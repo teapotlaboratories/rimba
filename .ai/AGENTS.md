@@ -4,9 +4,18 @@ Guidance for AI coding agents (Claude Code, Cursor, Copilot, and others) working
 in this repository. Follow these conventions in addition to anything a human
 maintainer asks for.
 
+## Committing
+
+**Do not commit or push automatically.** Make changes in the working tree and
+stop there so the owner can review them. Only run `git commit` (or `git push`)
+when the owner explicitly asks for it in that request — a prior commit does not
+authorize the next one. When work is done, summarize what changed and leave it
+staged or unstaged for review rather than committing on your own initiative.
+
 ## Commit & attribution conventions
 
-The commit history must read as solely the work of the repository's human owner.
+When you *are* asked to commit, the history must read as solely the work of the
+repository's human owner.
 
 - **Attribute commits only to the repo's configured git identity.** Do not set
   yourself as the author or committer. Use a plain `git commit` so the author and
