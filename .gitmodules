@@ -7,3 +7,7 @@
 [submodule "components/halow"]
 	path = components/halow
 	url = ../mm-esp32-halow.git
+[submodule "vendor/esp-idf"]
+	path = vendor/esp-idf
+	url = https://github.com/espressif/esp-idf.git
+	shallow = true

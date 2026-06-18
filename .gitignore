@@ -22,6 +22,6 @@ dependencies.lock
 __pycache__/
 *.pyc
 
-# Note: ESP-IDF itself is NOT vendored here. It is installed out-of-tree at
-# $HOME/esp/esp-idf (see firmware/README.md). Only the MM6108 SDK is vendored
-# under vendor/ (as a pinned git submodule).
+# Note: ESP-IDF is vendored at vendor/esp-idf (pinned submodule, v5.4.2); the
+# build uses it by default. The toolchain itself (compilers, Python env) is set up
+# out-of-tree under ~/.espressif by vendor/esp-idf/install.sh (see firmware/README.md).

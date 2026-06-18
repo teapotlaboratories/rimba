@@ -24,8 +24,10 @@ firmware/
     main/app_main.c
     CMakeLists.txt     # adds ../../components via EXTRA_COMPONENT_DIRS
   README.md
-vendor/mm-iot-sdk      # Morse Micro SDK (pinned submodule) — reference only; the
-                       # build uses the vendored components/, not this tree
+vendor/
+  esp-idf            # ESP-IDF toolchain (pinned submodule, v5.4.2) — the build uses this
+  mm-iot-sdk         # Morse Micro SDK (pinned submodule) — reference only; the
+                     # build uses the vendored components/, not this tree
 ```
 
 Builds are kept **out-of-source**: `make build APP=foo BOARD=bar` writes to
@@ -35,14 +37,18 @@ reuses a stale config.
 
 ## Prerequisites
 
-- **ESP-IDF v5.4.2**, installed out-of-tree (not committed here). v5.4.2 is the
-  minimum required by the `morsemicro/halow` component.
+- **ESP-IDF v5.4.2**, vendored as a git submodule at `vendor/esp-idf` (v5.4.2 is
+  the minimum required by the `morsemicro/halow` component). Check it out with its
+  own submodules, then install the toolchain from it:
   ```bash
-  git clone -b v5.4.2 --depth 1 --recursive https://github.com/espressif/esp-idf ~/esp/esp-idf-5.4.2
-  ~/esp/esp-idf-5.4.2/install.sh esp32s3
+  git submodule update --init vendor/esp-idf          # if not cloned --recurse-submodules
+  git -C vendor/esp-idf submodule update --init --recursive
+  ./vendor/esp-idf/install.sh esp32s3
   # cmake/ninja are not bundled on Linux; pin cmake to 3.x (cmake 4 breaks IDF):
   ~/.espressif/python_env/idf5.4_py*_env/bin/pip install "cmake==3.30.5" ninja
   ```
+  The Makefile's default `IDF_PATH` points at `vendor/esp-idf`, so you don't need
+  to set it (override `IDF_PATH=...` to use a different install).
 - The MM6108 components (`morsemicro/halow` + `morsemicro/firmware`) are
   **vendored as git submodules** under `components/` — not downloaded from the
   registry. Get them when cloning:

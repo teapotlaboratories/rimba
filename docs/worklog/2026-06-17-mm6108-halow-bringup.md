@@ -25,9 +25,10 @@ registry (see *Vendoring the Morse components* below). **No HAL port needed.**
 
 Consequences:
 - **ESP-IDF upgraded 5.2.3 → 5.4.2.** All published component versions
-  (`2.9.7-esp32-3`, `2.10.4-esp32-1/-2`) require `idf >=5.4.2`. Installed
-  v5.4.2 at `~/esp/esp-idf-5.4.2`; the Makefile default `IDF_PATH` now points
-  there. (5.2.3 left in place but unused.)
+  (`2.9.7-esp32-3`, `2.10.4-esp32-1/-2`) require `idf >=5.4.2`. Initially installed
+  v5.4.2 at `~/esp/esp-idf-5.4.2`; later **vendored as a submodule at
+  `vendor/esp-idf`** (pinned v5.4.2), which the Makefile default `IDF_PATH` now
+  points at.
 - `vendor/mm-iot-sdk` (submodule) is now **reference-only** — the build pulls
   morselib + blobs from the vendored components, not this submodule. Kept for its
   full docs and the complete BCF set.

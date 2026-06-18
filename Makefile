@@ -1,6 +1,6 @@
 # Rimba firmware — convenience wrapper around ESP-IDF's idf.py.
 #
-# ESP-IDF is installed out-of-tree (default: $HOME/esp/esp-idf). This Makefile
+# ESP-IDF is vendored at vendor/esp-idf (submodule, pinned v5.4.2). This Makefile
 # sources its environment for each target so you don't have to `. export.sh`
 # by hand. Override any variable on the command line, e.g.:
 #
@@ -12,8 +12,9 @@
 #
 SHELL := /bin/bash
 
-# ESP-IDF 5.4.2: required by the morsemicro/halow component (>=5.4.2).
-IDF_PATH  ?= $(HOME)/esp/esp-idf-5.4.2
+# ESP-IDF 5.4.2 (>=5.4.2 required by the morsemicro/halow component) is vendored
+# as a submodule at vendor/esp-idf. Override IDF_PATH to use a different install.
+IDF_PATH  ?= $(CURDIR)/vendor/esp-idf
 PORT      ?= /dev/ttyACM0
 APP       ?= rimba-halow-scan
 APP_DIR   := $(CURDIR)/firmware/$(APP)

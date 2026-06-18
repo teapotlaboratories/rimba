@@ -81,23 +81,29 @@ ESP32-S3  (runs ESP-IDF) ──SPI──▶ MM6108  (driven by morselib from mor
 > complete BCF set). The build does *not* use it — the radio code comes from the
 > vendored `components/halow` + `components/firmware` submodules.
 
-So **ESP-IDF is the mandatory toolchain**; the MM6108 components ship as git
-submodules under `components/` (init them when cloning). Install ESP-IDF first.
+So **ESP-IDF is the mandatory toolchain**; it is vendored at `vendor/esp-idf`, and
+the MM6108 radio code ships as git submodules under `components/` (init them when
+cloning). Set up the vendored ESP-IDF first (below).
 
 ### 1. One-time toolchain setup
 
-ESP-IDF is installed out-of-tree (it is not committed to this repo). v5.4.2 is
-the minimum required by the `morsemicro/halow` component:
+ESP-IDF is **vendored as a git submodule at `vendor/esp-idf`** (pinned at v5.4.2,
+the minimum required by the `morsemicro/halow` component). Check it out with its
+own submodules, then install the toolchain from it:
 
 ```bash
-git clone -b v5.4.2 --depth 1 --recursive https://github.com/espressif/esp-idf ~/esp/esp-idf-5.4.2
-~/esp/esp-idf-5.4.2/install.sh esp32s3
+git submodule update --init vendor/esp-idf          # if not cloned --recurse-submodules
+git -C vendor/esp-idf submodule update --init --recursive
+./vendor/esp-idf/install.sh esp32s3
 
 # cmake + ninja (ESP-IDF does not bundle them on Linux).
 # Pin cmake to 3.x — cmake 4.x breaks the ESP-IDF build.
 ~/.espressif/python_env/idf5.4_py*_env/bin/pip install "cmake==3.30.5" ninja
 # (or, if you have sudo: apt install cmake ninja-build)
 ```
+
+The Makefile's default `IDF_PATH` points at `vendor/esp-idf`, so the build uses
+the vendored toolchain automatically (override `IDF_PATH=...` for a different one).
 
 ### 2. Build / flash / monitor
 
@@ -117,14 +123,14 @@ make build APP=rimba-hello        # the radio-free sanity example
 ```
 
 Override defaults inline, e.g. `make flash PORT=/dev/ttyACM1`,
-`make build BOARD=proto2`, or `make build IDF_PATH=~/esp/esp-idf-5.4.2`. Run
+`make build BOARD=proto2`, or `make build IDF_PATH=/path/to/other/esp-idf`. Run
 `make help` for the full list.
 
 > The Seeed XIAO ESP32-S3 enumerates over its native USB-Serial-JTAG as
 > `/dev/ttyACM0`, used for both flashing and the console. Your user must be in the
 > `dialout` group to access it.
 
-Prefer raw `idf.py`? `source ~/esp/esp-idf-5.4.2/export.sh`, then work inside
+Prefer raw `idf.py`? `source vendor/esp-idf/export.sh`, then work inside
 `firmware/rimba-halow-scan/` — but pass the board config yourself, since the
 Makefile is what wires it: `idf.py -D SDKCONFIG_DEFAULTS=../../boards/proto1/sdkconfig.defaults build`.
 
