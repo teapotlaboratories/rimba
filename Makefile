@@ -15,14 +15,14 @@ SHELL := /bin/bash
 # ESP-IDF 5.4.2: required by the morsemicro/halow component (>=5.4.2).
 IDF_PATH  ?= $(HOME)/esp/esp-idf-5.4.2
 PORT      ?= /dev/ttyACM0
-TARGET    ?= esp32s3
 APP       ?= rimba-halow-scan
 APP_DIR   := $(CURDIR)/firmware/$(APP)
 
 # Board selection. Board-specific sdkconfig defaults live in boards/<BOARD>/;
 # override with BOARD=<name> (default: proto1). The board's sdkconfig.defaults
 # (plus sdkconfig.defaults.<target>) are applied to the build via
-# SDKCONFIG_DEFAULTS.
+# SDKCONFIG_DEFAULTS. The chip target is NOT set here — it comes from the board's
+# sdkconfig.defaults (CONFIG_IDF_TARGET), so the board owns its target.
 BOARD     ?= proto1
 BOARD_DIR := $(CURDIR)/boards/$(BOARD)
 
@@ -39,12 +39,11 @@ IDF := source "$(IDF_PATH)/export.sh" >/dev/null 2>&1 && cd "$(APP_DIR)" && \
               -D SDKCONFIG="$(BUILD_DIR)/sdkconfig" \
               -D SDKCONFIG_DEFAULTS="$(BOARD_DIR)/sdkconfig.defaults"
 
-.PHONY: help set-target build flash monitor flash-monitor clean fullclean \
+.PHONY: help build flash monitor flash-monitor clean fullclean \
         menuconfig size erase
 
 help:
 	@echo "Rimba firmware build (ESP-IDF wrapper)"
-	@echo "  make set-target    - set chip target ($(TARGET))"
 	@echo "  make build         - build $(APP)"
 	@echo "  make flash         - flash $(APP) to $(PORT)"
 	@echo "  make monitor       - serial monitor on $(PORT)  (Ctrl-] to exit)"
@@ -54,12 +53,9 @@ help:
 	@echo ""
 	@echo "Apps live under firmware/<APP>/; boards under boards/<BOARD>/;"
 	@echo "build output in build/<APP>/<BOARD>/.  Vars:"
-	@echo "  APP=$(APP)  BOARD=$(BOARD)  TARGET=$(TARGET)  PORT=$(PORT)"
-	@echo "  IDF_PATH=$(IDF_PATH)"
+	@echo "  APP=$(APP)  BOARD=$(BOARD)  PORT=$(PORT)"
+	@echo "  IDF_PATH=$(IDF_PATH)   (chip target comes from the board)"
 	@echo "  BUILD_DIR=$(BUILD_DIR)"
-
-set-target:
-	$(IDF) set-target $(TARGET)
 
 build:
 	$(IDF) build
