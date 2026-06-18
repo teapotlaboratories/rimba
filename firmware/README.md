@@ -8,21 +8,30 @@ bring-up log.
 ## Layout
 
 ```
-Makefile             # (repo root) convenience wrapper around idf.py (build/flash/monitor)
-build/<APP>/         # (repo root) out-of-source build output, e.g. build/rimba-hello/ (gitignored)
+Makefile               # (repo root) convenience wrapper around idf.py (build/flash/monitor)
+build/<APP>/<BOARD>/   # (repo root) out-of-source build output, per app+board (gitignored)
+boards/
+  proto1/              # board config (Seeed XIAO ESP32-S3 Plus + HaLow add-on)
+    sdkconfig.defaults
+    sdkconfig.defaults.esp32s3
+components/            # vendored Morse Micro components (git submodules), shared by apps
+  halow/               #   morsemicro/halow  — morselib driver  (repo: mm-esp32-halow)
+  firmware/            #   morsemicro/firmware — MM6108 blobs    (repo: mm-esp32-firmware)
 firmware/
-  rimba-hello/       # Phase-1 sanity example (toolchain + PSRAM/SRAM validation, no radio)
+  rimba-hello/         # Phase-1 sanity example (toolchain + PSRAM/SRAM validation, no radio)
     main/rimba_hello.c
-  rimba-halow-scan/  # MM6108 bring-up: boots the HaLow radio and scans for APs
+  rimba-halow-scan/    # MM6108 bring-up: boots the HaLow radio and scans for APs
     main/app_main.c
-    main/idf_component.yml   # pulls morsemicro/halow + morsemicro/firmware
+    CMakeLists.txt     # adds ../../components via EXTRA_COMPONENT_DIRS
   README.md
-vendor/mm-iot-sdk    # Morse Micro SDK (pinned submodule) — reference only; the
-                     # build uses the published components, not this tree
+vendor/mm-iot-sdk      # Morse Micro SDK (pinned submodule) — reference only; the
+                       # build uses the vendored components/, not this tree
 ```
 
-Builds are kept **out-of-source**: `make build APP=foo` writes to `build/foo/` at
-the repo root, never inside `firmware/foo/`. Override with `BUILD_DIR=...`.
+Builds are kept **out-of-source**: `make build APP=foo BOARD=bar` writes to
+`build/foo/bar/` at the repo root, never inside `firmware/foo/`. Each app+board
+gets its own build dir and generated `sdkconfig`, so switching boards never
+reuses a stale config.
 
 ## Prerequisites
 
@@ -34,27 +43,36 @@ the repo root, never inside `firmware/foo/`. Override with `BUILD_DIR=...`.
   # cmake/ninja are not bundled on Linux; pin cmake to 3.x (cmake 4 breaks IDF):
   ~/.espressif/python_env/idf5.4_py*_env/bin/pip install "cmake==3.30.5" ninja
   ```
-- The MM6108 components are fetched automatically by the ESP-IDF component
-  manager on first build (from each app's `main/idf_component.yml`). No manual
-  step. The `vendor/mm-iot-sdk` submodule is optional reference:
-  `git submodule update --init vendor/mm-iot-sdk`.
+- The MM6108 components (`morsemicro/halow` + `morsemicro/firmware`) are
+  **vendored as git submodules** under `components/` — not downloaded from the
+  registry. Get them when cloning:
+  ```bash
+  git clone --recurse-submodules <repo>          # or, in an existing clone:
+  git submodule update --init components/halow components/firmware
+  ```
+  The `rimba-halow-scan` project adds `components/` to the build via
+  `EXTRA_COMPONENT_DIRS`. The `vendor/mm-iot-sdk` submodule is separate, optional
+  reference (`git submodule update --init vendor/mm-iot-sdk`).
 
 ## Build / flash / monitor
 
 The board (Seeed XIAO ESP32-S3 Plus) enumerates over its **native USB-Serial-JTAG**
 as `/dev/ttyACM0`; that is used for both flashing and the console.
 
-Run from the **repo root** (`APP` selects which example):
+Run from the **repo root**. `APP` selects the example (default `rimba-halow-scan`)
+and `BOARD` selects the board config under `boards/` (default `proto1`):
 
 ```bash
-make build APP=rimba-halow-scan      # build (default APP is rimba-hello)
-make flash APP=rimba-halow-scan      # flash to /dev/ttyACM0
+make build                           # rimba-halow-scan on board proto1 (defaults)
+make flash                           # flash to /dev/ttyACM0
 make monitor                         # serial console (Ctrl-] to quit)
-make flash-monitor APP=rimba-halow-scan
+make flash-monitor
+make build APP=rimba-hello           # the radio-free sanity example
+make build BOARD=proto2              # a different board (boards/proto2/)
 ```
 
-Override `APP`, `TARGET`, `PORT`, or `IDF_PATH` on the command line, e.g.
-`make flash PORT=/dev/ttyACM1`. Run `make help` for the full list.
+Override `APP`, `BOARD`, `TARGET`, `PORT`, or `IDF_PATH` on the command line,
+e.g. `make flash PORT=/dev/ttyACM1`. Run `make help` for the full list.
 
 ## The examples
 
@@ -64,9 +82,10 @@ SRAM headroom, heartbeat. Use it to confirm the toolchain + flash pipeline.
 
 ### `rimba-halow-scan`
 Boots the MM6108 over SPI (loads firmware + BCF), prints version/chip info, and
-scans for HaLow APs. Built on the published `morsemicro/halow` component.
+scans for HaLow APs. Built on the vendored `halow` component (`components/halow`).
 
-Board-specific config lives in [`rimba-halow-scan/sdkconfig.defaults`](rimba-halow-scan/sdkconfig.defaults):
+Board-specific config lives under [`boards/<BOARD>/`](../boards/) — for the
+default `proto1` board, [`boards/proto1/sdkconfig.defaults`](../boards/proto1/sdkconfig.defaults):
 
 - **XIAO HaLow SPI/control pins** — the component's own defaults are a different
   board, so these overrides are required:

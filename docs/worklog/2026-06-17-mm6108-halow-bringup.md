@@ -38,14 +38,15 @@ Consequences:
 
 Based on the component's own `examples/scan` (`app_main.c`, clean high-level API:
 `mmhalow_init()` / `mmhalow_scan()` / `mmhalow_print_version_info()`), with a
-Seeed XIAO board overlay in `sdkconfig.defaults`.
+Seeed XIAO board overlay. (That overlay was later moved to `boards/proto1/` and
+selected via the `BOARD` make var — see *Build/flash* below.)
 
 The `halow` + `firmware` components are vendored under
 `components/ (repo root)` (see *Vendoring* below), so
 `main/idf_component.yml` no longer lists registry dependencies — IDF picks up the
 local components automatically. `main` just declares `REQUIRES halow`.
 
-### Board config that matters (sdkconfig.defaults)
+### Board config that matters (`boards/proto1/sdkconfig.defaults`)
 
 - **XIAO HaLow SPI/control pins** (from the Seeed `mm-iot-esp32` fork's Kconfig
   defaults — the *upstream component* defaults are a different board, each pin
@@ -135,12 +136,14 @@ only as reference; the vendored components above are the registry-packaged
 
 ```
 git clone --recurse-submodules …       # or: git submodule update --init
-make build APP=rimba-halow-scan        # uses IDF 5.4.2 by default
-make flash APP=rimba-halow-scan        # /dev/ttyACM0
+make build                             # default APP rimba-halow-scan, BOARD proto1
+make flash                             # /dev/ttyACM0
 ```
-Image: `rimba_halow_scan.bin` ~1.23 MB (20% partition free). The vendored
-`components/{halow,firmware}` must be checked out (submodules) for the build to
-resolve.
+`rimba-halow-scan` is now the default `APP`, and `BOARD` (default `proto1`)
+selects `boards/<BOARD>/sdkconfig.defaults` via `SDKCONFIG_DEFAULTS`; output goes
+to `build/<APP>/<BOARD>/`. Image: `rimba_halow_scan.bin` ~1.23 MB (20% partition
+free). The vendored `components/{halow,firmware}` must be checked out (submodules)
+for the build to resolve.
 
 ## Next steps
 

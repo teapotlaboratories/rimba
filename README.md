@@ -70,7 +70,7 @@ A Rimba node has two chips, each with its own SDK — don't confuse them:
 | | SDK | What it's for |
 |---|---|---|
 | **ESP32-S3** (host MCU) | **ESP-IDF** (Espressif) | The build system (`idf.py`, CMake/Ninja), FreeRTOS, drivers, crypto. **Everything compiles against this — it is required.** |
-| **MM6108** (HaLow radio, over SPI) | **`morsemicro/halow`** (Morse Micro) | `morselib` driver + firmware blobs, published on the [ESP Component Registry](https://components.espressif.com/components/morsemicro/halow). Fetched automatically by the component manager (see each app's `main/idf_component.yml`). Requires ESP-IDF ≥ 5.4.2. |
+| **MM6108** (HaLow radio, over SPI) | **`morsemicro/halow`** (Morse Micro) | `morselib` driver + firmware blobs, from the [ESP Component Registry](https://components.espressif.com/components/morsemicro/halow). **Vendored as git submodules** under `components/` (forked at `2.10.4-esp32-2`) for reproducibility, not auto-downloaded. Requires ESP-IDF ≥ 5.4.2. |
 
 ```
 ESP32-S3  (runs ESP-IDF) ──SPI──▶ MM6108  (driven by morselib from morsemicro/halow)
@@ -79,10 +79,10 @@ ESP32-S3  (runs ESP-IDF) ──SPI──▶ MM6108  (driven by morselib from mor
 
 > The `vendor/mm-iot-sdk` submodule is **reference only** (full docs + the
 > complete BCF set). The build does *not* use it — the radio code comes from the
-> published components.
+> vendored `components/halow` + `components/firmware` submodules.
 
-So **ESP-IDF is the mandatory toolchain**; the MM6108 components are pulled in
-automatically on first build. Install ESP-IDF first.
+So **ESP-IDF is the mandatory toolchain**; the MM6108 components ship as git
+submodules under `components/` (init them when cloning). Install ESP-IDF first.
 
 ### 1. One-time toolchain setup
 
@@ -102,24 +102,31 @@ git clone -b v5.4.2 --depth 1 --recursive https://github.com/espressif/esp-idf ~
 ### 2. Build / flash / monitor
 
 Run from the **repo root** (the `Makefile` wraps `idf.py` and sources the ESP-IDF
-environment for you). The MM6108 components download automatically on first build.
+environment for you). Make sure the `components/` submodules are checked out first
+(`git submodule update --init components/halow components/firmware`).
+
+`APP` selects the example (default `rimba-halow-scan`) and `BOARD` selects the
+board config under `boards/` (default `proto1`):
 
 ```bash
-make build APP=rimba-halow-scan   # compile (default APP is rimba-hello)
-make flash APP=rimba-halow-scan   # flash to /dev/ttyACM0
+make build                        # rimba-halow-scan on board proto1 (defaults)
+make flash                        # flash to /dev/ttyACM0
 make monitor                      # serial console (Ctrl-] to exit)
-make flash-monitor APP=rimba-halow-scan
+make flash-monitor
+make build APP=rimba-hello        # the radio-free sanity example
 ```
 
-Override defaults inline, e.g. `make flash PORT=/dev/ttyACM1` or
-`make build IDF_PATH=~/esp/esp-idf-5.4.2`. Run `make help` for the full list.
+Override defaults inline, e.g. `make flash PORT=/dev/ttyACM1`,
+`make build BOARD=proto2`, or `make build IDF_PATH=~/esp/esp-idf-5.4.2`. Run
+`make help` for the full list.
 
 > The Seeed XIAO ESP32-S3 enumerates over its native USB-Serial-JTAG as
 > `/dev/ttyACM0`, used for both flashing and the console. Your user must be in the
 > `dialout` group to access it.
 
-Prefer raw `idf.py`? `source ~/esp/esp-idf/export.sh` then work inside
-`firmware/rimba-hello/`.
+Prefer raw `idf.py`? `source ~/esp/esp-idf-5.4.2/export.sh`, then work inside
+`firmware/rimba-halow-scan/` — but pass the board config yourself, since the
+Makefile is what wires it: `idf.py -D SDKCONFIG_DEFAULTS=../../boards/proto1/sdkconfig.defaults build`.
 
 ## Documents
 
