@@ -55,10 +55,13 @@ CBOR payload
 
 ## Building the firmware
 
-The firmware lives under [`firmware/`](firmware/) and targets the ESP32-S3. The
-current example, `rimba-hello`, is a Phase-1 bring-up that validates the toolchain
-+ flash pipeline and the 8 MB PSRAM (RISK-04); it does **not** drive the HaLow
-radio yet. See [`firmware/README.md`](firmware/README.md) for details.
+The firmware lives under [`firmware/`](firmware/) and targets the ESP32-S3. Two
+examples exist (select with `APP=`):
+- **`rimba-hello`** — radio-free sanity check (toolchain + 8 MB PSRAM, RISK-04).
+- **`rimba-halow-scan`** — boots the MM6108 HaLow radio over SPI and scans for
+  APs. Confirmed working (firmware v1.17.6, chip ID 0x0306).
+
+See [`firmware/README.md`](firmware/README.md) for per-example detail.
 
 ### Two separate SDKs (and why)
 
@@ -67,52 +70,49 @@ A Rimba node has two chips, each with its own SDK — don't confuse them:
 | | SDK | What it's for |
 |---|---|---|
 | **ESP32-S3** (host MCU) | **ESP-IDF** (Espressif) | The build system (`idf.py`, CMake/Ninja), FreeRTOS, drivers, crypto. **Everything compiles against this — it is required.** |
-| **MM6108** (HaLow radio, over SPI) | **`mm-iot-sdk`** (Morse Micro) | `morselib` radio driver + firmware blobs. Vendored at [`vendor/mm-iot-sdk`](vendor/mm-iot-sdk); not used by `rimba-hello` yet. |
+| **MM6108** (HaLow radio, over SPI) | **`morsemicro/halow`** (Morse Micro) | `morselib` driver + firmware blobs, published on the [ESP Component Registry](https://components.espressif.com/components/morsemicro/halow). Fetched automatically by the component manager (see each app's `main/idf_component.yml`). Requires ESP-IDF ≥ 5.4.2. |
 
 ```
-ESP32-S3  (runs ESP-IDF) ──SPI──▶ MM6108  (driven by morselib from mm-iot-sdk)
+ESP32-S3  (runs ESP-IDF) ──SPI──▶ MM6108  (driven by morselib from morsemicro/halow)
    host MCU                          HaLow radio
 ```
 
-So **ESP-IDF is the mandatory toolchain** for any build here; `mm-iot-sdk` only
-comes into play once we drive the radio. Install ESP-IDF first.
+> The `vendor/mm-iot-sdk` submodule is **reference only** (full docs + the
+> complete BCF set). The build does *not* use it — the radio code comes from the
+> published components.
+
+So **ESP-IDF is the mandatory toolchain**; the MM6108 components are pulled in
+automatically on first build. Install ESP-IDF first.
 
 ### 1. One-time toolchain setup
 
-ESP-IDF is installed out-of-tree (it is not committed to this repo):
+ESP-IDF is installed out-of-tree (it is not committed to this repo). v5.4.2 is
+the minimum required by the `morsemicro/halow` component:
 
 ```bash
-# ESP-IDF v5.2.3 + ESP32-S3 toolchain
-git clone -b v5.2.3 --depth 1 --recursive https://github.com/espressif/esp-idf ~/esp/esp-idf
-~/esp/esp-idf/install.sh esp32s3
+git clone -b v5.4.2 --depth 1 --recursive https://github.com/espressif/esp-idf ~/esp/esp-idf-5.4.2
+~/esp/esp-idf-5.4.2/install.sh esp32s3
 
 # cmake + ninja (ESP-IDF does not bundle them on Linux).
-# Pin cmake to 3.x — cmake 4.x breaks ESP-IDF 5.2 builds.
-~/.espressif/python_env/idf5.2_py3.13_env/bin/pip install "cmake==3.30.5" ninja
+# Pin cmake to 3.x — cmake 4.x breaks the ESP-IDF build.
+~/.espressif/python_env/idf5.4_py*_env/bin/pip install "cmake==3.30.5" ninja
 # (or, if you have sudo: apt install cmake ninja-build)
 ```
 
-### 2. Fetch the MM6108 SDK submodule
+### 2. Build / flash / monitor
+
+Run from the **repo root** (the `Makefile` wraps `idf.py` and sources the ESP-IDF
+environment for you). The MM6108 components download automatically on first build.
 
 ```bash
-git submodule update --init vendor/mm-iot-sdk
-```
-
-### 3. Build / flash / monitor
-
-Run from the **repo root** (the `Makefile` here wraps `idf.py` and sources the
-ESP-IDF environment for you):
-
-```bash
-make build           # compile rimba-hello for esp32s3
-make flash           # flash to /dev/ttyACM0
-make monitor         # serial console (Ctrl-] to exit)
-make flash-monitor   # flash then monitor in one step
+make build APP=rimba-halow-scan   # compile (default APP is rimba-hello)
+make flash APP=rimba-halow-scan   # flash to /dev/ttyACM0
+make monitor                      # serial console (Ctrl-] to exit)
+make flash-monitor APP=rimba-halow-scan
 ```
 
 Override defaults inline, e.g. `make flash PORT=/dev/ttyACM1` or
-`make build APP=rimba-hello IDF_PATH=~/esp/esp-idf`. Run `make help` for the full
-list of targets and variables.
+`make build IDF_PATH=~/esp/esp-idf-5.4.2`. Run `make help` for the full list.
 
 > The Seeed XIAO ESP32-S3 enumerates over its native USB-Serial-JTAG as
 > `/dev/ttyACM0`, used for both flashing and the console. Your user must be in the

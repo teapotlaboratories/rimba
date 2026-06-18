@@ -10,7 +10,8 @@
 #
 SHELL := /bin/bash
 
-IDF_PATH  ?= $(HOME)/esp/esp-idf
+# ESP-IDF 5.4.2: required by the morsemicro/halow component (>=5.4.2).
+IDF_PATH  ?= $(HOME)/esp/esp-idf-5.4.2
 PORT      ?= /dev/ttyACM0
 TARGET    ?= esp32s3
 APP       ?= rimba-hello

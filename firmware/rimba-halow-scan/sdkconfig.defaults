@@ -1,0 +1,33 @@
+# ---- Target / console / board (Seeed XIAO ESP32-S3 Plus) ----
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# morselib + the HaLow stack do not fit the default app partition.
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# Regulatory domain: mmhalow_init() sets the channel list from this. US =
+# 902-928 MHz. Without it the stack reports "Channel list not set" and scan
+# fails. Valid: AU CA EU GB IN JP KR NZ US.
+CONFIG_HALOW_COUNTRY_CODE="US"
+
+# ---- Morse Micro MM6108 shim: XIAO HaLow wiring ----
+# GPIO map from the Seeed XIAO HaLow add-on (Seeed mm-iot-esp32 fork defaults).
+# NOTE: the upstream component defaults are a different board (each pin +1), so
+# these overrides are required for the XIAO.
+CONFIG_MM_RESET_N=1
+CONFIG_MM_WAKE=2
+CONFIG_MM_BUSY=5
+CONFIG_MM_SPI_IRQ=3
+CONFIG_MM_SPI_CS=4
+CONFIG_MM_SPI_SCK=7
+CONFIG_MM_SPI_MISO=8
+CONFIG_MM_SPI_MOSI=9
+
+# MM6108 firmware + Board Config File (blobs ship in the morsemicro/firmware
+# component). The Seeed XIAO HaLow examples use the MF16858_US module.
+# If RF/scan misbehaves, the board may be a Quectel FGH100M-H instead:
+# try CONFIG_MM_BCF_FILE="bcf_fgh100mhaamd.mbin".
+CONFIG_MMHAL_CHIP_TYPE_MM6108=y
+CONFIG_MM_FW_FILE="mm6108.mbin"
+CONFIG_MM_BCF_FILE="bcf_mf16858.mbin"

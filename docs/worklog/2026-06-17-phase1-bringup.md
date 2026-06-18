@@ -33,6 +33,14 @@ and build + flash a first example firmware to the real hardware.
 
 ## KEY FINDING — there is no supported ESP32 path for morselib
 
+> **SUPERSEDED (same day, session 2):** Morse Micro *does* publish a maintained
+> ESP32 port on the ESP Component Registry (`morsemicro/halow` +
+> `morsemicro/firmware`). We consume that as a managed dependency — **no HAL port
+> needed.** See [`2026-06-17-mm6108-halow-bringup.md`](2026-06-17-mm6108-halow-bringup.md).
+> The analysis below is kept for history. It was correct that *the maintained
+> `mm-iot-sdk` repo* has no ESP32 port; what it missed is the separately-published
+> component.
+
 This is the most important outcome of the session and it reshapes the Phase 1
 plan, so it is recorded in full.
 

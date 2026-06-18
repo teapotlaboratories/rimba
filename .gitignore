@@ -6,6 +6,10 @@ sdkconfig.old
 *.elf
 *.map
 
+# ESP-IDF component manager: downloaded components are regenerated from
+# idf_component.yml + dependencies.lock, so they are not committed.
+managed_components/
+
 # Editor / OS
 .vscode/
 .DS_Store
