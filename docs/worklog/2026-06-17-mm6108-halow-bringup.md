@@ -19,8 +19,9 @@ that Morse Micro publishes the ESP32 port on the **ESP Component Registry**:
 - https://components.espressif.com/components/morsemicro/firmware (the blobs)
 
 This is the same code as the deprecated `mm-iot-esp32` repo, now packaged and
-maintained as managed components. So we consume it as a dependency instead of
-porting anything. **No HAL port needed.**
+maintained as managed components. So we consume that code instead of porting
+anything — and have since **vendored it locally** rather than fetching from the
+registry (see *Vendoring the Morse components* below). **No HAL port needed.**
 
 Consequences:
 - **ESP-IDF upgraded 5.2.3 → 5.4.2.** All published component versions
@@ -28,8 +29,8 @@ Consequences:
   v5.4.2 at `~/esp/esp-idf-5.4.2`; the Makefile default `IDF_PATH` now points
   there. (5.2.3 left in place but unused.)
 - `vendor/mm-iot-sdk` (submodule) is now **reference-only** — the build pulls
-  morselib + blobs from the component, not the submodule. Kept for its full docs
-  and the complete BCF set.
+  morselib + blobs from the vendored components, not this submodule. Kept for its
+  full docs and the complete BCF set.
 
 ---
 
@@ -39,12 +40,10 @@ Based on the component's own `examples/scan` (`app_main.c`, clean high-level API
 `mmhalow_init()` / `mmhalow_scan()` / `mmhalow_print_version_info()`), with a
 Seeed XIAO board overlay in `sdkconfig.defaults`.
 
-`main/idf_component.yml`:
-```yaml
-dependencies:
-  morsemicro/halow:    { version: "^2.10.4-esp32-2" }
-  morsemicro/firmware: { version: "^2.10.4-esp32-2" }
-```
+The `halow` + `firmware` components are vendored under
+`firmware/rimba-halow-scan/components/` (see *Vendoring* below), so
+`main/idf_component.yml` no longer lists registry dependencies — IDF picks up the
+local components automatically. `main` just declares `REQUIRES halow`.
 
 ### Board config that matters (sdkconfig.defaults)
 
@@ -97,22 +96,69 @@ working `mmwlan` boot — the foundation for tasks 1.2–1.3 (the ADHOC/IBSS wor
 
 ---
 
+## Vendoring the Morse components
+
+Instead of letting `idf_component_manager` fetch `morsemicro/halow` +
+`morsemicro/firmware` from the ESP Component Registry into `managed_components/`
+(gitignored, hash-guarded, clobbered on every `reconfigure`), the two packages are
+**vendored as local components** under `firmware/rimba-halow-scan/components/`:
+
+| Component | Path | Submodule remote | Pinned |
+|---|---|---|---|
+| `halow` (driver + morselib) | `components/halow` | `teapotlaboratories/mm-esp32-halow` | `2.10.4-esp32-2` |
+| `firmware` (mm6108/mm8108 blobs) | `components/firmware` | `teapotlaboratories/mm-esp32-firmware` | `2.10.4-esp32-2` |
+
+Each is its own git repo, tracked from the main repo as a submodule (first commit =
+pristine upstream, so later commits are clean diffs of our changes). Why:
+
+- **Reproducibility insurance** — the build no longer depends on the registry (or a
+  specific published version) staying available; the exact source lives on remotes
+  we control.
+- **Track local modifications** — once we start patching morselib/mmhalow (e.g. for
+  the IBSS / raw-L2 work), every edit is a reviewable commit against pristine
+  upstream.
+
+ESP-IDF auto-discovers the project's `components/` dir and uses these in place of
+the registry packages of the same name (a *local-component override* — confirmed in
+the configure log: `Using component placed at .../components/firmware for
+dependency "morsemicro/firmware"`). No network, no `managed_components/`. The
+build output is byte-for-byte identical to the registry-fetched build.
+
+`vendor/mm-iot-sdk` is a *different* git ref (the upstream SDK source) and is kept
+only as reference; the vendored components above are the registry-packaged
+`-esp32-` build, which is what actually compiles.
+
+---
+
 ## Build/flash
 
 ```
-make build APP=rimba-halow-scan      # uses IDF 5.4.2 by default
-make flash APP=rimba-halow-scan      # /dev/ttyACM0
+git clone --recurse-submodules …       # or: git submodule update --init
+make build APP=rimba-halow-scan        # uses IDF 5.4.2 by default
+make flash APP=rimba-halow-scan        # /dev/ttyACM0
 ```
-Image: `rimba_halow_scan.bin` ~1.23 MB (20% partition free).
+Image: `rimba_halow_scan.bin` ~1.23 MB (20% partition free). The vendored
+`components/{halow,firmware}` must be checked out (submodules) for the build to
+resolve.
 
 ## Next steps
 
-1. **IBSS / RISK-01 (tasks 1.2–1.3):** the published component exposes STA/AP
-   (`mmhalow_connect`, `mmhalow_wifi_start`) but not ADHOC. Investigate whether
-   morselib (now we have it as source under `managed_components/`) exposes
-   `MORSE_CMD_INTERFACE_TYPE_ADHOC`, and whether we can reach raw L2 frame TX/RX
-   (EtherType 0x88B5) — the real Phase-1 goal. If ADHOC isn't reachable, this is
-   where the RISK-01 fallback (AP-STA) decision gets made.
+1. **IBSS / RISK-01 (tasks 1.2–1.3):** a first pass through the vendored morselib
+   source (`components/halow/.../morselib/include/mmwlan.h`) found:
+   - **Raw L2 TX/RX is reachable** — `mmwlan_tx_pkt()` takes a packet that starts
+     with an 802.3 header (`DST | SRC | ETHERTYPE | payload`, translated to 802.11),
+     so we can set EtherType `0x88B5` directly; `mmwlan_register_rx_cb()` /
+     `_rx_pkt_cb()` deliver RX frames with their 802.3 header, per-VIF. This is the
+     Rimba datapath.
+   - **No public ADHOC/IBSS** — the low-level `mmwlan` API exposes only STA
+     (`mmwlan_sta_enable`) and AP (`mmwlan_ap_enable`). IBSS code exists only inside
+     the bundled `wpa_supplicant` (hostap), with no evidence the Morse firmware
+     exposes an ADHOC opmode. `mmwlan_boot()` only idles the chip; TX/RX needs an
+     active VIF/BSS context.
+   - **Implication:** raw `0x88B5` frames work, but ride on an associated STA↔AP
+     link, not a peer IBSS — i.e. the **RISK-01 fallback (AP-STA) is the practical
+     path** unless an ADHOC opmode can be reached. Next: confirm raw TX/RX over a
+     live STA↔AP link before deciding whether to keep probing IBSS.
 2. Two-board test: build a second node, attempt STA↔AP first (known to work) to
    confirm a live link, then pursue IBSS.
 3. Measure MM6108 boot time (RISK-02 / task 1.4) once we control the boot path.
