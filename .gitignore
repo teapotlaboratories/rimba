@@ -6,9 +6,12 @@ sdkconfig.old
 *.elf
 *.map
 
-# ESP-IDF component manager: downloaded components are regenerated from
-# idf_component.yml + dependencies.lock, so they are not committed.
+# ESP-IDF component manager. The Morse components are vendored under components/
+# (git submodules), so nothing is downloaded into managed_components/. The lock
+# file is regenerated on every reconfigure and, for our local components, records
+# a machine-specific absolute path — so it is not committed either.
 managed_components/
+dependencies.lock
 
 # Editor / OS
 .vscode/

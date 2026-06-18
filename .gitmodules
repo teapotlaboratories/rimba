@@ -1,9 +1,9 @@
 [submodule "vendor/mm-iot-sdk"]
 	path = vendor/mm-iot-sdk
 	url = https://github.com/MorseMicro/mm-iot-sdk
-[submodule "firmware/rimba-halow-scan/components/halow"]
-	path = firmware/rimba-halow-scan/components/halow
-	url = ../mm-esp32-halow.git
-[submodule "firmware/rimba-halow-scan/components/firmware"]
-	path = firmware/rimba-halow-scan/components/firmware
+[submodule "components/firmware"]
+	path = components/firmware
 	url = ../mm-esp32-firmware.git
+[submodule "components/halow"]
+	path = components/halow
+	url = ../mm-esp32-halow.git

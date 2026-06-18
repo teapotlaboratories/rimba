@@ -41,7 +41,7 @@ Based on the component's own `examples/scan` (`app_main.c`, clean high-level API
 Seeed XIAO board overlay in `sdkconfig.defaults`.
 
 The `halow` + `firmware` components are vendored under
-`firmware/rimba-halow-scan/components/` (see *Vendoring* below), so
+`components/ (repo root)` (see *Vendoring* below), so
 `main/idf_component.yml` no longer lists registry dependencies — IDF picks up the
 local components automatically. `main` just declares `REQUIRES halow`.
 
@@ -101,7 +101,7 @@ working `mmwlan` boot — the foundation for tasks 1.2–1.3 (the ADHOC/IBSS wor
 Instead of letting `idf_component_manager` fetch `morsemicro/halow` +
 `morsemicro/firmware` from the ESP Component Registry into `managed_components/`
 (gitignored, hash-guarded, clobbered on every `reconfigure`), the two packages are
-**vendored as local components** under `firmware/rimba-halow-scan/components/`:
+**vendored as local components** under `components/ (repo root)`:
 
 | Component | Path | Submodule remote | Pinned |
 |---|---|---|---|
@@ -118,8 +118,9 @@ pristine upstream, so later commits are clean diffs of our changes). Why:
   the IBSS / raw-L2 work), every edit is a reviewable commit against pristine
   upstream.
 
-ESP-IDF auto-discovers the project's `components/` dir and uses these in place of
-the registry packages of the same name (a *local-component override* — confirmed in
+The repo-root `components/` dir is added to the build via `EXTRA_COMPONENT_DIRS`
+in `firmware/rimba-halow-scan/CMakeLists.txt`; IDF then uses these in place of the
+registry packages of the same name (a *local-component override* — confirmed in
 the configure log: `Using component placed at .../components/firmware for
 dependency "morsemicro/firmware"`). No network, no `managed_components/`. The
 build output is byte-for-byte identical to the registry-fetched build.
