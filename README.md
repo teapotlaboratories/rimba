@@ -53,6 +53,74 @@ CBOR payload
   → 802.11ah IBSS (EtherType 0x88B5, AES-128-CCM hop-by-hop)
 ```
 
+## Building the firmware
+
+The firmware lives under [`firmware/`](firmware/) and targets the ESP32-S3. The
+current example, `rimba-hello`, is a Phase-1 bring-up that validates the toolchain
++ flash pipeline and the 8 MB PSRAM (RISK-04); it does **not** drive the HaLow
+radio yet. See [`firmware/README.md`](firmware/README.md) for details.
+
+### Two separate SDKs (and why)
+
+A Rimba node has two chips, each with its own SDK — don't confuse them:
+
+| | SDK | What it's for |
+|---|---|---|
+| **ESP32-S3** (host MCU) | **ESP-IDF** (Espressif) | The build system (`idf.py`, CMake/Ninja), FreeRTOS, drivers, crypto. **Everything compiles against this — it is required.** |
+| **MM6108** (HaLow radio, over SPI) | **`mm-iot-sdk`** (Morse Micro) | `morselib` radio driver + firmware blobs. Vendored at [`vendor/mm-iot-sdk`](vendor/mm-iot-sdk); not used by `rimba-hello` yet. |
+
+```
+ESP32-S3  (runs ESP-IDF) ──SPI──▶ MM6108  (driven by morselib from mm-iot-sdk)
+   host MCU                          HaLow radio
+```
+
+So **ESP-IDF is the mandatory toolchain** for any build here; `mm-iot-sdk` only
+comes into play once we drive the radio. Install ESP-IDF first.
+
+### 1. One-time toolchain setup
+
+ESP-IDF is installed out-of-tree (it is not committed to this repo):
+
+```bash
+# ESP-IDF v5.2.3 + ESP32-S3 toolchain
+git clone -b v5.2.3 --depth 1 --recursive https://github.com/espressif/esp-idf ~/esp/esp-idf
+~/esp/esp-idf/install.sh esp32s3
+
+# cmake + ninja (ESP-IDF does not bundle them on Linux).
+# Pin cmake to 3.x — cmake 4.x breaks ESP-IDF 5.2 builds.
+~/.espressif/python_env/idf5.2_py3.13_env/bin/pip install "cmake==3.30.5" ninja
+# (or, if you have sudo: apt install cmake ninja-build)
+```
+
+### 2. Fetch the MM6108 SDK submodule
+
+```bash
+git submodule update --init vendor/mm-iot-sdk
+```
+
+### 3. Build / flash / monitor
+
+Run from the **repo root** (the `Makefile` here wraps `idf.py` and sources the
+ESP-IDF environment for you):
+
+```bash
+make build           # compile rimba-hello for esp32s3
+make flash           # flash to /dev/ttyACM0
+make monitor         # serial console (Ctrl-] to exit)
+make flash-monitor   # flash then monitor in one step
+```
+
+Override defaults inline, e.g. `make flash PORT=/dev/ttyACM1` or
+`make build APP=rimba-hello IDF_PATH=~/esp/esp-idf`. Run `make help` for the full
+list of targets and variables.
+
+> The Seeed XIAO ESP32-S3 enumerates over its native USB-Serial-JTAG as
+> `/dev/ttyACM0`, used for both flashing and the console. Your user must be in the
+> `dialout` group to access it.
+
+Prefer raw `idf.py`? `source ~/esp/esp-idf/export.sh` then work inside
+`firmware/rimba-hello/`.
+
 ## Documents
 
 All documents live under `docs/`.

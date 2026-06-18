@@ -1,0 +1,20 @@
+# ESP-IDF / CMake build output
+build/
+sdkconfig
+sdkconfig.old
+*.bin
+*.elf
+*.map
+
+# Editor / OS
+.vscode/
+.DS_Store
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+
+# Note: ESP-IDF itself is NOT vendored here. It is installed out-of-tree at
+# $HOME/esp/esp-idf (see firmware/README.md). Only the MM6108 SDK is vendored
+# under vendor/ (as a pinned git submodule).

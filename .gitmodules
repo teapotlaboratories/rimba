@@ -1,0 +1,3 @@
+[submodule "vendor/mm-iot-sdk"]
+	path = vendor/mm-iot-sdk
+	url = https://github.com/MorseMicro/mm-iot-sdk
