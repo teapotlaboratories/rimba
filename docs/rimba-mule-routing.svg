@@ -1,0 +1,123 @@
+<svg width="100%" viewBox="0 0 720 500" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Rimba mule routing path and bundle flow</title>
+<desc>Shows mule sweeping isolated relays in store_pct order, returning to gateway with collected bundles</desc>
+<defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="barr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#BA7517" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="garr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<!-- Coverage gap shaded zone -->
+<rect x="318" y="60" width="80" height="380" fill="#F5F4EF" stroke="#D3D1C7" stroke-width="0.5" stroke-dasharray="4 3"/>
+<text font-family="sans-serif" font-size="11" x="358" y="250" text-anchor="middle" fill="#B4B2A9" transform="rotate(-90,358,250)">coverage gap</text>
+
+<!-- Zone labels -->
+<text font-family="sans-serif" font-size="12" font-weight="500" x="170" y="48" text-anchor="middle" fill="#5F5E5A">Connected zone</text>
+<text font-family="sans-serif" font-size="12" font-weight="500" x="540" y="48" text-anchor="middle" fill="#5F5E5A">Isolated zone</text>
+
+<!-- Backbone links (connected relays to gateway) -->
+<line x1="112" y1="210" x2="194" y2="168" stroke="#B4B2A9" stroke-width="1.5"/>
+<line x1="112" y1="270" x2="194" y2="310" stroke="#B4B2A9" stroke-width="1.5"/>
+<line x1="224" y1="160" x2="288" y2="210" stroke="#B4B2A9" stroke-width="1.5"/>
+<line x1="224" y1="318" x2="288" y2="268" stroke="#B4B2A9" stroke-width="1.5"/>
+<line x1="214" y1="164" x2="214" y2="308" stroke="#B4B2A9" stroke-width="1.5"/>
+
+<!-- Mule sweep path (amber dotted, outbound) -->
+<path d="M 96 240 Q 210 240 310 240 Q 360 240 410 150" fill="none" stroke="#BA7517" stroke-width="2" stroke-dasharray="8 5"/>
+<path d="M 410 150 Q 470 80 530 140" fill="none" stroke="#BA7517" stroke-width="2" stroke-dasharray="8 5"/>
+<path d="M 530 140 Q 590 200 580 270" fill="none" stroke="#BA7517" stroke-width="2" stroke-dasharray="8 5"/>
+<path d="M 580 270 Q 570 360 490 390" fill="none" stroke="#BA7517" stroke-width="2" stroke-dasharray="8 5"/>
+
+<!-- Mule return path (lighter amber) -->
+<path d="M 490 390 Q 420 350 340 310 Q 280 280 210 260 Q 160 252 100 248" fill="none" stroke="#DDA04A" stroke-width="1.5" stroke-dasharray="4 4"/>
+
+<!-- Gateway (blue) -->
+<rect x="64" y="220" width="36" height="36" rx="6" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
+<text font-family="sans-serif" font-size="13" font-weight="600" x="82" y="241" text-anchor="middle" dominant-baseline="central" fill="#042C53">GW</text>
+<text font-family="sans-serif" font-size="11" x="82" y="266" text-anchor="middle" fill="#888780">gateway</text>
+
+<!-- Connected relays (lighter teal) -->
+<circle cx="210" cy="156" r="14" fill="#C8EFE4" stroke="#1D9E75" stroke-width="0.5"/>
+<text font-family="sans-serif" font-size="12" font-weight="500" x="210" y="157" text-anchor="middle" dominant-baseline="central" fill="#04342C">R</text>
+
+<circle cx="210" cy="320" r="14" fill="#C8EFE4" stroke="#1D9E75" stroke-width="0.5"/>
+<text font-family="sans-serif" font-size="12" font-weight="500" x="210" y="321" text-anchor="middle" dominant-baseline="central" fill="#04342C">R</text>
+
+<circle cx="300" cy="240" r="14" fill="#C8EFE4" stroke="#1D9E75" stroke-width="0.5"/>
+<text font-family="sans-serif" font-size="12" font-weight="500" x="300" y="241" text-anchor="middle" dominant-baseline="central" fill="#04342C">R</text>
+<text font-family="sans-serif" font-size="10" x="300" y="262" text-anchor="middle" fill="#888780">CONNECTED</text>
+
+<!-- Isolated relays (darker teal, different styling to show isolation) -->
+<!-- IR1 - 92% - visit 1st -->
+<circle cx="430" cy="148" r="16" fill="#9FE1CB" stroke="#085041" stroke-width="1.5"/>
+<text font-family="sans-serif" font-size="12" font-weight="600" x="430" y="148" text-anchor="middle" dominant-baseline="central" fill="#04342C">R</text>
+<rect x="406" y="168" width="52" height="20" rx="4" fill="#E8F9F3" stroke="#1D9E75" stroke-width="0.5"/>
+<text font-family="sans-serif" font-size="11" font-weight="500" x="432" y="181" text-anchor="middle" fill="#085041">① 92%</text>
+<text font-family="sans-serif" font-size="10" x="430" y="128" text-anchor="middle" fill="#888780">ISOLATED</text>
+
+<!-- IR2 - 83% - visit 2nd -->
+<circle cx="545" cy="138" r="16" fill="#9FE1CB" stroke="#085041" stroke-width="1.5"/>
+<text font-family="sans-serif" font-size="12" font-weight="600" x="545" y="138" text-anchor="middle" dominant-baseline="central" fill="#04342C">R</text>
+<rect x="521" y="158" width="52" height="20" rx="4" fill="#E8F9F3" stroke="#1D9E75" stroke-width="0.5"/>
+<text font-family="sans-serif" font-size="11" font-weight="500" x="547" y="171" text-anchor="middle" fill="#085041">② 83%</text>
+<text font-family="sans-serif" font-size="10" x="545" y="118" text-anchor="middle" fill="#888780">ISOLATED</text>
+
+<!-- IR3 - 78% - visit 3rd -->
+<circle cx="593" cy="272" r="16" fill="#9FE1CB" stroke="#085041" stroke-width="1.5"/>
+<text font-family="sans-serif" font-size="12" font-weight="600" x="593" y="272" text-anchor="middle" dominant-baseline="central" fill="#04342C">R</text>
+<rect x="569" y="292" width="52" height="20" rx="4" fill="#E8F9F3" stroke="#1D9E75" stroke-width="0.5"/>
+<text font-family="sans-serif" font-size="11" font-weight="500" x="595" y="305" text-anchor="middle" fill="#085041">③ 78%</text>
+<text font-family="sans-serif" font-size="10" x="593" y="252" text-anchor="middle" fill="#888780">ISOLATED</text>
+
+<!-- IR4 - 45% - visit 4th -->
+<circle cx="493" cy="388" r="16" fill="#9FE1CB" stroke="#085041" stroke-width="1.5"/>
+<text font-family="sans-serif" font-size="12" font-weight="600" x="493" y="388" text-anchor="middle" dominant-baseline="central" fill="#04342C">R</text>
+<rect x="469" y="408" width="52" height="20" rx="4" fill="#E8F9F3" stroke="#1D9E75" stroke-width="0.5"/>
+<text font-family="sans-serif" font-size="11" font-weight="500" x="495" y="421" text-anchor="middle" fill="#085041">④ 45%</text>
+<text font-family="sans-serif" font-size="10" x="493" y="368" text-anchor="middle" fill="#888780">ISOLATED</text>
+
+<!-- Mule node (amber diamond) at current position - shown mid-sweep -->
+<polygon points="430,55 444,70 430,85 416,70" fill="#F7C97A" stroke="#BA7517" stroke-width="1"/>
+<text font-family="sans-serif" font-size="11" font-weight="500" x="430" y="100" text-anchor="middle" fill="#BA7517">Mule</text>
+
+<!-- Bundle transfer arrows at each stop -->
+<!-- IR1 → Mule -->
+<line x1="430" y1="132" x2="430" y2="87" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#garr)" stroke-dasharray="3 2"/>
+<!-- IR2 → Mule area -->
+<line x1="545" y1="122" x2="480" y2="75" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#garr)" stroke-dasharray="3 2"/>
+<!-- IR3 annotation -->
+<line x1="577" y1="262" x2="530" y2="200" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#garr)" stroke-dasharray="3 2"/>
+<!-- IR4 annotation -->
+<line x1="493" y1="372" x2="460" y2="310" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#garr)" stroke-dasharray="3 2"/>
+
+<!-- Mule → Gateway (return, larger arrow) -->
+<line x1="106" y1="248" x2="102" y2="244" stroke="#BA7517" stroke-width="2" marker-end="url(#barr)"/>
+
+<!-- Labels -->
+<text font-family="sans-serif" font-size="11" x="340" y="220" fill="#BA7517">outbound sweep</text>
+<path d="M 340 225 L 380 232" fill="none" stroke="#BA7517" stroke-width="0.8" marker-end="url(#barr)"/>
+
+<text font-family="sans-serif" font-size="11" x="200" y="290" fill="#DDA04A">return to GW</text>
+<path d="M 240 290 L 270 278" fill="none" stroke="#DDA04A" stroke-width="0.8" marker-end="url(#barr)"/>
+
+<!-- Bundle transfer label -->
+<text font-family="sans-serif" font-size="10" x="412" y="110" text-anchor="end" fill="#1D9E75">bundle</text>
+<text font-family="sans-serif" font-size="10" x="412" y="122" text-anchor="end" fill="#1D9E75">custody</text>
+
+<!-- Legend -->
+<rect x="60" y="440" width="600" height="46" rx="6" fill="#F1EFE8" stroke="#D3D1C7" stroke-width="0.5"/>
+<line x1="80" y1="463" x2="108" y2="463" stroke="#BA7517" stroke-width="2" stroke-dasharray="6 3"/>
+<text font-family="sans-serif" font-size="11" x="114" y="467" fill="#5F5E5A">Mule path (outbound)</text>
+<line x1="230" y1="463" x2="258" y2="463" stroke="#DDA04A" stroke-width="1.5" stroke-dasharray="3 3"/>
+<text font-family="sans-serif" font-size="11" x="264" y="467" fill="#5F5E5A">Return path</text>
+<line x1="340" y1="463" x2="368" y2="463" stroke="#1D9E75" stroke-width="1.5" stroke-dasharray="3 2" marker-end="url(#garr)"/>
+<text font-family="sans-serif" font-size="11" x="374" y="467" fill="#5F5E5A">Bundle custody transfer</text>
+<text font-family="sans-serif" font-size="11" x="510" y="460" fill="#5F5E5A">① Visit order</text>
+<text font-family="sans-serif" font-size="11" x="510" y="474" fill="#5F5E5A">(highest store_pct first)</text>
+</svg>
