@@ -676,12 +676,13 @@ in-place for the target arch (xtensa)**. Consequences observed:
 - Every build dirties the firmware submodule (the `.o` changes), which is why the
   RISK-01 commits had to carefully avoid staging it.
 
-**To investigate / decide:** should these `.mbin.o` be gitignored in the firmware
-submodule (they're generated), or have CMake emit them into the build tree
-instead of in-source? Either would stop the per-build churn and remove the
-revert-breaks-the-build trap. Confirm what the committed `.o` actually is (wrong
-arch vs placeholder) and why upstream tracks it. Low priority, but it keeps
-biting the commit workflow.
+**RESOLVED (2026-06-19):** these are build outputs and shouldn't be tracked. In
+the `firmware` submodule (on its `test2` branch, `main` left pristine): `git rm
+--cached` the three committed `*.mbin.o` and added a `.gitignore` for `*.mbin.o`.
+The `.mbin` source blobs stay tracked; the build regenerates the objects locally.
+Verified by deleting the in-source `.o` (fresh-clone simulation) and rebuilding —
+the build regenerates + links, and the submodule stays clean (objects ignored).
+No more per-build churn and no revert-breaks-the-build trap.
 
 ## Result — sniffer validated against a known AP (2026-06-19)
 
