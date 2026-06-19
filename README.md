@@ -55,11 +55,14 @@ CBOR payload
 
 ## Building the firmware
 
-The firmware lives under [`firmware/`](firmware/) and targets the ESP32-S3. Two
-examples exist (select with `APP=`):
+The firmware lives under [`firmware/`](firmware/) and targets the ESP32-S3.
+Several apps exist (select with `APP=`):
 - **`rimba-hello`** — radio-free sanity check (toolchain + 8 MB PSRAM, RISK-04).
 - **`rimba-halow-scan`** — boots the MM6108 HaLow radio over SPI and scans for
   APs. Confirmed working (firmware v1.17.6, chip ID 0x0306).
+- **`rimba-halow-ap`** + **`rimba-halow-sta`** — a 2-board AP↔STA ping test.
+  Confirmed on hardware: bidirectional IP, ~12 ms RTT over 802.11ah — the
+  Phase-1 RISK-01 AP-STA link validated end-to-end.
 
 See [`firmware/README.md`](firmware/README.md) for per-example detail.
 

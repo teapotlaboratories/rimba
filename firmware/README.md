@@ -23,6 +23,8 @@ firmware/
   rimba-halow-scan/    # MM6108 bring-up: boots the HaLow radio and scans for APs
     main/app_main.c
     CMakeLists.txt     # adds ../../components via EXTRA_COMPONENT_DIRS
+  rimba-halow-ap/      # 2-board ping test: HaLow SoftAP node
+  rimba-halow-sta/     # 2-board ping test: HaLow station node
   README.md
 vendor/
   esp-idf            # ESP-IDF toolchain (pinned submodule, v5.4.2) — the build uses this
@@ -101,6 +103,32 @@ default `proto1` board, [`boards/proto1/sdkconfig.defaults`](../boards/proto1/sd
 - **Country:** `CONFIG_HALOW_COUNTRY_CODE="US"` — **required**; it defaults to
   `"??"` and without a valid code the radio won't set a channel list and scan
   fails. Valid: `AU CA EU GB IN JP KR NZ US`.
+
+### `rimba-halow-ap` + `rimba-halow-sta` (2-board ping test)
+
+A bidirectional ICMP ping over an 802.11ah AP↔STA link — the proven two-node
+path (the MM6108 has no public IBSS in morselib). Flash one board as the SoftAP
+and the other as the station, on separate ports:
+
+```bash
+make flash APP=rimba-halow-ap  PORT=/dev/ttyACM0    # SoftAP, static 192.168.12.1
+make flash APP=rimba-halow-sta PORT=/dev/ttyACM1    # STA,    static 192.168.12.2
+make monitor APP=rimba-halow-sta PORT=/dev/ttyACM1  # watch "reply from … time=N ms"
+```
+
+Both nodes ping each other (~12 ms RTT, US 915.5 MHz / 1 MHz BW). Two
+non-obvious details, both handled in the apps:
+
+- **Static IPs, no DHCP.** `mmhalow` gives even the AP a DHCP-*client* netif and
+  runs no DHCP server, so each side pins a static IP rather than leasing one.
+- **The AP must bring its netif up.** In AP mode `mmhalow` never fires a link-up
+  event, so it never calls `esp_netif_action_connected` — the AP netif stays
+  down and lwIP silently drops ICMP. `rimba-halow-ap` calls it explicitly; that
+  one line is what makes the AP reachable over IP.
+
+`rimba-halow-ap` carries one app-level override
+([`firmware/rimba-halow-ap/sdkconfig.defaults`](rimba-halow-ap/sdkconfig.defaults)):
+`CONFIG_HALOW_AP_MODE=y`. `rimba-halow-sta` needs none (STA is the default mode).
 
 ## Hardware notes
 
