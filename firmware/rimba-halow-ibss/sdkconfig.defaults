@@ -1,0 +1,4 @@
+# rimba-halow-ibss app config (layered on top of the board's boards/<BOARD>/ defaults).
+# IBSS reuses the AP-type interface + BSS_CONFIG/beacon code path, so the AP-mode
+# morselib sources (umac_ap.c, beacon helpers) must be compiled in.
+CONFIG_HALOW_AP_MODE=y
