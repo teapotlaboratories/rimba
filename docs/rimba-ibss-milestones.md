@@ -68,18 +68,49 @@ data-plane TX/RX enqueue path is still stubbed and is the next increment.
 
 ---
 
-## What was built
+## Code development overview & Linux comparison
 
-**`components/halow` (morselib) — IBSS support:** `morse_commands.h`
-(IBSS_CONFIG/BSSID_SET + structs), `mmdrv.h`/`driver.c` (ADHOC type + senders),
-`umac_interface.*` (UMAC_INTERFACE_ADHOC), `umac.c` + `umac_ibss.h`
-(`mmwlan_ibss_enable`, host IBSS beacon, IBSS datapath), `umac_mmdrv_shim.c`
-(beacon dispatch), `umac_datapath.c` (beacon-aware scan), `mmwlan.h`
-(`mmwlan_ibss_args` / `mmwlan_ibss_enable`).
+The port was built bottom-up, each layer mapped to (and derived from) its Linux
+source and verified on hardware: firmware commands → bring-up sequence → host
+beacon → datapath/probe-answering. The MM6108 firmware is the same silicon Linux
+drives, so the firmware-command layer matches `morse_driver` directly; the
+upper-layer behaviour (beacon IEs, probe answering, addressing, merge) matches
+`net/mac80211/ibss.c`.
 
-**Superproject:** `firmware/rimba-halow-ibss` (IBSS bring-up app),
-`boards/proto1-fgh100m` (FGH100M BCF board), `firmware/rimba-halow-scan` (scan
-loop + raw sniffer diagnostic), `vendor/mm-iot-sdk` pinned to 2.10.4.
+Path shorthands:
+- **port** = `components/halow/components/mm-iot-sdk/framework/morselib/` (+ a few
+  superproject files under `firmware/`, `boards/`).
+- **kernel** = `MorseMicro/linux` (fork branch `mm/linux-6.12.81/1.17.x`).
+- **morse_driver** = `MorseMicro/morse_driver` (out-of-tree mac80211 driver).
+
+| Concern | This port (file : symbol) | Linux equivalent (file : symbol) |
+|---|---|---|
+| ADHOC interface type + add | port `src/internal/mmdrv.h` : `MMDRV_INTERFACE_TYPE_ADHOC`; `src/driver/driver.c` : `mmdrv_add_if` ADHOC case | morse_driver `mac.c` : `interface_modes` `BIT(ADHOC)`@7211; `command.c` : `morse_cmd_add_if` (`NL80211_IFTYPE_ADHOC`→`MORSE_CMD_INTERFACE_TYPE_ADHOC`) |
+| IBSS commands + structs (`IBSS_CONFIG` 0x35, `BSSID_SET` 0x52) | port `src/common/morse_commands.h` : `morse_cmd_req_ibss_config`, `…_bssid_set`; `src/driver/driver.c` : `mmdrv_cfg_ibss`, `mmdrv_set_bssid` | morse_driver `morse_commands.h` : `morse_cmd_req_ibss_config`; `command.c` : `morse_cmd_cfg_ibss`@2228, `morse_cmd_set_bssid` |
+| Bring-up sequence + create/join, EEXIST handling | port `src/umac/umac.c` : `mmwlan_ibss_enable`, `umac_ibss_do_start` | kernel `net/mac80211/ibss.c` : `__ieee80211_sta_join_ibss`; morse_driver `mac.c` : `morse_mac_join_ibss`@5308, `bss_info_changed` IBSS branch@4127 |
+| Host IBSS beacon (IBSS cap bit, IBSS Param Set, S1G Cap/Op, no TIM, long) | port `src/umac/umac.c` : `umac_ibss_build_beacon`, `umac_ibss_get_beacon`, `umac_ibss_append_s1g_ies`; dispatch `src/umac/umac_mmdrv_shim.c` : `mmdrv_host_get_beacon` | kernel `net/mac80211/ibss.c` : `ieee80211_ibss_build_presp`@38 (IBSS Param Set@133, cap `WLAN_CAPABILITY_IBSS`@475); 11n→S1G conv morse_driver `dot11ah/tx_11n_to_s1g.c` : `morse_dot11ah_beacon_to_s1g`@819 (`EXT\|S1G_BEACON`@831) + `beacon.c` : long-only for ADHOC@382 |
+| Probe-request answering | port `src/umac/umac.c` : `umac_ibss_process_rx_mgmt_frame`, `umac_ibss_build_probe_resp`, `datapath_ops_ibss` | kernel `net/mac80211/ibss.c` : `ieee80211_ibss_rx_queued_mgmt`@1584 → `ieee80211_rx_mgmt_probe_req`@1490 |
+| IBSS data 802.11 addressing (ToDS=FromDS=0; A1=DA, A2=SA, A3=BSSID) | port `src/umac/umac.c` : `umac_ibss_construct_80211_data_header` | kernel `net/mac80211/tx.c` : `ieee80211_build_hdr` (`NL80211_IFTYPE_ADHOC` case) |
+| Beacon-aware discovery (workaround) | port `src/umac/datapath/umac_datapath.c` : `…_process_rx_mgmt_frame_sta` BEACON case | n/a — ESP32 `hw_scan` only surfaces probe responses to the host, so we answer probes (as Linux does) and also feed beacons to the scanner |
+| Public API / app entry | port `include/mmwlan.h` : `mmwlan_ibss_enable`, `mmwlan_ibss_args`; app `firmware/rimba-halow-ibss/main/app_main.c` | userspace: `iw dev … ibss join`; `wpa_supplicant` (`mode=1`) |
+| IBSS merge (TSF tiebreak) | **not yet implemented** | kernel `net/mac80211/ibss.c` : `ieee80211_rx_bss_info`@1081 (TSF tiebreak@1160) |
+| Data-plane TX/RX (`0x88B5`) | **stubbed** — port `src/umac/umac.c` : `umac_ibss_enqueue_tx_frame`/`…dequeue…` | kernel `net/mac80211/tx.c` + `rx.c`; morse_driver data path |
+
+### Key divergences from Linux (and why)
+1. **S1G beacon conversion location.** On Linux the 11n→S1G beacon conversion is
+   *host-side* (`morse_driver/dot11ah/tx_11n_to_s1g.c`). On ESP32 the **chip
+   firmware** performs it (proven by the working SoftAP). So we feed an
+   11n-form PV0 beacon body (incl. the S1G Cap/Op IEs, as hostapd does for AP)
+   and rely on the chip to emit the S1G `EXT/S1G_BEACON` per interface type.
+2. **State-machine scope.** Linux mac80211 runs the full IBSS state machine
+   (merge, TSF adoption, ATIM, per-peer `sta_info`). This port implements the
+   subset proven so far — bring-up, beacon, probe-answering — with **merge and
+   the data plane still pending**. ATIM is intentionally omitted (window 0 =
+   always awake; per `ibss.c` it is power-save-only).
+3. **No association objects.** IBSS has no association, so the datapath `stad`
+   lookups return `NULL` and frames are admitted via
+   `frames_allowed_pre_association` — matching how Linux treats IBSS peers
+   before any `sta_info` exists.
 
 ## Build / test
 
