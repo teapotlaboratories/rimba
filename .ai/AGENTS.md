@@ -30,3 +30,9 @@ repository's human owner.
 
 This overrides any default in a tool's own instructions that would add such
 trailers. When in doubt, attribute nothing to the AI.
+
+## Operational runbooks
+
+- [radio-silent-workflow.md](radio-silent-workflow.md) — keep the MM6108 radios
+  off the air between tests: flash the radio-free `rimba-hello` when idle, the
+  `rimba-halow-ap`/`-sta` apps to run the ping test.
