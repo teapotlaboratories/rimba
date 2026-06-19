@@ -43,6 +43,31 @@ static const uint8_t LINK_BSSID[6] = { 0x02, 0x12, 0x34, 0x56, 0x78, 0x9a };
 
 static const char *TAG = "rimba-ibss";
 
+/* Rimba L2 frame type. The Phase-1 gate is exchanging these raw, not just IP. */
+#define RIMBA_ETHERTYPE 0x88b5
+
+/* Broadcast one raw EtherType-0x88B5 L2 frame to the cell via mmwlan_tx(), which
+ * takes a bare 802.3 frame: [DST(6)][SRC(6)][ethertype(2,BE)][payload]. Goes out
+ * over the same IBSS data path as IP (plaintext for now). The peer surfaces it in
+ * halow_rx ("RX 0x88B5 ..."); lwIP would otherwise drop the unknown EtherType. */
+static void send_rimba_88b5(const uint8_t *src_mac, unsigned seq)
+{
+    uint8_t frame[64];
+    memset(frame, 0xff, 6);                       /* DST = broadcast            */
+    memcpy(frame + 6, src_mac, 6);                /* SRC = our MAC              */
+    frame[12] = (RIMBA_ETHERTYPE >> 8) & 0xff;    /* EtherType 0x88B5 (BE)      */
+    frame[13] = RIMBA_ETHERTYPE & 0xff;
+    int n = snprintf((char *)(frame + 14), sizeof(frame) - 14, "RIMBA-88B5 seq=%u", seq);
+    unsigned len = 14 + (n > 0 ? (unsigned)n : 0);
+
+    enum mmwlan_status st = mmwlan_tx(frame, len);
+    if (st != MMWLAN_SUCCESS) {
+        ESP_LOGW(TAG, "TX 0x88B5 seq=%u failed status=%d", seq, st);
+    } else {
+        ESP_LOGI(TAG, "TX 0x88B5 broadcast seq=%u len=%u", seq, len);
+    }
+}
+
 static void on_ping_success(esp_ping_handle_t hdl, void *args)
 {
     uint16_t seqno;
@@ -142,8 +167,21 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(1500));
     start_static_ip_and_ping(my_ip, peer_ip);
 
+    unsigned seq = 0;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(10000));
-        ESP_LOGI(TAG, "alive (role=%s ip=%s)", creator ? "CREATOR" : "JOINER", my_ip);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        send_rimba_88b5(mac, seq++);   /* exercise the raw Rimba 0x88B5 path */
+
+        /* Dump the per-peer station table (multi-node IBSS): each discovered peer
+         * shows its MAC, assigned AID, and the firmware SET_STA_STATE result. */
+        struct mmwlan_ibss_peer_info peers[8];
+        unsigned np = mmwlan_ibss_get_peers(peers, 8);
+        ESP_LOGI(TAG, "IBSS peers: %u", np);
+        for (unsigned i = 0; i < np && i < 8; i++) {
+            ESP_LOGI(TAG, "  peer[%u] %02x:%02x:%02x:%02x:%02x:%02x aid=%u",
+                     i, peers[i].mac_addr[0], peers[i].mac_addr[1], peers[i].mac_addr[2],
+                     peers[i].mac_addr[3], peers[i].mac_addr[4], peers[i].mac_addr[5],
+                     peers[i].aid);
+        }
     }
 }
