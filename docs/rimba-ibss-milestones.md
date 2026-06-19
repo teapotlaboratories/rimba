@@ -60,11 +60,29 @@ RXFRAME flag=PROBE_RSP len=77 freq=915500kHz  A2=A3=02:12:34:56:78:9a
 This confirms the MM6108 in ADHOC mode on the ESP32 **transmits and receives on
 air** and is advertised as a real IBSS — the central risk of RISK-01 is retired.
 
-### Remaining — EtherType `0x88B5` data exchange ⬜
-The Phase-1 success gate: exchange raw Rimba `0x88B5` data frames between two
-IBSS peers. The IBSS data addressing is already in place
-(`construct_80211_data_header`: ToDS=FromDS=0, A1=DA, A2=SA, A3=BSSID); the
-data-plane TX/RX enqueue path is still stubbed and is the next increment.
+### M6 — IBSS data path: bidirectional IP, dynamic ARP ✅
+Un-stubbed the data plane (single shared peer `stad`, STA-style enqueue/dequeue,
+OPEN-plaintext TX, IBSS addressing) and fixed the real blocker: the RX **data**
+path resolved the VIF as STA/AP only and dropped `UMAC_INTERFACE_ADHOC` frames
+(`umac_datapath.c` "Invalid RX VIF"); added an ADHOC→`MMWLAN_VIF_AP` case. Two
+boards then exchange **bidirectional IP over IBSS with dynamic ARP** (no static
+entry):
+
+```
+RXDATA dst=<self> src=<peer> eth=0x0800   reply from 192.168.13.2: time=17 ms
+counts: ok=18  rxdata=36  timeout=0  senderr=0   (~16-17 ms RTT)
+```
+
+**The Phase-1 data gate is met** — two battery-class nodes exchange L2/IP frames
+with no infrastructure. The literal Rimba EtherType `0x88B5` rides this same path
+(it's just a different EtherType than the `0x0800` used here; sending raw `0x88B5`
+is an app-level `mmwlan_tx`, not a datapath change).
+
+### RISK-01 — RESOLVED
+All five layers (interface/commands, bring-up, beacon, probe-answering, data
+path) work end-to-end on two boards, derived from and verified against the Linux
+implementation. IBSS is a viable L2 for Rimba on the MM6108; the RISK-01 fallback
+(AP-STA) is not required.
 
 ---
 

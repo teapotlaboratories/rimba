@@ -56,6 +56,11 @@ static void sniff_cb(const struct mmwlan_rx_frame_info *info, void *arg)
              ours ? " <== IBSS MATCH" : "",
              a2 ? a2[0]:0, a2 ? a2[1]:0, a2 ? a2[2]:0, a2 ? a2[3]:0, a2 ? a2[4]:0, a2 ? a2[5]:0,
              a3 ? a3[0]:0, a3 ? a3[1]:0, a3 ? a3[2]:0, a3 ? a3[3]:0, a3 ? a3[4]:0, a3 ? a3[5]:0);
+    /* For our own IBSS frames, hexdump the whole frame so the IEs can be decoded
+     * and verified against the Linux beacon/probe-resp (net/mac80211/ibss.c). */
+    if (ours) {
+        ESP_LOG_BUFFER_HEXDUMP(TAG, info->buf, info->buf_len, ESP_LOG_INFO);
+    }
 }
 
 static void scan_cb(enum mmwlan_scan_state state, void *args)
