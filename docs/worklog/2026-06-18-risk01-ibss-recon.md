@@ -496,6 +496,193 @@ forward, both sizable:
 The chip-command layer of RISK-01 remains proven; the open question is purely the
 host-side TX/RX plumbing needed to get frames on/off the air in ad-hoc mode.
 
+## Verification — decoded the on-air IBSS frame vs Linux (2026-06-19)
+
+Added a hexdump to the board-1 sniffer and decoded a captured IBSS probe response
+(77 B) byte-for-byte. It is well-formed and faithful to the Linux IBSS frame:
+
+```
+FC=0x0050 (PV0 mgmt, PROBE_RESP)  Dur=0x02d0
+A1/DA = bc:2a:33:96:b2:9f  (the probe requester, board 1)
+A2/SA = 02:12:34:56:78:9a  (= BSSID)   ← chip applied SW-4741 override
+A3/BSSID = 02:12:34:56:78:9a
+timestamp=0  beacon_int=100TU  cap=0x0002 (IBSS set, ESS clear)
+IE 00/0a "rimba-ibss"            SSID
+IE 06/02 00 00                   IBSS Parameter Set, ATIM=0  (exact ibss.c:133 match)
+IE d9/0f …                       S1G Capabilities (217)
+IE e8/06 00 44 1b 1b 00 00       S1G Operation (232): op_class 68, chan 27
+```
+
+**Two earlier concerns resolved by the decode:**
+- The flagged "SA = my_mac bug" is **not a bug**. The wire SA = BSSID — the chip
+  applies morse_driver's SW-4741 (`tx_11n_to_s1g.c:867`, "SA MUST be the BSSID")
+  itself. My source `SA = my_mac` matches mac80211 `ieee80211_ibss_build_presp`
+  (`sa = vif.addr`); the chip overrides it. Faithful, no fix needed.
+- The host body provides S1G Cap/Op and the chip does **not** duplicate them — so
+  on ESP32 the host supplies the S1G content IEs (as the AP path does via
+  hostapd) and the chip handles S1G framing + SA. Confirmed: no malformed/dup IEs.
+
+**Minor deltas vs Linux (not bugs, optional to close):** no legacy Supported
+Rates IE (mac80211 emits it in the 11n presp but morse_driver strips it for S1G,
+so its absence matches the S1G wire); no Country IE and no S1G Short Beacon
+Interval IE (Linux probe-resp carries these). The IBSS-defining content matches.
+
+Note: this is the PROBE RESPONSE (shares `umac_ibss_append_s1g_ies` with the
+beacon, so the beacon's IE content is equally verified). The S1G *beacon* frame
+itself isn't surfaced by the scan-based sniffer, so its EXT/S1G-beacon framing is
+the chip's job and unverified-on-wire.
+
+## Verification — command structs vs raw morse_driver (2026-06-19)
+
+Diffed my recreated IBSS commands against `MorseMicro/morse_driver@main`
+(`morse_commands.h`, `command.c`) — **byte-for-byte match, no discrepancies**:
+- IDs: `MORSE_CMD_ID_IBSS_CONFIG = 0x0035`, `MORSE_CMD_ID_BSSID_SET = 0x0052`.
+- `morse_cmd_req_ibss_config { hdr; u8 ibss_bssid[6]; u8 ibss_cfg_opcode; u8
+  ibss_probe_filtering; } __packed` — opcodes CREATE=0/JOIN=1/STOP=2.
+- `morse_cmd_req_bssid_set { hdr; morse_cmd_mac_addr bssid; } __packed`.
+- `morse_cmd_header` = 6×`__le16` (12 B).
+My structs are `MM_PACKED` and `ibss_probe_filtering` defaults to 1 (matches the
+driver's `enable_ibss_probe_filtering = true`). Opcode selection
+(stop→STOP, else creator→CREATE/joiner→JOIN) matches `morse_cmd_cfg_ibss`.
+
+### Linux-fidelity verification summary
+- ✅ Beacon/probe-resp IE content (on-wire decode) — faithful.
+- ✅ Command IDs + structs — byte-for-byte vs morse_driver.
+- ✅ Command sequence + probe-answering + addressing — from morse_driver / ibss.c.
+- 🚧 Data path — plumbing implemented (see below); data not yet flowing.
+
+## Data path — plumbing implemented; ARP not resolving (2026-06-19)
+
+Un-stubbed the IBSS data plane in `umac.c`, reusing the STA single-peer model:
+- A single shared peer `stad` (`g_ibss.stad = umac_sta_data_alloc_static`) — IBSS
+  has no association, so all peers map to it; real DA/SA travel in the 802.11
+  header. The TX path requires a non-NULL stad, so the `lookup_stad_*` ops return
+  it.
+- `enqueue/dequeue_tx_frame` use the per-stad queue
+  (`umac_sta_data_queue_pkt`/`_pop_pkt`), mirroring `datapath_ops_sta`.
+- Marked the shared stad **OPEN** security so the TX datapath sends **plaintext**
+  (`umac_datapath.c:1733` only encrypts when `security_type != MMWLAN_OPEN`) —
+  correct for a keyless open IBSS.
+- `construct_80211_data_header` already does IBSS addressing (ToDS=FromDS=0,
+  A1=DA, A2=SA, A3=BSSID).
+- App (`rimba-halow-ibss`) now picks role from its MAC (one binary for both
+  boards), pins a static IP (CREATOR .1 / JOINER .2), brings the netif up
+  (IBSS, like AP, fires no link-up event), and pings the peer.
+
+**On two boards:** both come up with correct roles, beacon, and start pinging —
+but every ping **times out** with `ping_sock: send error=0` on *both* sides. That
+is the **ARP-unresolved** symptom: lwIP has no MAC for the peer IP, so it never
+emits the ICMP. (Identical to the AP-STA ping test, which needed a static ARP
+entry — see `2026-06-18-halow-ap-sta-ping.md`.)
+
+**So the data plumbing runs but a frame round-trip isn't completing.** Open
+question to debug next: does the ARP broadcast TX go out / get received, and does
+unicast data RX get delivered up? Plan:
+1. Add **static ARP** entries (peer IP → peer MAC) on both boards to bypass ARP
+   and isolate unicast data TX/RX (exactly what unblocked AP-STA). Peer MACs:
+   creator `68:24:99:44:6b:b7`, joiner `bc:2a:33:96:b2:9f`.
+2. If static ARP makes ICMP flow → broadcast/ARP path is the remaining gap; if
+   not → unicast data RX delivery (the shared-stad RX dedup / 802.11→802.3
+   translate path) needs tracing against mac80211 `rx.c`.
+3. Then swap ICMP for raw EtherType `0x88B5` (the literal Phase-1 gate).
+
+### Static-ARP diagnostic result (2026-06-19)
+
+Added a static ARP entry (peer IP → peer MAC) on both boards (`USE_STATIC_ARP`,
+`etharp_add_static_entry`). Result: the **`send error=0` disappears** — lwIP now
+*sends* the ICMP (TX no longer blocked on ARP) — **but pings still time out** on
+both boards. So:
+- **Unicast TX is now issued** (ARP was the only thing blocking the send).
+- **The round-trip still fails** → either the data frame isn't reaching the air,
+  or (more likely, since it's symmetric on both boards) the **RX data path isn't
+  delivering received frames up to the netif**.
+
+Static ARP was the diagnostic; **the goal remains dynamic ARP** (which AP-STA got
+once its netif came up). But dynamic ARP can't work until the data round-trip
+does — and the round-trip is the real remaining bug.
+
+**Next diagnostic:** instrument the RX data path — log in `mmhalow` `halow_rx`
+(the `rx_pkt_callback`) and/or the umac RX data handler — to see whether the peer
+receives the frame at all. That splits it cleanly: frames arrive → RX→netif
+delivery bug; frames don't arrive → OTA TX bug (verify via TX counters or a
+monitor interface, since the scan sniffer only surfaces mgmt frames, not data).
+Check `umac_datapath_process_tx_frame` (dequeue→frame build→`mmdrv_tx_frame`) for
+a silent drop on the shared-stad path, and the RX dedup/seq handling against
+mac80211 `rx.c` for the IBSS case.
+
+## ✅ Data path works — RX-VIF bug found & fixed; IP ping over IBSS (2026-06-19)
+
+Root cause of the dropped round-trip: the RX **data** path resolves the VIF by
+checking only STA or AP (`umac_datapath.c` ~595): our interface is
+`UMAC_INTERFACE_ADHOC`, so it fell through to `"Invalid RX VIF" → drop`. **Every
+received IBSS data frame was dropped before the netif.** Fix: add an
+`UMAC_INTERFACE_ADHOC` case mapping to `MMWLAN_VIF_AP` (no dedicated IBSS vif
+enum), so RX data is delivered up.
+
+With the fix + static ARP, two boards exchange ICMP over IBSS:
+```
+RXDATA len=106 dst=68:24:99:44:6b:b7 src=bc:2a:33:96:b2:9f eth=0x0800
+reply from 192.168.13.2: seq=32 time=17 ms  <== IBSS DATA OK
+counts: ok=16  rxdata=32  timeout=0   (~17-20 ms RTT)
+```
+The **Phase-1 data gate is met** (IP data exchange between two MM6108 IBSS peers).
+Note the data-frame `src` is the peer's **real MAC** — SW-4741 (SA=BSSID) is
+beacon-only, so unicast data addressing is normal and ARP can work.
+
+Implementation note: the shared-stad model + the STA-style enqueue/dequeue +
+OPEN-plaintext TX + IBSS addressing all check out on the wire. RX dedup uses the
+single shared stad's sequence space (fine for 2 nodes; revisit for >2).
+
+### ✅ Dynamic ARP works (goal met) — no static entry (2026-06-19)
+Set `USE_STATIC_ARP=0` (remove the static ARP entry entirely) and re-ran:
+```
+counts: ok=18  rxdata=36  timeout=0  senderr=0   (~16-17 ms RTT)
+```
+ARP resolves **dynamically** over the IBSS — the static entry was only ever a
+diagnostic. The RX-VIF drop was the sole root cause; once received frames are
+delivered, the ARP broadcast→unicast-reply round-trip completes and IP flows with
+no manual entries. This matches how AP-STA behaved once its netif was up.
+
+## RISK-01 — RESOLVED
+
+End-to-end on two ESP32-S3 + MM6108 boards, all derived from the Linux side:
+- ✅ ADHOC interface + IBSS commands (vs morse_driver, byte-verified)
+- ✅ Stable bring-up; `EEXIST(-17)` understood/handled
+- ✅ Host IBSS beacon (vs ieee80211_ibss_build_presp; on-wire verified)
+- ✅ Probe-answering → discoverable as a genuine IBSS (cap 0x0002)
+- ✅ **IBSS data path: bidirectional IP, dynamic ARP, 0 timeouts, ~17 ms RTT**
+
+The Phase-1 success gate (two battery nodes exchange L2 frames without
+infrastructure) is demonstrated. The literal Rimba EtherType `0x88B5` rides the
+same data path — it's just a different EtherType than the IP (0x0800) used here;
+sending raw `0x88B5` is an app-level `mmwlan_tx` with that EtherType, not a
+datapath change.
+
+Cleanup still owed before this is merge-ready: gate/remove the `RXDATA` debug log
+in `mmhalow.c` and the static-ARP/MAC diagnostic scaffolding in the app; resolve
+the `.mbin.o` artifact churn (above).
+
+## TODO — investigate the `components/firmware/*.mbin.o` build artifacts
+
+Hit a footgun: `components/firmware/mm6108/bcf_fgh100mhaamd.mbin.o` (and the other
+`*.mbin.o`) are objcopy-generated binary objects (`make_binary_object` in the
+firmware component's CMakeLists, from the `.mbin` blobs). They are **tracked in
+git** (committed in the pristine import) **but the build regenerates them
+in-place for the target arch (xtensa)**. Consequences observed:
+- `git checkout` / reverting a `.mbin.o` restores the committed object, which is
+  **not an xtensa object**, and the incremental build does **not** regenerate it
+  (its mtime looks up-to-date) → link fails: *"unknown architecture … incompatible
+  with xtensa output"*. Fix used: `rm` the `.o` to force regeneration.
+- Every build dirties the firmware submodule (the `.o` changes), which is why the
+  RISK-01 commits had to carefully avoid staging it.
+
+**To investigate / decide:** should these `.mbin.o` be gitignored in the firmware
+submodule (they're generated), or have CMake emit them into the build tree
+instead of in-source? Either would stop the per-build churn and remove the
+revert-breaks-the-build trap. Confirm what the committed `.o` actually is (wrong
+arch vs placeholder) and why upstream tracks it. Low priority, but it keeps
+biting the commit workflow.
+
 ## Result — sniffer validated against a known AP (2026-06-19)
 
 Per the owner's suggestion, validated the board-1 sniffer against a known-good
