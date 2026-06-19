@@ -27,18 +27,24 @@ APP_DIR   := $(CURDIR)/firmware/$(APP)
 BOARD     ?= proto1
 BOARD_DIR := $(CURDIR)/boards/$(BOARD)
 
+# sdkconfig defaults applied to the build: the board overlay first, then the
+# app's own sdkconfig.defaults (if it has one) layered on top so it can add
+# app-level config (e.g. CONFIG_HALOW_AP_MODE). IDF auto-appends the matching
+# .<target> variant of each file.
+SDKCONFIG_DEFAULTS := $(BOARD_DIR)/sdkconfig.defaults$(if $(wildcard $(APP_DIR)/sdkconfig.defaults),;$(APP_DIR)/sdkconfig.defaults)
+
 # All build output goes to <repo root>/build/<APP>/<BOARD>/, never inside the
 # app dir. The generated sdkconfig lives there too, so each board keeps its own
 # config and switching boards never reuses a stale one.
 BUILD_DIR := $(CURDIR)/build/$(APP)/$(BOARD)
 
 # Source the IDF environment, enter the app dir, then run idf.py with our
-# out-of-source build directory and the selected board's config defaults
+# out-of-source build directory and the selected board + app config defaults
 # (-B / -D apply to build/flash/monitor/size/clean).
 IDF := source "$(IDF_PATH)/export.sh" >/dev/null 2>&1 && cd "$(APP_DIR)" && \
        idf.py -B "$(BUILD_DIR)" \
               -D SDKCONFIG="$(BUILD_DIR)/sdkconfig" \
-              -D SDKCONFIG_DEFAULTS="$(BOARD_DIR)/sdkconfig.defaults"
+              -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_DEFAULTS)"
 
 .PHONY: help build flash monitor flash-monitor clean fullclean \
         menuconfig size erase

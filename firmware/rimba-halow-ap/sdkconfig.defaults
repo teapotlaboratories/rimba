@@ -1,0 +1,3 @@
+# rimba-halow-ap app config (layered on top of the board's boards/<BOARD>/ defaults).
+# Put the MM6108 driver into AP (SoftAP) mode.
+CONFIG_HALOW_AP_MODE=y
