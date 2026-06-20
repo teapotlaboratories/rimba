@@ -71,7 +71,9 @@ The working implementation deliberately took shortcuts to prove the link:
    every interval unconditionally — fine for 2, a storm risk as density grows.
 6. ☐ **Teardown / disable / re-enable.** `mmwlan_ibss_disable()` (stop beaconing,
    `IBSS_CONFIG STOP`, remove interface, free the stad); handle re-enable and
-   param/channel change cleanly.
+   param/channel change cleanly. *Template:* the momentary-systems fork has
+   `mmwlan_ibss_stop()` (tears down the vif; `start` composes over the boot STA) —
+   see [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
 7. ☐ **Drop bench heuristics.** Remove the MAC-based role pick + hardcoded IPs in
    the app once merge + proper create/join land.
 14. ☐ **Peer age-out / free (follow-on to #2).** Per-peer records are currently
@@ -87,7 +89,10 @@ The working implementation deliberately took shortcuts to prove the link:
     (2026-06-19), where survivors could not re-acquire a returned same-MAC peer
     because the record never expired (see test plan §8.1 and the P0 worklog). Until
     age-out exists, "rediscovered as a fresh record" is impossible on the survivor
-    side by construction.
+    side by construction. *Template:* the momentary-systems fork implements this
+    (`mmwlan_ibss_age_peers(threshold_ms)`, per-peer `last_rx_ms`, LRU eviction at the
+    8-cap; caller-driven, no background timer) — usable as a reference. See
+    [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
 
 ### P3 — power & de-risking
 8. ☐ **ATIM / IBSS power save (RISK-06-ish, Rimba leaves).** Battery leaves need
@@ -104,7 +109,12 @@ The working implementation deliberately took shortcuts to prove the link:
 
 ### P4 — code quality
 12. ☐ **Factor IBSS out of `umac.c`** into `umac_ibss.c` (beacon, probe-resp,
-    datapath ops, bring-up) for separation and easier upstream-diffing.
+    datapath ops, bring-up) for separation and easier upstream-diffing. *Template:*
+    the momentary-systems fork (`esp-halow-ibss` @ `5237495`) already factors exactly
+    this into `umac/ibss/umac_ibss.c` (+ `.h`) with a clean `mmwlan_ibss_*` public API
+    — strong reference for the module split. Reuse its structure, but **keep our
+    Linux-verified beacon discovery** (their `SA=BSSID` beacon assumption is wrong for
+    the reference `morse_driver`). See [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
 13. ☐ **Review all STA/AP-only assumptions** in morselib for other ADHOC drops
     (the RX-VIF bug was one; audit for siblings).
 15. ☐ **Bump the ESP32 stack to latest (fw / SDK / IDF).** Current pins:
@@ -125,6 +135,59 @@ The working implementation deliberately took shortcuts to prove the link:
       before trusting the new base.
 
 ## Findings
+
+### IBSS_CONFIG EEXIST(-17) — root cause + why we still tolerate it (2026-06-20)
+Our `mmwlan_ibss_enable` bring-up gets `IBSS_CONFIG(CREATE)` → **EEXIST(-17)** from the
+firmware, which we tolerate (treat as "already created"). Investigated against the other
+public fork, **momentary-systems/esp-halow-ibss** (`5237495`, see
+[`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md)).
+
+- **Confirmed it is NOT firmware/command-bytes:** the `mm6108.mbin` blob is byte-identical
+  (same SHA256) between the forks, and `mmdrv_add_if` / `mmdrv_cfg_bss` / `mmdrv_cfg_ibss` /
+  `morse_cmd_tx` are byte-identical. Matching every command *arg* (cssid, DTIM,
+  probe_filtering, interface MAC = node-MAC, skipping BSSID_SET) in our fork did **not**
+  remove the EEXIST.
+- **Root cause = a divergence from the Linux flow (governing rule).** Their
+  `mmwlan_ibss_start` **removes any active interface (boot STA/SCAN/AP) before
+  `ADD_INTERFACE(ADHOC)`** (`umac_interface_remove` loop) — and that teardown is exactly
+  what Morse's Linux stack does. In mac80211 you cannot switch an iface to IBSS while it is
+  up: `ieee80211_if_change_type` returns `-EBUSY` (kernel `net/mac80211/iface.c`), so
+  `iw set type ibss` requires `ip link down` first, which runs `ieee80211_do_stop()` →
+  driver `.remove_interface` → **`morse_mac_ops_remove_interface` → `morse_cmd_rm_if` →
+  `MORSE_CMD_ID_REMOVE_INTERFACE`** (`morse_driver/mac.c:3566`, `command.c:916`). i.e. Linux
+  removes the old firmware interface, then adds the new ADHOC one. **Our bring-up skips the
+  `REMOVE_INTERFACE` step** — we `ADD_INTERFACE(ADHOC)` on top of the live boot interface, so
+  the stale firmware BSS context makes `IBSS_CONFIG(CREATE)` report already-exists → EEXIST.
+  Their fork (and Linux) returns `0`. So the teardown is not their trick; it's the
+  Linux-mandated behaviour we should derive per the governing rule.
+- **Why we still tolerate EEXIST for now (precise mechanism):** instrumented our bring-up —
+  before `ADD_INTERFACE(ADHOC)` the active set is `active_interface_types = 0x0001` =
+  **`UMAC_INTERFACE_NONE`**, the boot vif that `mmwlan_boot` creates (`umac.c:778`). That
+  lone NONE interface is what makes `IBSS_CONFIG(CREATE)` return EEXIST. But
+  `umac_interface_remove` only issues the firmware `mmdrv_rm_if` (REMOVE_INTERFACE) **when
+  `active_interface_types` reaches 0** (`umac_interface.c:23-27`) — so the teardown removes
+  NONE → active hits 0 → **`mmdrv_rm_if(boot vif)`** fires → the chip/data path is torn down,
+  and re-adding ADHOC does not re-establish the netif/datapath binding our `mmhalow` relies
+  on. Result: porting *only* the teardown **killed the EEXIST but regressed the data path**
+  (discovery/RX perfect — 3 peers, 0 phantoms — but all pings failed, chronium↔ESP32 0/3).
+  Their fork re-establishes the binding in `umac_ibss_start`; ours doesn't. Reverted → data
+  path works again (chronium→ESP32 2/2, 4-node mixed cell OK). **Proven fixable:** building +
+  flashing their *full* fork on our exact board gives both no-EEXIST *and* a working data path.
+- **Surgical fix attempt 2 (2026-06-20) — teardown + RX re-bind, still insufficient.** Added
+  the teardown (EEXIST gone, `IBSS_CONFIG`=0 ✓) **and** an `mmhalow_rebind_rx()` re-registering
+  the netif RX/link-state callbacks after the re-init. Result: **raw L2 TX works** (`0x88B5`
+  broadcast sends, 0 failures) but **ARP/ICMP still fail** (data RX broken — ARP replies never
+  arrive → ping never resolves). So the chip re-init loses **more** data-path state than just
+  the RX callback (chip-side data RX config / netif↔driver attach / PS / channel). Reverted.
+  **Conclusion: surgical reconstruction isn't converging — the validated fix is to adopt the
+  momentary-systems integrated bring-up (their `umac_ibss.c` + mmhalow), i.e. the #12 factor-out
+  — which re-establishes the full post-boot data path holistically and is proven on our HW.**
+- **Backlog (future clean-up, Linux-faithful):** do **both** halves of the Linux sequence —
+  (1) `REMOVE_INTERFACE` the active interface before `ADD_INTERFACE(ADHOC)` (mirrors
+  `morse_mac_ops_remove_interface`/`ieee80211_do_stop`), **and** (2) re-bind the netif/datapath
+  to the new ADHOC vif afterwards (mirrors their `umac_ibss_start` host setup / Linux's
+  `ip link up` re-attach). Until both land, the EEXIST is benign and handled. Relates to
+  #6 (teardown/disable) and #7.
 
 ### CCMP attempt (2026-06-19) — blocked on the chip's key model
 Tried the simplest Rimba-aligned model: one shared **GROUP** CCMP key (the
