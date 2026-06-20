@@ -123,6 +123,11 @@ The reference-implementation correctness check: our port talks to real Linux
 `morse_driver`/mac80211 IBSS on the **same silicon**. Also closes backlog #11
 (verify the S1G beacon on-wire), since the Linux node can capture/decode frames.
 
+> **Bring-up runbook:** [`rimba-ibss-linux-interop-runbook.md`](rimba-ibss-linux-interop-runbook.md)
+> — concrete commands for I.1–I.5, the pinned cell params, and the open question of
+> the S1G IBSS *join* syntax (no vendor-documented IBSS recipe exists). Resolve the
+> working join command there and back-fill the `<S1G_FREQ_FOR_CH27>` placeholder below.
+
 | # | Test | Pass criteria |
 |---|---|---|
 | I.1 | Mutual discovery | Linux `iw dev wlan0 scan` sees us / our probe-answer responds; we form a peer record for the Linux MAC; `iw dev wlan0 station dump` lists our nodes |
