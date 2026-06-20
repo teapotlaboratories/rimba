@@ -93,6 +93,22 @@ The working implementation deliberately took shortcuts to prove the link:
     datapath ops, bring-up) for separation and easier upstream-diffing.
 13. ☐ **Review all STA/AP-only assumptions** in morselib for other ADHOC drops
     (the RX-VIF bug was one; audit for siblings).
+15. ☐ **Bump the ESP32 stack to latest (fw / SDK / IDF).** Current pins:
+    MM6108 firmware **1.17.6**, `morsemicro/halow` (morselib + mm-iot-sdk) fork
+    **`2.10.4-esp32-2`**, ESP-IDF **v5.4.2**. Move each to the latest stable.
+    Caveats / cost (this is not a plain version-bump):
+    - **The IBSS port patches morselib** (the ADHOC interface, IBSS commands,
+      beacon/probe-resp, datapath RX-VIF fix live on the `mm-esp32-halow` fork). A
+      morselib/mm-iot-sdk bump means **re-applying and re-validating those patches**
+      on the new base — budget for a real port-forward, not a fast-forward.
+    - **Keep generation parity with the Linux reference node** (P0.5 interop, test
+      plan §2): bump the ESP32 *and* the chronium `morse_driver`/firmware **together**
+      to the same MM release, or pin both deliberately — a one-sided bump invalidates
+      the interop result. See `rimba-ibss-linux-interop-runbook.md`.
+    - **Toolchain pin:** keep cmake on **3.x** (4.x breaks the ESP-IDF build, per
+      README) when moving IDF.
+    - **Regress after any bump:** re-run the 3-board P0 bench (and the AP-STA ping)
+      before trusting the new base.
 
 ## Findings
 
