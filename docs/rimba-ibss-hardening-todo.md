@@ -47,21 +47,20 @@ The working implementation deliberately took shortcuts to prove the link:
    (see below). Reverted to working plaintext.**
 
 ### P2 — robustness / correctness
-16. ☐ **Fix peer-extraction from the reference S1G beacon (Linux interop).** *Found
-    in the 2026-06-20 Linux IBSS interop run (test plan I.2).* The ESP32 beacon-aware
-    peer discovery (`umac_ibss_get_or_add_peer`, `src/umac/umac.c`) reads the
-    transmitter MAC from the wrong offset in `morse_driver`'s **S1G beacon** frames —
-    the offset lands in the beacon **TSF timestamp**, so every Linux beacon mints a
-    fresh phantom peer (observed: `48:63:3d:08:00:d5`, `48:f3:3e:…`, 3rd byte tracking
-    the timestamp). The 8-slot table floods with garbage, the Linux peer's real MAC is
-    never recorded, and ESP32-initiated unicast goes to non-existent IPs. **The data
-    path is unaffected** (Linux→ESP32 ping works; the ESP32 replies correctly), so this
-    is isolated to peer-discovery TA parsing of the reference **S1G (compressed/EXT)
-    MAC header** vs our hand-built beacon layout. Fix the offset (parse the S1G beacon
-    header properly, or only seed peers from frames with a reliable TA — probe-resp /
-    data, as Linux's `sta_info` effectively does), then re-run I.1/I.2. Relates to #14
-    (age-out would also evict phantoms) and #11 (capture the on-wire S1G beacon to get
-    the exact field layout).
+16. ☑ **Fix peer-extraction from the reference S1G beacon (Linux interop).** *Found +
+    fixed 2026-06-20 (test plan I.1/I.2).* The IBSS RX filter
+    (`umac_datapath_rx_frame_filter`, `src/umac/datapath/umac_datapath.c`) read the
+    transmitter via `dot11_get_ta()` (legacy `addr2` offset) for **all** frames — but
+    `morse_driver`'s **S1G beacons** use the compressed `dot11_s1g_beacon_hdr`, where
+    `source_addr` is at offset 4 and the **`time_stamp`** sits at the `addr2` offset. So
+    every reference beacon minted a fresh phantom peer from the ticking timestamp
+    (observed `48:63:3d:08:00:d5`, `48:f3:3e:…`), flooding the 8-slot table and crowding
+    out the real Linux MAC. (ESP32↔ESP32 was unaffected: the existing BSSID check in
+    `umac_ibss_get_or_add_peer` drops our own `SA=BSSID` beacons — but only once the
+    *right* field is read.) **Fix:** read `source_addr` for `(EXT, S1G_BEACON)` frames.
+    Verified on-air: 1 clean peer for the Linux MAC, 0 phantoms, passive beacon
+    discovery, bidirectional ping. Side benefit: the data path was already fine, so this
+    only touched discovery.
 4. ☐ **IBSS merge (TSF).** Discover peers via beacons and converge on a common
    BSSID/TSF (higher-TSF wins), per `ieee80211_rx_bss_info`. Replaces the
    hardcoded-BSSID + MAC-role bench heuristic with real create/join semantics
