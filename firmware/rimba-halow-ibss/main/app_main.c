@@ -9,9 +9,13 @@
  * IP and pings the peer to exercise the IBSS data path (Phase-1 success gate).
  * See docs/worklog/2026-06-18-risk01-ibss-recon.md.
  *
- * ONE binary runs on both boards: the role (creator/IP .1 vs joiner/IP .2) is
- * chosen at runtime from the MAC, so no separate build per node. (This MAC split
- * is a 2-board bench heuristic; real role/merge would use IBSS TSF arbitration.)
+ * ONE binary runs on every board. The IBSS create/join role is still chosen at
+ * runtime from the MAC (a 2-board bench heuristic; real role/merge would use IBSS
+ * TSF arbitration), but addressing is now N-node: each node derives its own IP
+ * from its MAC (192.168.13.<octet(mac)>) and pings *every* discovered peer, so the
+ * same binary scales to 3+ boards without IP collisions. The ping target set is
+ * driven by the L2 peer table (mmwlan_ibss_get_peers) — a ping only happens
+ * because the peer was discovered.
  */
 
 #include <inttypes.h>
@@ -34,14 +38,24 @@
 #define LINK_S1G_CHAN  27             /* US 915.5 MHz, 1 MHz BW (global op-class 68) */
 #define LINK_OP_CLASS  68
 #define NETMASK        "255.255.255.0"
-#define CREATOR_IP     "192.168.13.1"
-#define JOINER_IP      "192.168.13.2"
+#define IP_PREFIX      "192.168.13."   /* N-node: host octet derived from the MAC */
 
 /* IBSS BSSID — MUST be identical on every node. Locally-administered. */
 static const uint8_t LINK_BSSID[6] = { 0x02, 0x12, 0x34, 0x56, 0x78, 0x9a };
 /* ---------------------------------------------------------------------------- */
 
 static const char *TAG = "rimba-ibss";
+
+/* Derive the host octet from a MAC the same way on every node: octet = mac[5],
+ * clamped off the network/broadcast addresses (0 -> 1, 255 -> 254). Identical
+ * derivation everywhere (incl. the Linux node) makes the ping mesh symmetric. */
+static void mac_to_ip(const uint8_t *mac, char *out, size_t outlen)
+{
+    unsigned octet = mac[5];
+    if (octet == 0)   octet = 1;
+    if (octet == 255) octet = 254;
+    snprintf(out, outlen, IP_PREFIX "%u", octet);
+}
 
 /* Rimba L2 frame type. The Phase-1 gate is exchanging these raw, not just IP. */
 #define RIMBA_ETHERTYPE 0x88b5
@@ -87,7 +101,7 @@ static void on_ping_timeout(esp_ping_handle_t hdl, void *args)
     ESP_LOGW(TAG, "ping timeout seq=%u (peer not up yet?)", seqno);
 }
 
-static void start_static_ip_and_ping(const char *my_ip, const char *peer_ip)
+static void setup_static_ip(const char *my_ip)
 {
     esp_netif_t *n = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (n == NULL) {
@@ -105,8 +119,14 @@ static void start_static_ip_and_ping(const char *my_ip, const char *peer_ip)
     /* IBSS (like AP mode) doesn't fire a link-up event, so bring the netif up
      * explicitly or lwIP drops everything. */
     esp_netif_action_connected(n, NULL, 0, NULL);
-    ESP_LOGI(TAG, "Static IP %s up; pinging peer %s (dynamic ARP)", my_ip, peer_ip);
+    ESP_LOGI(TAG, "Static IP %s up (dynamic ARP)", my_ip);
+}
 
+/* Start an infinite 1 Hz ping session to one peer. One session per peer; the
+ * callbacks log the per-target result, so concurrent sessions don't interleave
+ * ambiguously. */
+static void start_ping(const char *peer_ip)
+{
     ip_addr_t target = { 0 };
     target.type = IPADDR_TYPE_V4;
     target.u_addr.ip4.addr = esp_ip4addr_aton(peer_ip);
@@ -121,8 +141,9 @@ static void start_static_ip_and_ping(const char *my_ip, const char *peer_ip)
     esp_ping_handle_t ping;
     if (esp_ping_new_session(&cfg, &cbs, &ping) == ESP_OK) {
         esp_ping_start(ping);
+        ESP_LOGI(TAG, "pinging peer %s", peer_ip);
     } else {
-        ESP_LOGE(TAG, "failed to create ping session");
+        ESP_LOGE(TAG, "failed to create ping session for %s", peer_ip);
     }
 }
 
@@ -137,12 +158,13 @@ void app_main(void)
     mmhalow_init(NULL);
     mmhalow_print_version_info();
 
-    /* Pick role from our MAC so one binary serves both boards (bench heuristic). */
+    /* Pick the IBSS create/join role from our MAC so one binary serves every board
+     * (bench heuristic). Addressing is independent: my IP is derived from my MAC. */
     uint8_t mac[6] = { 0 };
     mmwlan_get_mac_addr(mac);
     bool creator = ((mac[0] & 0x80) == 0);
-    const char *my_ip = creator ? CREATOR_IP : JOINER_IP;
-    const char *peer_ip = creator ? JOINER_IP : CREATOR_IP;
+    char my_ip[16];
+    mac_to_ip(mac, my_ip, sizeof(my_ip));
     ESP_LOGI(TAG, "MAC %02x:%02x:%02x:%02x:%02x:%02x -> role=%s ip=%s",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
              creator ? "CREATOR" : "JOINER", my_ip);
@@ -165,7 +187,13 @@ void app_main(void)
     ESP_LOGI(TAG, "==> IBSS up; bringing up IP + ping");
 
     vTaskDelay(pdMS_TO_TICKS(1500));
-    start_static_ip_and_ping(my_ip, peer_ip);
+    setup_static_ip(my_ip);
+
+    /* Track which peer MACs we've already started a ping session for, so each new
+     * peer gets pinged exactly once as it's discovered (and a power-cycled peer
+     * that returns with the same MAC isn't double-pinged). */
+    uint8_t pinged[8][6];
+    unsigned npinged = 0;
 
     unsigned seq = 0;
     for (;;) {
@@ -173,15 +201,28 @@ void app_main(void)
         send_rimba_88b5(mac, seq++);   /* exercise the raw Rimba 0x88B5 path */
 
         /* Dump the per-peer station table (multi-node IBSS): each discovered peer
-         * shows its MAC, assigned AID, and the firmware SET_STA_STATE result. */
+         * shows its MAC, assigned AID, and the firmware SET_STA_STATE result. Start
+         * a ping to any peer we haven't pinged yet (target IP derived from its MAC,
+         * same convention as ours), tying the L3 test to the L2 peer table. */
         struct mmwlan_ibss_peer_info peers[8];
         unsigned np = mmwlan_ibss_get_peers(peers, 8);
         ESP_LOGI(TAG, "IBSS peers: %u", np);
         for (unsigned i = 0; i < np && i < 8; i++) {
+            const uint8_t *pmac = peers[i].mac_addr;
             ESP_LOGI(TAG, "  peer[%u] %02x:%02x:%02x:%02x:%02x:%02x aid=%u",
-                     i, peers[i].mac_addr[0], peers[i].mac_addr[1], peers[i].mac_addr[2],
-                     peers[i].mac_addr[3], peers[i].mac_addr[4], peers[i].mac_addr[5],
+                     i, pmac[0], pmac[1], pmac[2], pmac[3], pmac[4], pmac[5],
                      peers[i].aid);
+
+            bool seen = false;
+            for (unsigned j = 0; j < npinged; j++) {
+                if (memcmp(pinged[j], pmac, 6) == 0) { seen = true; break; }
+            }
+            if (!seen && npinged < 8) {
+                char peer_ip[16];
+                mac_to_ip(pmac, peer_ip, sizeof(peer_ip));
+                start_ping(peer_ip);
+                memcpy(pinged[npinged++], pmac, 6);
+            }
         }
     }
 }

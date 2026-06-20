@@ -19,9 +19,18 @@ Proven on a 2-board bench, close range, short (~20–30 s) captures:
 - ☑ Raw Rimba `0x88B5` frame exchange (bidirectional)
 - ☑ Per-peer station records form (one per peer, BSSID excluded)
 
-This proves it **works**. It does not prove it works **reliably, under load, over
-time, at >2 nodes, or against the reference implementation** — which is the point
-of this plan.
+Extended 2026-06-19 to **3 ESP32 nodes** (N-node MAC-octet addressing), close range:
+
+- ☑ 3-node discovery — each node forms exactly 2 peer records, distinct AIDs (P0.1)
+- ☑ All-pairs unicast — full triangle, 0 timeouts in window (P0.2)
+- ☑ `0x88B5` broadcast reaches all nodes (P0.3)
+- ☑ Concurrent multi-peer load — each node drives both peers at once (P0.5)
+- ◐ Drop/rejoin — survivor link unaffected, dropped node rediscovered (P0.6; survivor
+  re-acquisition under-tested — see §4)
+
+This proves it **works at 3 nodes**. It does not yet prove it works **reliably under
+sustained load, over long durations (soak), or against the Linux reference
+implementation** — which is the remaining point of this plan (P0.5-interop, P1, P2).
 
 ---
 
@@ -68,15 +77,43 @@ was discovered — and makes the app topology-agnostic (2/3/N + Linux).
 
 The first real exercise of the per-peer records (#14); invisible with 2 boards.
 
-| # | Test | Pass criteria |
-|---|---|---|
-| P0.1 | 3-node discovery | each node forms **exactly 2** peer records — correct MACs, distinct AIDs, no self/BSSID/bogus entries (`mmwlan_ibss_get_peers` dump) |
-| P0.2 | All-pairs unicast | N0↔N1, N0↔N2, N1↔N2 all ping with low loss |
-| P0.3 | Broadcast reaches all | one node's broadcast `0x88B5` is received by **both** others |
-| P0.4 | Per-peer dedup correctness | with 2 peers each, **no cross-peer false dedup** (the bug #14 prevents) — sequence/dup counters per peer are independent |
-| P0.5 | Concurrent multi-peer load | N0 drives N1 and N2 simultaneously; both flows hold |
-| P0.6 | Partial-failure resilience | power-cycle N2 → N0↔N1 unaffected; N2 rejoins → rediscovered as a fresh record |
-| P0.7 | Multi-creator convergence | however the MAC role-heuristic assigns roles across 3 boards, all share one BSSID/cell |
+| # | St | Test | Pass criteria |
+|---|---|---|---|
+| P0.1 | ☑ | 3-node discovery | each node forms **exactly 2** peer records — correct MACs, distinct AIDs, no self/BSSID/bogus entries (`mmwlan_ibss_get_peers` dump) |
+| P0.2 | ☑ | All-pairs unicast | N0↔N1, N0↔N2, N1↔N2 all ping with low loss |
+| P0.3 | ☑ | Broadcast reaches all | one node's broadcast `0x88B5` is received by **both** others |
+| P0.4 | ◐ | Per-peer dedup correctness | with 2 peers each, **no cross-peer false dedup** (the bug #14 prevents) — sequence/dup counters per peer are independent |
+| P0.5 | ☑ | Concurrent multi-peer load | N0 drives N1 and N2 simultaneously; both flows hold |
+| P0.6 | ◐ | Partial-failure resilience | power-cycle N2 → N0↔N1 unaffected; N2 rejoins → rediscovered as a fresh record |
+| P0.7 | ☑ | Multi-creator convergence | however the MAC role-heuristic assigns roles across 3 boards, all share one BSSID/cell |
+
+**Run 2026-06-19** — 3× XIAO ESP32-S3 on ACM0/1/2, one binary (N-node MAC-octet
+addressing), `boards/proto1-fgh100m`. MAC→IP: `…6b:b7`→.183, `bc…b2:9f`→.159,
+`…6a:56`→.86.
+
+- **P0.1 ☑** — every node formed exactly 2 records, correct MACs, distinct AIDs
+  (1 & 2), no self/BSSID/bogus entries.
+- **P0.2 ☑** — full triangle reachable; **165 replies, 0 timeouts** in the window
+  (RTT 16–57 ms, the spread is the added contention vs the 2-board ~16 ms).
+- **P0.3 ☑** — `0x88B5` broadcast received by all (13–18 frames/node).
+- **P0.5 ☑** — each node drove **both** peers' unicast pings + the `0x88B5`
+  broadcast concurrently; all flows held, 0 errors/asserts on any board.
+- **P0.4 ◐** — per-peer AIDs are independent and concurrent 2-peer flows stayed
+  healthy, but the per-peer **seq/dup counter** independence wasn't isolated as its
+  own assertion (only inferred from clean concurrent flows). Revisit with a forced
+  duplicate/seq-wrap probe.
+- **P0.6 ◐** — drop N2 (`.86`) by re-flash (radio off), survivors capturing:
+  **N0↔N1 link unaffected** (130 + 73 continuous replies, 0 timeouts, 0 crashes);
+  **N2 rejoined**, rediscovered **both** peers with stable AIDs, restarted pings to
+  both, bidirectional data back **~6.1 s after app start**. *Caveat:* the
+  **survivor side** of re-acquisition was under-tested — survivors logged 0 new
+  pings for the returned peer because the app's `pinged[]` dedup × the no-age-out
+  gap (§8.1) suppress re-pinging a peer that returns with the **same MAC**. Protocol
+  layer is unaffected (real DATA is driven off the live peer table each loop, not a
+  one-shot ping session); the **ping test app** needs membership-driven sessions to
+  test survivor re-acquisition properly. Blocked on age-out (§8.1).
+- **P0.7 ☑** — all three boards (whatever role the MAC heuristic assigned) shared
+  one BSSID/cell; no split-cell.
 
 ---
 
