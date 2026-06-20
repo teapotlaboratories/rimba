@@ -196,3 +196,13 @@ channelization), IP `192.168.13.66`. ESP32 `rimba-halow-ibss` on ACM0.
   peers, never records Linux's real MAC. ESP32-side fix; data path unaffected.
 
 Radio-silent after: `iw dev wlan1 ibss leave` + `wlan1` down; ESP32 ACM0 → `rimba-hello`.
+
+## UPDATE 2026-06-20 — #16 fixed, IBSS interop fully passing
+
+Fixed the ESP32 S1G-beacon TA parse (`umac_datapath_rx_frame_filter` reads
+`source_addr` for `(EXT, S1G_BEACON)` instead of `dot11_get_ta`'s addr2 offset, which
+landed in the beacon timestamp). Re-ran against chronium: ESP32 forms **1 clean peer**
+(`3c:22:7f`, 0 phantoms), discovers it passively from the beacon, and pings
+bidirectionally (ESP32→Linux 30/30, Linux→ESP32 4/4 0% loss, ~12 ms). **I.1/I.2/I.3
+pass.** Fix lives in the `mm-esp32-halow` submodule. Next: I.4 (frame diff, #11), I.5
+(mixed 4-node cell). Radio-silent after.

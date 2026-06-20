@@ -130,8 +130,8 @@ The reference-implementation correctness check: our port talks to real Linux
 
 | # | St | Test | Pass criteria |
 |---|---|---|---|
-| I.1 | ◐ | Mutual discovery | Linux `iw dev wlan0 scan` sees us / our probe-answer responds; we form a peer record for the Linux MAC; `iw dev wlan0 station dump` lists our nodes |
-| I.2 | ◐ | Beacon interop (both ways) | Linux ingests our hand-built S1G beacons without error; we ingest Linux beacons without garbage/crash — **riskiest divergence point** (our IE set vs `morse_driver`) |
+| I.1 | ☑ | Mutual discovery | Linux `iw dev wlan0 scan` sees us / our probe-answer responds; we form a peer record for the Linux MAC; `iw dev wlan0 station dump` lists our nodes |
+| I.2 | ☑ | Beacon interop (both ways) | Linux ingests our hand-built S1G beacons without error; we ingest Linux beacons without garbage/crash — **riskiest divergence point** (our IE set vs `morse_driver`) |
 | I.3 | ☑ | Data path | ESP32 ↔ Linux ping both directions + throughput; validates addressing (A1=DA/A2=SA/A3=BSSID), plaintext data frames |
 | I.4 | ☐ | On-air frame diff | Linux in **monitor mode** captures our beacon/probe/data; decode and diff against Linux-emitted frames (closes #11) |
 | I.5 | ☐ | Mixed 4-node cell | 3 ESP32 + 1 Linux: all-pairs reachability + broadcast reaches everyone across both implementations |
@@ -163,9 +163,20 @@ IP `192.168.13.66`.
   Tracked as hardening backlog **#16**. Fix is ESP32-side, then re-run I.1/I.2.
 - **I.4 / I.5** ☐ not yet run (gated on the I.2 fix for a meaningful mixed cell).
 
-**Net:** IBSS data interoperates on-air with the reference implementation (I.3 ✓); the
-one defect is the ESP32's beacon-based peer discovery against real `morse_driver` S1G
-beacons (I.2) — exactly the risk this test was built to surface.
+**Net (initial run):** IBSS data interoperates on-air with the reference implementation
+(I.3 ✓); the one defect was the ESP32's beacon-based peer discovery against real
+`morse_driver` S1G beacons (I.2) — exactly the risk this test was built to surface.
+
+**Fix verified (2026-06-20, #16 done).** Root cause: the IBSS RX filter read the
+transmitter via `dot11_get_ta()` (legacy `addr2` offset) even for S1G beacons, whose
+compressed `dot11_s1g_beacon_hdr` puts `source_addr` at offset 4 and the **time_stamp**
+at the addr2 offset — so every reference beacon minted a phantom peer from the ticking
+timestamp. Fixed in `umac_datapath.c` to read `source_addr` for S1G beacons (the
+existing BSSID check then drops our own `SA=BSSID` beacons while admitting a real
+peer's). Re-run: ESP32 forms **exactly 1 clean peer** for the Linux MAC (`3c:22:7f…`,
+**0 phantoms**), discovers it **passively from its beacon**, and pings bidirectionally —
+**ESP32→Linux 30/30 replies, Linux→ESP32 4/4 0% loss** (~12 ms). **I.1, I.2, I.3 now
+pass.** Remaining: I.4 (on-air frame diff / #11) and I.5 (mixed 4-node cell).
 
 ### Linux-side bring-up (reference template — adapt to the Luckfox worklog)
 
