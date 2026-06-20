@@ -178,3 +178,21 @@ Radio-silent: chronium hostapd stopped + `wlan1` down; ESP32 ACM0 reflashed `rim
 IBSS interop (P0.5 proper): `sudo /usr/sbin/iw dev wlan1 set type ibss` + join
 `rimba-ibss` on freq **5560 MHz** fixed-freq `02:12:34:56:78:9a` (OPEN), IP
 `192.168.13.<octet(mac)>`. Framing compat is now de-risked by the AP-STA success.
+
+---
+
+## UPDATE 2026-06-20 (later) — IBSS interop run (P0.5 proper)
+
+Joined the cell from Linux: `sudo iw dev wlan1 set type ibss; sudo iw dev wlan1 ibss
+join rimba-ibss 5560 fixed-freq 02:12:34:56:78:9a` (5 GHz ch112 = S1G ch27; `morse_cli
+channel` confirmed **915500 kHz / 1 MHz** — the `iw` join lands on the right S1G
+channelization), IP `192.168.13.66`. ESP32 `rimba-halow-ibss` on ACM0.
+
+**Result (details + scorecard in test plan §5):**
+- **Data path interoperates** — Linux→ESP32 ping 3/3, 0% loss; the ESP32 receives
+  Linux frames and replies. Linux correctly discovers the ESP32 (`iw station dump`).
+- **Bug found (backlog #16)** — the ESP32 misparses Linux's S1G **beacons**, reading
+  the TA from an offset in the TSF timestamp → floods its peer table with phantom
+  peers, never records Linux's real MAC. ESP32-side fix; data path unaffected.
+
+Radio-silent after: `iw dev wlan1 ibss leave` + `wlan1` down; ESP32 ACM0 → `rimba-hello`.
