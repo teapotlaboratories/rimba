@@ -30,7 +30,7 @@ The threat model section should explicitly answer, for each adversary class, wha
 
 | Adversary class | Access | Rimba's current defence | Gap to close |
 |---|---|---|---|
-| Passive eavesdropper | RF sniffing only | BPSec E2E + AES-CCM link crypto | Confirm no plaintext metadata leaks |
+| Passive eavesdropper | RF sniffing only | BPSec E2E + AES-CCM link crypto | Plaintext metadata leaks — see 1.2 |
 | Active injector | Can transmit, no keys | MIC/auth rejection on every frame | Define rejection behaviour explicitly (Tier 1) |
 | Compromised single relay | Holds one node's link keys | Partial — BPSec payload stays encrypted | **Largest open question — see 1.1** |
 | Physical node capture | Extracts keys from flash | NVS AES-256 encryption | Define key zeroisation, tamper response |
@@ -59,6 +59,101 @@ Containment goal:
   A single compromised relay degrades but does not defeat the network.
   Define the blast radius precisely and the detection/recovery path.
 ```
+
+### 1.2 Metadata and traffic-flow confidentiality (open IBSS)
+
+The Tier 1 backbone runs on an **open** 802.11ah IBSS link — the MM6108 firmware
+will not register adhoc stations for chip-level RSN (`SET_STA_STATE` returns -116
+on the ADHOC interface), and the spec's security model deliberately sits a layer
+up (per-peer ECDH + AES-128-CCM shim, §7/§10). The consequence: the peer-link
+shim protects **payload confidentiality and integrity**, but the **entire control
+plane and all link metadata travel in clear**. This is the "no plaintext metadata
+leaks" gap for the passive eavesdropper, made explicit.
+
+**What an outsider sees today (open IBSS + peer-link shim):**
+
+```
+Hidden  : DATA payloads (link AES-CCM + E2E BPSec)
+Clear   : RF presence, channel, RSSI, timing      → localization (direction-finding)
+          all 802.11 headers: MAC addrs, type, size, seq
+          beacons: SSID = "hmdp-<relay_node_id>"  → node_id broadcast in clear
+          EtherType 0x88B5                         → protocol fingerprint
+          mesh frame_type (in CCM AAD)             → control-vs-data classification
+          HELLO (broadcast, pre-link, plaintext)   → node_id, role (gateway/relay/
+                                                      mule), peer graph, battery,
+                                                      tx_power, TDMA wake schedule
+          PEER_OPEN/CONFIRM (pre-key)              → handshake observable
+          nonce fields (src node_id, seq, ts, ctr) → cleartext by necessity
+```
+
+Net: an attacker who never decrypts a byte can map the full mesh, identify the
+**gateway** (highest-value target), physically locate nodes, read each node's
+**sleep schedule** (→ efficient targeted jamming during wake windows), and do
+traffic analysis. The spec's stated model (spec §10.1) claims data confidentiality
++ integrity, **not** topology/traffic-flow confidentiality — so this is consistent
+with the spec, not a violation. It only becomes a gap **if hiding topology, roles,
+gateway identity, or wake schedules enters the threat model.**
+
+**Core mitigation — a network group key for the broadcast control plane.** HELLO,
+routing (RREQ/RREP/RERR/OGM/TIME_SYNC), and the PEER handshake leak because they
+are broadcast or pre-link and cannot use a per-peer session key. But every node
+shares the deployment root, so derive a network-wide key and AES-128-CCM the
+control plane under it:
+
+```
+network_key = HKDF(deployment_root_secret, salt = "HMDP-v1-netkey")
+```
+
+This is the Thread / 802.15.4 model (network key for the control plane + per-link
+keys for data) and is the single highest-leverage change. Tradeoff: the control
+plane gains no forward secrecy (static shared key — rotate periodically), but
+topology/roles/gateway/TDMA become opaque to outsiders. All software (mbedTLS),
+same primitives as the peer-link shim.
+
+**Per-leak mitigation (in priority order):**
+
+```
+Leak                                Mitigation                         Residual
+──────────────────────────────────────────────────────────────────────────────
+HELLO topology/role/peers/TDMA      encrypt with network_key + drop    none (outsider)
+                                    non-essential fields
+PEER_OPEN/CONFIRM observable        wrap in network_key                "two MACs talk"
+routing control (RREQ/RREP/OGM)     network_key                        none (outsider)
+SSID = hmdp-<node_id>               opaque deployment-wide SSID;        "a net exists"
+                                    never embed node_id
+frame_type in AAD (ctrl vs data)    move frame_type into ciphertext    inferable by size
+MAC addresses (clear in header)     rotate MACs over time (identity    short-term linkable
+                                    lives encrypted at mesh layer)
+frame sizes / volume                pad to fixed size buckets          coarse volume
+EtherType 0x88B5 fingerprint        (low value to change)              "custom L2 exists"
+```
+
+**Unavoidable residuals (cost exceeds benefit / power budget):**
+- **RF presence + localization** — any SDR can direction-find a transmitter. Only
+  physical/operational mitigations help: adaptive/min TX power (already specced),
+  fewer/less-frequent beacons + HELLOs.
+- **Coarse traffic analysis (timing/volume)** — the real defences (constant-rate
+  cover traffic, heavy padding) fight the µA-class battery budget head-on and are
+  largely a non-starter. Size-bucket padding is the affordable partial measure.
+
+**Recommendation / sequencing.** If topology privacy is in scope: (1) network group
+key on the whole broadcast control plane — earns most of the protection for the
+least cost; (2) opaque SSID — trivial; (3) `frame_type` into ciphertext + size-
+bucket padding — cheap; (4) MAC rotation — only if anonymity vs. a persistent local
+observer matters (it interacts with the per-peer records and reachability); (5)
+accept RF localization + coarse traffic analysis as residual. **Decide topology
+privacy in/out of scope as part of the Tier 0 deliverable before Phase 2 (link
+security) implementation begins** — the group key is cheapest to design in up front.
+
+**DECISION (2026-06-19): topology privacy is IN scope.** Phase 2 link security is
+a **two-tier** model: a network group key (Tier A) encrypting the full control
+plane (HELLO, routing, PEER handshake) for metadata privacy, plus per-peer ECDH
+session keys (Tier B) on unicast DATA. Same pairwise+group shape as 802.11 RSN,
+relocated into a software shim above the open IBSS link. Accepted residuals: the
+group key is outsider-only (a captured node exposes it — see 1.1), and RF
+localization + coarse traffic analysis remain; rotate the group key to bound the
+capture blast radius. This supersedes the earlier "chip CCMP via SET_STA_STATE /
+ibss_rsn" target, which is the wrong layer and blocked on -116.
 
 **Deliverable**: New spec Section 16 (Threat Model) or a dedicated security architecture document.
 
