@@ -189,6 +189,49 @@ public fork, **momentary-systems/esp-halow-ibss** (`5237495`, see
   `ip link up` re-attach). Until both land, the EEXIST is benign and handled. Relates to
   #6 (teardown/disable) and #7.
 
+### Adoption validated on HW (2026-06-20)
+Adopted the momentary-systems `umac_ibss.c` + integrated bring-up (WIP branches:
+super `wip/ibss-adopt-refactor`, submodule `wip/adopt-momentary-ibss`). Bench results:
+- **EEXIST gone** — `IBSS_CONFIG(CREATE)` returns 0 (teardown-first bring-up mirrors
+  the Linux `REMOVE_INTERFACE`→`ADD_INTERFACE(ADHOC)` order). Root-caused, not tolerated.
+- **Pure ESP32↔ESP32 (2 nodes, no Linux node): works** — ACM0↔ACM1 discover + ping
+  bidirectionally.
+- **Pure 3-ESP32 (no Linux node): full mesh, 3/3 bidirectional** (2026-06-20) — each
+  node pings + gets replies from *both* others. Same node count as the mixed cell
+  minus chronium → isolates node-count from the Linux node. This is the
+  deployment-relevant case (cells are all-rimba) and it works completely.
+- **Linux interop: works** — chronium ↔ all 3 ESP32 data 2/2; beacon-based discovery
+  of the Linux node via the #16 `source_addr` fix.
+- **Gained** peer age-out (#14), teardown (#6), membership callbacks (#12).
+- **Open — mixed-cell ESP32↔ESP32 discovery completeness:** when the Linux node is in
+  the cell, ESP32s under-discover *each other*. NOT a refactor flaw (pure mesh works;
+  old code degraded in the mixed cell too) — it's mixed-cell dynamics (beacon
+  contention #5 / 0x88B5-vs-beacon timing with a 4th node beaconing every 100 ms).
+  Lower priority: the all-rimba deployment case is now *proven* to work (pure 3-node
+  full mesh above); the Linux node is a test instrument. Tracked under #5.
+  - **Discovery mechanism is sound (dual-path):** a peer is created — and `PEER_ADDED`
+    fired to the app — from *either* its beacon `source_addr`
+    (`umac_datapath.c:164`) *or* any data-frame TA (`lookup_stad_by_peer_addr_ibss`
+    → `umac_ibss_get_or_create_peer_stad`, `:1303/:1486`). The 8-slot LRU table only
+    evicts above 8 peers, so a 4-node cell never churns. So the gap is RF/airtime,
+    not a discovery-logic bug.
+  - **Ruled out — IBSS merge / BSSID fragmentation:** chronium pins the *same* BSSID
+    `02:12:34:56:78:9a` as our `LINK_BSSID` and neither side does TSF merge
+    (interop runbook §"BSSID pinning"), so the cell doesn't split. The suspect is
+    airtime/RX contention from chronium's mac80211 beaconing+traffic on the 1 MHz
+    channel (or a marginal short-capture artifact in the earlier mixed-cell run).
+    Next step if pursued: re-run 3-ESP32 + chronium with a longer capture, logging
+    each node's discovered-peer set + replies to characterise which pairs degrade.
+
+### Beacon interval = 100 TU, matches Linux (2026-06-20)
+Q: is the ESP32 beacon interval different from Linux? **No.** The app sets
+`beacon_interval_tu = 100`; the Linux node config uses `beacon_int=100`
+(`rimba-linux-node-setup.md`). 100 TU (≈102.4 ms) is the standard IEEE 802.11 /
+mac80211 IBSS default — both sides match. S1G nuance: 802.11ah adds short beacons +
+an "S1G Short Beacon Interval" IE, but Linux IBSS always emits **long** beacons
+(`beacon.c:388` — `if (type==ADHOC) short_beacon=false`), and our `umac_ibss` beacon
+builder does the same, so we follow Linux there too.
+
 ### CCMP attempt (2026-06-19) — blocked on the chip's key model
 Tried the simplest Rimba-aligned model: one shared **GROUP** CCMP key (the
 deployment key) for all frames, installed via `umac_keys_install_key` (cipher is
