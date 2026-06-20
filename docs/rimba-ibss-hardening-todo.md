@@ -47,6 +47,21 @@ The working implementation deliberately took shortcuts to prove the link:
    (see below). Reverted to working plaintext.**
 
 ### P2 — robustness / correctness
+16. ☐ **Fix peer-extraction from the reference S1G beacon (Linux interop).** *Found
+    in the 2026-06-20 Linux IBSS interop run (test plan I.2).* The ESP32 beacon-aware
+    peer discovery (`umac_ibss_get_or_add_peer`, `src/umac/umac.c`) reads the
+    transmitter MAC from the wrong offset in `morse_driver`'s **S1G beacon** frames —
+    the offset lands in the beacon **TSF timestamp**, so every Linux beacon mints a
+    fresh phantom peer (observed: `48:63:3d:08:00:d5`, `48:f3:3e:…`, 3rd byte tracking
+    the timestamp). The 8-slot table floods with garbage, the Linux peer's real MAC is
+    never recorded, and ESP32-initiated unicast goes to non-existent IPs. **The data
+    path is unaffected** (Linux→ESP32 ping works; the ESP32 replies correctly), so this
+    is isolated to peer-discovery TA parsing of the reference **S1G (compressed/EXT)
+    MAC header** vs our hand-built beacon layout. Fix the offset (parse the S1G beacon
+    header properly, or only seed peers from frames with a reliable TA — probe-resp /
+    data, as Linux's `sta_info` effectively does), then re-run I.1/I.2. Relates to #14
+    (age-out would also evict phantoms) and #11 (capture the on-wire S1G beacon to get
+    the exact field layout).
 4. ☐ **IBSS merge (TSF).** Discover peers via beacons and converge on a common
    BSSID/TSF (higher-TSF wins), per `ieee80211_rx_bss_info`. Replaces the
    hardcoded-BSSID + MAC-role bench heuristic with real create/join semantics

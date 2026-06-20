@@ -128,13 +128,44 @@ The reference-implementation correctness check: our port talks to real Linux
 > the S1G IBSS *join* syntax (no vendor-documented IBSS recipe exists). Resolve the
 > working join command there and back-fill the `<S1G_FREQ_FOR_CH27>` placeholder below.
 
-| # | Test | Pass criteria |
-|---|---|---|
-| I.1 | Mutual discovery | Linux `iw dev wlan0 scan` sees us / our probe-answer responds; we form a peer record for the Linux MAC; `iw dev wlan0 station dump` lists our nodes |
-| I.2 | Beacon interop (both ways) | Linux ingests our hand-built S1G beacons without error; we ingest Linux beacons without garbage/crash — **riskiest divergence point** (our IE set vs `morse_driver`) |
-| I.3 | Data path | ESP32 ↔ Linux ping both directions + throughput; validates addressing (A1=DA/A2=SA/A3=BSSID), plaintext data frames |
-| I.4 | On-air frame diff | Linux in **monitor mode** captures our beacon/probe/data; decode and diff against Linux-emitted frames (closes #11) |
-| I.5 | Mixed 4-node cell | 3 ESP32 + 1 Linux: all-pairs reachability + broadcast reaches everyone across both implementations |
+| # | St | Test | Pass criteria |
+|---|---|---|---|
+| I.1 | ◐ | Mutual discovery | Linux `iw dev wlan0 scan` sees us / our probe-answer responds; we form a peer record for the Linux MAC; `iw dev wlan0 station dump` lists our nodes |
+| I.2 | ◐ | Beacon interop (both ways) | Linux ingests our hand-built S1G beacons without error; we ingest Linux beacons without garbage/crash — **riskiest divergence point** (our IE set vs `morse_driver`) |
+| I.3 | ☑ | Data path | ESP32 ↔ Linux ping both directions + throughput; validates addressing (A1=DA/A2=SA/A3=BSSID), plaintext data frames |
+| I.4 | ☐ | On-air frame diff | Linux in **monitor mode** captures our beacon/probe/data; decode and diff against Linux-emitted frames (closes #11) |
+| I.5 | ☐ | Mixed 4-node cell | 3 ESP32 + 1 Linux: all-pairs reachability + broadcast reaches everyone across both implementations |
+
+**Run 2026-06-20** — 1 ESP32 (`rimba-halow-ibss`, ACM0, MAC `…6b:b7`→.183) + Linux
+node `chronium` (RPi 5 + MM6108, `morse_driver`/mac80211, all components 1.17.8 —
+see [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md)). Linux joined via
+`iw dev wlan1 ibss join rimba-ibss 5560 fixed-freq 02:12:34:56:78:9a` (the **5 GHz
+ch112 = S1G ch27 / 915.5 MHz / 1 MHz** mapping; `morse_cli channel` confirmed 1 MHz),
+IP `192.168.13.66`.
+
+- **Preceded by AP-STA interop ☑** (`hostapd_s1g` AP ↔ `rimba-halow-sta`): WPA3-SAE
+  associated, bidirectional ping ~12 ms — proved the radios interoperate on-air and
+  de-risked framing before IBSS. (See the Linux-node worklog.)
+- **I.3 data path ☑** — **Linux → ESP32 ping 3/3, 0% loss** (`192.168.13.183`); the
+  ESP32 receives Linux data frames *and replies*, so plaintext IBSS data interoperates
+  bidirectionally between the two implementations.
+- **I.1 discovery ◐** — Linux **correctly discovers the ESP32** (`iw station dump` →
+  `68:24:99:44:6b:b7`, −31 dBm). The **ESP32 does NOT correctly discover Linux**: see I.2.
+- **I.2 beacon interop ◐ — the predicted divergence, confirmed.** Linux ingests the
+  ESP32's beacons cleanly (created the IBSS, sees the ESP32, no dmesg errors). But the
+  **ESP32 misparses Linux's S1G beacons**: its peer-discovery extracts the transmitter
+  MAC from the wrong offset — landing in the beacon **TSF timestamp** — so every Linux
+  beacon mints a fresh phantom peer (`48:63:3d:08:00:d5`, `48:f3:3e:…`, 3rd byte
+  climbing with the timestamp). The 8-slot table floods with garbage, Linux's real MAC
+  (`3c:22:7f`) is never recorded, and the ESP32's own pings go to non-existent IPs (all
+  time out). **Data path is unaffected** (I.3 works); the bug is isolated to the ESP32
+  IBSS RX **peer-extraction vs the reference S1G (compressed/EXT) MAC-header layout**.
+  Tracked as hardening backlog **#16**. Fix is ESP32-side, then re-run I.1/I.2.
+- **I.4 / I.5** ☐ not yet run (gated on the I.2 fix for a meaningful mixed cell).
+
+**Net:** IBSS data interoperates on-air with the reference implementation (I.3 ✓); the
+one defect is the ESP32's beacon-based peer discovery against real `morse_driver` S1G
+beacons (I.2) — exactly the risk this test was built to surface.
 
 ### Linux-side bring-up (reference template — adapt to the Luckfox worklog)
 
