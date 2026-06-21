@@ -35,12 +35,17 @@ Above 200 relays, switch to reactive RREQ/RREP routing and consider GPS-equipped
 
 ### 2.1 Practical ranges
 
-| Category | Leaves per relay | Relay avg current (K=6) | Notes |
+| Category | Leaves per relay | Relay avg current (K=6) ¹ | Notes |
 |---|---|---|---|
-| Conservative | 10–30 | 7.3 mA | Minimal TDMA overhead |
-| Typical | 50–100 | 7.2–7.4 mA | Good density, comfortable |
-| High density | 200–300 | 7.5–7.8 mA | Still within duty budget |
-| Maximum | 900 | ~8.5 mA | Hitting relay duty ceiling |
+| Conservative | 10–30 | ~14.1 mA | Minimal TDMA overhead |
+| Typical | 50–100 | ~14.2–14.3 mA | Good density, comfortable |
+| High density | 200–300 | ~14.6–14.9 mA | Still within duty budget |
+| Maximum | 900 | ~16.8 mA | Hitting relay duty ceiling |
+
+¹ Scheduled mode (K=6) at the datasheet **26 mA** idle-RX baseline (was 7.2–8.5 mA
+at the old 12 mA estimate). The **density conclusions are unchanged** — the limit
+is the duty-cycle budget (`RELAY_DUTY_BUDGET 0.70`) and channel capacity, not
+absolute current. See `rimba-battery-analysis.md` — confirm idle-RX on hardware.
 
 **Practical recommendation: 50–100 leaves per relay.** Leaf count has minimal power impact with a 1 ppm RTC (leaf windows are 100 ms each), so the constraint is primarily channel capacity, not relay power.
 
@@ -329,7 +334,7 @@ Recommended deployment parameters:
 
   Relay count:      50–200  (sweet spot for routing and coverage)
   Relay spacing:    300–600 m (terrain dependent)
-  Leaves per relay: 50–100   (comfortable, 7.2 mA relay average)
+  Leaves per relay: 50–100   (comfortable, ~14.3 mA relay average ¹)
   Total leaves:     up to 50,000 (500 relays × 100)
   Gateways:         ≥ 2, geographically separated
   Mule sweep:       every 12 hours
