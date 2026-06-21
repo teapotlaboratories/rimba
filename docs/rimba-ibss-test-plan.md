@@ -148,7 +148,15 @@ The reference-implementation correctness check: our port talks to real Linux
 | I.2 | ☑ | Beacon interop (both ways) | Linux ingests our hand-built S1G beacons without error; we ingest Linux beacons without garbage/crash — **riskiest divergence point** (our IE set vs `morse_driver`) |
 | I.3 | ☑ | Data path | ESP32 ↔ Linux ping both directions + throughput; validates addressing (A1=DA/A2=SA/A3=BSSID), plaintext data frames |
 | I.4 | ☐ | On-air frame diff | Linux in **monitor mode** captures our beacon/probe/data; decode and diff against Linux-emitted frames (closes #11) |
-| I.5 | ☐ | Mixed 4-node cell | 3 ESP32 + 1 Linux: all-pairs reachability + broadcast reaches everyone across both implementations |
+| I.5 | ☑ | Mixed 4-node cell | 3 ESP32 + 1 Linux: all-pairs reachability + broadcast reaches everyone across both implementations |
+
+**Run 2026-06-20 (I.5)** — chronium (`wlan1`, MM6108, `.66`) joined the pinned cell
+(`iw … ibss join rimba-ibss 5560 fixed-freq 02:12:34:56:78:9a`; S1G ch27 maps to the
+5 GHz-model freq **5560** per `dot11ah` `CHANS1GHZ(27,…,112)`, on-air 915.5 MHz) + 3 ESP32.
+- **First run: FAILED** — phantom-peer flood (#17): chronium's beacons minted hundreds of
+  `:00:d5` timestamp-phantoms, evicting real peers → ACM0 starved to 0 replies.
+- **After the #17 fix: PASS** — full all-pairs reachability, **0 phantoms**; each ESP32
+  reaches the other two + chronium; chronium 4/4 to each ESP32, `station dump` = 3 peers.
 
 **Run 2026-06-20** — 1 ESP32 (`rimba-halow-ibss`, ACM0, MAC `…6b:b7`→.183) + Linux
 node `chronium` (RPi 5 + MM6108, `morse_driver`/mac80211, all components 1.17.8 —

@@ -61,15 +61,18 @@ The working implementation deliberately took shortcuts to prove the link:
     Verified on-air: 1 clean peer for the Linux MAC, 0 phantoms, passive beacon
     discovery, bidirectional ping. Side benefit: the data path was already fine, so this
     only touched discovery.
-17. ☐ **Chronium beacon phantom flood (mixed-cell interop) — HIGH.** *Found 2026-06-20
-    (I.5).* In the adopted datapath, chronium's `morse_driver` S1G beacon is **not
-    classified as `EXT/S1G_BEACON`**, so the TA-mint sites (`umac_datapath.c:1303`/`:1486`)
-    read `dot11_get_ta` = its `time_stamp` → a phantom peer per beacon, flooding the
-    8-slot table and evicting real ESP32 peers (ACM0 starved to 0 replies). The #16
-    `source_addr` fix only runs once a frame *is* classified `S1G_BEACON`, so it misses
-    this. **Fix:** instrument to capture chronium's beacon `frame_ver_type_subtype`, pin
-    the misclassification, extend the #16 guard. Breaks Linux interop; not a pure
-    all-ESP32 blocker. See Findings → "BUG #17". Discover peers via beacons and converge on a common
+17. ☑ **Chronium beacon phantom flood (mixed-cell interop).** *Found + fixed 2026-06-20
+    (I.5).* The adopted datapath bound IBSS to the **AP-mode**
+    `frames_allowed_pre_association` list, which omits `S1G_BEACON` (an AP never receives
+    beacons from clients). So every S1G beacon failed the pre-assoc check and fell to the
+    RX filter's `dot11_get_ta` mint (`umac_datapath.c:1303`) = the beacon `time_stamp` →
+    a phantom per beacon, flooding the 8-slot table and evicting real peers (ACM0 starved
+    to 0 replies; a morse_driver node beacons every 100 ms with SA=BSSID). **Fix:** give
+    IBSS its own allowed list incl. `S1G_BEACON` (like STA mode); beacons now skip the
+    mint and route to `process_s1g_beacon` (#16 `source_addr` discovery, drops SA=BSSID).
+    **Verified:** mixed 4-node cell full all-pairs reachability, **0 phantoms** (was
+    hundreds). Same mint was the source of pure-cell discovery flakiness too. See
+    Findings → "BUG #17". Discover peers via beacons and converge on a common
    BSSID/TSF (higher-TSF wins), per `ieee80211_rx_bss_info`. Replaces the
    hardcoded-BSSID + MAC-role bench heuristic with real create/join semantics
    (scan → join existing, else create). **Pairs with #14 (age-out): merge makes
@@ -213,20 +216,27 @@ super `wip/ibss-adopt-refactor`, submodule `wip/adopt-momentary-ibss`). Bench re
   the real ESP32 peers** → ACM0 got **0 replies** (fully starved), ACM2 lost chronium.
   chronium→ESP32 is fine (3–4/4 replies, clean `station dump`); only ESP32←chronium
   beacon parse is broken.
-  - **Mechanism:** the two TA-mint sites (`umac_datapath.c:1303` filter,
-    `:1486` process) are guarded by `frame_ver_type_subtype == DOT11_VER_TYPE_SUBTYPE(0,
-    EXT, S1G_BEACON)`; on a hit they skip `dot11_get_ta` (the #16 principle). chronium's
-    beacon evidently **fails that classification** (read as non-S1G-beacon), so it falls
-    to `dot11_get_ta` = the S1G beacon's `time_stamp` field (addr2 offset) → a fresh
-    phantom each beacon. The #16 `source_addr` fix lives in `process_s1g_beacon` and only
-    runs for frames that *are* classified as `S1G_BEACON` — so it doesn't catch this.
-  - **Ruled out:** IBSS merge / BSSID split (chronium pins the same BSSID, no TSF merge);
-    8-slot table churn in a 4-node cell *would* be fine — the flood is what overflows it.
-  - **Severity:** breaks **Linux interop** discovery. NOT a pure all-ESP32 deployment
-    blocker (no morse beacons there — pure 2-/3-node mesh is clean, 0 phantoms).
-  - **Next:** instrument the datapath to log `frame_ver_type_subtype` + head bytes on the
-    mint path, chronium-only capture → pin the exact misclassification → extend the #16
-    guard to cover chronium's beacon. Tracked as **#17**.
+  - **Mechanism (pinned by on-air probe).** Instrumented the filter mint site and
+    captured chronium's beacon: `vts=0x001c ta=48:93:01:00:00:d5 fc=1c00 a1=02123456789a
+    o10=4893010000d5`. So the beacon **is** classified `S1G_BEACON` (`vts=0x1c`), `a1`
+    (source_addr, offset 4) = the **BSSID**, and `ta = dot11_get_ta` = the **time_stamp**
+    at offset 10 → the phantom. Crucially it fired *inside the filter's mint block*, i.e.
+    `rx_frame_allowed_pre_association` returned **false for a beacon**. Cause: IBSS reused
+    the **AP-mode** `frames_allowed_pre_association` list (`{PROBE_REQ, AUTH, ASSOC_REQ}`),
+    which omits `S1G_BEACON` — so beacons aren't allowed pre-assoc and fall to the TA-mint.
+    (The #16 `source_addr` fix in `process_s1g_beacon` is correct but runs *after* the
+    filter, which already minted the phantom.)
+  - **Fix (one targeted change):** give IBSS its own list incl. `S1G_BEACON` (mirrors STA
+    mode — IBSS has no association). Beacons skip the filter mint and reach
+    `process_s1g_beacon`, which reads `source_addr` (peer MAC → discover; BSSID → drop).
+    `mm-esp32-halow` `fix/ibss-beacon-phantom-flood` (`0cf0a97`).
+  - **Verified on HW (mixed 4-node, 3 ESP32 + Linux):** full all-pairs reachability,
+    **0 phantoms** (was hundreds), chronium 4/4 to each ESP32, station dump = 3 peers.
+  - **Ruled out:** IBSS merge / BSSID split (same pinned BSSID, no TSF merge); it was never
+    a classification miss or airtime contention.
+  - **Severity:** broke **Linux interop** discovery (and degraded pure cells — ESP32 peer
+    beacons hit the same mint). Not a hard pure all-ESP32 blocker (data-path discovery
+    masked it), but the fix makes both cells clean.
 
 ### Beacon interval = 100 TU, matches Linux (2026-06-20)
 Q: is the ESP32 beacon interval different from Linux? **No.** The app sets
