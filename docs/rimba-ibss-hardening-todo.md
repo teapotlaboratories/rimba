@@ -218,15 +218,18 @@ The working implementation deliberately took shortcuts to prove the link:
    "does the chip do IBSS PS" framing — we now expect it doesn't).
 10. ☐ **>2-node test.** Validate beacons, discovery, and data with 3+ nodes (needs
     more boards) — depends on #2.
-11. ☐ **Verify the S1G beacon on-wire — needs an external sniffer (I.4 blocked).** Only
-    the probe response was decoded; the actual `EXT/S1G_BEACON` frame's framing (compat
-    IE, etc.) is chip-side and unverified. **The Linux monitor route is blocked** (I.4,
-    2026-06-21): morse monitor mode delivers **no** S1G frames to the host (`rx_packets`
-    delta 0; same `wlan1` RX's fine in IBSS mode), and the ESP32 active-scan surfaces only
-    probe responses (M4). So this needs an **external S1G-capable sniffer** (non-morse
-    radio / SDR). Confirmed the monitor failure is **not IBSS-specific** — an ESP32 SoftAP
-    beacon also captured 0 frames. The specific open question is **our ESP32 beacon's
-    `source_addr`** (MAC vs BSSID). See test plan §5 "I.4".
+11. ☐ **Verify the S1G beacon on-wire (I.4) — needs a monitor-enabled morse build.** Only
+    the probe response was decoded; the actual `EXT/S1G_BEACON` framing is chip-side and
+    unverified. **Root cause of the failed capture (2026-06-21): the chronium `morse_driver`
+    is built WITHOUT `CONFIG_MORSE_MONITOR`** — the `morse0` monitor netdev + RX→monitor path
+    are `#ifdef CONFIG_MORSE_MONITOR` (forum + driver source; per APPNOTE-36 you capture on
+    `morse0`, not `mon0`). **NOT a hardware/external-sniffer issue — a driver build flag.**
+    A rebuild with `CONFIG_MORSE_MONITOR=y` compiled but my reverse-engineered flag set
+    didn't register the `morse_spi` driver (chip didn't probe) → reverted. **To close:**
+    rebuild with the exact original recipe + `CONFIG_MORSE_MONITOR`, OR use the ESP32's
+    raw-frame hook (`mmwlan_register_rx_frame_cb` + `MMWLAN_FRAME_BEACON`). Open question:
+    **our ESP32 beacon's `source_addr`** (MAC vs BSSID). See test plan §5 "I.4".
+    *(Also noted: chronium's Pi throws frequent undervoltage warnings — check its PSU.)*
 
 ### P4 — code quality
 12. ☑ **Factor IBSS out of `umac.c`** into `umac_ibss.c` (beacon, probe-resp,

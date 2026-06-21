@@ -36,9 +36,10 @@ The open IBSS foundation is now validated end-to-end:
   the same silicon; mixed 4-node all-pairs after the #17 fix.
 - **Reliability (P1.4 recovery, P1.5 soak) ☑** — mid-stream node drop/recovery, and a
   **~6.5 h 4-node soak: 0 reboots, 0 asserts, no heap leak**, RTT stable to the end.
-- **One caveat — I.4 ✗ (blocked):** on-wire frame diff needs an external S1G sniffer
-  (morse monitor mode captures nothing); the ESP32's own beacon `source_addr` stays
-  unverified on-wire (#11). Not a functional blocker.
+- **One caveat — I.4 ✗ (not done):** on-wire frame diff needs the morse driver rebuilt with
+  `CONFIG_MORSE_MONITOR` (a build flag, *not* external gear; rebuild attempted + reverted);
+  the ESP32's own beacon `source_addr` stays unverified on-wire (#11). Not a functional
+  blocker.
 - Not collected: P1.1–P1.3 throughput/jitter/MTU *numbers* (stability + recovery +
   soak — the load-bearing reliability tests — pass).
 
@@ -168,7 +169,7 @@ The reference-implementation correctness check: our port talks to real Linux
 | I.1 | ☑ | Mutual discovery | Linux `iw dev wlan0 scan` sees us / our probe-answer responds; we form a peer record for the Linux MAC; `iw dev wlan0 station dump` lists our nodes |
 | I.2 | ☑ | Beacon interop (both ways) | Linux ingests our hand-built S1G beacons without error; we ingest Linux beacons without garbage/crash — **riskiest divergence point** (our IE set vs `morse_driver`) |
 | I.3 | ☑ | Data path | ESP32 ↔ Linux ping both directions + throughput; validates addressing (A1=DA/A2=SA/A3=BSSID), plaintext data frames |
-| I.4 | ✗ | On-air frame diff | **BLOCKED 2026-06-21 — morse monitor mode delivers no S1G frames** (not a code failure). Needs an external S1G sniffer to close #11. See the I.4 note below. |
+| I.4 | ✗ | On-air frame diff | **Not done 2026-06-21 — monitor mode is *compiled out* of our morse driver (`CONFIG_MORSE_MONITOR`), not a hardware limit.** Needs the driver rebuilt with that flag (capture on `morse0` per APPNOTE-36), or the ESP32 raw-frame hook. Rebuild attempted + reverted (see note). |
 | I.5 | ☑ | Mixed 4-node cell | 3 ESP32 + 1 Linux: all-pairs reachability + broadcast reaches everyone across both implementations |
 
 **Run 2026-06-20 (I.5)** — chronium (`wlan1`, MM6108, `.66`) joined the pinned cell
@@ -210,20 +211,25 @@ IP `192.168.13.66`.
   **915500 kHz** = ch27, 1 MHz) with ACM0 beaconing as a lone IBSS creator, and captured
   via a raw `AF_PACKET` socket. **Zero frames** — `rx_packets` delta was **0** over 6 s,
   unchanged by promiscuous mode, with no `morse_cli` monitor/sniff command and no relevant
-  `dmesg`. The same `wlan1` receives fine in *IBSS* mode, so this is a **morse monitor-mode
-  limitation** (the firmware doesn't surface frames to the host in monitor) — consistent
-  with the broader "firmware doesn't readily surface S1G beacons to the host" theme (#16).
-  **Confirmed not IBSS-specific (2026-06-21):** repeated with an ESP32 **SoftAP** beaconing
-  (a well-supported mode) on the same channel — **also 0 frames, rx delta 0**. So morse
-  monitor mode captures nothing regardless of the transmitter's mode (IBSS or AP).
-  **Consequence:** closing **#11** (verify the S1G beacon on-wire) needs an **external
-  S1G-capable sniffer** (a second non-morse radio or an SDR) — neither the Linux monitor
-  nor the ESP32 active-scan (surfaces only probe responses, per M4) can do it. What we
+  `dmesg`. (Not IBSS-specific — an ESP32 SoftAP beacon also captured 0 frames.)
+  **ROOT CAUSE FOUND 2026-06-21 (forum + driver source) — NOT a hardware limit:** the
+  chronium `morse_driver` was compiled **without `CONFIG_MORSE_MONITOR`**. The `morse0`
+  monitor netdev (`monitor.c: morse_mon_init`) and the RX->monitor path are `#ifdef
+  CONFIG_MORSE_MONITOR`; our build lacks the flag (no `morse0`, 0 `morse_mon` symbols). Per
+  the forum + APPNOTE-36 you capture on the **`morse0`** interface (not `mon0`), which only
+  exists with that flag. **So I.4 is unblockable by a driver rebuild, no external sniffer.**
+  **Rebuild attempt 2026-06-21 — partial:** rebuilt with `CONFIG_MORSE_MONITOR=y` (monitor.o
+  compiled, 24 `morse_mon` syms) but the reverse-engineered flag set (+ a `-Wno-error` hack)
+  produced a module that **didn't register the `morse_spi` driver** -> chip never probed ->
+  no `wlan1`; reverted, chronium restored. Proper fix: rebuild with the *exact original
+  recipe* + `CONFIG_MORSE_MONITOR`. **Alternative:** the ESP32 has a raw-frame hook
+  (`mmwlan_register_rx_frame_cb` + `MMWLAN_FRAME_BEACON`) giving raw bytes. What we
   *do* know of the framing comes from instrumentation, not a clean capture: chronium's
   beacon `source_addr = BSSID` (DBG-SA + the morse `morse_dot11ah_beacon_to_s1g` source),
   the data header layout (DBG17: A1=RA@4, A2=TA@10), and the M5 probe-response decode. The
   one thing still *unverified* on-wire is **our ESP32's own beacon `source_addr`** (MAC vs
-  BSSID) — it needs the external sniffer.
+  BSSID) — it needs either a monitor-enabled morse build (`morse0` capture) or the ESP32
+  raw-frame hook.
 
 **Net (initial run):** IBSS data interoperates on-air with the reference implementation
 (I.3 ✓); the one defect was the ESP32's beacon-based peer discovery against real
