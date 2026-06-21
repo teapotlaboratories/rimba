@@ -1,7 +1,19 @@
 # Rimba Protocol — Power and Battery Analysis
 
-**Hardware**: ESP32-S3 + MM6108 (802.11ah) + RV-3028-C7 RTC + RV-3028-C7 RTC (leaf & relay)  
+**Hardware**: ESP32-S3 + MM6108 (802.11ah) + RV-3028-C7 RTC (leaf & relay)  
 **Companion to**: rimba-protocol-spec.md Draft 0.26
+
+> **Baseline updated 2026-06-21** to the MM6108 datasheet currents
+> (MM6108-MF08651-US Data Sheet — Listen/active and Table 6 sleep modes). The
+> relay analysis now uses **26 mA** idle-RX (datasheet "Listen" at 1 MHz), not the
+> earlier 12 mA estimate. See §2 and the note there. Sleep-mode reachability is in
+> [`rimba-mm6108-powersave-analysis.md`](rimba-mm6108-powersave-analysis.md) §9.
+>
+> 📌 **SPEC UPDATE PENDING:** the protocol spec (`rimba-protocol-spec.md`,
+> Section 12/13 power & §15 open issues) still carries the old relay/power
+> figures and the "IBSS ATIM power save" open issue. Once the idle-RX current is
+> measured on hardware, fold the final numbers (and the closed ATIM/Deep-sleep
+> findings) back into the spec. Tracked in the development plan §7.
 
 ---
 
@@ -22,19 +34,37 @@
 
 ## 2. Component Current Reference
 
+MM6108 figures from the datasheet (MM6108-MF08651-US, Table 6 + Listen/active).
+
 | Component | State | Current |
 |---|---|---|
-| MM6108 (802.11ah) | IBSS receive (always-on) | 12 mA |
-| MM6108 | Hibernate / deep sleep | 0.1 mA |
+| MM6108 | **active RX / idle Listen** (1 MHz, always-on relay) | **26 mA** ¹ |
+| MM6108 | active RX Listen (2–8 MHz) | 30–37 mA |
+| MM6108 | active RX decode (MCS0–7) | 26–67 mA |
+| MM6108 | **Snooze** (RC osc on, memory retained, timer wake) | 0.042 mA (42 µA) |
+| MM6108 | **Deep sleep** (RC osc on, timer wake) | 0.001 mA (1 µA) |
+| MM6108 | **Hibernate** (power off, ext-IRQ wake) | 0.00005 mA (0.05 µA) |
 | ESP32-S3 | FreeRTOS light sleep | 2 mA |
-| ESP32-S3 | Deep sleep | 0.02 mA |
+| ESP32-S3 | Deep sleep (RTC retention) | 0.02 mA (~10–20 µA) |
 | RV-3028-C7 RTC | Always on (any mode) | 0.00004 mA (40 nA) |
+
+¹ **Idle-RX baseline = 26 mA** — the datasheet "Listen" current at the 1 MHz cell
+bandwidth. An earlier version of this doc assumed 12 mA; that was optimistic and
+unverified. 26 mA is now used for all relay numbers (§5–§12). A receiver *can*
+idle below "active Listen," so the true figure could be lower — **measure idle-RX
+at 1 MHz on hardware**; if it comes in under 26 mA, relay life and solar margins
+improve linearly. This is the single highest-leverage measurement for relay BOM.
+
+**Sleep-mode note:** Hibernate is **0.05 µA** (an earlier "~0.1 mA" guess was
+2000× too high). A powered-off radio is therefore negligible in sleep; the leaf
+sleep floor is **ESP32-bound** (~10–20 µA deep sleep + 40 nA RTC). The remaining
+radio cost is the cold-boot **energy** per wake (RISK-02), not sleep current.
 
 ---
 
 ## 3. Leaf Node Power Analysis
 
-The leaf has a fundamentally different power profile from the relay. It spends 99.97% of its time in deep sleep and wakes for only ~230 ms per cycle.
+The leaf has a fundamentally different power profile from the relay. It spends 99.97% of its time in deep sleep and wakes for only ~230 ms per cycle. **Leaf life is sleep-dominated, so it is unaffected by the idle-RX baseline** — the radio is only on (and only at active currents) during its brief wake window.
 
 ### 3.1 Leaf Current Breakdown
 
@@ -42,21 +72,24 @@ The leaf has a fundamentally different power profile from the relay. It spends 9
 15-minute cycle (LEAF_SLEEP_MS = 900,000 ms, sparse-first default):
 
 Active phase (230 ms per cycle):
-  MM6108 IBSS boot + TX/RX:   ~20 mA average
-  ESP32-S3 active (brief):     included in 20 mA average
-  Duration:                    0.230 s
+  MM6108 cold-boot + IBSS join + TX/RX:  ~20 mA average
+    (boot-dominated: SPI firmware load draws less than active RX;
+     the brief 26–37 mA RX/TX bursts are included in this blend)
+  ESP32-S3 active (brief):                included in the 20 mA average
+  Duration:                               0.230 s
 
 Sleep phase (899.77 s per cycle):
-  MM6108 hibernate:            ~0.10 mA
-  ESP32-S3 deep sleep:          0.02 mA
-  RV-3028-C7 RTC:               0.00004 mA
-  Total sleep:                 ~0.12 mA
+  MM6108 hibernate (datasheet):  0.00005 mA  (0.05 µA)
+  ESP32-S3 deep sleep:           0.02 mA     (~10–20 µA, dominant)
+  RV-3028-C7 RTC:                0.00004 mA
+  Total sleep:                  ~0.015–0.020 mA  (ESP32-bound)
 
-  Note: MM6108 hibernate current is the key unknown.
-  The spec targets 15 µA total sleep — achievable if MM6108
-  hibernate reaches ~10 µA. Measure in Phase 1 of dev plan.
+  The MM6108 hibernate "key unknown" is settled by the datasheet (0.05 µA,
+  negligible). The sleep floor is the ESP32-S3 deep sleep. The 15 µA total-sleep
+  target is met if the ESP32 reaches ~10 µA (achievable on the S3 with RTC-only
+  retention); at a conservative 20 µA the leaf 15-min average is ~25 µA.
 
-Weighted average:
+Weighted average (using ~15 µA sleep, optimized ESP32):
   Active:  20 mA    × 0.230 / 900    = 0.0051 mA =   5.1 µA
   Sleep:   0.015 mA × 899.77 / 900   = 0.015 mA  =  15.0 µA
   ─────────────────────────────────────────────────────────────
@@ -194,6 +227,49 @@ Wake interval   No sensor    With sensor (~50 µA overhead)
 
 ---
 
+## 3A. Chip sleep modes — per-node viability (datasheet-grounded)
+
+The MM6108 datasheet defines three hardware sleep modes; the firmware/host
+analysis (`rimba-mm6108-powersave-analysis.md`) determined which are reachable on
+an IBSS (ADHOC) vif. Mapping that onto Rimba roles:
+
+| Chip mode (typ current) | IBSS-reachable? | Leaf | Relay / Gateway / Mule |
+|---|---|---|---|
+| Active RX (26–37 mA) | yes | ✗ far too high | ✓ **Continuous mode** — must hear peers |
+| **Snooze** (42 µA) | ✓ via `CONFIG_PS` patch | ✗ (~2.9 mA in-cell, see below) | ✗ deaf to peers (no ATIM) |
+| **Deep sleep** (1 µA) | ✗ STA-only in firmware | — | — |
+| **Hibernate / power-off** (0.05 µA) | ✓ via `RESET_N` | ✓ **RTC-scheduled leaf** | ✓ **Scheduled-mode** sleep slots |
+
+**Only two modes have a production role:** Active RX (always-on nodes) and
+Hibernate/power-off (RTC-scheduled — both leaf sleep and relay Scheduled-mode
+slots). Snooze and Deep sleep fit no Rimba role.
+
+### Why Snooze is not a leaf mode
+
+Could a leaf stay in the cell and use radio Snooze (dynamic PS) instead of fully
+powering off? A node that stays in the IBSS cell must keep the ESP32 awake enough
+to hold TSF/serve the link (light sleep, 2 mA) **and** TX its own S1G beacon every
+beacon interval (100 TU = 102.4 ms → 9.77/s):
+
+```
+  ESP32 light sleep (must stay in-cell):          2.00 mA
+  Beacon TX  (~30 mA × ~3 ms × 9.77/s):           0.88 mA
+  MM6108 Snooze floor between beacons:            0.04 mA
+  ──────────────────────────────────────────────────────
+  Snooze-leaf average:                          ~ 2.9 mA
+  Battery life (3,000 mAh): 3,000 / 2.9 = 1,034 h ≈ 43 days
+```
+
+That is ~150× worse than the RTC power-off leaf (20 µA, ~17 years, §3.3). The
+42 µA Snooze floor is irrelevant — the cost is *staying in the cell at all* (MCU
+awake + mandatory beaconing). Powering **off** (Hibernate/`RESET_N`) drops the
+node out of the cell entirely, which is why the RTC design wins. Snooze only helps
+a node that is already always-on *and* never needs to receive unsolicited peer
+traffic — no Rimba role fits, so Snooze stays a bench curiosity (the `CONFIG_PS`
+patch) for send-only tests, not a production mode.
+
+---
+
 ## 4. Relay Sleep Options
 
 Two relay sleep modes are defined in the protocol spec (Section 12.10):
@@ -206,14 +282,16 @@ Two relay sleep modes are defined in the protocol spec (Section 12.10):
 ## 5. Continuous Mode — Current Derivation
 
 ```
-MM6108 IBSS receive:    12.00 mA  (continuous, always on)
-ESP32-S3 light sleep:    2.00 mA  (continuous, wakes on MM6108 interrupt)
-RV-3028-C7 RTC:          0.00 mA  (40 nA, negligible)
+MM6108 IBSS receive (idle Listen, 1 MHz):  26.00 mA  (continuous, always on)
+ESP32-S3 light sleep:                        2.00 mA  (wakes on MM6108 interrupt)
+RV-3028-C7 RTC:                              0.00 mA  (40 nA, negligible)
 ─────────────────────────────────────────────────────────────────────
-Total Continuous mode:          14.00 mA
+Total Continuous mode:                      28.00 mA
 
 This is independent of K (backbone peer count) or leaf count.
-The relay is always drawing 14 mA regardless of traffic.
+The relay draws ~28 mA regardless of traffic — dominated by the
+always-on receiver. (At 12 mA idle-RX this was 14 mA; the figure
+scales linearly with the measured idle-RX current.)
 ```
 
 ---
@@ -222,7 +300,7 @@ The relay is always drawing 14 mA regardless of traffic.
 
 Scheduled mode has two phases. Every component is weighted by the fraction of time in each phase.
 
-### 5.1 Phase fractions (K=6 backbone peers, 100 leaves, 15-min leaf interval)
+### 6.1 Phase fractions (K=6 backbone peers, 100 leaves, 15-min leaf interval)
 
 ```
 Backbone TDMA duty    = (1 TX slot + K RX slots + 3 MGMT slots) / 20 total slots
@@ -235,31 +313,31 @@ Active fraction       = backbone duty + leaf window duty = 51.1%
 Sleep fraction        = 100% − 51.1% = 48.9%
 ```
 
-### 5.2 Weighted current
+### 6.2 Weighted current
 
 ```
 During active phase (51.1% of time):
-  MM6108 IBSS RX:          12 mA × 51.1% = 6.13 mA
-  ESP32-S3 light sleep:     2 mA × 51.1% = 1.02 mA
+  MM6108 active RX:        26 mA × 51.1% = 13.29 mA
+  ESP32-S3 light sleep:     2 mA × 51.1% =  1.02 mA
 
 During sleep phase (48.9% of time):
-  MM6108 hibernate:        0.1 mA × 48.9% = 0.049 mA
+  MM6108 hibernate:    0.00005 mA × 48.9% = 0.00002 mA  (negligible)
   ESP32-S3 deep sleep:    0.02 mA × 48.9% = 0.010 mA
 
 RTC (always):                               0.000 mA
 ─────────────────────────────────────────────────────────────────────
-Total Scheduled mode (K=6, 100 leaves, 15-min):   7.21 mA ≈ 7.2 mA
+Total Scheduled mode (K=6, 100 leaves, 15-min):   14.32 mA ≈ 14.3 mA
 ```
 
-**Note on MCU weighting**: The MCU draws 2 mA in light sleep (active phase) and 0.02 mA in deep sleep (sleep phase). It must be weighted by duty cycle. Counting it as a flat 2 mA across all time overstates the MCU contribution by ~1 mA.
+**Note on MCU weighting**: The MCU draws 2 mA in light sleep (active phase) and 0.02 mA in deep sleep (sleep phase). It must be weighted by duty cycle. The sleep-phase radio term is negligible (Hibernate 0.05 µA), so Scheduled mode is dominated entirely by the **active-phase RX**.
 
-### 5.3 Where the saving comes from
+### 6.3 Where the saving comes from
 
 ```
-Continuous mode:  MM6108 12.0 mA (100%) + MCU 2.0 mA (100%) = 14.0 mA
-Scheduled mode:  MM6108  6.1 mA (51%)  + MCU 1.0 mA (51%)  =  7.2 mA
+Continuous mode:  MM6108 26.0 mA (100%) + MCU 2.0 mA (100%) = 28.0 mA
+Scheduled mode:  MM6108 13.3 mA (51%)  + MCU 1.0 mA (51%)  = 14.3 mA
 
-Saving:    MM6108 saves 5.9 mA   MCU saves 1.0 mA    = 6.8 mA total
+Saving:    MM6108 saves 12.7 mA   MCU saves 1.0 mA    = 13.7 mA total
 
 The saving is almost entirely the MM6108 being off during sleep slots.
 ```
@@ -273,24 +351,27 @@ The backbone peer count K determines the active fraction. The formula for any K:
 ```
 active_fraction = (1 + K + 3) / 20     [for 20-slot superframe]
 
-Scheduled mode average = (12 + 2) mA × active_fraction
-                 + (0.1 + 0.02) mA × (1 − active_fraction)
+Scheduled mode average = (26 + 2) mA × active_fraction
+                 + (0.00005 + 0.02) mA × (1 − active_fraction)
 
-Simplified (dominant terms):
-  Scheduled mode ≈ 14 mA × active_fraction + 0.12 mA × sleep_fraction
+Simplified (sleep term ≈ 0.01 mA, negligible):
+  Scheduled mode ≈ 28 mA × active_fraction
 ```
 
 | K peers | Active fraction | Scheduled mode avg | Continuous mode | Saving |
 |---|---|---|---|---|
-| 2 | 30% | 4.3 mA | 14 mA | 9.7 mA |
-| 4 | 40% | 5.7 mA | 14 mA | 8.3 mA |
-| 6 | 50% | 7.2 mA | 14 mA | 6.8 mA |
-| 8 | 60% | 8.6 mA | 14 mA | 5.4 mA |
-| 10 | 70% | 10.0 mA | 14 mA | 4.0 mA |
-| 12 | 80% | 11.3 mA | 14 mA | 2.7 mA |
-| 14+ | ≥ 85% | ≥ 12.0 mA | 14 mA | ≤ 2 mA → use Continuous mode |
+| 2 | 30% | 8.7 mA | 28 mA | 19.3 mA |
+| 4 | 40% | 11.5 mA | 28 mA | 16.5 mA |
+| 6 | 50% | 14.3 mA | 28 mA | 13.7 mA |
+| 8 | 60% | 17.1 mA | 28 mA | 10.9 mA |
+| 10 | 70% | 19.9 mA | 28 mA | 8.1 mA |
+| 12 | 80% | 22.7 mA | 28 mA | 5.3 mA |
+| 14 | 90% | 25.5 mA | 28 mA | 2.5 mA |
+| 15+ | ≥ 95% | ≥ 26.9 mA | 28 mA | ≤ 1 mA → use Continuous mode |
 
-*Includes 100 leaves at 15-min interval (+1.1% active fraction, +0.13 mA)*
+*Includes 100 leaves at 15-min interval (+1.1% active fraction, +0.31 mA). The
+Scheduled-mode advantage now persists to higher K than at 12 mA idle-RX (the
+crossover moved from K≈14 to K≈15) because the per-slot RX saving is larger.*
 
 ---
 
@@ -302,18 +383,18 @@ With the mandatory 1 ppm RTC, leaf windows are 100ms wide (vs 1000ms with intern
 Leaf window fraction = N_leaves × 100ms / 900,000ms
 
 Per 100 leaves: 100 × 100 / 900,000 = 1.11% additional active fraction
-Additional current per 100 leaves: 14 mA × 0.0111 = 0.16 mA
+Additional current per 100 leaves: 28 mA × 0.0111 = 0.31 mA
 ```
 
 | Leaves | Leaf window % | Additional current | Total (K=6) |
 |---|---|---|---|
-| 0 | 0.0% | 0.00 mA | 7.1 mA |
-| 100 | 1.1% | 0.13 mA | 7.2 mA |
-| 300 | 3.3% | 0.40 mA | 7.5 mA |
-| 500 | 5.6% | 0.67 mA | 7.8 mA |
-| 900 | 10.0% | 1.20 mA | 8.3 mA |
+| 0 | 0.0% | 0.00 mA | 14.0 mA |
+| 100 | 1.1% | 0.31 mA | 14.3 mA |
+| 300 | 3.3% | 0.93 mA | 14.9 mA |
+| 500 | 5.6% | 1.56 mA | 15.6 mA |
+| 900 | 10.0% | 2.80 mA | 16.8 mA |
 
-Leaf count barely matters. Even at 900 leaves the increase is only 1.2 mA. Backbone peer count K is the dominant variable.
+Leaf count barely matters. Even at 900 leaves the increase is only 2.8 mA. Backbone peer count K is the dominant variable.
 
 ---
 
@@ -322,99 +403,104 @@ Leaf count barely matters. Even at 900 leaves the increase is only 1.2 mA. Backb
 ```
 Battery life = 5,000 mAh / average_current_mA
 
-Continuous mode:  5,000 / 14.0  =  357 h  = 14.9 days  ≈ 2 weeks
+Continuous mode:  5,000 / 28.0  =  179 h  =  7.4 days  ≈ 1 week
 Scheduled mode (K=6, 100 leaves):
-           5,000 / 7.2   =  694 h  = 28.9 days  ≈ 4 weeks
+           5,000 / 14.3  =  350 h  = 14.6 days  ≈ 2 weeks
 
 Scheduled mode by K:
-  K=2:  5,000 / 4.3  = 1,163 h = 48.5 days  ≈ 7 weeks
-  K=4:  5,000 / 5.7  =   877 h = 36.5 days  ≈ 5 weeks
-  K=6:  5,000 / 7.2  =   694 h = 28.9 days  ≈ 4 weeks
-  K=8:  5,000 / 8.6  =   581 h = 24.2 days  ≈ 3.5 weeks
-  K=10: 5,000 / 10.0 =   500 h = 20.8 days  ≈ 3 weeks
+  K=2:  5,000 / 8.7  =   575 h = 23.9 days  ≈ 3.4 weeks
+  K=4:  5,000 / 11.5 =   435 h = 18.1 days  ≈ 2.6 weeks
+  K=6:  5,000 / 14.3 =   350 h = 14.6 days  ≈ 2 weeks
+  K=8:  5,000 / 17.1 =   292 h = 12.2 days  ≈ 1.7 weeks
+  K=10: 5,000 / 19.9 =   251 h = 10.5 days  ≈ 1.5 weeks
 ```
 
 ---
 
 ## 10. Solar Sustainability (Relay)
 
-### 9.1 Daily energy balance
+### 10.1 Daily energy balance
 
 ```
 Solar assumptions:
   Panel: 2W
   System efficiency (MPPT charger × battery): 85%
   Daily harvest = 2W × peak_sun_hours × 0.85 / 3.7V
+                = 459.5 mAh per peak-sun-hour
 
 Daily consumption:
-  Continuous mode:  14.0 mA × 24h = 336 mAh/day
-  Scheduled mode:   7.2 mA × 24h = 173 mAh/day
+  Continuous mode:  28.0 mA × 24h = 672 mAh/day
+  Scheduled mode:   14.3 mA × 24h = 343 mAh/day
 
 Net daily balance (harvest − consumption):
 
   Peak sun   Harvest      Continuous mode net    Scheduled mode net
   ──────────────────────────────────────────────────────────────
-  1h           459 mAh    +123 mAh  ✅    +286 mAh  ✅
-  2h           919 mAh    +583 mAh  ✅    +746 mAh  ✅
-  3h         1,378 mAh  +1,042 mAh  ✅  +1,205 mAh  ✅
-  4h         1,837 mAh  +1,501 mAh  ✅  +1,664 mAh  ✅
-  5h         2,297 mAh  +1,961 mAh  ✅  +2,124 mAh  ✅
+  1h           459 mAh    −213 mAh  ❌    +116 mAh  ✅
+  2h           919 mAh    +247 mAh  ✅    +576 mAh  ✅
+  3h         1,378 mAh    +706 mAh  ✅  +1,035 mAh  ✅
+  4h         1,838 mAh  +1,166 mAh  ✅  +1,495 mAh  ✅
+  5h         2,297 mAh  +1,625 mAh  ✅  +1,954 mAh  ✅
 
-Both options are self-sustaining with a 2W panel even in
-heavy overcast with only 1 peak sun hour per day.
+With a 2W panel, Scheduled mode self-sustains even at 1 peak sun hour;
+Continuous mode needs ~1.5 peak sun hours per day to break even.
 ```
 
-### 9.2 Minimum panel for net-zero
+### 10.2 Minimum panel for net-zero
 
 ```
 Required harvest = daily consumption
-Required harvest = panel_W × 5h × 0.85 / 3.7V
+Required harvest = panel_W × sun_h × 0.85 / 3.7V
 Solving for panel_W:
 
-Continuous mode: panel_W = 336 × 3.7 / (5 × 0.85) = 0.29W → use 0.5W panel
-Scheduled mode: panel_W = 173 × 3.7 / (5 × 0.85) = 0.15W → use 0.2W panel
+At 5 peak sun hours:
+  Continuous mode: 672 × 3.7 / (5 × 0.85 × 1000) = 0.59W → use 1W panel
+  Scheduled mode:  343 × 3.7 / (5 × 0.85 × 1000) = 0.30W → use 0.5W panel
 
 At 3 peak sun hours (conservative mid-latitude):
-Continuous mode: 0.49W → 0.5W panel still sufficient
-Scheduled mode: 0.25W → 0.3W panel sufficient
+  Continuous mode: 0.97W → ~1W panel
+  Scheduled mode:  0.50W → ~0.5W panel
 ```
 
-### 9.3 Solar failure survival (panel blocked, e.g. snow / fault)
+### 10.3 Solar failure survival (panel blocked, e.g. snow / fault)
 
 How many days does the battery last if the panel produces nothing?
 
 ```
-This is the same as Section 8 (battery-only life):
-  Continuous mode: ~2 weeks before battery exhausted
-  Scheduled mode: ~4 weeks before battery exhausted
+This is the same as Section 9 (battery-only life):
+  Continuous mode: ~1 week before battery exhausted
+  Scheduled mode: ~2 weeks before battery exhausted
 
 Practical note: a 2W panel at 10% of rating (heavy cloud, shade)
-still produces 46 mAh/day. Scheduled mode (173 mAh/day consumption)
-is not sustained at this level. Continuous mode (336 mAh/day) is not
-sustained either. The battery absorbs the deficit in both cases.
+still produces 46 mAh/day. Neither mode is sustained at this level
+(Continuous 672, Scheduled 343 mAh/day consumption); the battery
+absorbs the deficit in both cases.
 ```
 
-### 9.4 Extended cloudy season analysis
+### 10.4 Extended cloudy season analysis
 
 How many consecutive cloudy days can the relay survive starting from a full battery?
 
 ```
 Scenario: 2W panel, very poor sun (0.5 peak hours/day, heavy overcast)
-  Daily harvest:      0.5h × 2W × 0.85 / 3.7V = 230 mAh/day
+  Daily harvest:      0.5h × 459.5 = 230 mAh/day
 
 Net per day:
-  Continuous mode: 230 − 336 = −106 mAh/day (draining at 106 mAh/day)
-  Scheduled mode: 230 − 173 =  +57 mAh/day (still surplus — self-sustaining!)
+  Continuous mode: 230 − 672 = −442 mAh/day (draining)
+  Scheduled mode: 230 − 343 = −113 mAh/day (draining, but slower)
 
 Starting from full battery (5,000 mAh):
-  Continuous mode: 5,000 / 106 = 47 days until battery exhausted
-  Scheduled mode: never exhausted — net positive even at 0.5h/day sun
+  Continuous mode: 5,000 / 442 = 11.3 days until exhausted
+  Scheduled mode: 5,000 / 113 = 44.2 days until exhausted
 
-Scheduled mode becomes self-sustaining at:
-  173 mAh/day = 2W × h × 0.85 / 3.7V → h = 0.40 peak hours/day
+Self-sustaining sun threshold (2W panel):
+  Continuous mode:  672 / 459.5 = 1.46 peak hours/day (~88 min)
+  Scheduled mode:   343 / 459.5 = 0.75 peak hours/day (~45 min)
 
-A 2W panel with Scheduled mode sustains the relay with as little as
-24 minutes of useful sun per day — indoor window or deep forest.
+At the 26 mA idle-RX baseline neither mode is self-sustaining on a 2W panel at
+0.5h/day (unlike the old 12 mA estimate, where Scheduled survived 0.4h/day).
+Scheduled now needs ~45 min of useful sun per day on a 2W panel; Continuous ~88
+min. A larger panel restores the margin (see §10.2 and §12).
 ```
 
 ---
@@ -423,14 +509,18 @@ A 2W panel with Scheduled mode sustains the relay with as little as
 
 | Scenario | Continuous mode | Scheduled mode (K=6) |
 |---|---|---|
-| Average current | 14.0 mA | 7.2 mA |
-| Battery only | ~2 weeks | ~4 weeks |
-| Min panel (5h sun) | 0.3W | 0.16W |
-| Min panel (3h sun) | 0.5W | 0.26W |
-| Self-sustaining sun threshold (2W panel) | 0.40 h/day | 0.20 h/day |
-| Recommended panel | 2W | 1W |
+| Average current | 28.0 mA | 14.3 mA |
+| Battery only | ~1 week | ~2 weeks |
+| Min panel (5h sun) | 0.6W → use 1W | 0.3W → use 0.5W |
+| Min panel (3h sun) | 1.0W | 0.5W |
+| Self-sustaining sun threshold (2W panel) | 1.46 h/day | 0.75 h/day |
+| Recommended panel | 3W | 2W |
 | Implementation effort | Low | Medium-High |
 | Boot time dependency | None | MM6108 < 100ms |
+
+> All relay figures use the **26 mA datasheet idle-RX baseline** (§2). If a
+> hardware measurement shows idle-RX is lower, battery life and solar margins
+> improve linearly — this is the key relay measurement to take.
 
 ---
 
@@ -438,23 +528,28 @@ A 2W panel with Scheduled mode sustains the relay with as little as
 
 ```
 For v1 deployment with solar:
-  Continuous mode + 2W panel.
-  14 mA average, self-sustaining from 0.4 peak sun hours per day.
-  ~2 weeks battery backup during total solar failure.
+  Continuous mode + 3W panel.
+  28 mA average, self-sustaining from ~1.5 peak sun hours per day.
+  ~1 week battery backup during total solar failure.
   No implementation risk — simple FreeRTOS light sleep.
+  (2W panel is acceptable only in good-sun regions, ≥1.5h/day.)
 
-For v2 or battery-only deployment:
-  Scheduled mode + 1W panel.
-  7.2 mA average, self-sustaining from 0.2 peak sun hours per day.
-  ~4 weeks battery backup during total solar failure.
+For v2 or battery-only / low-sun deployment:
+  Scheduled mode + 2W panel.
+  14.3 mA average, self-sustaining from ~0.75 peak sun hours per day.
+  ~2 weeks battery backup during total solar failure.
   Requires MM6108 IBSS boot time < 100ms (measure in Phase 1).
 
-For K ≥ 12 deployments:
-  Scheduled mode saving is < 2 mA — not worth the complexity.
+For K ≥ 15 deployments:
+  Scheduled mode saving is < ~1 mA — not worth the complexity.
   Use Continuous mode with a slightly larger panel.
+
+Before committing panel BOM:
+  Measure idle-RX current at 1 MHz on hardware. The 26 mA datasheet figure
+  drives panel size and battery backup; a lower measured value relaxes both.
 ```
 
 ---
 
-*Document version: 1.0*  
+*Document version: 1.1 (2026-06-21 — rebaselined to datasheet MM6108 currents)*  
 *Companion spec: rimba-protocol-spec.md Draft 0.26*

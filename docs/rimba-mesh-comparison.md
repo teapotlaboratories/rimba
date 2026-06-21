@@ -155,13 +155,17 @@ Strict TDMA divides time into fixed slots and assigns specific slots to specific
 | Channel access         | CSMA/CA                 | CSMA/CA (identical mechanism)  |
 | Path selection         | HWMP (standard)         | OGM / RREQ / Geographic (custom) |
 | Sleep / battery        | Not designed for it     | Core design goal               |
-| Node power             | 5–15 W (Linux router)   | ~8 mA relay, ~20 µA leaf      |
+| Node power             | 5–15 W (Linux router)   | ~14 mA relay, ~20 µA leaf ¹   |
 | DTN / disruption       | No                      | Yes (BPv7, mule custody)       |
 | MCU support            | No (requires Linux)     | Yes (ESP32-S3 / nRF54)        |
 | Routing overhead       | HWMP proactive + reactive | OGM + RREQ/RREP + geographic   |
 | Security               | WPA3 link-layer         | BPSec E2E + per-peer ECDH     |
 | Node count             | Hundreds                | 500–1000 relays + thousands of leaves |
 | Maturity               | Very mature, standard   | Early stage                    |
+
+¹ Relay = Scheduled mode (K=6) at the datasheet **26 mA** idle-RX baseline
+(Continuous ≈ 28 mA); was ~8 mA at the old 12 mA estimate. Leaf unchanged
+(sleep-dominated). See `rimba-battery-analysis.md` — confirm idle-RX on hardware.
 
 **Key distinction**: 802.11s is designed for always-on infrastructure — home mesh routers, enterprise wireless backhaul. It makes no concessions for battery power. Rimba targets exactly the opposite: years of battery life with intermittent connectivity. A node running 802.11s firmware would drain a sensor battery in hours.
 
@@ -225,7 +229,7 @@ Security: AES-128 per-channel shared key
 | Encryption scope       | Channel (symmetric)     | E2E per source-destination     |
 | Leaf sleep current     | < 1 µA (LoRa)           | ~15–20 µA average             |
 | Leaf battery life      | 5–15 years (small cell) | 3–8 years                     |
-| Relay power            | ~5 mA                   | ~8 mA                         |
+| Relay power            | ~5 mA                   | ~14 mA (Sched.) ¹             |
 | Max practical nodes    | ~50–200                 | 500–1000 relays (more with GPS) |
 | Sensor data support    | Basic telemetry plugins | BPv7 bundles, CBOR, aggregation|
 | Mobile app             | Yes (mature, iOS/Android)| Not yet                       |
