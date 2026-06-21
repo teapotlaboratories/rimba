@@ -25,12 +25,25 @@ Extended 2026-06-19 to **3 ESP32 nodes** (N-node MAC-octet addressing), close ra
 - ☑ All-pairs unicast — full triangle, 0 timeouts in window (P0.2)
 - ☑ `0x88B5` broadcast reaches all nodes (P0.3)
 - ☑ Concurrent multi-peer load — each node drives both peers at once (P0.5)
-- ◐ Drop/rejoin — survivor link unaffected, dropped node rediscovered (P0.6; survivor
-  re-acquisition under-tested — see §4)
+- ☑ Per-peer dedup independence — forced cross-peer probe (P0.4, 2026-06-20)
+- ☑ Drop/rejoin — survivors unaffected, dropped node aged out + rediscovered (P0.6,
+  unblocked by the adopted age-out)
 
-This proves it **works at 3 nodes**. It does not yet prove it works **reliably under
-sustained load, over long durations (soak), or against the Linux reference
-implementation** — which is the remaining point of this plan (P0.5-interop, P1, P2).
+### Foundation validation — COMPLETE (2026-06-21)
+The open IBSS foundation is now validated end-to-end:
+- **Multi-node (P0.1–0.7) ☑** — 3-board full mesh, per-peer state, drop/rejoin.
+- **Linux interop (I.1–I.3, I.5) ☑** — talks to a real `morse_driver`/mac80211 node on
+  the same silicon; mixed 4-node all-pairs after the #17 fix.
+- **Reliability (P1.4 recovery, P1.5 soak) ☑** — mid-stream node drop/recovery, and a
+  **~6.5 h 4-node soak: 0 reboots, 0 asserts, no heap leak**, RTT stable to the end.
+- **One caveat — I.4 ✗ (blocked):** on-wire frame diff needs an external S1G sniffer
+  (morse monitor mode captures nothing); the ESP32's own beacon `source_addr` stays
+  unverified on-wire (#11). Not a functional blocker.
+- Not collected: P1.1–P1.3 throughput/jitter/MTU *numbers* (stability + recovery +
+  soak — the load-bearing reliability tests — pass).
+
+**Verdict: Phase-1 open-IBSS foundation is robust and ready for Phase-2 (link
+security) to build on it.**
 
 ---
 
@@ -306,11 +319,13 @@ still uncollected; stability + recovery + soak are the load-bearing ones and pas
 
 ## 9. Suggested execution order
 
-1. Make the **N-node addressing** app change (§3) + a multi-node/reliability build.
-2. Bench the **3 ESP32 nodes** (ACM0/1/2) → run **P0**.
-3. Bring up the **Linux node**, pin the matching config (§5) → run **P0.5**
-   (discovery → beacon → ping → on-air diff → mixed cell).
-4. **P1 reliability** across the mixed topology; **soak overnight**.
-5. **P2 RF/edge** as time / physical access allows.
+1. ☑ Make the **N-node addressing** app change (§3) + a multi-node/reliability build.
+2. ☑ Bench the **3 ESP32 nodes** (ACM0/1/2) → run **P0** (P0.1–0.7).
+3. ☑ Bring up the **Linux node**, pin the matching config (§5) → run **P0.5/I.x**
+   (discovery → beacon → ping → mixed cell). I.4 on-air diff ✗ (needs external sniffer).
+4. ☑ **P1 reliability** — recovery (P1.4) + **~6.5 h soak (P1.5)**. P1.1–1.3 numbers TODO.
+5. ☐ **P2 RF/edge** as time / physical access allows (range, etc.).
 
 Record results inline (flip ☐ → ☑/✗ with a one-line note) as each test runs.
+**Status (2026-06-21): foundation validation complete — see §1. Next: #9 boot-time
+(power-save gating), then Phase 2.**

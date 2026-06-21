@@ -149,6 +149,17 @@ effectively does too (`ieee80211_ibss_rx_bss_info` keys on `mgmt->sa`, but morse
 sets `mgmt->sa = bssid`). Marked **morse hardware/firmware dependent** in the
 driver; revisit only if a future firmware surfaces real per-node beacons.
 
+### H6 — Phase-1 foundation validation COMPLETE ✅ (2026-06-21)
+Full validation suite passed (see [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md)):
+multi-node **P0.1–0.7 ☑**, Linux interop **I.1–I.3, I.5 ☑** (real `morse_driver` node,
+same silicon), per-peer dedup **P0.4 ☑** (forced cross-peer probe), recovery **P1.4 ☑**,
+and a **~6.5 h 4-node soak P1.5 ☑** (0 reboots, 0 asserts, no heap leak, RTT stable).
+**One caveat: I.4 ✗** — on-wire frame diff is blocked (morse monitor mode captures
+nothing; needs an external S1G sniffer to close #11). P1.1–P1.3 throughput/jitter/MTU
+*numbers* not collected. **The open-IBSS foundation is robust and ready for Phase-2
+(link security).** Next dev: **#9 RISK-02 boot/join time** (gating for RTC-scheduled
+power-save), then Phase 2.
+
 ---
 
 ## Code development overview & Linux comparison

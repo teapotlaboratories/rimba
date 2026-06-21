@@ -16,13 +16,14 @@ Development started with the BLOCKING hardware-validation phase. **Before writin
 any feature, read the [development plan](docs/rimba-development-plan.md)** — it
 defines the phased build order and the IBSS-foundation phase everything depends on.
 
-**RISK-01 (IBSS on the MM6108) is resolved and hardened**: 802.11ah ad-hoc bring-up,
-bidirectional IP/`0x88B5` data, a 3-board full mesh, peer age-out + drop/rejoin, and
-interop with a Linux `morse_driver` IBSS node on the same silicon — all derived from
-and verified against the Linux implementation. See
-[`docs/rimba-ibss-milestones.md`](docs/rimba-ibss-milestones.md) and the
-[IBSS worklogs](docs/worklog/). The AP-STA fallback is not required. Next: Phase-2
-link security.
+**RISK-01 (IBSS on the MM6108) is resolved, hardened, and validated**: 802.11ah ad-hoc
+bring-up, bidirectional IP/`0x88B5` data, a 3-board full mesh, peer age-out + drop/rejoin,
+interop with a Linux `morse_driver` IBSS node on the same silicon, and a **~6.5 h 4-node
+soak** (0 reboots, no heap leak) — all derived from and verified against the Linux
+implementation. See [`docs/rimba-ibss-milestones.md`](docs/rimba-ibss-milestones.md),
+the [test plan](docs/rimba-ibss-test-plan.md), and the [IBSS worklogs](docs/worklog/).
+The AP-STA fallback is not required. **Next: power-save bring-up** (RTC-scheduled radio
+duty-cycle — the morse firmware has no IBSS radio power-save), then Phase-2 link security.
 
 See Section 15 (Open Issues) and Section 16 (Future Investigations) in the spec
 for tracked work, including the urgent config-changeable-parameter-scope security
