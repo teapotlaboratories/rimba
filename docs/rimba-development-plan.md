@@ -315,6 +315,7 @@ Estimated effort: 5–8 weeks. Produces a more complete implementation but with 
 | 1.10 | **Implement Continuous mode relay sleep (FreeRTOS light sleep + MM6108 interrupt wake)** | 1 day | 1.9 |
 | 1.11 | **Verify Continuous mode: relay wakes on incoming frame, MCU sleeps between frames** | 1 day | 1.10 |
 | 1.12 | **Assess Scheduled mode feasibility: if boot time < 100ms, prototype full TDMA sleep** | 1 day | 1.4 |
+| 1.12a | **TSF-sync experiment + IBSS power-save readiness** (prerequisite for Scheduled mode). Verify the firmware syncs the cell TSF across same-BSSID nodes and exposes `GET_TSF`; pairs with create-else-join (the JOIN path is what syncs a late node's clock). Power-save is an **early focus** per the 2026-06-20 decision — see [`rimba-ibss-hardening-todo.md`](rimba-ibss-hardening-todo.md) #18/#7/#8. Runs after the small Phase-1 validation items. | 1–2 days | 1.4 |
 | 1.13 | **Implement NTP dev-mode time sync** (Phase 1 only — replaced by RTC in Phase 4) | 1 day | 1.1 |
 
 **Phase 1 success gate**: Two boards exchange `EtherType 0x88B5` frames over IBSS. Boot time measured and spec updated. Continuous mode relay sleep confirmed working. NTP dev-mode providing absolute time to both boards.

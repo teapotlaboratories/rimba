@@ -99,15 +99,20 @@ The working implementation deliberately took shortcuts to prove the link:
    STA) and the teardown-first bring-up is what fixes the EEXIST. **Remaining:**
    exercise/verify stop→re-enable and param/channel change at runtime (not yet tested).
    See [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
-7. ◐ **Unify create/join (provisioned model).** With merge out of scope (#4), this
-   is the remaining create/join cleanup: every node uses the **same agreed BSSID**
-   and a single proper create-or-join path against it. The current MAC-role
-   heuristic (`mac[0] & 0x80` picks who issues `cfg_ibss CREATE` vs `JOIN`) is an
-   acceptable provisioned-net role pick — make it explicit/configurable rather than
-   inferred, and fix the latent `umac_connection_addr_matches_bssid` bug (the
-   connection's BSSID field isn't set to the cell BSSID in IBSS). IPs are
-   MAC-derived (`192.168.13.<mac[5]>`), which is fine for a mesh — not a "hardcoded"
-   problem. No merge dependency anymore.
+7. ◐ **Dynamic create-else-join (`ieee80211_sta_find_ibss`).** The role must **not**
+   be provisioned — field relays are all equal and don't know who's "first". Decide
+   it at boot by **active scan against the agreed BSSID/SSID**: probe → got a probe
+   response (cell exists) → `cfg_ibss JOIN`; silence → `cfg_ibss CREATE`. Whoever
+   powers on first creates; everyone after joins. Identical logic on every node, no
+   per-node config. We already have the parts: nodes answer probe requests (M5) and
+   the chip surfaces probe responses during an active scan (M4). The current
+   `mac[0] & 0x80` heuristic is a bench stand-in for this scan. **Pairs with #18:**
+   JOIN is also what makes a late node sync to the cell's TSF (CREATE starts a fresh
+   clock), so this is the vehicle for TSF sync, not just role selection. Also fix the
+   latent `umac_connection_addr_matches_bssid` bug here (connection BSSID not set to
+   the cell BSSID in IBSS). NB this is *not* merge (#4) — same known BSSID throughout;
+   "does the one cell exist yet?", not "reconcile two BSSIDs." IPs are MAC-derived
+   (`192.168.13.<mac[5]>`), fine for a mesh.
 14. ☑ **Peer age-out / free (follow-on to #2).** Done 2026-06-20 via the adoption:
     `mmwlan_ibss_age_peers(threshold_ms)` frees per-peer records (+ stad) idle past a
     threshold and fires `PEER_REMOVED`; per-peer `last_rx_ms`, LRU eviction at the
@@ -121,9 +126,36 @@ The working implementation deliberately took shortcuts to prove the link:
     [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
 
 ### P3 — power & de-risking
-8. ☐ **ATIM / IBSS power save (RISK-06-ish, Rimba leaves).** Battery leaves need
-   doze; implement the ATIM window + buffered-traffic announcement. Check whether
-   the MM6108 firmware exposes IBSS PS at all (Open Issue #6).
+> **PRIORITY CHANGE (2026-06-20): power-save is an early focus, not deferred to
+> Phase 3/4.** Rimba's whole battery-leaf model (RTC-scheduled wake) rests on it, and
+> it's better to prove it's achievable now than to discover at Phase 3 that the
+> firmware can't. Near-term sequence: finish the small Phase-1 validation (P0.4
+> dedup, I.4 frame diff, P1.5 soak) → **#18 TSF-sync experiment** (the gating fact) →
+> **#7** dynamic create-else-join (delivers TSF sync) → **#8** ATIM/PS. The TSF
+> experiment is scheduled *after* the other Phase-1 points are done. (The
+> development plan's phasing should be revisited to match — see note there.)
+
+18. ☐ **TSF sync — prerequisite for power-save (EARLY, after other Phase-1 points).**
+    Scheduled wake / ATIM need every node to agree on the cell's TSF clock. TSF *sync*
+    (intra-cell, "adopt the highest TSF heard") is **separate from merge** (#4) and is
+    a firmware/lower-MAC behaviour — so this **starts as an experiment**, not a code
+    change:
+    1. **Can the host read the TSF?** Find/expose a `GET_TSF` in `morse_commands`
+       (Linux: `drv_get_tsf`) — needed both to verify sync and to schedule wake.
+    2. **Do same-BSSID nodes actually sync?** Measure two ESP32 TSFs over time — do
+       they converge? (One data point suggests chronium's stayed *independent*, but its
+       `fixed-freq` join may disable sync, so inconclusive for ESP32↔ESP32.)
+    3. **Does JOIN sync to the cell while CREATE starts fresh?** (Confirms #7 delivers
+       sync.)
+    If the firmware syncs intra-cell, even today's all-CREATE nodes may already
+    converge and we mainly need the readout to prove it; if it doesn't and exposes no
+    controls, that's a firmware-capability limit we document (like beacon-surfacing).
+    Linux ref: `net/mac80211/ibss.c` TSF handling + `ieee80211_rx_bss_info`.
+8. ☐ **ATIM / IBSS power save (RISK-06-ish, Rimba leaves) — EARLY FOCUS.** Battery
+   leaves need doze; implement the ATIM window + buffered-traffic announcement.
+   **Depends on #18 (synced TSF) and #7 (create-else-join).** Check whether the MM6108
+   firmware exposes IBSS PS at all (Open Issue #6) — pair that capability check with
+   the #18 experiment.
 9. ☐ **RISK-02 — measure IBSS boot/join time.** Dev plan targets `LEAF_BOOT_MS=30`;
    never measured. GPIO-toggle / timestamp from power-on to first beacon
    heard/joined. Gates Scheduled mode.
@@ -300,7 +332,22 @@ network's BSSID (provisioned at staging, like Wi-Fi credentials), so all nodes s
   (foreign-TSF beacons *are* surfaced — cf. the data-driven finding above), so this is a
   product decision, not a hardware limitation.
 
-What remains is #7 (unify create/join against the agreed BSSID), not #4.
+What remains is #7 (dynamic create-else-join against the agreed BSSID), not #4.
+
+### DECISION — role is dynamic (not provisioned) + power-save is an early focus (2026-06-20)
+Two related decisions:
+- **No provisioned create/join role.** Field relays are all equal and can't know who's
+  "first," so the role can't be a per-node config. It's decided at boot by **active scan
+  against the agreed BSSID** (`ieee80211_sta_find_ibss`): cell exists → JOIN, else CREATE.
+  See #7. The current `mac[0]&0x80` heuristic is a bench stand-in for that scan.
+- **Power-save pulled early.** Rimba's battery-leaf / RTC-scheduled-wake model depends on
+  IBSS power-save, which depends on a **synced TSF**, which depends on JOIN (vs CREATE)
+  syncing to the cell clock — so create-else-join (#7) and TSF sync (#18) are the same
+  thread, and we treat power-save as an early goal rather than a Phase-3/4 afterthought.
+  **Sequence:** small Phase-1 validation (P0.4, I.4, P1.5 soak) → #18 TSF experiment
+  (gating fact — does the firmware sync TSF / expose `GET_TSF`?) → #7 create-else-join →
+  #8 ATIM/PS. The TSF experiment runs *after* the other Phase-1 points. The development
+  plan's phase ordering should be revisited to match.
 
 ### Beacon interval = 100 TU, matches Linux (2026-06-20)
 Q: is the ESP32 beacon interval different from Linux? **No.** The app sets
