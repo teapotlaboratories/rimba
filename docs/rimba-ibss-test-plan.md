@@ -155,7 +155,7 @@ The reference-implementation correctness check: our port talks to real Linux
 | I.1 | ☑ | Mutual discovery | Linux `iw dev wlan0 scan` sees us / our probe-answer responds; we form a peer record for the Linux MAC; `iw dev wlan0 station dump` lists our nodes |
 | I.2 | ☑ | Beacon interop (both ways) | Linux ingests our hand-built S1G beacons without error; we ingest Linux beacons without garbage/crash — **riskiest divergence point** (our IE set vs `morse_driver`) |
 | I.3 | ☑ | Data path | ESP32 ↔ Linux ping both directions + throughput; validates addressing (A1=DA/A2=SA/A3=BSSID), plaintext data frames |
-| I.4 | ☐ | On-air frame diff | Linux in **monitor mode** captures our beacon/probe/data; decode and diff against Linux-emitted frames (closes #11) |
+| I.4 | ✗ | On-air frame diff | **BLOCKED 2026-06-21 — morse monitor mode delivers no S1G frames** (not a code failure). Needs an external S1G sniffer to close #11. See the I.4 note below. |
 | I.5 | ☑ | Mixed 4-node cell | 3 ESP32 + 1 Linux: all-pairs reachability + broadcast reaches everyone across both implementations |
 
 **Run 2026-06-20 (I.5)** — chronium (`wlan1`, MM6108, `.66`) joined the pinned cell
@@ -191,7 +191,26 @@ IP `192.168.13.66`.
   time out). **Data path is unaffected** (I.3 works); the bug is isolated to the ESP32
   IBSS RX **peer-extraction vs the reference S1G (compressed/EXT) MAC-header layout**.
   Tracked as hardening backlog **#16**. Fix is ESP32-side, then re-run I.1/I.2.
-- **I.4 / I.5** ☐ not yet run (gated on the I.2 fix for a meaningful mixed cell).
+- **I.5** ☑ done (mixed 4-node, after the #17 fix — see §5).
+- **I.4 ✗ BLOCKED (2026-06-21) — morse monitor mode captures nothing on-wire.** Put
+  chronium's `wlan1` in monitor mode on the right S1G channel (`morse_cli` confirmed
+  **915500 kHz** = ch27, 1 MHz) with ACM0 beaconing as a lone IBSS creator, and captured
+  via a raw `AF_PACKET` socket. **Zero frames** — `rx_packets` delta was **0** over 6 s,
+  unchanged by promiscuous mode, with no `morse_cli` monitor/sniff command and no relevant
+  `dmesg`. The same `wlan1` receives fine in *IBSS* mode, so this is a **morse monitor-mode
+  limitation** (the firmware doesn't surface frames to the host in monitor) — consistent
+  with the broader "firmware doesn't readily surface S1G beacons to the host" theme (#16).
+  **Confirmed not IBSS-specific (2026-06-21):** repeated with an ESP32 **SoftAP** beaconing
+  (a well-supported mode) on the same channel — **also 0 frames, rx delta 0**. So morse
+  monitor mode captures nothing regardless of the transmitter's mode (IBSS or AP).
+  **Consequence:** closing **#11** (verify the S1G beacon on-wire) needs an **external
+  S1G-capable sniffer** (a second non-morse radio or an SDR) — neither the Linux monitor
+  nor the ESP32 active-scan (surfaces only probe responses, per M4) can do it. What we
+  *do* know of the framing comes from instrumentation, not a clean capture: chronium's
+  beacon `source_addr = BSSID` (DBG-SA + the morse `morse_dot11ah_beacon_to_s1g` source),
+  the data header layout (DBG17: A1=RA@4, A2=TA@10), and the M5 probe-response decode. The
+  one thing still *unverified* on-wire is **our ESP32's own beacon `source_addr`** (MAC vs
+  BSSID) — it needs the external sniffer.
 
 **Net (initial run):** IBSS data interoperates on-air with the reference implementation
 (I.3 ✓); the one defect was the ESP32's beacon-based peer discovery against real
