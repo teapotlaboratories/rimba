@@ -135,8 +135,13 @@ The working implementation deliberately took shortcuts to prove the link:
 > experiment is scheduled *after* the other Phase-1 points are done. (The
 > development plan's phasing should be revisited to match — see note there.)
 
-18. ☐ **TSF sync — prerequisite for power-save (EARLY, after other Phase-1 points).**
-    Scheduled wake / ATIM need every node to agree on the cell's TSF clock. TSF *sync*
+18. ☐ **TSF sync — DEMOTED (no longer gating; the RTC is the schedule clock).** *Reframed
+    2026-06-20.* Power-save scheduling now rides the **RTC** (#8 RTC-scheduled mode), not
+    the radio TSF — so TSF sync is **not** a power-save prerequisite anymore. Keep it on
+    the list only as a *nice-to-have* (fine intra-window timing, or if we ever want
+    radio-level scheduling). The experiment below stays valid if/when we want it, but it is
+    **not** Phase-1-blocking; #9 (boot time) is the gating power-save number instead.
+    Scheduled wake needs every node to agree on the cell's TSF clock. TSF *sync*
     (intra-cell, "adopt the highest TSF heard") is **separate from merge** (#4) and is
     a firmware/lower-MAC behaviour — so this **starts as an experiment**, not a code
     change:
@@ -151,14 +156,65 @@ The working implementation deliberately took shortcuts to prove the link:
     converge and we mainly need the readout to prove it; if it doesn't and exposes no
     controls, that's a firmware-capability limit we document (like beacon-surfacing).
     Linux ref: `net/mac80211/ibss.c` TSF handling + `ieee80211_rx_bss_info`.
-8. ☐ **ATIM / IBSS power save (RISK-06-ish, Rimba leaves) — EARLY FOCUS.** Battery
-   leaves need doze; implement the ATIM window + buffered-traffic announcement.
-   **Depends on #18 (synced TSF) and #7 (create-else-join).** Check whether the MM6108
-   firmware exposes IBSS PS at all (Open Issue #6) — pair that capability check with
-   the #18 experiment.
-9. ☐ **RISK-02 — measure IBSS boot/join time.** Dev plan targets `LEAF_BOOT_MS=30`;
-   never measured. GPIO-toggle / timestamp from power-on to first beacon
-   heard/joined. Gates Scheduled mode.
+8. ☐ **RTC-scheduled radio power-cycling = Rimba "Scheduled mode" (EARLY FOCUS;
+   PRIORITY after the small Phase-1 items).** *Approach decided 2026-06-20.* Instead of
+   relying on chip-level IBSS power-save (which doesn't exist — see below), drive the
+   whole duty cycle from the **ESP32 + the precise RTC** (RV-3028-C7, ≤1 ppm): the RTC
+   alarm wakes the ESP32, which **powers the MM6108 on, joins the pinned cell, exchanges
+   for the window, powers the radio off, and deep-sleeps** until the next alarm. Both
+   chips off between windows → lowest power.
+
+   **Why this is the right model (it bypasses the firmware gaps):**
+   - **No chip IBSS power-save needed** — we hard power-cycle the radio, not chip-doze it.
+   - **No radio TSF sync needed** — the **RTC is the shared clock**, not the chip TSF.
+     This *demotes #18* (TSF sync) from "gating prerequisite" to nice-to-have.
+   - **Fits Rimba's DTN nature** — delay-tolerant, so "events wait for the next window"
+     is acceptable (leaves buffer + send on their slot). RTC is already mandated in the
+     spec *for* scheduled wake.
+   - **Keeps the all-IBSS topology** — pure-IBSS leaves can be low-power without TWT, so
+     the AP-STA-for-power argument (below) is weakened, not forced.
+
+   **The gating measurement → RISK-02 (#9): radio cold-boot-to-IBSS-joined time.** Every
+   window pays an MM6108 boot (firmware blob over SPI) + IBSS formation before data flows.
+   That single number sets the viable wake period + the power budget; if it's tens of ms,
+   great, if hundreds of ms–seconds, the duty cycle is inefficient. **Also check for a
+   faster *resume* (firmware-retained reset) vs full cold boot.** This is THE Phase-1
+   power-save experiment — measure it on the bench (GPIO toggle: power-on → first
+   frame exchanged).
+
+   **Other costs to design for:** clock discipline (RTCs drift — ~60 µs/min at 1 ppm, so a
+   few-ms guard band covers many minutes; need initial + periodic re-sync, e.g. distribute
+   canonical time **in-band during the window**); window = boot + join + data + guard; all
+   nodes on the same schedule (provisioned period + re-sync); latency floor = the wake
+   period (async alerts wait — DTN-acceptable).
+
+   **Hardware pins (XIAO carrier, `boards/proto1-fgh100m`)** for the cycle: `RESET_N`=GPIO1
+   (power-cycle the chip), **`WAKE`=GPIO2** (host→chip, `mmdrv_set_wake_enabled()`),
+   **`BUSY`=GPIO5** (chip→host), **`SPI_IRQ`=GPIO3** (chip→host — wakes the ESP32). RTC
+   alarm → ESP32 deep-sleep wake. The wiring exists (dev-plan 1.9–1.11).
+
+   **Why not chip power-save (the investigation that led here):**
+   - *morselib:* `mmwlan_set_power_save_mode` + `Standby` exist but are **STA/DTIM-only**;
+     no ATIM, no IBSS-PS code.
+   - *morse Linux driver (firmware oracle):* rich PS — `ps.c` (bus/dynamic PS), **`twt.c`
+     (TWT, 802.11ah scheduled wake)**, `yaps.c` — but **structurally STA/AP-only** (every
+     TWT path gates on `IFTYPE_STATION`/`AP`; no ADHOC; no ATIM). So the firmware almost
+     certainly has **no IBSS radio power-save**. See the Findings note.
+   - *Continuous mode* (radio on, MCU sleeps on the GPIO3 IRQ) remains the simple fallback
+     and is independently useful for always-on relays.
+   - *TWT works in AP-STA* — only relevant if the RTC-scheduled approach proves
+     insufficient; then AP-STA leaf↔relay links become the lever. Not the plan.
+
+   **Depends on #7 (create-else-join, so a woken node rejoins fast) + #9 (RISK-02 boot
+   time, the gating number).** Supersedes the earlier "implement ATIM" framing.
+9. ☐ **RISK-02 — measure radio cold-boot-to-IBSS-joined time (GATING for #8; PRIORITY
+   after the small Phase-1 items).** This is the number that decides whether RTC-scheduled
+   mode (#8) is viable. Dev plan targets `LEAF_BOOT_MS=30`; never measured. GPIO-toggle /
+   timestamp from MM6108 power-on → firmware loaded → IBSS joined → **first frame
+   exchanged**. Also measure a *resume* path (firmware-retained reset) if one exists — a
+   fast resume vs a full cold boot changes the power budget a lot. Run on the bench
+   (boards we have). **This is the Phase-1 power-save experiment** (replaces the earlier
+   "does the chip do IBSS PS" framing — we now expect it doesn't).
 10. ☐ **>2-node test.** Validate beacons, discovery, and data with 3+ nodes (needs
     more boards) — depends on #2.
 11. ☐ **Verify the S1G beacon on-wire.** Only the probe response was decoded; the
@@ -340,14 +396,38 @@ Two related decisions:
   "first," so the role can't be a per-node config. It's decided at boot by **active scan
   against the agreed BSSID** (`ieee80211_sta_find_ibss`): cell exists → JOIN, else CREATE.
   See #7. The current `mac[0]&0x80` heuristic is a bench stand-in for that scan.
-- **Power-save pulled early.** Rimba's battery-leaf / RTC-scheduled-wake model depends on
-  IBSS power-save, which depends on a **synced TSF**, which depends on JOIN (vs CREATE)
-  syncing to the cell clock — so create-else-join (#7) and TSF sync (#18) are the same
-  thread, and we treat power-save as an early goal rather than a Phase-3/4 afterthought.
-  **Sequence:** small Phase-1 validation (P0.4, I.4, P1.5 soak) → #18 TSF experiment
-  (gating fact — does the firmware sync TSF / expose `GET_TSF`?) → #7 create-else-join →
-  #8 ATIM/PS. The TSF experiment runs *after* the other Phase-1 points. The development
-  plan's phase ordering should be revisited to match.
+- **Power-save pulled early — via RTC scheduling, not chip power-save.** The morse driver
+  has no IBSS radio power-save (TWT is STA/AP-only — see the Finding), so Rimba's
+  battery-leaf Scheduled mode is driven by the **ESP32 + the precise RTC**: wake on the RTC
+  alarm, power the radio on, join, exchange, power off, deep-sleep (#8). This **bypasses
+  both the missing chip IBSS-PS and the TSF-sync question** (the RTC is the schedule clock,
+  so #18 is demoted). The gating unknown is **radio cold-boot-to-joined time** (#9 /
+  RISK-02) — that one number sets the viable wake period and the power budget.
+  **Sequence:** small Phase-1 validation (P0.4, I.4, P1.5 soak) → **#9 RISK-02 boot-time
+  measurement** (the gating number) → #8 RTC-scheduled-mode prototype → #7 create-else-join
+  (fast rejoin per window). The boot-time measurement runs *after* the other Phase-1
+  points. Dev-plan task 1.12a updated to match.
+
+### FINDING — morse driver has no IBSS radio power-save; TWT is STA/AP-only (2026-06-20)
+Read the morse Linux driver (`~/halow/morse_driver` on chronium) to gauge firmware
+power-save capability. It has a *rich* power-save stack — `ps.c` (bus/dynamic PS),
+**`twt.c` (Target Wake Time — the 802.11ah scheduled-wake mechanism, not legacy ATIM)**,
+`yaps.c` — **but it is structurally STA/AP-only:** every TWT path gates on
+`IFTYPE_STATION`/`IFTYPE_AP` (no ADHOC branch), `morse_cmd_set_ps` is driven from STA
+(`cfg80211` power_mgmt) + AP paths, and there is **no ATIM and no IBSS/ADHOC on-air
+power-save path anywhere**. Since the driver mirrors firmware features, the firmware very
+likely has **no IBSS radio power-save** — an IBSS node's radio stays awake to hear peers.
+
+**Consequence — resolved by going host-driven (RTC), not a blocker after all:**
+- *Continuous mode* (radio on, **MCU** sleeps, wakes on the GPIO3 IRQ) is achievable now.
+- *Scheduled mode* doesn't need chip power-save: **drive it from the ESP32 + RTC** —
+  power-cycle the radio per the RTC schedule (#8). The RTC is the shared clock, so we
+  don't need TWT/ATIM *or* radio TSF sync. This keeps the all-IBSS topology.
+- **TWT works in AP-STA** — held in reserve only if RTC-scheduled cycling proves too
+  power-hungry (e.g. radio cold-boot is too slow per #9); then AP-STA leaf↔relay links
+  become the lever. Not the current plan.
+Full detail + the gating experiment (#9 boot time) in #8. Still worth confirming with
+Morse whether any IBSS PS exists undocumented (as the IBSS_CONFIG opcodes did).
 
 ### Beacon interval = 100 TU, matches Linux (2026-06-20)
 Q: is the ESP32 beacon interval different from Linux? **No.** The app sets
