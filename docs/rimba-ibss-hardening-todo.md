@@ -61,6 +61,11 @@ The working implementation deliberately took shortcuts to prove the link:
     Verified on-air: 1 clean peer for the Linux MAC, 0 phantoms, passive beacon
     discovery, bidirectional ping. Side benefit: the data path was already fine, so this
     only touched discovery.
+    **Superseded 2026-06-20:** the `DBG-SA` follow-up (Findings → "Beacon-based peer
+    discovery does no real work") showed the firmware doesn't surface peer beacons and
+    morse beacons carry `source_addr=BSSID`, so beacon-based discovery earns nothing.
+    `process_s1g_beacon` now **drops** beacons (no peer minting); discovery is fully
+    data-driven. Revisit only if a future firmware surfaces real per-node beacons.
 17. ☑ **Chronium beacon phantom flood (mixed-cell interop).** *Found + fixed 2026-06-20
     (I.5).* The adopted datapath bound IBSS to the **AP-mode**
     `frames_allowed_pre_association` list, which omits `S1G_BEACON` (an AP never receives
@@ -237,6 +242,27 @@ super `wip/ibss-adopt-refactor`, submodule `wip/adopt-momentary-ibss`). Bench re
   - **Severity:** broke **Linux interop** discovery (and degraded pure cells — ESP32 peer
     beacons hit the same mint). Not a hard pure all-ESP32 blocker (data-path discovery
     masked it), but the fix makes both cells clean.
+
+### Beacon-based peer discovery does no real work — discovery is data-driven (2026-06-20)
+Followed up on #17 with an on-air `DBG-SA` probe in `process_s1g_beacon` (dump each
+received beacon's `source_addr`). Result settles whether #16 beacon discovery earns its
+keep — it doesn't:
+- **Pure 2-ESP32:** the two boards communicate fine, but **0 beacons reached
+  `process_s1g_beacon`** on either. The **mm6108 firmware (1.17.6) does not surface
+  same-cell peer beacons to the host** — a firmware/lower-MAC decision, upstream of the
+  driver (morselib never sees them). So ESP32↔ESP32 discovery is 100% data-driven.
+- **With chronium:** 113 beacons reached the handler, **all** `source_addr =
+  02:12:34:56:78:9a` (the BSSID), and `umac_connection_addr_matches_bssid()` returned
+  **false** for it — so #16 was actually **minting the BSSID as a junk peer** (→ IP
+  `.154`), not "dropping it" as previously thought. (Sub-bug: the connection's BSSID
+  field isn't set to our cell BSSID in IBSS; moot once we stop using beacons.)
+- **Conclusion / fix:** `process_s1g_beacon` no longer mints peers from beacons (#16
+  reverted to a drop, with a comment marking it **morse hardware/firmware dependent**).
+  Real discovery is the data-frame path (`lookup_stad_by_peer_addr_ibss` on the real TA),
+  which is what Linux+morse effectively does too (`net/mac80211/ibss.c` keys on
+  `mgmt->sa`, but morse RX sets `mgmt->sa = bssid`). Converges our design with the
+  momentary-systems (data-driven) model. Revisit #16 only if a future firmware surfaces
+  peer beacons with a real per-node `source_addr`. `mm-esp32-halow` `d7cfa18`.
 
 ### Beacon interval = 100 TU, matches Linux (2026-06-20)
 Q: is the ESP32 beacon interval different from Linux? **No.** The app sets
