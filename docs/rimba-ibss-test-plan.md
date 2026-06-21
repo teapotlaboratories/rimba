@@ -41,7 +41,8 @@ implementation** — which is the remaining point of this plan (P0.5-interop, P1
 | N0–N2 | XIAO ESP32-S3 + HaLow (MM6108) | esp-halow / morselib (our port) | `/dev/ttyACM0..2` |
 | N3 | Same MM6108 module on Linux | `morse_driver` + mac80211 (reference) | host net iface |
 
-**Common cell parameters — identical on every node** (no TSF merge yet, so the
+**Common cell parameters — identical on every node** (no TSF merge — provisioned
+mesh, agreed BSSID, by design; #4 out of scope — so the
 BSSID must be pinned, see gaps §7):
 
 | Param | Value |
@@ -211,7 +212,7 @@ sudo ip link set wlan0 up
 
 # Join OUR cell with the pinned BSSID, on the S1G channel matching ch27/1MHz/op-class 68.
 # The exact freq/channel arg follows morse_driver's S1G convention (see Luckfox worklog);
-# fixed-freq + BSSID is required because neither side does TSF merge yet.
+# fixed-freq + BSSID is required because neither side does TSF merge (by design).
 sudo iw dev wlan0 ibss join rimba-ibss <S1G_FREQ_FOR_CH27> fixed-freq 02:12:34:56:78:9a
 
 # Static IP per the MAC-octet convention (matches the ESP32 derivation).
@@ -262,7 +263,8 @@ no long-duration evidence.
 2. **No teardown / disable path** (backlog #6) — bring-up assumes a clean boot;
    can't cleanly cycle IBSS down/up without a reboot.
 3. **Role = MAC heuristic** — untested when multiple nodes pick the same role
-   (P2.2); real create/join + merge is backlog #16.
+   (P2.2). Merge (#4) is out of scope (provisioned mesh); the remaining cleanup is
+   unifying create/join against the agreed BSSID (#7).
 
 ---
 

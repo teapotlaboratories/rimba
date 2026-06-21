@@ -12,8 +12,9 @@ Status: ☐ todo · ◐ in progress · ☑ done. Update this log as items move.
 The working implementation deliberately took shortcuts to prove the link:
 - **Single shared peer `stad`** for the whole cell — RX dedup/sequence tracking
   is one space shared across all peers; correct for 2 nodes, wrong for >2.
-- **No IBSS merge** — BSSID is hardcoded and the role is a MAC heuristic in the
-  app; no TSF-based merge / join-existing-cell discovery.
+- **No IBSS merge** — agreed (pinned) BSSID, role is a MAC heuristic in the app; no
+  TSF-based merge. *Now a deliberate design choice, not a shortcut* — Rimba is a
+  provisioned network, see #4 (out of scope) and the Findings decision note.
 - **Open/plaintext only** — peer marked `MMWLAN_OPEN`; no encryption.
 - **No ATIM / power save** — ATIM window 0 (always awake).
 - **Verified with IP (0x0800)**, not the literal Rimba EtherType `0x88B5`.
@@ -77,11 +78,19 @@ The working implementation deliberately took shortcuts to prove the link:
     mint and route to `process_s1g_beacon` (#16 `source_addr` discovery, drops SA=BSSID).
     **Verified:** mixed 4-node cell full all-pairs reachability, **0 phantoms** (was
     hundreds). Same mint was the source of pure-cell discovery flakiness too. See
-    Findings → "BUG #17". Discover peers via beacons and converge on a common
-   BSSID/TSF (higher-TSF wins), per `ieee80211_rx_bss_info`. Replaces the
-   hardcoded-BSSID + MAC-role bench heuristic with real create/join semantics
-   (scan → join existing, else create). **Pairs with #14 (age-out): merge makes
-   peer membership a real state machine, and add/remove are two sides of it.**
+    Findings → "BUG #17".
+4. ✗ **IBSS merge (TSF) — OUT OF SCOPE (decided 2026-06-20).** *Rimba is a
+   **provisioned** network*: every node is deployed knowing the mesh's BSSID (like
+   Wi-Fi credentials), so all nodes are already on one agreed cell. TSF merge
+   (`ieee80211_rx_bss_info`, higher-TSF wins) exists to let *uncoordinated* ad-hoc
+   nodes — each having rolled its own **random** BSSID — converge to a single cell.
+   With a pre-shared BSSID there are never two BSSIDs to reconcile, so merge is
+   unnecessary. The adopted momentary-systems fork made the same call (pinned BSSID,
+   explicit create/join, no merge), as does Linux when pointed at a fixed BSSID. The
+   still-useful part of the old #4 (unify create/join, drop the role heuristic) is
+   folded into #7. **Revisit only if a deployment ever needs coordinator-free cell
+   formation** (nodes that cannot pre-agree on a BSSID). See the Findings decision
+   note below.
 5. ☐ **Beacon contention.** Real IBSS has distributed beaconing (a node suppresses
    its beacon if it heard one for the interval). Currently every node beacons
    every interval unconditionally — fine for 2, a storm risk as density grows.
@@ -90,8 +99,15 @@ The working implementation deliberately took shortcuts to prove the link:
    STA) and the teardown-first bring-up is what fixes the EEXIST. **Remaining:**
    exercise/verify stop→re-enable and param/channel change at runtime (not yet tested).
    See [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
-7. ☐ **Drop bench heuristics.** Remove the MAC-based role pick + hardcoded IPs in
-   the app once merge + proper create/join land.
+7. ◐ **Unify create/join (provisioned model).** With merge out of scope (#4), this
+   is the remaining create/join cleanup: every node uses the **same agreed BSSID**
+   and a single proper create-or-join path against it. The current MAC-role
+   heuristic (`mac[0] & 0x80` picks who issues `cfg_ibss CREATE` vs `JOIN`) is an
+   acceptable provisioned-net role pick — make it explicit/configurable rather than
+   inferred, and fix the latent `umac_connection_addr_matches_bssid` bug (the
+   connection's BSSID field isn't set to the cell BSSID in IBSS). IPs are
+   MAC-derived (`192.168.13.<mac[5]>`), which is fine for a mesh — not a "hardcoded"
+   problem. No merge dependency anymore.
 14. ☑ **Peer age-out / free (follow-on to #2).** Done 2026-06-20 via the adoption:
     `mmwlan_ibss_age_peers(threshold_ms)` frees per-peer records (+ stad) idle past a
     threshold and fires `PEER_REMOVED`; per-peer `last_rx_ms`, LRU eviction at the
@@ -263,6 +279,28 @@ keep — it doesn't:
   `mgmt->sa`, but morse RX sets `mgmt->sa = bssid`). Converges our design with the
   momentary-systems (data-driven) model. Revisit #16 only if a future firmware surfaces
   peer beacons with a real per-node `source_addr`. `mm-esp32-halow` `d7cfa18`.
+
+### DECISION — Rimba is a provisioned network: no IBSS merge (2026-06-20)
+Closes #4. **Rimba is a provisioned mesh** — every node is deployed already knowing the
+network's BSSID (provisioned at staging, like Wi-Fi credentials), so all nodes share one
+**agreed BSSID** and are on a single cell from boot.
+
+- **What merge is for:** IBSS has no AP to define the cell. If nodes start "the same"
+  network (same SSID) but each rolls its own **random** BSSID, you get two same-named cells
+  with different IDs that can't talk. TSF merge (`net/mac80211/ibss.c:
+  ieee80211_rx_bss_info`, higher-TSF wins) is the coordinator-free coalescing that collapses
+  them into one — *only needed when nodes can't pre-agree on a BSSID*.
+- **Why Rimba doesn't need it:** a pre-shared BSSID means there are never two BSSIDs to
+  reconcile. Standard for a managed deployment; sidesteps the firmware-capability risks
+  (runtime BSSID change, TSF readout) merge would require.
+- **Consistency:** the adopted momentary-systems fork already chose pinned-BSSID + explicit
+  create/join + no merge; Linux pointed at a fixed BSSID behaves the same.
+- **Reversal trigger:** only a deployment that must form cells with *no* pre-agreed BSSID
+  (truly uncoordinated nodes). Not anticipated. The merge beacon-input is actually available
+  (foreign-TSF beacons *are* surfaced — cf. the data-driven finding above), so this is a
+  product decision, not a hardware limitation.
+
+What remains is #7 (unify create/join against the agreed BSSID), not #4.
 
 ### Beacon interval = 100 TU, matches Linux (2026-06-20)
 Q: is the ESP32 beacon interval different from Linux? **No.** The app sets
