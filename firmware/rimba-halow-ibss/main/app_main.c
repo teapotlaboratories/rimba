@@ -119,6 +119,12 @@ static uint8_t s_pending[8][6];
 static volatile unsigned s_npending;
 static void peer_cb(const uint8_t *mac, enum mmwlan_ibss_peer_event ev, void *arg)
 {
+    /* Test observability (P0.6 drop/rejoin): surface membership churn. The
+     * umac_ibss layer's own "IBSS new peer"/"aging out" logs are MMLOG_INF, which
+     * is compiled out at morselib's default ERR level — so log it app-side here. */
+    ESP_LOGI(TAG, "peer_cb %s %02x:%02x:%02x:%02x:%02x:%02x",
+             ev == MMWLAN_IBSS_PEER_ADDED ? "ADDED" : "REMOVED",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     if (ev != MMWLAN_IBSS_PEER_ADDED) return;
     if (s_npending < 8) { memcpy(s_pending[s_npending++], mac, 6); }
 }

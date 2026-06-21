@@ -84,7 +84,7 @@ The first real exercise of the per-peer records (#14); invisible with 2 boards.
 | P0.3 | ☑ | Broadcast reaches all | one node's broadcast `0x88B5` is received by **both** others |
 | P0.4 | ◐ | Per-peer dedup correctness | with 2 peers each, **no cross-peer false dedup** (the bug #14 prevents) — sequence/dup counters per peer are independent |
 | P0.5 | ☑ | Concurrent multi-peer load | N0 drives N1 and N2 simultaneously; both flows hold |
-| P0.6 | ◐ | Partial-failure resilience | power-cycle N2 → N0↔N1 unaffected; N2 rejoins → rediscovered as a fresh record |
+| P0.6 | ☑ | Partial-failure resilience | power-cycle N2 → N0↔N1 unaffected; N2 rejoins → rediscovered as a fresh record |
 | P0.7 | ☑ | Multi-creator convergence | however the MAC role-heuristic assigns roles across 3 boards, all share one BSSID/cell |
 
 **Run 2026-06-19** — 3× XIAO ESP32-S3 on ACM0/1/2, one binary (N-node MAC-octet
@@ -112,6 +112,20 @@ addressing), `boards/proto1-fgh100m`. MAC→IP: `…6b:b7`→.183, `bc…b2:9f`�
   layer is unaffected (real DATA is driven off the live peer table each loop, not a
   one-shot ping session); the **ping test app** needs membership-driven sessions to
   test survivor re-acquisition properly. Blocked on age-out (§8.1).
+- **P0.6 ☑ — re-run 2026-06-20, caveat resolved by the age-out adoption.** With the
+  momentary-systems `umac_ibss` age-out merged, the survivor side now works. Dropped
+  N2 (`.86` = `68:24:99:44:6a:56`) by re-flash (radio off); survivors (instrumented
+  `peer_cb` logging, since the layer's own add/age-out logs are `MMLOG_INF`, compiled
+  out at the default ERR level) showed: **(1) link unaffected** — N0↔N1 replies
+  continued throughout; **(2) age-out** — *both* survivors logged `peer_cb REMOVED
+  68:24:99:44:6a:56` ~30 s after N2 went silent (record freed); **(3) rediscovery as
+  a fresh record** — on N2's return *both* logged `peer_cb ADDED 68:24:99:44:6a:56`
+  (only possible because age-out freed the old record); **(4) bidirectional data to
+  the returned node restored** — N2 receives replies from *both* survivors (so
+  survivor→N2 and N2→survivor both flow). Remaining app-only caveat (#7): the test
+  app pings each peer once and never clears `pinged[]` on `REMOVED`, so the survivor's
+  *own* ping session to the returned peer isn't re-displayed — the link is proven via
+  the reverse direction. Fix: membership-driven ping sessions in the app.
 - **P0.7 ☑** — all three boards (whatever role the MAC heuristic assigned) shared
   one BSSID/cell; no split-cell.
 
