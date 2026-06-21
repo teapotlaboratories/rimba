@@ -12,6 +12,17 @@ Both forks share the same premise: a fork of `morsemicro/halow`, adding host-sid
 to morselib on stock MM6108 firmware (both verified on 1.17.6 / 1.17.9), OPEN /
 no link-layer encryption. The differences are in maturity vs reference-correctness.
 
+> **⚠ Status update (2026-06-20): this comparison drove a decision we then acted on —
+> we ADOPTED the momentary-systems implementation** (their `umac_ibss.c` + datapath,
+> onto our `esp32-2` base) as the proper EEXIST fix (milestones **H2**). Two claims
+> below were later *disproven on hardware* and are corrected inline:
+> - "Ours is ahead via beacon discovery" rested on a **wrong measurement** (we thought
+>   chronium's beacon carried the node MAC; it carries `SA=BSSID`). Beacon discovery is
+>   moot on this hardware — discovery is **data-driven**, so we converged on *their*
+>   model (#16). See [`worklog/2026-06-20-ibss-adoption-interop-phantom.md`](worklog/2026-06-20-ibss-adoption-interop-phantom.md).
+> - Their datapath had a latent **#17 phantom-flood** bug (IBSS bound to the AP-mode
+>   `frames_allowed_pre_association` list) that we inherited and then fixed.
+
 ## Where theirs is ahead (these map to our open TODOs)
 
 | Area | momentary-systems (`5237495`) | Ours | Our backlog |
@@ -29,35 +40,35 @@ app-layer-crypto recommendation with a perf budget, and honest caveats. `UMAC_IB
 = 8` (same as ours); per-peer state is RX-only (TX shares one stad/queue) — **identical to
 our design**, so no per-peer Block-Ack on TX in either.
 
-## Where ours is ahead — reference-implementation (Linux) correctness
+## What our Linux interop testing actually found (corrects the original "ours is ahead")
 
-**The decisive difference.** Both forks were tested ESP32↔ESP32 only — *except ours*, which
-we validated on-air against the real Linux `morse_driver`/mac80211 IBSS node (P0.5,
-2026-06-20). That exposed a divergence in their design:
+The original draft claimed our beacon-based discovery was a reference-correctness
+advantage over their "drop beacons as another AP" handler. **On-air testing against the
+real Linux node disproved this** — and we ended up adopting *their* model:
 
-Their S1G beacon handler `umac_datapath_process_s1g_beacon` (datapath `umac_datapath.c:156`):
-```c
-if (!umac_connection_addr_matches_bssid(umacd, s1g_header->source_addr)) {
-    MMLOG_DBG("Beacon received from another AP.\n");   /* -> drop */
-    return;
-}
-```
-It assumes a beacon's `source_addr == BSSID`. That holds for the **ESP32's own
-non-standard self-beacon** (the `SA=BSSID` / SW-4741 quirk) but **not** for a standard
-802.11 IBSS beacon, where `SA = the beaconing node's own MAC`. The Linux `morse_driver`
-emits the standard form — we *measured* chronium's beacon `source_addr = 3c:22:7f…` (the
-node MAC, not the BSSID). So their handler would **reject the reference implementation's
-beacons as "from another AP,"** i.e. no passive beacon discovery against Linux (it would
-fall back to data-frame discovery, which still works).
+- **Their handler was effectively right.** `umac_datapath_process_s1g_beacon` dropped
+  beacons whose `source_addr` looked like the BSSID. A `morse_driver` node's S1G beacon
+  carries **`source_addr = BSSID`** (measured: `sa = 02:12:34:56:78:9a`, the BSSID — *not*
+  the node MAC `3c:22:7f…` as the original draft wrongly stated; the morse RX path
+  `dot11ah/rx_s1g_to_11n.c: morse_dot11ah_s1g_to_beacon` sets `mgmt->sa = mgmt->bssid`).
+  So a morse beacon can't identify the sender at all.
+- **Our #16 "mint a peer from `source_addr`" was the wrong move** — it minted the BSSID as
+  a junk peer (and the firmware doesn't even surface same-cell *peer* ESP32 beacons to the
+  host, so it discovered nothing real). We reverted #16 to **drop** beacons (H5): all
+  discovery is **data-driven** (data-frame source addresses) — i.e. *their* design.
+- **Net:** beacon-based IBSS discovery does no useful work on this firmware. Linux+morse is
+  data-driven for the same reason (`ieee80211_ibss_rx_bss_info` keys `mgmt->sa`, which the
+  morse RX path has set to the BSSID).
 
-Our #16 fix takes the opposite, IBSS-correct path: read `source_addr` and **mint a peer
-from it**; the BSSID-exclusion drops only our own cell's self-beacon. Result (verified
-on-air): the ESP32 discovers the Linux node **passively from its beacon**, 1 clean peer, 0
-phantoms, bidirectional ping. This is a direct payoff of our governing rule — derive and
-verify against the Linux side — vs their ESP32-only testing.
-
-> Note: their behaviour against Linux is *inferred from their code*, not measured by us.
-> Ours against Linux is measured (test plan §5, I.1/I.2/I.3 pass).
+### Where we *did* add value (post-adoption)
+- **#17 phantom-flood fix** — their datapath (and ours, after adoption) bound IBSS to the
+  **AP-mode** `frames_allowed_pre_association` list, omitting `S1G_BEACON`; beacons then
+  fell to the data-path `dot11_get_ta` mint and read the S1G **timestamp** as a peer →
+  flood. We gave IBSS its own list with `S1G_BEACON`. *Their fork still has this latent
+  bug* (only surfaces against a `morse_driver` node, which they never tested).
+- **Linux interop validation** — I.1–I.3 + I.5 on-air against `morse_driver`/mac80211
+  (test plan §5). Both forks were otherwise ESP32↔ESP32 only.
+- **P0.6 drop/rejoin** validated using their age-out.
 
 ## Where they're the same
 - **No TSF merge** (#4) — neither auto-merges; both pin the BSSID. (Theirs: explicit
@@ -66,11 +77,14 @@ verify against the Linux side — vs their ESP32-only testing.
   our Phase-2 software-shim decision). Their fork ships a `supplicant_shim` but does **not**
   wire IBSS-RSN ("plausibly 1000+ lines").
 - **Firmware support** — both 1.17.6 + 1.17.9.
+- **Discovery model** — both data-driven now (we converged on theirs via #16).
 
-## Recommendation
-Borrow their **robustness work** — age-out (#14), teardown (#6), membership callbacks, and
-the `umac_ibss.c` factoring (#12); their `umac_ibss.c` is a strong template that would
-accelerate that backlog. **Keep our Linux-verified beacon discovery** (their `SA=BSSID`
-beacon assumption must not be adopted). Cautions: they self-describe the fork as "hackily
-forked… AI slop," they modify shared AP/STA files without re-verifying those modes, and the
-`mmwlan_ibss_*` symbol names may collide with a future official Morse API.
+## Outcome (what we did)
+**Adopted their implementation** (`umac_ibss.c` + datapath, milestones H2) for the proper
+EEXIST fix and the robustness work — age-out (#14), teardown (#6), membership callbacks,
+module factoring (#12). On top, we **fixed #17** (their latent phantom-flood bug) and
+**validated against the Linux reference**. The original "keep our beacon discovery" advice
+is **reversed** — beacon discovery is moot on this hardware; we use their data-driven model.
+Residual cautions still apply: they self-describe the fork as "hackily forked… AI slop,"
+they modify shared AP/STA files without re-verifying those modes, and the `mmwlan_ibss_*`
+symbol names may collide with a future official Morse API.

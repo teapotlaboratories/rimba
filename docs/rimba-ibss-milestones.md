@@ -10,9 +10,13 @@ diagnoses) see [`worklog/2026-06-18-risk01-ibss-recon.md`](worklog/2026-06-18-ri
 `net/mac80211/ibss.c` (MorseMicro kernel fork) for the IBSS beacon/probe-resp IE
 set, merge, and ATIM — not improvised from morselib's AP path.
 
-**Hardware:** 2× Seeed XIAO ESP32-S3 + HaLow module (reports `mm6108-mf16858`,
-chip `0x0306`, firmware **v1.17.6**); board config `boards/proto1-fgh100m`
-(`bcf_fgh100mhaamd`); US 915.5 MHz, 1 MHz BW, S1G channel 27 / op-class 68.
+**Hardware:** up to 3× Seeed XIAO ESP32-S3 + HaLow module (reports
+`mm6108-mf16858`, chip `0x0306`, firmware **v1.17.6**) **plus a Raspberry Pi +
+MM6108 Linux reference node** (`morse_driver`/mac80211, same silicon — the interop
+oracle, see [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md)); board config
+`boards/proto1-fgh100m` (`bcf_fgh100mhaamd`); US 915.5 MHz, 1 MHz BW, S1G channel
+27 / op-class 68 (the Linux `iw … ibss join` frequency for ch27 is **5560** — the
+5 GHz-model channel that `dot11ah` maps ch27 onto; on-air is still 915.5 MHz).
 
 ---
 
@@ -86,6 +90,67 @@ implementation. IBSS is a viable L2 for Rimba on the MM6108; the RISK-01 fallbac
 
 ---
 
+## Post-RISK-01 — Phase-1 hardening & validation
+
+These extend the proven link toward a robust mesh. Detail:
+[`worklog/2026-06-20-ibss-adoption-interop-phantom.md`](worklog/2026-06-20-ibss-adoption-interop-phantom.md),
+plus [`rimba-ibss-hardening-todo.md`](rimba-ibss-hardening-todo.md) (backlog) and
+[`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md) (P0/I results).
+
+### H1 — N-node addressing + 3-board bench (P0) ✅
+One binary on every board; each derives its IP from its MAC
+(`192.168.13.<mac[5]>`) and pings every discovered peer. 3 boards form a full
+mesh (P0.1–0.7); per-peer `sta_data`+AID so RX dedup is isolated per sender.
+
+### H2 — Adopt the momentary-systems IBSS implementation (proper EEXIST fix) ✅
+Replaced our inline IBSS with the public `momentary-systems/esp-halow-ibss`
+implementation (`umac_ibss.c` module + `datapath_ops_ibss`), adopted onto our
+`esp32-2` base. This is the **Linux-faithful teardown-first bring-up**: it removes
+the active boot interface before `ADD_INTERFACE(ADHOC)` (mirrors
+`ieee80211_do_stop` → morse `REMOVE_INTERFACE`), so `IBSS_CONFIG(CREATE)` returns
+**0** — the `EEXIST(-17)` is fixed at the root, not tolerated. Brings peer age-out
+(#14), teardown (#6), and membership callbacks (#12). Validated on HW: no EEXIST,
+pure 2-/3-ESP32 full mesh, Linux interop data 2/2.
+
+### H3 — Drop/rejoin resilience, P0.6 (age-out unblocks survivor rediscovery) ✅
+With age-out merged, a survivor now frees a departed peer's record (~30 s) and
+re-acquires it as a **fresh record** on return — the survivor-side test that was
+structurally impossible before. Mirrors `ieee80211_ibss_sta_expire`.
+
+### H4 — Linux interop in a mixed cell, I.5 (the #17 phantom-flood bug) ✅
+3 ESP32 + 1 Linux `morse_driver` node on one cell. First run **failed**: the
+adopted datapath bound IBSS to the **AP-mode** `frames_allowed_pre_association`
+list, which omits `S1G_BEACON`. So every received S1G beacon fell through to the
+RX filter's `dot11_get_ta()` peer-mint — which on an S1G beacon reads the
+**`time_stamp`** field (addr2 offset), minting a fresh phantom peer per beacon,
+flooding the 8-slot table and evicting real peers (a survivor was starved to 0
+replies). **Fix:** give IBSS its own allowed-list including `S1G_BEACON`, so
+beacons skip the mint and route to `process_s1g_beacon`. After the fix: **full
+all-pairs reachability, 0 phantoms.** This bug was present in the upstream
+momentary-systems fork too (same `ap_mode` binding) — surfaced only by our Linux
+interop testing.
+
+### H5 — Beacon discovery is data-driven (the #16 correction) ✅
+On-air `DBG-SA` probing settled how peers are actually discovered, and **corrected
+an earlier wrong belief**: beacon-based discovery does *no* useful work on this
+hardware/firmware.
+- The **mm6108 firmware (1.17.6) does not surface same-cell peer beacons to the
+  host** — a pure 2-ESP32 cell communicates fine but **0** beacons reach
+  `process_s1g_beacon`. So ESP32↔ESP32 discovery is entirely data-driven.
+- A `morse_driver` node's S1G beacon carries **`source_addr = BSSID`** (not the
+  sender's MAC), confirmed both on-air and in the Linux driver
+  (`morse_dot11ah_s1g_to_beacon` copies the single S1G address into *both*
+  `mgmt->sa` and `mgmt->bssid`). So even surfaced beacons can't identify a peer.
+
+`process_s1g_beacon` now **drops** beacons (no peer minting; it was creating a junk
+`BSSID` peer). All real discovery is the **data-frame** path
+(`lookup_stad_by_peer_addr_ibss` on a frame's real TA) — which is what Linux+morse
+effectively does too (`ieee80211_ibss_rx_bss_info` keys on `mgmt->sa`, but morse
+sets `mgmt->sa = bssid`). Marked **morse hardware/firmware dependent** in the
+driver; revisit only if a future firmware surfaces real per-node beacons.
+
+---
+
 ## Code development overview & Linux comparison
 
 The port was built bottom-up, each layer mapped to (and derived from) its Linux
@@ -111,8 +176,24 @@ Path shorthands:
 | IBSS data 802.11 addressing (ToDS=FromDS=0; A1=DA, A2=SA, A3=BSSID) | port `src/umac/umac.c` : `umac_ibss_construct_80211_data_header` | kernel `net/mac80211/tx.c` : `ieee80211_build_hdr` (`NL80211_IFTYPE_ADHOC` case) |
 | Beacon-aware discovery (workaround) | port `src/umac/datapath/umac_datapath.c` : `…_process_rx_mgmt_frame_sta` BEACON case | n/a — ESP32 `hw_scan` only surfaces probe responses to the host, so we answer probes (as Linux does) and also feed beacons to the scanner |
 | Public API / app entry | port `include/mmwlan.h` : `mmwlan_ibss_enable`, `mmwlan_ibss_args`; app `firmware/rimba-halow-ibss/main/app_main.c` | userspace: `iw dev … ibss join`; `wpa_supplicant` (`mode=1`) |
-| IBSS merge (TSF tiebreak) | **not yet implemented** | kernel `net/mac80211/ibss.c` : `ieee80211_rx_bss_info`@1081 (TSF tiebreak@1160) |
-| Data-plane TX/RX (`0x88B5`) | **stubbed** — port `src/umac/umac.c` : `umac_ibss_enqueue_tx_frame`/`…dequeue…` | kernel `net/mac80211/tx.c` + `rx.c`; morse_driver data path |
+| IBSS merge (TSF tiebreak) | **not yet implemented** (#4) | kernel `net/mac80211/ibss.c` : `ieee80211_rx_bss_info`@1081 (TSF tiebreak@1160) |
+| Data-plane TX/RX (`0x88B5` + IP) | ✅ working — port `src/umac/datapath/umac_datapath.c` : `umac_datapath_process_rx_data_frame`, `…tx_dequeue_frame_ibss` | kernel `net/mac80211/tx.c` + `rx.c`; morse_driver data path |
+
+### Post-RISK-01 hardening — adoption + #16/#17 (2026-06-20)
+
+After H2, IBSS moved out of `src/umac/umac.c` into the adopted module
+`src/umac/ibss/umac_ibss.c` (+ `datapath_ops_ibss` in `umac_datapath.c`). New/changed
+mappings from this phase:
+
+| Concern | This port (file : symbol) | Linux equivalent (file : symbol) |
+|---|---|---|
+| IBSS module + public API (factor-out #12) | `src/umac/ibss/umac_ibss.c` : `mmwlan_ibss_start`/`_stop`, `umac_ibss_get_or_create_peer_stad` | kernel `net/mac80211/ibss.c` : `__ieee80211_sta_join_ibss`, `ieee80211_ibss_add_sta`@581 |
+| Teardown-first bring-up (EEXIST fix, H2) | `umac_ibss.c` : `mmwlan_ibss_stop` → `REMOVE_INTERFACE` before `ADD_INTERFACE(ADHOC)` | kernel `net/mac80211/iface.c` : `ieee80211_do_stop`; morse_driver `mac.c` : `morse_mac_ops_remove_interface` |
+| Peer age-out / free (#14) | `umac_ibss.c` : `mmwlan_ibss_age_peers(threshold_ms)`, per-peer `last_rx_ms`, LRU at 8-cap | kernel `net/mac80211/ibss.c` : `ieee80211_ibss_sta_expire` (`IEEE80211_IBSS_INACTIVITY_LIMIT` 60 s) |
+| Peer discovery (the real path) — **data-driven** | `umac_datapath.c` : `umac_datapath_lookup_stad_by_peer_addr_ibss` (get-or-create on a data frame's real TA) | kernel `net/mac80211/ibss.c` : `sta_info_get(mgmt->sa)` → `ieee80211_ibss_add_sta`; `rx.c` sta lookup |
+| Beacon RX handler — **drops, no peer mint (#16)** | `umac_datapath.c` : `umac_datapath_process_s1g_beacon` | kernel `net/mac80211/ibss.c` : `ieee80211_ibss_rx_bss_info`@968 (keys `mgmt->sa`) — see "morse beacon SA=BSSID" below |
+| IBSS allowed-pre-assoc list (**#17 phantom-flood fix**) | `umac_datapath.c` : `frames_allowed_pre_association_ibss[]` (incl. `S1G_BEACON`), bound on `datapath_ops_ibss` | kernel design: beacons route to `ieee80211_ibss_rx_bss_info`, never minted as "unknown sender" via the data path; cf. `frames_allowed_pre_association_sta_mode` which also lists `S1G_BEACON` |
+| morse S1G beacon **SA=BSSID** (why beacon discovery is moot) | firmware (mm6108.mbin 1.17.6) lower-MAC TX rewrite + non-surfacing of peer beacons | morse_driver `dot11ah/rx_s1g_to_11n.c` : `morse_dot11ah_s1g_to_beacon` (sets `mgmt->sa = mgmt->bssid = s1g.sa`); TX `dot11ah/tx_11n_to_s1g.c` : `morse_dot11ah_beacon_to_s1g` (SW-4741) |
 
 ### Key divergences from Linux (and why)
 1. **S1G beacon conversion location.** On Linux the 11n→S1G beacon conversion is
@@ -127,15 +208,34 @@ Path shorthands:
    always awake; per `ibss.c` it is power-save-only).
 3. **No association objects.** IBSS has no association, so the datapath `stad`
    lookups return `NULL` and frames are admitted via
-   `frames_allowed_pre_association` — matching how Linux treats IBSS peers
-   before any `sta_info` exists.
+   `frames_allowed_pre_association`. **The adopted code reused the AP-mode list
+   here, which omits `S1G_BEACON` — that was the #17 phantom-flood bug** (a beacon
+   isn't "allowed," so it fell to the data-path `dot11_get_ta` mint and read the
+   beacon timestamp as a transmitter). Fixed by an IBSS-specific list that allows
+   `S1G_BEACON` (like STA mode). Linux never has this problem: a beacon goes to
+   `ieee80211_ibss_rx_bss_info`, not the unknown-sender data path.
+4. **Discovery is data-driven, not beacon-based** (H5/#16). On this firmware,
+   peer beacons aren't surfaced to the host and morse beacons carry `SA=BSSID`,
+   so peers are learned from data-frame source addresses. This matches Linux+morse
+   in practice (`ieee80211_ibss_rx_bss_info` keys `mgmt->sa`, but the morse RX
+   path sets `mgmt->sa = bssid`). Morse hardware/firmware dependent.
 
 ## Build / test
 
 ```bash
 make build APP=rimba-halow-ibss BOARD=proto1-fgh100m
-make flash APP=rimba-halow-ibss BOARD=proto1-fgh100m PORT=/dev/ttyACM0   # IBSS node
-make flash APP=rimba-halow-scan BOARD=proto1-fgh100m PORT=/dev/ttyACM1   # detector/sniffer
+# one binary on every node — flash 1..3 boards:
+for p in 0 1 2; do make flash APP=rimba-halow-ibss BOARD=proto1-fgh100m PORT=/dev/ttyACM$p; done
+make monitor APP=rimba-halow-ibss PORT=/dev/ttyACM0      # "reply from 192.168.13.N … IBSS DATA OK"
+```
+
+Linux interop (the 4th node) — Raspberry Pi + MM6108, `morse_driver`/mac80211; bring-up
+in [`rimba-ibss-linux-interop-runbook.md`](rimba-ibss-linux-interop-runbook.md). Join the
+same pinned cell with **frequency 5560** (S1G ch27 in the 5 GHz model; on-air 915.5 MHz):
+
+```bash
+sudo iw dev wlan1 ibss join rimba-ibss 5560 fixed-freq 02:12:34:56:78:9a
+sudo ip addr add 192.168.13.66/24 dev wlan1     # octet from the node MAC, like the ESP32s
 ```
 
 > Bench note: XIAO USB-Serial-JTAG re-enumerates on reset and a beaconing board
