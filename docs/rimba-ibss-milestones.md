@@ -176,7 +176,7 @@ Path shorthands:
 | IBSS data 802.11 addressing (ToDS=FromDS=0; A1=DA, A2=SA, A3=BSSID) | port `src/umac/umac.c` : `umac_ibss_construct_80211_data_header` | kernel `net/mac80211/tx.c` : `ieee80211_build_hdr` (`NL80211_IFTYPE_ADHOC` case) |
 | Beacon-aware discovery (workaround) | port `src/umac/datapath/umac_datapath.c` : `…_process_rx_mgmt_frame_sta` BEACON case | n/a — ESP32 `hw_scan` only surfaces probe responses to the host, so we answer probes (as Linux does) and also feed beacons to the scanner |
 | Public API / app entry | port `include/mmwlan.h` : `mmwlan_ibss_enable`, `mmwlan_ibss_args`; app `firmware/rimba-halow-ibss/main/app_main.c` | userspace: `iw dev … ibss join`; `wpa_supplicant` (`mode=1`) |
-| IBSS merge (TSF tiebreak) | **not yet implemented** (#4) | kernel `net/mac80211/ibss.c` : `ieee80211_rx_bss_info`@1081 (TSF tiebreak@1160) |
+| IBSS merge (TSF tiebreak) | **intentionally omitted** — Rimba is a *provisioned* mesh (agreed BSSID); merge is for coordinator-free cell formation, not needed (#4 out of scope, 2026-06-20) | kernel `net/mac80211/ibss.c` : `ieee80211_rx_bss_info`@1081 (TSF tiebreak@1160) — used only with a random BSSID |
 | Data-plane TX/RX (`0x88B5` + IP) | ✅ working — port `src/umac/datapath/umac_datapath.c` : `umac_datapath_process_rx_data_frame`, `…tx_dequeue_frame_ibss` | kernel `net/mac80211/tx.c` + `rx.c`; morse_driver data path |
 
 ### Post-RISK-01 hardening — adoption + #16/#17 (2026-06-20)
@@ -203,9 +203,11 @@ mappings from this phase:
    and rely on the chip to emit the S1G `EXT/S1G_BEACON` per interface type.
 2. **State-machine scope.** Linux mac80211 runs the full IBSS state machine
    (merge, TSF adoption, ATIM, per-peer `sta_info`). This port implements the
-   subset proven so far — bring-up, beacon, probe-answering — with **merge and
-   the data plane still pending**. ATIM is intentionally omitted (window 0 =
-   always awake; per `ibss.c` it is power-save-only).
+   bring-up, beacon, probe-answering, **and data plane** (all proven). **TSF merge
+   is intentionally omitted** — Rimba is a *provisioned* network with an agreed
+   BSSID, so coordinator-free cell coalescing isn't needed (#4 out of scope, decided
+   2026-06-20; see the hardening-todo decision note). ATIM is also omitted (window
+   0 = always awake; per `ibss.c` it is power-save-only).
 3. **No association objects.** IBSS has no association, so the datapath `stad`
    lookups return `NULL` and frames are admitted via
    `frames_allowed_pre_association`. **The adopted code reused the AP-mode list

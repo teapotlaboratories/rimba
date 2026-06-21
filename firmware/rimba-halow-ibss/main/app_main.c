@@ -7,10 +7,20 @@
  * IBSS_CONFIG(CREATE) returns 0 (no EEXIST), plus peer age-out and membership cb.
  * Our S1G-beacon source_addr fix (#16) is layered on top for Linux interop.
  *
- * ONE binary runs on every board: the create/join role is a MAC heuristic (bench
- * heuristic; real role/merge is backlog #4). Addressing is N-node: each node
- * derives its IP from its MAC (192.168.13.<octet(mac)>) and pings every discovered
- * peer, so the same binary scales to 3+ boards + the Linux node.
+ * ONE binary runs on every board. Addressing is N-node: each node derives its IP
+ * from its MAC (192.168.13.<octet(mac)>) and pings every discovered peer, so the
+ * same binary scales to 3+ boards + the Linux node.
+ *
+ * Design note — provisioned mesh, agreed BSSID, NO TSF merge (decided 2026-06-20):
+ * Rimba is a provisioned network, so every node is deployed knowing the mesh's
+ * BSSID (LINK_BSSID below — in production this is provisioned, not a literal).
+ * IBSS TSF merge (net/mac80211/ibss.c ieee80211_rx_bss_info) exists to let
+ * *uncoordinated* ad-hoc nodes that each rolled a random BSSID converge to one
+ * cell; with a pre-shared BSSID there is only ever one cell, so merge is out of
+ * scope (backlog #4 closed). The create-vs-join role here is a MAC heuristic
+ * (mac[0]&0x80 picks who issues cfg_ibss CREATE first) — fine for a provisioned
+ * net; making it explicit/configurable is the remaining cleanup (#7). See
+ * docs/rimba-ibss-hardening-todo.md ("DECISION — Rimba is a provisioned network").
  */
 
 #include <inttypes.h>
@@ -35,6 +45,9 @@
 #define NETMASK        "255.255.255.0"
 #define IP_PREFIX      "192.168.13."   /* N-node: host octet derived from the MAC */
 
+/* The agreed cell BSSID — same on every node (provisioned; no TSF merge — see the
+ * design note above). Locally-administered (0x02). In production this comes from
+ * provisioning, not a literal. */
 static const uint8_t LINK_BSSID[6] = { 0x02, 0x12, 0x34, 0x56, 0x78, 0x9a };
 static const char *TAG = "rimba-ibss";
 

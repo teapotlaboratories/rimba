@@ -32,7 +32,7 @@ no link-layer encryption. The differences are in maturity vs reference-correctne
 | Teardown / re-enable | ✅ `mmwlan_ibss_stop()` (tears down vif; `start` composes over boot STA) | ❌ assumes clean boot | #6 |
 | Membership events | ✅ `mmwlan_ibss_register_peer_cb` (ADDED/REMOVED), `mmwlan_ibss_foreach_peer` | ❌ snapshot API only (`mmwlan_ibss_get_peers`) | — |
 | Multicast | ✅ IPv4/IPv6 verified (`IP_ADD_MEMBERSHIP`) | basic IP only | — |
-| Create/Join role | explicit `create` bool arg | MAC heuristic (bench hack) | #7 |
+| Create/Join role | explicit `create` bool arg | MAC heuristic (provisioned-net role pick; make explicit) | #7 |
 | S1G beacon header | parses `next_tbtt`/`cssid`/`ano` present flags | minimal | — |
 
 Their `IBSS_ADOPTION.md` is a strong reference: security tradeoff analysis, an
@@ -71,8 +71,10 @@ real Linux node disproved this** — and we ended up adopting *their* model:
 - **P0.6 drop/rejoin** validated using their age-out.
 
 ## Where they're the same
-- **No TSF merge** (#4) — neither auto-merges; both pin the BSSID. (Theirs: explicit
-  create/join arg; ours: MAC heuristic.)
+- **No TSF merge** — neither auto-merges; both pin the BSSID. (Theirs: explicit
+  create/join arg; ours: MAC heuristic.) **This is now Rimba's deliberate design** —
+  a provisioned mesh uses an agreed BSSID, so merge is out of scope (#4 closed
+  2026-06-20). Their pinned-BSSID choice turned out to match ours.
 - **No link-layer encryption** — both OPEN, both defer crypto to a higher layer (matches
   our Phase-2 software-shim decision). Their fork ships a `supplicant_shim` but does **not**
   wire IBSS-RSN ("plausibly 1000+ lines").
