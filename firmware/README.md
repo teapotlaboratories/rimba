@@ -25,6 +25,7 @@ firmware/
     CMakeLists.txt     # adds ../../components via EXTRA_COMPONENT_DIRS
   rimba-halow-ap/      # 2-board ping test: HaLow SoftAP node
   rimba-halow-sta/     # 2-board ping test: HaLow station node
+  rimba-halow-ibss/    # IBSS / ad-hoc mesh (RISK-01): N-node addressing, peer discovery, ping
   README.md
 vendor/
   esp-idf            # ESP-IDF toolchain (pinned submodule, v5.4.2) — the build uses this
@@ -129,6 +130,35 @@ non-obvious details, both handled in the apps:
 `rimba-halow-ap` carries one app-level override
 ([`firmware/rimba-halow-ap/sdkconfig.defaults`](rimba-halow-ap/sdkconfig.defaults)):
 `CONFIG_HALOW_AP_MODE=y`. `rimba-halow-sta` needs none (STA is the default mode).
+
+### `rimba-halow-ibss` (the IBSS / ad-hoc mesh)
+
+The RISK-01 result: an **802.11ah IBSS** (peer-to-peer, no AP). The MM6108 has no
+public IBSS API in morselib, so the IBSS support is added in the vendored
+`components/halow` (adopted from `momentary-systems/esp-halow-ibss`; bring-up,
+peer table + age-out, datapath). **One binary runs on every node** — the
+create/join role is a MAC heuristic (bench), and each node derives its IP from its
+MAC (`192.168.13.<mac[5]>`) and pings every discovered peer, so the same image
+scales to N boards.
+
+```bash
+make flash APP=rimba-halow-ibss BOARD=proto1-fgh100m PORT=/dev/ttyACM0   # node 1
+make flash APP=rimba-halow-ibss BOARD=proto1-fgh100m PORT=/dev/ttyACM1   # node 2  (… ACM2 = node 3)
+make monitor APP=rimba-halow-ibss PORT=/dev/ttyACM0                      # "reply from 192.168.13.N … IBSS DATA OK"
+```
+
+Validated on hardware: 2- and 3-board **full mesh**, peer age-out + drop/rejoin
+resilience, and **interop with a Linux `morse_driver` IBSS node** on the same
+silicon. Background, the Linux-equivalence map, and the on-air debugging (the #17
+beacon phantom-flood; #16 data-driven discovery) are in
+[`../docs/rimba-ibss-milestones.md`](../docs/rimba-ibss-milestones.md),
+[`../docs/rimba-ibss-test-plan.md`](../docs/rimba-ibss-test-plan.md), and
+[`../docs/worklog/2026-06-20-ibss-adoption-interop-phantom.md`](../docs/worklog/2026-06-20-ibss-adoption-interop-phantom.md).
+
+Key discovery detail worth knowing: peer discovery is **data-driven** (learned from
+data-frame source addresses), *not* beacon-based — the current MM6108 firmware
+(1.17.6) doesn't surface same-cell peer beacons to the host, and `morse_driver`
+beacons carry `SA=BSSID`. This is firmware-dependent (see the milestones doc).
 
 ## Hardware notes
 

@@ -10,13 +10,19 @@ RTC-scheduled; traffic to the backend is always end-to-end encrypted.
 
 ## Status
 
-**Draft 0.28 — design stage, entering hardware bring-up.**
+**Draft 0.28 — design stage; Phase-1 IBSS foundation validated on hardware.**
 
-Development is starting with the BLOCKING hardware-validation phase. **Before
-writing any feature, read the [development plan](docs/rimba-development-plan.md)**
-— it defines the phased build order and, critically, the IBSS-foundation phase
-that everything else depends on (plus the fallback strategy if IBSS doesn't work
-on the MM6108).
+Development started with the BLOCKING hardware-validation phase. **Before writing
+any feature, read the [development plan](docs/rimba-development-plan.md)** — it
+defines the phased build order and the IBSS-foundation phase everything depends on.
+
+**RISK-01 (IBSS on the MM6108) is resolved and hardened**: 802.11ah ad-hoc bring-up,
+bidirectional IP/`0x88B5` data, a 3-board full mesh, peer age-out + drop/rejoin, and
+interop with a Linux `morse_driver` IBSS node on the same silicon — all derived from
+and verified against the Linux implementation. See
+[`docs/rimba-ibss-milestones.md`](docs/rimba-ibss-milestones.md) and the
+[IBSS worklogs](docs/worklog/). The AP-STA fallback is not required. Next: Phase-2
+link security.
 
 See Section 15 (Open Issues) and Section 16 (Future Investigations) in the spec
 for tracked work, including the urgent config-changeable-parameter-scope security
@@ -63,6 +69,11 @@ Several apps exist (select with `APP=`):
 - **`rimba-halow-ap`** + **`rimba-halow-sta`** — a 2-board AP↔STA ping test.
   Confirmed on hardware: bidirectional IP, ~12 ms RTT over 802.11ah — the
   Phase-1 RISK-01 AP-STA link validated end-to-end.
+- **`rimba-halow-ibss`** — the **IBSS / ad-hoc** mesh app (RISK-01 resolved). One
+  binary on every node: N-node MAC-derived addressing, peer discovery, and pings
+  to every peer. Validated on hardware — 3-board full mesh **and** interop with a
+  Linux `morse_driver` IBSS node. See
+  [`docs/rimba-ibss-milestones.md`](docs/rimba-ibss-milestones.md).
 
 See [`firmware/README.md`](firmware/README.md) for per-example detail.
 
@@ -146,6 +157,11 @@ All documents live under `docs/`.
 | [`docs/rimba-development-plan.md`](docs/rimba-development-plan.md) | **Phased implementation plan + risk register.** Start here to build. Phase 1 (IBSS foundation, BLOCKING) and the RISK-01 IBSS fallback strategy. |
 | [`docs/rimba-protocol-spec.md`](docs/rimba-protocol-spec.md) | **The normative specification** (Draft 0.28). 16 sections: architecture, frames, routing, DTN/mule protocol, custody, security, power, OTA, open issues, future investigations. |
 | [`docs/rimba-hardening-plan.md`](docs/rimba-hardening-plan.md) | Security hardening roadmap (Tier 0–4). |
+| [`docs/rimba-ibss-milestones.md`](docs/rimba-ibss-milestones.md) | **RISK-01 IBSS bring-up milestones + the Linux-equivalence table** (each port file/symbol ↔ its `net/mac80211` / `morse_driver` counterpart). |
+| [`docs/rimba-ibss-hardening-todo.md`](docs/rimba-ibss-hardening-todo.md) | IBSS hardening backlog + Findings (EEXIST, #16 data-driven discovery, #17 phantom flood, …). |
+| [`docs/rimba-ibss-test-plan.md`](docs/rimba-ibss-test-plan.md) | IBSS validation plan + results (P0 multi-node, I.1–I.5 Linux interop). |
+| [`docs/rimba-ibss-impl-comparison.md`](docs/rimba-ibss-impl-comparison.md) | Our port vs the `momentary-systems/esp-halow-ibss` fork (which we adopted). |
+| [`docs/rimba-ibss-linux-interop-runbook.md`](docs/rimba-ibss-linux-interop-runbook.md) + [`docs/rimba-linux-node-setup.md`](docs/rimba-linux-node-setup.md) | Bring-up + interop commands for the Raspberry Pi + MM6108 Linux reference node. |
 | [`docs/rimba-mesh-comparison.md`](docs/rimba-mesh-comparison.md) | Comparison vs other mesh protocols. |
 | [`docs/rimba-routing-comparison.md`](docs/rimba-routing-comparison.md) | Routing-approach analysis and tradeoffs. |
 | [`docs/rimba-battery-analysis.md`](docs/rimba-battery-analysis.md) | Power budget and battery-life analysis. |
