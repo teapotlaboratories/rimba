@@ -129,11 +129,11 @@ The working implementation deliberately took shortcuts to prove the link:
 > **PRIORITY CHANGE (2026-06-20): power-save is an early focus, not deferred to
 > Phase 3/4.** Rimba's whole battery-leaf model (RTC-scheduled wake) rests on it, and
 > it's better to prove it's achievable now than to discover at Phase 3 that the
-> firmware can't. Near-term sequence: finish the small Phase-1 validation (P0.4
-> dedup, I.4 frame diff, P1.5 soak) → **#18 TSF-sync experiment** (the gating fact) →
-> **#7** dynamic create-else-join (delivers TSF sync) → **#8** ATIM/PS. The TSF
-> experiment is scheduled *after* the other Phase-1 points are done. (The
-> development plan's phasing should be revisited to match — see note there.)
+> firmware can't. Power-save is **host/RTC-driven** (#8), since the firmware has no IBSS
+> radio PS. Near-term sequence: finish the small Phase-1 validation (~~P0.4 dedup ☑~~,
+> I.4 frame diff, P1.5 soak) → **#9 RISK-02 boot-time** (the gating number) → **#8**
+> RTC-scheduled-mode prototype → **#7** create-else-join (fast rejoin). #9 runs *after*
+> the other Phase-1 points. (Dev-plan task 1.12a updated to match.)
 
 18. ☐ **TSF sync — DEMOTED (no longer gating; the RTC is the schedule clock).** *Reframed
     2026-06-20.* Power-save scheduling now rides the **RTC** (#8 RTC-scheduled mode), not
@@ -403,7 +403,7 @@ Two related decisions:
   both the missing chip IBSS-PS and the TSF-sync question** (the RTC is the schedule clock,
   so #18 is demoted). The gating unknown is **radio cold-boot-to-joined time** (#9 /
   RISK-02) — that one number sets the viable wake period and the power budget.
-  **Sequence:** small Phase-1 validation (P0.4, I.4, P1.5 soak) → **#9 RISK-02 boot-time
+  **Sequence:** small Phase-1 validation (P0.4 ☑, I.4, P1.5 soak) → **#9 RISK-02 boot-time
   measurement** (the gating number) → #8 RTC-scheduled-mode prototype → #7 create-else-join
   (fast rejoin per window). The boot-time measurement runs *after* the other Phase-1
   points. Dev-plan task 1.12a updated to match.

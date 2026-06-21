@@ -179,4 +179,5 @@ Both PRs **MERGED** to `main`:
   (latent; moot now that beacons don't mint peers).
 - #4 IBSS merge / TSF — would tighten the remaining Linux-fidelity gaps (real
   BSSID/SA handling, scan→join-else-create).
-- P0.4 per-peer dedup still needs a forced duplicate/seq-wrap probe (only inferred).
+- P0.4 per-peer dedup — **done 2026-06-20** (forced cross-peer probe: 208 cross-peer
+  seq collisions correctly accepted, 9 genuine dedup drops; see test plan §4).
