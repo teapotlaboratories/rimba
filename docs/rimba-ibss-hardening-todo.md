@@ -69,29 +69,23 @@ The working implementation deliberately took shortcuts to prove the link:
 5. ☐ **Beacon contention.** Real IBSS has distributed beaconing (a node suppresses
    its beacon if it heard one for the interval). Currently every node beacons
    every interval unconditionally — fine for 2, a storm risk as density grows.
-6. ☐ **Teardown / disable / re-enable.** `mmwlan_ibss_disable()` (stop beaconing,
-   `IBSS_CONFIG STOP`, remove interface, free the stad); handle re-enable and
-   param/channel change cleanly. *Template:* the momentary-systems fork has
-   `mmwlan_ibss_stop()` (tears down the vif; `start` composes over the boot STA) —
-   see [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
+6. ◐ **Teardown / disable / re-enable.** Partly done 2026-06-20 via the adoption:
+   `mmwlan_ibss_stop()` exists (tears down the vif; `start` composes over the boot
+   STA) and the teardown-first bring-up is what fixes the EEXIST. **Remaining:**
+   exercise/verify stop→re-enable and param/channel change at runtime (not yet tested).
+   See [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
 7. ☐ **Drop bench heuristics.** Remove the MAC-based role pick + hardcoded IPs in
    the app once merge + proper create/join land.
-14. ☐ **Peer age-out / free (follow-on to #2).** Per-peer records are currently
-    heap-allocated on first RX and **never freed** — a departed peer lingers; the
-    table caps at 8 then overflows to the shared record, and the heap is grow-only.
-    Stamp `last_rx` per peer, sweep on the beacon/work timer, and free the record +
-    release its AID when idle past a limit. **Linux ref (governing rule):**
-    `net/mac80211/ibss.c` `ieee80211_ibss_sta_expire()` on a timer, dropping peers
-    idle past `IEEE80211_IBSS_INACTIVITY_LIMIT` (60 s). Best built **with #4**, since
-    proper join semantics already need peer add *and* remove. **Why it matters:**
-    (a) bounds the heap and unblocks >8-node cells; (b) it is the prerequisite for
-    honest **survivor-side** drop/rejoin testing — observed in the P0.6 bench
-    (2026-06-19), where survivors could not re-acquire a returned same-MAC peer
-    because the record never expired (see test plan §8.1 and the P0 worklog). Until
-    age-out exists, "rediscovered as a fresh record" is impossible on the survivor
-    side by construction. *Template:* the momentary-systems fork implements this
-    (`mmwlan_ibss_age_peers(threshold_ms)`, per-peer `last_rx_ms`, LRU eviction at the
-    8-cap; caller-driven, no background timer) — usable as a reference. See
+14. ☑ **Peer age-out / free (follow-on to #2).** Done 2026-06-20 via the adoption:
+    `mmwlan_ibss_age_peers(threshold_ms)` frees per-peer records (+ stad) idle past a
+    threshold and fires `PEER_REMOVED`; per-peer `last_rx_ms`, LRU eviction at the
+    8-cap; caller-driven (the app calls it every loop @ 30 s). Mirrors the intent of
+    `net/mac80211/ibss.c` `ieee80211_ibss_sta_expire()` (Linux: 60 s on a timer; ours
+    is caller-driven, no background timer). **Verified P0.6 (2026-06-20):** survivors
+    aged out a dropped peer (`PEER_REMOVED` on both) and rediscovered it as a **fresh
+    record** on return (`PEER_ADDED` on both) — the survivor-side re-acquisition that
+    was structurally impossible before. This (a) bounds the heap / unblocks >8-node
+    cells and (b) unblocked honest drop/rejoin testing (test plan §4 P0.6). See
     [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
 
 ### P3 — power & de-risking
@@ -108,13 +102,12 @@ The working implementation deliberately took shortcuts to prove the link:
     unverified — capture via a monitor interface.
 
 ### P4 — code quality
-12. ☐ **Factor IBSS out of `umac.c`** into `umac_ibss.c` (beacon, probe-resp,
-    datapath ops, bring-up) for separation and easier upstream-diffing. *Template:*
-    the momentary-systems fork (`esp-halow-ibss` @ `5237495`) already factors exactly
-    this into `umac/ibss/umac_ibss.c` (+ `.h`) with a clean `mmwlan_ibss_*` public API
-    — strong reference for the module split. Reuse its structure, but **keep our
-    Linux-verified beacon discovery** (their `SA=BSSID` beacon assumption is wrong for
-    the reference `morse_driver`). See [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
+12. ☑ **Factor IBSS out of `umac.c`** into `umac_ibss.c` (beacon, probe-resp,
+    datapath ops, bring-up). Done 2026-06-20 by adopting the momentary-systems
+    `umac/ibss/umac_ibss.c` (+ `.h`) with the `mmwlan_ibss_*` public API, **keeping our
+    Linux-verified beacon discovery** layered on top (#16 — their `SA=BSSID` beacon
+    assumption is wrong for the reference `morse_driver`). See
+    [`rimba-ibss-impl-comparison.md`](rimba-ibss-impl-comparison.md).
 13. ☐ **Review all STA/AP-only assumptions** in morselib for other ADHOC drops
     (the RX-VIF bug was one; audit for siblings).
 15. ☐ **Bump the ESP32 stack to latest (fw / SDK / IDF).** Current pins:
