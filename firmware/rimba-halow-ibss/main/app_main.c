@@ -32,6 +32,9 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "ping/ping_sock.h"
 
@@ -210,5 +213,15 @@ void app_main(void)
 
         /* Age out peers idle > 30 s (caller-driven, per the umac_ibss API). */
         mmwlan_ibss_age_peers(30000);
+
+        /* SOAK telemetry (P1.5): periodic heap + uptime for leak/stability tracking.
+         * Every 10 loops = ~30 s. min8 = largest free 8-bit-capable (internal) block. */
+        if ((seq % 10) == 0) {
+            ESP_LOGI(TAG, "SOAK uptime=%llus heap_free=%u heap_min=%u int_free=%u",
+                     (unsigned long long)(esp_timer_get_time() / 1000000),
+                     (unsigned)esp_get_free_heap_size(),
+                     (unsigned)esp_get_minimum_free_heap_size(),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        }
     }
 }

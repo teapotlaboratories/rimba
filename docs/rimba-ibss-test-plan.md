@@ -266,8 +266,18 @@ no long-duration evidence.
 | P1.1 | Throughput | sustained TX-flood (sender blasts, receiver counts) → packets/s + Mbps per direction |
 | P1.2 | Loss + jitter under load | high-rate traffic → loss % and RTT distribution (p50/p99) |
 | P1.3 | MTU sweep | ping payload 64→1500 B; find the fragmentation/MTU cliff |
-| P1.4 | Recovery | power-cycle a node mid-stream → link + data resume without manual intervention |
-| P1.5 | Soak (overnight) | hours of continuous traffic → no asserts/crashes, stable RTT, no heap growth (watch the no-age-out gap, §7) |
+| P1.4 | Recovery ☑ | power-cycle a node mid-stream → link + data resume (done in the 2026-06-20 stress test §"P1.4") |
+| P1.5 | Soak (overnight) ☑ | hours of continuous traffic → no asserts/crashes, stable RTT, no heap growth |
+
+**P1.5 soak ☑ — 2026-06-21, ~6.5 h, 4-node cell (3 ESP32 + chronium).** Continuous
+traffic (chronium 2/s to each ESP32 + the ESP32s' all-pairs cross-pings); ESP32 firmware
+instrumented with a 30 s heap/uptime telemetry line. Result on all three boards: **uptime
+6 h 31–32 m, 0 reboots, 0 asserts/panics/backtraces**, data flowing to the end (chronium
+`icmp_seq ~47 000`, **12–19 ms RTT**, no degradation). **No heap leak** — `heap_min` over
+6.5 h: ACM0 **Δ0 B**, ACM1 −108 B, ACM2 −548 B (transient noise, not a growing leak; a leak
+would be 100s of KB). The merged stack (adoption + #16/#17 + data-driven discovery) is
+stable for long-duration continuous operation. *(P1.1–P1.3 throughput/jitter/MTU numbers
+still uncollected; stability + recovery + soak are the load-bearing ones and pass.)*
 
 ---
 
