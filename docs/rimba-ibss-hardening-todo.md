@@ -61,7 +61,15 @@ The working implementation deliberately took shortcuts to prove the link:
     Verified on-air: 1 clean peer for the Linux MAC, 0 phantoms, passive beacon
     discovery, bidirectional ping. Side benefit: the data path was already fine, so this
     only touched discovery.
-4. ☐ **IBSS merge (TSF).** Discover peers via beacons and converge on a common
+17. ☐ **Chronium beacon phantom flood (mixed-cell interop) — HIGH.** *Found 2026-06-20
+    (I.5).* In the adopted datapath, chronium's `morse_driver` S1G beacon is **not
+    classified as `EXT/S1G_BEACON`**, so the TA-mint sites (`umac_datapath.c:1303`/`:1486`)
+    read `dot11_get_ta` = its `time_stamp` → a phantom peer per beacon, flooding the
+    8-slot table and evicting real ESP32 peers (ACM0 starved to 0 replies). The #16
+    `source_addr` fix only runs once a frame *is* classified `S1G_BEACON`, so it misses
+    this. **Fix:** instrument to capture chronium's beacon `frame_ver_type_subtype`, pin
+    the misclassification, extend the #16 guard. Breaks Linux interop; not a pure
+    all-ESP32 blocker. See Findings → "BUG #17". Discover peers via beacons and converge on a common
    BSSID/TSF (higher-TSF wins), per `ieee80211_rx_bss_info`. Replaces the
    hardcoded-BSSID + MAC-role bench heuristic with real create/join semantics
    (scan → join existing, else create). **Pairs with #14 (age-out): merge makes
@@ -196,25 +204,29 @@ super `wip/ibss-adopt-refactor`, submodule `wip/adopt-momentary-ibss`). Bench re
 - **Linux interop: works** — chronium ↔ all 3 ESP32 data 2/2; beacon-based discovery
   of the Linux node via the #16 `source_addr` fix.
 - **Gained** peer age-out (#14), teardown (#6), membership callbacks (#12).
-- **Open — mixed-cell ESP32↔ESP32 discovery completeness:** when the Linux node is in
-  the cell, ESP32s under-discover *each other*. NOT a refactor flaw (pure mesh works;
-  old code degraded in the mixed cell too) — it's mixed-cell dynamics (beacon
-  contention #5 / 0x88B5-vs-beacon timing with a 4th node beaconing every 100 ms).
-  Lower priority: the all-rimba deployment case is now *proven* to work (pure 3-node
-  full mesh above); the Linux node is a test instrument. Tracked under #5.
-  - **Discovery mechanism is sound (dual-path):** a peer is created — and `PEER_ADDED`
-    fired to the app — from *either* its beacon `source_addr`
-    (`umac_datapath.c:164`) *or* any data-frame TA (`lookup_stad_by_peer_addr_ibss`
-    → `umac_ibss_get_or_create_peer_stad`, `:1303/:1486`). The 8-slot LRU table only
-    evicts above 8 peers, so a 4-node cell never churns. So the gap is RF/airtime,
-    not a discovery-logic bug.
-  - **Ruled out — IBSS merge / BSSID fragmentation:** chronium pins the *same* BSSID
-    `02:12:34:56:78:9a` as our `LINK_BSSID` and neither side does TSF merge
-    (interop runbook §"BSSID pinning"), so the cell doesn't split. The suspect is
-    airtime/RX contention from chronium's mac80211 beaconing+traffic on the 1 MHz
-    channel (or a marginal short-capture artifact in the earlier mixed-cell run).
-    Next step if pursued: re-run 3-ESP32 + chronium with a longer capture, logging
-    each node's discovered-peer set + replies to characterise which pairs degrade.
+- **BUG #17 — mixed-cell ESP32↔ESP32 discovery breaks: chronium beacon phantom flood
+  (root-caused 2026-06-20, I.5).** *Earlier framing (airtime contention / "not a
+  blocker") was WRONG — corrected here.* In a mixed cell the ESP32s under-discover
+  each other because **chronium's `morse_driver` S1G beacon mints a phantom peer per
+  beacon** (~every 100 ms): MACs `48:xx:xx:xx:00:d5` — the #16 timestamp-as-MAC
+  signature. ~hundreds of phantoms in 40 s flood the 8-slot peer table and **LRU-evict
+  the real ESP32 peers** → ACM0 got **0 replies** (fully starved), ACM2 lost chronium.
+  chronium→ESP32 is fine (3–4/4 replies, clean `station dump`); only ESP32←chronium
+  beacon parse is broken.
+  - **Mechanism:** the two TA-mint sites (`umac_datapath.c:1303` filter,
+    `:1486` process) are guarded by `frame_ver_type_subtype == DOT11_VER_TYPE_SUBTYPE(0,
+    EXT, S1G_BEACON)`; on a hit they skip `dot11_get_ta` (the #16 principle). chronium's
+    beacon evidently **fails that classification** (read as non-S1G-beacon), so it falls
+    to `dot11_get_ta` = the S1G beacon's `time_stamp` field (addr2 offset) → a fresh
+    phantom each beacon. The #16 `source_addr` fix lives in `process_s1g_beacon` and only
+    runs for frames that *are* classified as `S1G_BEACON` — so it doesn't catch this.
+  - **Ruled out:** IBSS merge / BSSID split (chronium pins the same BSSID, no TSF merge);
+    8-slot table churn in a 4-node cell *would* be fine — the flood is what overflows it.
+  - **Severity:** breaks **Linux interop** discovery. NOT a pure all-ESP32 deployment
+    blocker (no morse beacons there — pure 2-/3-node mesh is clean, 0 phantoms).
+  - **Next:** instrument the datapath to log `frame_ver_type_subtype` + head bytes on the
+    mint path, chronium-only capture → pin the exact misclassification → extend the #16
+    guard to cover chronium's beacon. Tracked as **#17**.
 
 ### Beacon interval = 100 TU, matches Linux (2026-06-20)
 Q: is the ESP32 beacon interval different from Linux? **No.** The app sets
