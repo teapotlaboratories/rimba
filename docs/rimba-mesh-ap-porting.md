@@ -123,8 +123,11 @@ schedule the SP — is not required and is gated for AP vifs anyway; host-side d
 - **Downlink latency = TWT interval.** Buffered downlink is delivered at the STA's next SP — the
   inherent TWT trade-off (fine for a leaf that wakes every N minutes; a short interval was used
   on the bench only to fit a 2 s ping timeout).
-- **Transport = assoc-IE only.** TWT is negotiated in (re)assoc IEs (matching the morselib STA
-  requester); the standalone TWT-Setup *action-frame* path Linux also supports is not ported.
+- **Transport: assoc-IE + teardown action frame.** TWT is *negotiated* in (re)assoc IEs (matching
+  the morselib STA requester). A received **TWT Teardown** action frame (S1G unprotected, action 7)
+  is now handled — it frees the STA's agreement (`umac_twt_responder_handle_action`, dispatched from
+  `umac_datapath.c`). The **mid-session TWT-Setup action frame** (negotiating a new agreement outside
+  association) is recognised but not yet negotiated — it needs a TWT-Setup response action frame TX.
 - **Bench-verified only** (ping workload); no radio-rail current measurement of the µA draw.
 
 ### 4.5 Diff summary
