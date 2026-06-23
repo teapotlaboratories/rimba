@@ -11,3 +11,6 @@
 	path = vendor/esp-idf
 	url = https://github.com/espressif/esp-idf.git
 	shallow = true
+[submodule "vendor/morse-firmware"]
+	path = vendor/morse-firmware
+	url = https://github.com/MorseMicro/morse-firmware
