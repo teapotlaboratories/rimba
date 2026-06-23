@@ -162,14 +162,14 @@ All documents live under `docs/`.
 | [`docs/rimba-ibss-hardening-todo.md`](docs/rimba-ibss-hardening-todo.md) | IBSS hardening backlog + Findings (EEXIST, #16 data-driven discovery, #17 phantom flood, …). |
 | [`docs/rimba-ibss-test-plan.md`](docs/rimba-ibss-test-plan.md) | IBSS validation plan + results (P0 multi-node, I.1–I.5 Linux interop). |
 | [`docs/rimba-ibss-impl-comparison.md`](docs/rimba-ibss-impl-comparison.md) | Our port vs the `momentary-systems/esp-halow-ibss` fork (which we adopted). |
-| [`docs/rimba-ibss-linux-interop-runbook.md`](docs/rimba-ibss-linux-interop-runbook.md) + [`docs/rimba-linux-node-setup.md`](docs/rimba-linux-node-setup.md) | Bring-up + interop commands for the Raspberry Pi + MM6108 Linux reference node. |
+| [`docs/rimba-linux-node-setup.md`](docs/rimba-linux-node-setup.md) | Bring-up + interop commands for the Raspberry Pi + MM6108 Linux reference node (AP test §11; IBSS interop §12). |
+| [`docs/rimba-mesh-ap-porting.md`](docs/rimba-mesh-ap-porting.md) | **Mesh+AP porting (Linux `morse_driver` → ESP32 morselib)** — capability matrix + the AP-TWT-responder port with a line-by-line new-code↔Linux comparison table. |
 | [`docs/rimba-mesh-comparison.md`](docs/rimba-mesh-comparison.md) | Comparison vs other mesh protocols. |
 | [`docs/rimba-routing-comparison.md`](docs/rimba-routing-comparison.md) | Routing-approach analysis and tradeoffs. |
 | [`docs/rimba-battery-analysis.md`](docs/rimba-battery-analysis.md) | Power budget and battery-life analysis. |
 | [`docs/rimba-latency-bandwidth.md`](docs/rimba-latency-bandwidth.md) | Latency and bandwidth analysis. |
 | [`docs/rimba-mesh-topology.md`](docs/rimba-mesh-topology.md) | Topology and density analysis. |
 | [`docs/rimba-rtc-comparison.md`](docs/rimba-rtc-comparison.md) | RTC selection and drift analysis (incl. NTP dev-mode for Phases 1–3). |
-| [`docs/halow-mesh-dtn-spec.md`](docs/halow-mesh-dtn-spec.md) | Superseded original spec (kept for history; see deprecation banner inside). |
 | [`CHANGELOG.md`](CHANGELOG.md) | Per-draft change history. |
 
 ## Standards followed
