@@ -86,7 +86,7 @@ no firmware change** — 18–23/18–23 ping replies, 0 timeouts, ~15 ms RTT, S
 | 7 | **Install agreement to firmware** (cmd `0x26`) — *gated on AP vif; harmless* | `twt/umac_twt.c:491` `umac_twt_responder_install` → `umac_twt_install_agreement` (`:286`) → `mmdrv_twt_agreement_install_req`; install hook at `driver_ap.c:277` (on `WPA_STA_AUTHORIZED`) | `mac.c:5024` → `morse_twt_process_pending_cmds` (`twt.c:1355`) → `morse_cmd_twt_agreement_install_req` (`command.c:2211`) |
 | 8 | **Agreement blob format** (15 B: control, req_type, twt, min_dur, mantissa, channel) | `twt/umac_twt.c:286` `umac_twt_install_agreement` (packs `&agr->control` + packed `params`) | `twt.c:2326` `morse_twt_initialise_agreement` |
 | 9 | **AP-side serving — deliver buffered downlink at the SP** ⭐ the load-bearing fix | `ap/umac_ap.c:890` `umac_ap_set_stad_sleep_state`: on STA asleep→awake with queued frames, `umac_core_evt_wake()` to flush now (PM-bit tracked at `datapath/umac_datapath.c:1528`) | `mac80211` PS buffering (`ieee80211_sta_ps_deliver_wakeup`) + `twt.c` wake-interval tree (`morse_twt_agreement_wake_interval_add` `twt.c:941`, dump `twt.c:201`) |
-| 10 | **Data structures** | `twt/umac_twt_data.h` `struct umac_twt_data` (added `responder_peer[6]`; `agreements[1]`) | `morse_twt` per-STA list + per-vif `twt_wake_interval_tree` |
+| 10 | **Data structures** (per-STA table) | `twt/umac_twt_data.h`: `agreements[MMWLAN_AP_MAX_STAS_LIMIT]` (20, = the AP's max-STA cap) + parallel `responder_peers[20][6]`; slot allocated by SA in `umac_twt.c` `umac_twt_responder_alloc_slot`, looked up by `umac_twt_responder_slot_for_peer`, freed on STA leave via `umac_twt_responder_free_agreement` (hooked in `driver_ap.c` `mmwpas_sta_remove`) | `morse_twt` per-STA agreement (stored on the sta) + per-vif `twt_wake_interval_tree` |
 
 ### 4.3 The decisive fix (row 9)
 
@@ -105,10 +105,21 @@ schedule the SP — is not required and is gated for AP vifs anyway; host-side d
 
 ### 4.4 Caveats / open items
 
-- **Single-STA agreement slot.** `umac_twt_data` holds one agreement + one `responder_peer`
-  (`UMAC_TWT_NUM_AGREEMENTS == 1`). Multi-STA needs the per-STA list Linux keeps (row 10).
+- **Multi-STA, bounded table.** ✅ The responder now keeps a per-STA agreement table
+  (`UMAC_TWT_NUM_AGREEMENTS == MMWLAN_AP_MAX_STAS_LIMIT == 20`, matching the AP's max-STA cap so
+  every associable leaf can hold TWT; parallel `responder_peers[]`), allocated by SA on the
+  assoc-req and freed on STA leave — so several leaves can hold TWT at once. The table is
+  bounded for embedded RAM: when full, the responder logs and drops the IE (implicit reject,
+  STA still associates without TWT). Linux keeps a dynamic per-STA list.
+  **Hardware-validated (1 AP + 2 STA):** one ESP32 AP held two TWT-requester ESP32 STAs
+  (`68:24:99:44:6a:56` and `bc:2a:33:96:b2:9f`) concurrently associated + authorized, stable
+  for ~69 s, with downlink served (ping RTT 10–201 ms — the spikes are TWT doze buffering) and
+  no disconnect/crash. (Aside: morselib `MMLOG_INF` doesn't reach the ESP console and the
+  USB-CDC console freezes during the association window, so the per-slot grant log isn't
+  capturable; validation is via the AP's authorized-STA callback count instead.)
 - **No SP-overlap scheduling.** Linux's `twt_wi_tree` spaces multiple STAs' SPs (`twt.c:941`);
-  this port uses the requested target-wake-time as-is (fine for one STA).
+  this port serves each STA's downlink reactively on wake (per-STA, via the flush-on-wake) but
+  does not yet *schedule* SPs to avoid overlap — fine until many leaves share tight intervals.
 - **Downlink latency = TWT interval.** Buffered downlink is delivered at the STA's next SP — the
   inherent TWT trade-off (fine for a leaf that wakes every N minutes; a short interval was used
   on the bench only to fit a 2 s ping timeout).
