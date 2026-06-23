@@ -251,7 +251,7 @@ The working implementation deliberately took shortcuts to prove the link:
     - **Keep generation parity with the Linux reference node** (P0.5 interop, test
       plan §2): bump the ESP32 *and* the chronium `morse_driver`/firmware **together**
       to the same MM release, or pin both deliberately — a one-sided bump invalidates
-      the interop result. See `rimba-ibss-linux-interop-runbook.md`.
+      the interop result. See `rimba-linux-node-setup.md` (§1 versions, §12 IBSS interop).
     - **Toolchain pin:** keep cmake on **3.x** (4.x breaks the ESP-IDF build, per
       README) when moving IDF.
     - **Regress after any bump:** re-run the 3-board P0 bench (and the AP-STA ping)

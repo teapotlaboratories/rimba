@@ -1,7 +1,9 @@
 # Rimba Protocol — Development Plan
-## Draft 0.4
+## Draft 0.5
 
 *Companion to: rimba-protocol-spec.md Draft 0.26*
+
+*Last updated 2026-06-21: RISK-01 resolved + Phase-1 IBSS foundation validated; RISK-02 boot time measured (≈1.39 s); Wio-WM6180/FGH100M hardware baseline + schematic findings (no power-enable line; BUSY/WAKE DNP) folded in.*
 
 ---
 
@@ -26,7 +28,7 @@ This document covers the practical implementation plan for Rimba on ESP32-S3 + M
 **Reference hardware**: Seeed Xiao ESP32-S3 + Seeed HaLow (MM6108 module)  
 **Estimated prototype timeline**: 3–4 months (1–2 engineers)
 
-**Critical path**: IBSS API → IBSS boot time measurement → BPv7 implementation. All three must succeed before the protocol can function end-to-end.
+**Critical path**: IBSS API → IBSS boot time measurement → BPv7 implementation. All three must succeed before the protocol can function end-to-end. **(2026-06-21: IBSS API resolved + foundation validated; IBSS cold-boot time measured ≈1.39 s — see RISK-01/RISK-02. Critical path now clears to BPv7.)**
 
 ---
 
@@ -48,6 +50,8 @@ Minimum hardware needed to begin development. All items available off-the-shelf.
 
 **Note on BCF files**: The Seeed HaLow module ships with a vendor-supplied BCF (Board Configuration File) for regulatory compliance. Do not substitute BCF files from other modules. For custom PCB designs, obtain BCF from Morse Micro or a certified module partner before production.
 
+**Hardware baseline pinned (2026-06-21)**: the validated module is the **Seeed Wio-WM6180 Wi-Fi HaLow for XIAO** (Quectel **FGH100M** / MM6108) → build `BOARD=proto1-fgh100m`, BCF **`bcf_fgh100mhaamd.mbin`**. (The repo also has `proto1` → `bcf_mf16858.mbin` for the Seeed mf16858 module — *don't* flash that BCF onto FGH100M hardware; same XIAO wiring, different calibration.) **Schematic finding** (`WI-FI_HALOW_FGH100M_EXT01_V30`): the board has **no host power-enable / load switch** — the MM6108 is rail-fed via ferrite beads, so radio power-cycling is via **`RESET_N` (GPIO1)**, not a VBAT cut. Reaching the datasheet sub-µA Hibernate floor may therefore require adding a **load switch** (hardware mod). **BUSY (GPIO5)** and **WAKEUP_IN (GPIO2)** are on **DNP footprints** (populate 0 Ω to enable). This matters for the USB power-meter measurements below.
+
 ---
 
 ## 3. Risk Register
@@ -58,8 +62,8 @@ Risks are ordered by priority. Items marked **BLOCKING** must be resolved before
 
 | Risk | Priority | Resolved in | Key task |
 |---|---|---|---|
-| RISK-01 — IBSS API | BLOCKING | Phase 1 | 1.2–1.3 (`rimba_ibss_init()`) |
-| RISK-02 — IBSS boot time | BLOCKING | Phase 1 | 1.4 (measure), 1.12 (gates Scheduled mode) |
+| RISK-01 — IBSS API | ✅ RESOLVED (2026-06-20) | Phase 1 | 1.2–1.3 (`mmwlan_ibss_*`); foundation validated (multi-node, Linux interop, ~6.5 h soak) |
+| RISK-02 — IBSS boot time | ✅ MEASURED (2026-06-21) | Phase 1 | 1.4 — cold-boot-to-joined **≈1.39 s** (not 30 ms); absorbed by RTC-scheduled design (1.12a), gates duty cycle not feasibility |
 | RISK-03 — BPv7 implementation | BLOCKING | Phase 4 | 4.1–4.4 (RFC 9171 subset) |
 | RISK-04 — Memory without PSRAM | MEDIUM | Phase 1 | 1.8 (validate PSRAM) |
 | RISK-05 — Adaptive TX power API | LOW | Phase 5 | 5.3 (adaptive TX power) |
@@ -130,6 +134,11 @@ Degree 3 — no usable ad-hoc mode at all (the real threat):
         relay-to-relay peering needs a design decision.
       Most of Rimba sits above L2 and survives — rewrite the link layer,
       keep the rest.
+      Porting status (if this fallback is taken): AP mode + an AP **TWT
+      responder** (the leaf power-save win) are now ported to ESP32/morselib
+      and verified on stock fw 1.17.6; 802.11s mesh for the backbone is NOT
+      ported (Linux-only). Details + the new-code↔Linux comparison table:
+      docs/rimba-mesh-ap-porting.md.
 
     Fallback B — different sub-GHz PHY (big change, core survives):
       Port the DTN+mule+routing stack onto LoRa (cf. TU Darmstadt
@@ -184,20 +193,56 @@ pivot.
 
 ---
 
-### RISK-02 — MM6108 IBSS Boot Time: Unknown, Target 30ms **[BLOCKING]**
+### RISK-02 — MM6108 IBSS Boot Time **[MEASURED ✅ 2026-06-21 — ≈1.39 s]**
 
-**Probability**: High risk of target miss  
-**Impact**: High — leaf power budget and scan window depend on this  
-**Owner**: Measure on first hardware bring-up
+**Probability**: Target missed (measured ~46× the 30 ms assumption)  
+**Impact**: High — sets the leaf duty cycle and power budget (but does **not** block the design)  
+**Owner**: Measure on first hardware bring-up — **done**
 
-**Description**: The spec assumes `LEAF_BOOT_MS = 30ms` (MM6108 IBSS join time from power-on). This has never been measured. Typical 802.11 chip boot times range from 50ms to 400ms depending on mode and firmware. If the actual time exceeds 30ms, the leaf scan window must widen, increasing average power.
+**Description**: The spec assumes `LEAF_BOOT_MS = 30ms` (MM6108 IBSS join time from power-on). This had never been measured. Typical 802.11 chip boot times range from 50ms to 400ms depending on mode and firmware. If the actual time exceeds 30ms, the leaf scan window must widen, increasing average power.
 
-**Measurement procedure**:
+> **RESULT (2026-06-21) — cold-boot-to-IBSS-joined ≈ 1.39 s.** Seeed Wio-WM6180
+> (FGH100M / MM6108) for XIAO, `BOARD=proto1-fgh100m`, fw 1.17.6. 20-cycle
+> in-firmware loop (`mmwlan_boot` → `mmwlan_ibss_start` → `mmwlan_ibss_stop` →
+> `mmwlan_shutdown`, timed with `esp_timer`; app `firmware/rimba-halow-bootmeas`):
+>
+> | Phase | mean (min–max) |
+> |---|---|
+> | `mmwlan_boot` — firmware `.mbin` load over SPI @40 MHz + chip init | **616 ms** (599–631) |
+> | `mmwlan_ibss_start` — ADD ADHOC vif + cfg_ibss JOIN + start beaconing | **772 ms** (740–805) |
+> | **TOTAL cold-boot-to-joined** | **≈1389 ms** (1349–1425) |
+>
+> **20/20 cycles, 0 failures, ±40 ms** — reliable and tightly bounded. (An earlier
+> loop that skipped `mmwlan_ibss_stop` before `shutdown` hit `MMWLAN_UNAVAILABLE`
+> re-boots — a teardown-ordering bug, not a hardware limit. Fixed.)
+>
+> **Interpretation:** lands in the ">200 ms" row below — the 30 ms `LEAF_BOOT_MS`
+> assumption is obsolete for an MM6108 IBSS cold boot. **This does not block Rimba.**
+> The RTC-scheduled design (task 1.12a, Issue #5) already plans a full radio
+> power-off + cold boot per wake, so ≈1.39 s is the **per-wake "rejoin tax"** that
+> sets the achievable duty cycle — *not* a per-frame latency. At infrequent leaf
+> wakes (e.g. every 10 min) it is a sub-percent active-time tax. The number to keep
+> reducing it is the `mmwlan_ibss_start` portion (772 ms of fixed bring-up).
+>
+> **Hardware mechanism (Wio-WM6180 schematic `WI-FI_HALOW_FGH100M_EXT01_V30`,
+> checked 2026-06-21):** the board has **no host power-enable / load switch** — the
+> MM6108 is fed from the XIAO 3V3/5V rails through ferrite beads. So "power-cycle the
+> radio" = drive **`RESET_N` (GPIO1)**, *not* cut VBAT. Whether `RESET_N`-held
+> reaches the datasheet Hibernate floor (~0.05 µA) or a higher reset current is
+> **unmeasured** (no current rig this round) — if too high, reaching sub-µA needs a
+> **load-switch hardware mod**. The board's **BUSY (GPIO5)** and **WAKEUP_IN (GPIO2)**
+> sit on **DNP footprints**; a planned 0 Ω mod (all 3 boards) wires them to (a)
+> tighten the boot handshake and (b) enable evaluating chip-PS/Snooze. The firmware
+> pin map (`boards/proto1-fgh100m`, SPI2_HOST @40 MHz mode 0, sw-CS) **matches the
+> schematic exactly** — verified pin-by-pin.
+
+**Measurement procedure** (as run; the original GPIO/sniffer method is unnecessary — the host SDK timing is authoritative and the firmware doesn't surface peer beacons anyway, see Issue #6 / I.4):
 ```
-GPIO toggle at MM6108 power-on
-GPIO toggle when first IBSS beacon is heard by a second node
-Measure interval with logic analyser or oscilloscope
-Repeat 20 times, take P95 value
+In-firmware loop, timed with esp_timer_get_time():
+  mmwlan_boot()       -> t_boot   (firmware reload + chip init)
+  mmwlan_ibss_start() -> t_ibss   (vif up + beaconing = joined)
+  [hold joined], mmwlan_ibss_stop(), mmwlan_shutdown()  (clean teardown)
+Repeat 20×, report min/mean/max per phase.
 ```
 
 **Impact of results**:
@@ -207,7 +252,7 @@ Repeat 20 times, take P95 value
 | < 30ms | Spec confirmed. No changes needed. |
 | 30–80ms | Update `LEAF_BOOT_MS` in spec. Increase `LEAF_SCAN_WINDOW_MS` to 250ms. Minor power impact. |
 | 80–200ms | Significant scan window increase. Leaf power may double. Recalculate power budget. Consider wake-on-interrupt from relay beacon as alternative. |
-| > 200ms | Fundamental issue. Investigate MM6108 IBSS fast-start options in morselib source. May need to keep MM6108 in low-power standby (not full off) between leaf wakes. |
+| > 200ms | Fundamental issue. Investigate MM6108 IBSS fast-start options in morselib source. May need to keep MM6108 in low-power standby (not full off) between leaf wakes. **← ACTUAL (≈1389 ms). Resolution: not a per-frame cost — it's the per-wake tax of RTC-scheduled mode (1.12a). `LEAF_BOOT_MS` → ~1400 ms; fold into the power budget; no fast-resume IBSS state exists (standby/deep-sleep are STA-only — see rimba-mm6108-powersave-analysis.md §9), so the cold boot is unavoidable for sub-µA sleep.** |
 
 ---
 
@@ -311,7 +356,7 @@ Estimated effort: 5–8 weeks. Produces a more complete implementation but with 
 | 1.1 | Set up ESP-IDF + morselib build for Seeed Xiao HaLow | 1 day | Hardware |
 | 1.2 | Read morselib AP and STA init sequences | 2 days | morselib source |
 | 1.3 | Write `rimba_ibss_init()` wrapper using ADHOC interface type | 3 days | 1.2 |
-| 1.4 | **Measure MM6108 IBSS boot time** (RISK-02) | 1 day | 1.3 |
+| 1.4 | ✅ **Measure MM6108 IBSS boot time** (RISK-02) — **DONE 2026-06-21: cold-boot-to-joined ≈1.39 s** (boot 616 ms + ibss_start 772 ms), 20/20 reliable. See RISK-02. | 1 day | 1.3 |
 | 1.5 | Update `LEAF_BOOT_MS` and `LEAF_SCAN_WINDOW_MS` in spec | 1 day | 1.4 |
 | 1.6 | Implement raw Ethernet frame TX/RX (EtherType 0x88B5) | 2 days | 1.3 |
 | 1.7 | Prove two-node frame exchange (ping test) | 1 day | 1.6 |
@@ -319,11 +364,32 @@ Estimated effort: 5–8 weeks. Produces a more complete implementation but with 
 | 1.9 | **Connect MM6108 interrupt line to ESP32-S3 wake pin** | 0.5 day | 1.3 |
 | 1.10 | **Implement Continuous mode relay sleep (FreeRTOS light sleep + MM6108 interrupt wake)** | 1 day | 1.9 |
 | 1.11 | **Verify Continuous mode: relay wakes on incoming frame, MCU sleeps between frames** | 1 day | 1.10 |
-| 1.12 | **Assess Scheduled mode feasibility: if boot time < 100ms, prototype full TDMA sleep** | 1 day | 1.4 |
+| 1.12 | **Assess Scheduled mode feasibility** — ⚠️ **revised (2026-06-21):** boot is ≈1.39 s, far over the old 100 ms TDMA-sleep threshold, so per-frame TDMA sleep is off the table. Scheduled mode is instead the **RTC-driven cold-power-cycle** in 1.12a (wake → cold-boot ≈1.39 s → exchange → off); 1.39 s is the per-wake tax, viable for infrequent (minutes-scale) wakes. | 1 day | 1.4 |
 | 1.12a | **RTC-scheduled radio power-cycling = Scheduled mode** (early focus). The morse driver/firmware has **no IBSS radio power-save** (TWT is STA/AP-only — now **firmware-confirmed by decompilation**: TWT/WNM-sleep/Deep-sleep are STA-gated, ATIM is absent; only *Snooze* via `CONFIG_PS` is reachable in IBSS but is leaf-unsuitable — see [`rimba-mm6108-powersave-analysis.md`](rimba-mm6108-powersave-analysis.md) §7/§9), so drive the duty cycle from the **ESP32 + RTC**: wake on the RTC alarm → power the MM6108 on → join the pinned cell → exchange → power off → deep-sleep. Bypasses chip power-save *and* TSF sync (RTC is the clock). **Gating measurement = radio cold-boot-to-IBSS-joined time (RISK-02, task 1.4)** — that sets the viable wake period + power budget. Runs after the small Phase-1 validation. See [`rimba-ibss-hardening-todo.md`](rimba-ibss-hardening-todo.md) #8/#9. | 2–3 days | 1.4 |
 | 1.13 | **Implement NTP dev-mode time sync** (Phase 1 only — replaced by RTC in Phase 4) | 1 day | 1.1 |
 
 **Phase 1 success gate**: Two boards exchange `EtherType 0x88B5` frames over IBSS. Boot time measured and spec updated. Continuous mode relay sleep confirmed working. NTP dev-mode providing absolute time to both boards.
+
+> **Phase 1 status (2026-06-21) — IBSS foundation VALIDATED, exceeded the 2-board gate.**
+> - **RISK-01 resolved & hardened:** `mmwlan_ibss_*` API (adopted from the
+>   momentary-systems fork + our Linux-derived fixes). Validated well beyond two
+>   boards: **3-board full mesh, per-peer state, drop/rejoin, Linux `morse_driver`
+>   interop, and a ~6.5 h 4-node soak** (0 reboots, no heap leak). See
+>   [`rimba-ibss-milestones.md`](rimba-ibss-milestones.md),
+>   [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md).
+> - **RISK-02 measured:** cold-boot-to-IBSS-joined **≈1.39 s** (task 1.4). The 30 ms
+>   `LEAF_BOOT_MS` assumption is retired; ≈1.4 s is the RTC-wake tax (1.12a).
+> - **Beacon/discovery (I.4 / Issue #6):** the MM6108 firmware does **not surface
+>   peer beacons** to the host, and an S1G beacon carries `source_addr = BSSID` by
+>   frame format — so peer discovery is **data-driven** on both ESP32 and Linux
+>   (matches mac80211). On-air beacon capture needs an external sniffer; not a
+>   functional blocker. (The ESP32 also builds a *legacy* MGMT beacon host-side vs
+>   Linux's software S1G translation — a noted divergence, not a defect.)
+> - **Hardware baseline pinned:** Seeed Wio-WM6180 (FGH100M / MM6108) for XIAO =
+>   `BOARD=proto1-fgh100m` (BCF `bcf_fgh100mhaamd.mbin`); schematic-verified pin map.
+> - **Remaining Phase-1 items:** the RTC-scheduled power-cycle prototype (1.12a) and
+>   Continuous-mode sleep (1.9–1.11); next concrete step is the BUSY/WAKE 0 Ω mod +
+>   re-measuring boot before/after, then radio-rail current (needs a power rig).
 
 ### Development Mode: External RTC is not required for Phase 1–3
 
@@ -578,5 +644,5 @@ The following issues from the Rimba protocol specification (rimba-protocol-spec.
 
 ---
 
-*Document status: Draft 0.3*  
+*Document status: Draft 0.5*  
 *Companion to: rimba-protocol-spec.md Draft 0.26*
