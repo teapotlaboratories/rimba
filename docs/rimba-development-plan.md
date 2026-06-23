@@ -204,7 +204,7 @@ pivot.
 > **RESULT (2026-06-21) — cold-boot-to-IBSS-joined ≈ 1.39 s.** Seeed Wio-WM6180
 > (FGH100M / MM6108) for XIAO, `BOARD=proto1-fgh100m`, fw 1.17.6. 20-cycle
 > in-firmware loop (`mmwlan_boot` → `mmwlan_ibss_start` → `mmwlan_ibss_stop` →
-> `mmwlan_shutdown`, timed with `esp_timer`; app `firmware/rimba-halow-bootmeas`):
+> `mmwlan_shutdown`, timed with `esp_timer`):
 >
 > | Phase | mean (min–max) |
 > |---|---|
