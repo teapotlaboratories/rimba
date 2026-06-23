@@ -150,15 +150,13 @@ sets `mgmt->sa = bssid`). Marked **morse hardware/firmware dependent** in the
 driver; revisit only if a future firmware surfaces real per-node beacons.
 
 ### H6 — Phase-1 foundation validation COMPLETE ✅ (2026-06-21)
-Full validation suite passed (see [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md)):
-multi-node **P0.1–0.7 ☑**, Linux interop **I.1–I.3, I.5 ☑** (real `morse_driver` node,
-same silicon), per-peer dedup **P0.4 ☑** (forced cross-peer probe), recovery **P1.4 ☑**,
-and a **~6.5 h 4-node soak P1.5 ☑** (0 reboots, 0 asserts, no heap leak, RTT stable).
-**One caveat: I.4 ✗** — on-wire frame diff is blocked (morse monitor mode captures
-nothing; needs an external S1G sniffer to close #11). P1.1–P1.3 throughput/jitter/MTU
-*numbers* not collected. **The open-IBSS foundation is robust and ready for Phase-2
-(link security).** Next dev: **#9 RISK-02 boot/join time** (gating for RTC-scheduled
-power-save), then Phase 2.
+Full suite passed — multi-node mesh, Linux `morse_driver` interop (same silicon), per-peer
+dedup, recovery, and a ~6.5 h 4-node soak (0 reboots, no heap leak, RTT stable). **Per-test
+results (P0.1–0.7, I.1–I.5, P1.4/P1.5) and the I.4 caveat are tabulated in the canonical
+[`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md) §1** (don't restate them here). The
+open-IBSS foundation is robust and ready for **Phase 2 (link security)**. RISK-02
+cold-boot-to-IBSS-joined time has since been **measured ≈1.39 s** (2026-06-21), the gating
+number for RTC-scheduled power-save (#9).
 
 ---
 
@@ -243,7 +241,7 @@ make monitor APP=rimba-halow-ibss PORT=/dev/ttyACM0      # "reply from 192.168.1
 ```
 
 Linux interop (the 4th node) — Raspberry Pi + MM6108, `morse_driver`/mac80211; bring-up
-in [`rimba-ibss-linux-interop-runbook.md`](rimba-ibss-linux-interop-runbook.md). Join the
+in [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md) §12 (IBSS interop). Join the
 same pinned cell with **frequency 5560** (S1G ch27 in the 5 GHz model; on-air 915.5 MHz):
 
 ```bash

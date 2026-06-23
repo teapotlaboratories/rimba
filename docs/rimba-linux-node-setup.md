@@ -217,6 +217,47 @@ ESP32 side: `make flash APP=rimba-halow-sta BOARD=proto1-fgh100m PORT=/dev/ttyAC
 Expect `AP-STA-CONNECTED <mac>` + `EAPOL-4WAY-HS-COMPLETED` in `hostapd.log`, and
 `reply from 192.168.12.1 … ~12 ms` on the ESP32 console.
 
+## 12. IBSS interop (P0.5 / I.1–I.5) — VALIDATED
+
+The open-IBSS interop path (this node as the `morse_driver`/mac80211 **reference IBSS
+node** joining the ESP32 cell). Cell parameters must match every ESP32 node: SSID
+`rimba-ibss`, **pinned** BSSID `02:12:34:56:78:9a` (no TSF merge either side — provisioned),
+S1G ch27 / 915.5 MHz / 1 MHz / US, OPEN. IP = `192.168.13.<octet>`, octet = `mac[5]`.
+
+**Method A — `iw` ad-hoc join (the validated path).** S1G ch27 maps to the 5 GHz-model
+frequency **5560** (`dot11ah CHANS1GHZ(27,…,112)`; on-air 915.5 MHz):
+```sh
+sudo nmcli dev set wlan1 managed no
+sudo iw dev wlan1 set type ibss; sudo ip link set wlan1 up
+sudo iw dev wlan1 ibss join rimba-ibss 5560 fixed-freq 02:12:34:56:78:9a
+sudo ip addr add 192.168.13.66/24 dev wlan1     # octet from this node's MAC, like the ESP32s
+```
+Because the ESP32 app auto-pings **every** discovered peer at `192.168.13.<octet>`, once this
+node holds its octet IP the ESP32s start pinging it with no change — "just another peer."
+
+**Method B — `wpa_supplicant_s1g` ad-hoc (`mode=1`), OPEN — fallback** if a given `iw`/driver
+build rejects the S1G IBSS join (preserved from the old interop runbook; uses the same S1G
+channel fields as the hostapd example). Needs `wpa_supplicant_s1g` from the Morse hostap fork:
+```
+ctrl_interface=/var/run/wpa_supplicant_s1g
+network={
+    ssid="rimba-ibss"
+    mode=1
+    bssid=02:12:34:56:78:9a
+    frequency=915500            # or: channel=27 op_class=68 s1g_prim_chwidth=0 s1g_prim_1mhz_chan_index=0
+    key_mgmt=NONE               # OPEN — Phase 1
+}
+```
+```sh
+wpa_supplicant_s1g -D nl80211 -i wlan1 -c wpa_ibss.conf
+```
+
+Results (I.1 discovery, I.2 beacon interop, I.3 data, I.4 on-air, I.5 mixed 4-node cell) are
+tabulated in [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md) §5. Key interop findings:
+discovery is **data-driven** (the firmware doesn't surface peer beacons; morse S1G beacons
+carry `source_addr = BSSID`), and I.4 on-air capture needs an external sniffer (morse monitor
+mode isn't compiled into this build).
+
 ---
 
 ## Gotchas (each cost real time — read before debugging)
