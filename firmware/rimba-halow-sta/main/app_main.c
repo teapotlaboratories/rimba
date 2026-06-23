@@ -147,6 +147,20 @@ void app_main(void)
     conf.sta.security_type = MMWLAN_SAE;
 
     ESP_ERROR_CHECK(mmhalow_set_config(WIFI_IF_STA, &conf));
+
+    /* Request a TWT agreement BEFORE associating (morselib requires
+     * mmwlan_twt_add_configuration to be called before mmwlan_sta_enable, which
+     * mmhalow_connect drives). TWT is the AP/STA HaLow power-save that is NOT
+     * available in IBSS (STA/AP-only) — as a STA on chronium's AP it becomes usable.
+     * Requester role, ~5 s service-period interval, ~65 ms min wake duration. */
+    struct mmwlan_twt_config_args twt = MMWLAN_TWT_CONFIG_ARGS_INIT;
+    twt.twt_mode = MMWLAN_TWT_REQUESTER;
+    twt.twt_wake_interval_us = 1000000;        /* wake ~every 1 s (test: < ping 2s timeout) */
+    twt.twt_min_wake_duration_us = 65536;      /* ~65 ms awake per service period */
+    twt.twt_setup_command = MMWLAN_TWT_SETUP_REQUEST;
+    enum mmwlan_status twt_st = mmwlan_twt_add_configuration(&twt);
+    ESP_LOGI(TAG, "TWT add_configuration (requester, 5s/65ms) -> %d (0=OK)", twt_st);
+
     ESP_LOGI(TAG, "Connecting to \"%s\"...", LINK_SSID);
     mmhalow_connect(sta_status_cb);
 }
