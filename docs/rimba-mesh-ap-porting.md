@@ -123,11 +123,14 @@ schedule the SP — is not required and is gated for AP vifs anyway; host-side d
 - **Downlink latency = TWT interval.** Buffered downlink is delivered at the STA's next SP — the
   inherent TWT trade-off (fine for a leaf that wakes every N minutes; a short interval was used
   on the bench only to fit a 2 s ping timeout).
-- **Transport: assoc-IE + teardown action frame.** TWT is *negotiated* in (re)assoc IEs (matching
-  the morselib STA requester). A received **TWT Teardown** action frame (S1G unprotected, action 7)
-  is now handled — it frees the STA's agreement (`umac_twt_responder_handle_action`, dispatched from
-  `umac_datapath.c`). The **mid-session TWT-Setup action frame** (negotiating a new agreement outside
-  association) is recognised but not yet negotiated — it needs a TWT-Setup response action frame TX.
+- **Transport: assoc-IE + TWT action frames.** TWT is negotiated in (re)assoc IEs (the common
+  requester flow) *and* via **S1G unprotected action frames** (category 22): a received **TWT Setup**
+  (action 6) is accepted and answered with a TWT-Setup response action frame carrying the ACCEPT IE
+  (`umac_twt_responder_tx_setup_response` → `umac_datapath_build_and_tx_mgmt_frame`); a **TWT
+  Teardown** (action 7) frees the STA's agreement. Both dispatch from `umac_datapath.c` →
+  `umac_twt_responder_handle_action`; the accept policy + IE build are shared with the assoc path
+  (`umac_twt_responder_accept_ie` / `_fill_ie`). *Not yet exercised on hardware* — our test STA app
+  negotiates TWT in the assoc IEs, not mid-session, so the action-frame path is review-verified only.
 - **Bench-verified only** (ping workload); no radio-rail current measurement of the µA draw.
 
 ### 4.5 Diff summary
