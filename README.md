@@ -102,6 +102,10 @@ cloning). Set up the vendored ESP-IDF first (below).
 
 ### 1. One-time toolchain setup
 
+> **Install [Git LFS](https://git-lfs.com) before cloning** (`git lfs install`) — some docs (e.g.
+> `docs/MM_APPNOTE-24_Linux_Porting_Guide.pdf`) are stored via LFS. If you cloned without it, run
+> `git lfs install && git lfs pull` to fetch the real files (otherwise you get small pointer stubs).
+
 ESP-IDF is **vendored as a git submodule at `vendor/esp-idf`** (pinned at v5.4.2,
 the minimum required by the `morsemicro/halow` component). Check it out with its
 own submodules, then install the toolchain from it:
