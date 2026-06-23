@@ -141,7 +141,46 @@ schedule the SP — is not required and is gated for AP vifs anyway; host-side d
 
 ---
 
-## 5. References
+## 5. Open items / backlog
+
+Tracked TWT / AP work not yet done (mirrors the live task list):
+
+- **TWT power-save validation — needs a current meter.** The responder is *functionally* validated
+  (assoc + multi-STA + teardown + setup action frames), but the **power-save win is unproven**. A
+  10 s-interval test on an *idle* leaf still saw the AP reach the STA every ~1 s at ~10 ms RTT — the
+  radio is awake, not sleeping the interval. Investigation findings:
+  - PS defaults to `MMWLAN_PS_ENABLED` (100 ms dynamic-PS); the STA app makes no explicit PS call.
+  - The requester agreement is built *implicit, announced (flow_type=0), non-triggered*.
+  - AP defaults: beacon interval 100 TU (~102 ms), DTIM period 1 → a PS STA wakes ~every 102 ms at
+    DTIM, and TWT's longer interval doesn't reduce that while downlink is buffered.
+  - The ping test **cannot** show radio sleep (any downlink forces a wake; an idle link has nothing
+    to observe). Only a **current meter on a fully-idle link** proves the µA floor + per-interval wake
+    spikes. Board caveat: no host power-enable line (RESET_N only), BUSY/WAKE on DNP pads (RISK-02).
+  - **Empirical (item (a)):** the radio *does* sleep — setting `mmwlan_set_listen_interval(10)`
+    *before* association made the STA sleep through the assoc handshake (0 associations), which proves
+    PS sleep engages. But the default wake cadence tracks the DTIM/beacon rate (~10 ms RTT to 1 s
+    pings), governed by listen_interval/DTIM rather than the TWT service period. A clean post-assoc
+    RTT-rise demo was thwarted by flaky association (cause still open — *not* the BCF; see below).
+  - **BCF is correct (cleared a false lead).** The runtime "BCF board description: mf16858" is *not*
+    a wrong/mislabeled file — `components/firmware/mm6108/bcf_fgh100mhaamd.mbin` is byte-identical to
+    the genuine `bcf/quectel/bcf_fgh100mhaamd.bin` from Morse's `morse-firmware` repo (now vendored at
+    `vendor/morse-firmware` as the BCF source of truth), and that genuine FGH100M-H BCF simply carries
+    `.board_desc = "mf16858"` (the FGH100M-H shares the mf16858 board reference). So `BOARD=proto1-fgh100m`
+    loads the right calibration; flaky association must be explained elsewhere (PS config / RF env).
+  - Levers to try for real sleep: explicit `mmwlan_set_power_save_mode` + `mmwlan_set_dynamic_ps_timeout`,
+    a longer AP beacon/DTIM + STA `mmwlan_set_listen_interval` (applied *post-assoc*), or WNM sleep.
+- **AP STA-count ceiling + PSRAM.** morselib caps AP STAs at `MMWLAN_AP_MAX_STAS_LIMIT = 20` (a
+  software `#define`, not firmware). Per-STA host cost = **912 B** (`sizeof(umac_sta_data)`), which
+  defaults to internal SRAM (< the 16 KB `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` threshold). 8 MB PSRAM
+  ≈ ~8,700 structs — already covers the 802.11ah AID ceiling (8,191), so **firmware capacity is the
+  real limit**. To scale past ~20: route STA allocs to PSRAM (`MALLOC_CAP_SPIRAM`) and confirm the
+  firmware's per-STA context capacity.
+- **Action-frame path not yet HW-exercised.** Mid-session TWT-Setup + teardown action frames are
+  implemented and review-verified, but our test STA negotiates TWT in assoc IEs, not mid-session.
+- **Regression suite** for every built feature (hello / scan / AP-STA / IBSS / TWT / Mesh+AP) so
+  firmware/morselib bumps don't silently regress earlier milestones.
+
+## 6. References
 
 - Worklog (blow-by-blow + firmware byte-comparison): [`worklog/2026-06-22-mesh-ap-twt.md`](worklog/2026-06-22-mesh-ap-twt.md)
 - Linux node + Mesh/AP/TWT bring-up: [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md) §11–§12
