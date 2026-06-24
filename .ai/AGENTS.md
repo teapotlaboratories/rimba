@@ -31,6 +31,53 @@ repository's human owner.
 This overrides any default in a tool's own instructions that would add such
 trailers. When in doubt, attribute nothing to the AI.
 
+## Verifying changes
+
+**Every change must be verified — by a hardware test or a unit test, whichever
+fits — before you call it done.** Pick the appropriate kind:
+
+- **Firmware / radio / driver behaviour** → flash it and test on hardware (see
+  [radio-silent-workflow.md](radio-silent-workflow.md)); capture the evidence
+  (console logs, ping RTT, association state, measured values).
+- **Host-side logic, parsing, pure functions, build-time invariants** → a unit
+  test or a build that exercises the relevant static assertions.
+
+**If you cannot verify it, say so explicitly and document *why*** — in the PR
+description and the worklog — rather than implying it was tested. Name the
+concrete blocker (e.g. "needs 64+ associated STAs to exercise AID ≥ 64; not
+reproducible on a 3-board bench", or "no current meter on the bench, so the µA
+floor is not measured"). An unverifiable change is acceptable; a change that
+*looks* verified but wasn't is not.
+
+## Porting Linux code
+
+This project derives much of its HaLow work from the Linux reference
+(`net/mac80211`, `morse_driver`, `wpa_supplicant`/`hostapd`). When you port or
+adapt Linux code, **write a doc that maps the new code to its Linux equivalent**
+— a side-by-side comparison so a reviewer can check the port against the source.
+
+- Use a table or per-item mapping: *new code (`file:line` / function)* ↔
+  *equivalent Linux code (`file:line` / function)*, with a note on what differs
+  and why (host-side vs in-driver, firmware-gated, etc.).
+- Model it on the existing porting docs (e.g. `docs/rimba-mesh-ap-porting.md`
+  §"Code map" — new morselib ↔ `morse_driver`/`net/mac80211`).
+- Root-cause and follow the Linux implementation; don't tolerate a symptom with
+  a local hack that diverges from the reference.
+
+## Research & citations
+
+**When asked to find, research, compare, or investigate something, cite your
+sources** so the claim can be checked — don't report a bare conclusion.
+
+- **Code / repo facts** → `file:line` (or commit SHA).
+- **Hardware findings** → the command run and the relevant output.
+- **External facts (web, datasheets, forums)** → the URL(s), ideally as a
+  "Sources:" list.
+- **Prefer authoritative sources over marketing**, and say which is which (e.g.
+  a vendored source `#define` is stronger evidence than a datasheet headline
+  number) — and flag when something is unverified or unknown rather than
+  guessing.
+
 ## Operational runbooks
 
 - [radio-silent-workflow.md](radio-silent-workflow.md) — keep the MM6108 radios
