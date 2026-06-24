@@ -16,7 +16,7 @@ documented), and ported code carries a new-code ↔ Linux mapping (below).
 **Hardware:** up to 3× Seeed XIAO ESP32-S3 + FGH100M (`boards/proto1-fgh100m`,
 `bcf_fgh100mhaamd`, fw **1.17.6**) **+ a Raspberry Pi 5 + Wio-WM6180 (MM6108)
 Linux reference node** (`morse_driver`/cli/fw **1.17.8** — the interop oracle,
-[`design-specification/rimba-linux-node-setup.md`](../design-specification/rimba-linux-node-setup.md)). US 915.5 MHz, 1 MHz BW,
+[`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md)). US 915.5 MHz, 1 MHz BW,
 S1G ch27 / op-class 68; SSID `rimba-ping`, WPA3-SAE; HaLow subnet 192.168.12.0/24.
 
 Paths: `MORSE = components/halow/components/mm-iot-sdk/framework/morselib/src`;
@@ -78,7 +78,7 @@ beacon via the bundled hostapd. Boots and beacons stably.
 On chronium one MM6108 ran AP (`hostapd_s1g`) + open 802.11s mesh-point
 (`iw … mesh join`) **co-channel** (ch27) + a TWT'ing ESP32 STA, all at once. Recipe
 + gotchas (`type mp` needs explicit `iw set type`; distinct locally-administered
-MAC; bare `freq` not `HT20`) in [`design-specification/rimba-linux-node-setup.md`](../design-specification/rimba-linux-node-setup.md)
+MAC; bare `freq` not `HT20`) in [`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md)
 §12. On ESP32 this is blocked only by the **absence of 802.11s in morselib** (the AP
 half works; the mesh half doesn't exist) — the open structural item for an all-ESP32
 Mesh-gate. ([`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md))
@@ -289,6 +289,6 @@ chronium as a Linux STA (interop oracle) — `wpa_supplicant_s1g`, SAE, **freq 5
 
 - Worklog (Mesh+AP+TWT blow-by-blow + firmware byte-comparison): [`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md)
 - Worklogs (STA-count): [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](../worklog/2026-06-23-ap-sta-ceiling-100-psram.md), [`worklog/2026-06-23-ap-sta-ceiling-255.md`](../worklog/2026-06-23-ap-sta-ceiling-255.md), multi-node test [`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](../worklog/2026-06-23-ap-multinode-twt-hwtest.md)
-- Linux node + Mesh/AP/TWT bring-up: [`design-specification/rimba-linux-node-setup.md`](../design-specification/rimba-linux-node-setup.md) §11–§12
+- Linux node + Mesh/AP/TWT bring-up: [`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md) §11–§12
 - Power-save context (why TWT matters for leaves): [`design-specification/rimba-mm6108-powersave-analysis.md`](../design-specification/rimba-mm6108-powersave-analysis.md)
 - Linux driver source (reference): `morse_driver/{twt.c,mac.c,command.c,beacon.c,dot11ah/tim.c}`; `net/mac80211` TWT/PS/mesh

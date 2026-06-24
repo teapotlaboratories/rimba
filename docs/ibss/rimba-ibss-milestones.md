@@ -17,7 +17,7 @@ set, merge, and ATIM — not improvised from morselib's AP path.
 **Hardware:** up to 3× Seeed XIAO ESP32-S3 + HaLow module (reports
 `mm6108-mf16858`, chip `0x0306`, firmware **v1.17.6**) **plus a Raspberry Pi +
 MM6108 Linux reference node** (`morse_driver`/mac80211, same silicon — the interop
-oracle, see [`design-specification/rimba-linux-node-setup.md`](../design-specification/rimba-linux-node-setup.md)); board config
+oracle, see [`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md)); board config
 `boards/proto1-fgh100m` (`bcf_fgh100mhaamd`); US 915.5 MHz, 1 MHz BW, S1G channel
 27 / op-class 68 (the Linux `iw … ibss join` frequency for ch27 is **5560** — the
 5 GHz-model channel that `dot11ah` maps ch27 onto; on-air is still 915.5 MHz).
@@ -406,7 +406,7 @@ make monitor APP=rimba-halow-ibss PORT=/dev/ttyACM0      # "reply from 192.168.1
 ```
 
 Linux interop (the 4th node) — Raspberry Pi + MM6108, `morse_driver`/mac80211; bring-up
-in [`design-specification/rimba-linux-node-setup.md`](../design-specification/rimba-linux-node-setup.md) §12 (IBSS interop). Join the
+in [`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md) §12 (IBSS interop). Join the
 same pinned cell with **frequency 5560** (S1G ch27 in the 5 GHz model; on-air 915.5 MHz):
 
 ```bash

@@ -93,7 +93,7 @@ this round — datasheet Snooze ≈42 µA is the expected dozing draw; timing/be
 ## 3. `wpa_supplicant_s1g` rebuilt with mesh
 
 chronium's `wpa_supplicant_s1g` had never been built (§6 of
-[`../design-specification/rimba-linux-node-setup.md`](../design-specification/rimba-linux-node-setup.md): deferred — DPP hit an
+[`../reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md): deferred — DPP hit an
 OpenSSL-3 `EC_KEY` deprecation-as-error). Rebuilt it: enabled `CONFIG_MESH=y`, **disabled
 `CONFIG_DPP/DPP2/DPP3`** to dodge that error. Clean build, **55 mesh symbols**, installed to
 `/usr/local/bin/wpa_supplicant_s1g`. Secured (SAE) 802.11s mesh is now possible (the §1 mesh
