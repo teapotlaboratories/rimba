@@ -242,8 +242,24 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
 - **Linux STA as TWT *requester*** vs the ESP32 AP responder. Needs the Morse driver's
   requester-role bring-up (`twt_requester=1` global + the correct assoc-time negotiation;
   `morse_cli twt conf` alone returns -1 / "non-requester"). The strongest responder interop test.
-- **Action-frame TWT path on hardware.** Mid-session TWT-Setup/Teardown action frames are
-  implemented + review-verified but not HW-exercised (the test STA negotiates in assoc IEs).
+- ◐ **Action-frame TWT path on hardware** *(in progress).* The AP **responder** RX/TX action
+  path exists (`umac_twt_responder_handle_action` / `_tx_setup_response`) but is unexercised —
+  the test STA only negotiates in assoc IEs. HW test needs a **requester-side action-frame
+  sender** (no such path in morselib yet): TX a mid-session TWT-Setup action (cmd REQUEST) +
+  RX the AP's ACCEPT response → install via `umac_twt_process_ie`, plus a Teardown. Mirror
+  `morse_driver` `morse_mac_send_twt_action_frame` + the requester half of
+  `morse_mac_process_rx_twt_mgmt`. Then verify TWT engages mid-session (doze RTT) + teardown frees.
+- ☐ **RAW (Restricted Access Window) — AP-side, port from Linux.** morselib has only RAW
+  *types/caps* today (`MORSE_CAPS_RAW`, the S1G cap-6 RAW-operation bit, `raw_priority` in
+  `mmwlan_sta_args`) — **no implementation**. Port the AP RAW from `morse_driver` **`raw.c`**
+  (1742 lines) + **`page_slicing.c`**: build the **RPS IE** (`morse_raw_get_rps_ie` /
+  `_generate_rps_ie` / `_generate_assignment`), AID-list grouping
+  (`morse_generate_aid_list` over the `aid_bitmap`), slot definition
+  (`morse_raw_generate_slot_definition`), and insert it in the beacon (the AP beacon path
+  already reserves space for an RPS IE on Linux). Follow Linux exactly; write the
+  new-code↔Linux map. Scope MVP for a provisioned mesh (may not need PRAW/periodic at first).
+  *Recommend a recon/feasibility pass first* (does the fw accept the RAW config cmd; what's
+  minimum-viable) like the IBSS/mesh recons. Big feature — its own branch + PR.
 - **SP-overlap scheduling.** Port Linux's `twt_wi_tree` SP spacing (`twt.c:941`) — matters
   only when many leaves share tight wake intervals.
 - **µA current measurement** of a fully-idle TWT link — no bench power-enable line / meter
