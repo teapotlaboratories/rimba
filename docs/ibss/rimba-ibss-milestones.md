@@ -298,6 +298,14 @@ The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milesto
   `umac_connection_addr_matches_bssid` (connection BSSID not set in IBSS) here.
 - ☐ **#13 Audit STA/AP-only assumptions** in morselib for other ADHOC drops (the RX-VIF
   bug was one).
+- ☐ **#20 Drop/rejoin survivor-side rediscovery gap** (found in the 2026-06-23 regression/stress
+  test). In a mixed 4-node cell (3 ESP32 + chronium), dropping then rejoining one ESP32: the
+  rejoined node fully recovers (pings all peers, 0 timeouts) and survivors still **serve** its
+  traffic (reply to its pings), but the survivors did **not re-add it to their own active-ping
+  set** within ~90 s — i.e. survivor→returned-peer discovery didn't re-fire even though the RX
+  path sees the peer's frames. P0.6 claimed survivor re-acquisition works; re-confirm and fix
+  (likely the get-or-add-on-RX path vs the app ping-list). See
+  [`worklog/2026-06-23-regression-stress-test.md`](../worklog/2026-06-23-regression-stress-test.md).
 
 **Power & de-risking** *(early focus — Rimba's battery-leaf model rests on it)*
 - ☐ **#9 RISK-02 — measure radio cold-boot-to-IBSS-joined time (GATING, NEXT).** The number
