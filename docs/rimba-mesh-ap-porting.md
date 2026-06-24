@@ -165,12 +165,20 @@ Tracked TWT / AP work not yet done (mirrors the live task list):
     loads the right calibration; flaky association must be explained elsewhere (PS config / RF env).
   - Levers to try for real sleep: explicit `mmwlan_set_power_save_mode` + `mmwlan_set_dynamic_ps_timeout`,
     a longer AP beacon/DTIM + STA `mmwlan_set_listen_interval` (applied *post-assoc*), or WNM sleep.
-- **AP STA-count ceiling + PSRAM.** morselib caps AP STAs at `MMWLAN_AP_MAX_STAS_LIMIT = 20` (a
-  software `#define`, not firmware). Per-STA host cost = **912 B** (`sizeof(umac_sta_data)`), which
-  defaults to internal SRAM (< the 16 KB `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` threshold). 8 MB PSRAM
-  ≈ ~8,700 structs — already covers the 802.11ah AID ceiling (8,191), so **firmware capacity is the
-  real limit**. To scale past ~20: route STA allocs to PSRAM (`MALLOC_CAP_SPIRAM`) and confirm the
-  firmware's per-STA context capacity.
+- **AP STA-count ceiling + PSRAM — RESOLVED (build-verified; HW-at-scale deferred).** ✅ Both the
+  cap and the per-STA RAM placement are now `sdkconfig`-selectable, and the structural ceiling was
+  raised from 63 to **127** (target 100). Knobs: `CONFIG_HALOW_AP_MAX_STAS` (range 1..127, default 20,
+  drives `MMWLAN_AP_MAX_STAS_LIMIT`) and `CONFIG_HALOW_STA_DATA_IN_PSRAM` (route each `umac_sta_data`,
+  ~912 B, to `MALLOC_CAP_SPIRAM` — **strictly PSRAM, no internal-SRAM fallback**). **Key finding:** the
+  real ceiling was *not* firmware capacity or the 20 `#define` — it was morselib's **S1G TIM partial
+  virtual bitmap**, which the shipped code asserted as a *single* block (`MAX_SUPPORTED_AID = 64`,
+  `MAX_SUPPORTED_PVB_LEN == 10`, vendor tripwire "Review the TIM logic"). The encoder
+  (`ies/s1g_tim.c ie_s1g_tim_build`) already loops over blocks generically, so raising
+  `MAX_SUPPORTED_AID` to **128** (two blocks → AIDs 1..127) + updating the tripwire (`== 20`) is all the
+  rework; the parse path was already multi-block. The reference AP app builds clean at cap=100 + PSRAM.
+  *Deferred:* on-air validation with a STA whose AID ≥ 64 (exercises the new block-1 code path) — needs
+  64+ live associations, not reproducible on a 3-board bench. Full record:
+  [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](worklog/2026-06-23-ap-sta-ceiling-100-psram.md).
 - **Action-frame path not yet HW-exercised.** Mid-session TWT-Setup + teardown action frames are
   implemented and review-verified, but our test STA negotiates TWT in assoc IEs, not mid-session.
 - **Regression suite** for every built feature (hello / scan / AP-STA / IBSS / TWT / Mesh+AP) so
@@ -179,6 +187,7 @@ Tracked TWT / AP work not yet done (mirrors the live task list):
 ## 6. References
 
 - Worklog (blow-by-blow + firmware byte-comparison): [`worklog/2026-06-22-mesh-ap-twt.md`](worklog/2026-06-22-mesh-ap-twt.md)
+- Worklog (STA-count ceiling → 100, two-block S1G TIM, per-STA PSRAM): [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](worklog/2026-06-23-ap-sta-ceiling-100-psram.md)
 - Linux node + Mesh/AP/TWT bring-up: [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md) §11–§12
 - Power-save context (why TWT matters for leaves): [`rimba-mm6108-powersave-analysis.md`](rimba-mm6108-powersave-analysis.md)
 - Linux driver source (reference): `morse_driver/{twt.c,mac.c,command.c}`, `mesh.c`; `net/mac80211` TWT/PS
