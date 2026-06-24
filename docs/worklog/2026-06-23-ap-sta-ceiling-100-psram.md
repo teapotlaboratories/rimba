@@ -253,3 +253,20 @@ both branches matter.
 
 Updated the `HALOW_STA_DATA_IN_PSRAM` Kconfig help to state it now covers both `umac_sta_data`
 *and* the TWT table.
+
+---
+
+## Linux alignment (verified against `morse_driver` 1.17.8)
+
+Later confirmed against the actual driver source (`/home/chronium/halow/morse_driver`, the
+loaded `0-rel_1_17_8_2026_Mar_24`): morselib's S1G TIM is a **port of Linux `dot11ah/tim.c`**,
+so the multi-block change follows Linux rather than diverging. Shared: the constant
+`S1G_TIM_MAX_BLOCK_SIZE = 256` (same name + value), the 8-subblocks/64-AIDs-per-block geometry
+(`S1G_TIM_NUM_SUBBLOCKS_PER_BLOCK = 8`, `dot11ah/tim.h:52`), the four encoding modes
+(`ENC_MODE_BLOCK/AID/OLB/ADE` ≡ morselib's four `ie_s1g_tim_*_has_aid`), the entire-page slice
+`31` (`page_index = 0`), and the block-loop encoder (`morse_dot11ah_insert_s1g_tim`,
+`dot11ah/tim.c:1030`). Linux sizes its `aid_bitmap` to the full `MORSE_AP_AID_BITMAP_SIZE =
+AID_LIMIT + 1` (`morse.h:398`); morselib's single-block `MAX_SUPPORTED_AID = 64` cap was a
+self-imposed embedded limit, not a behaviour difference — the encoder loop was already generic.
+The **PSRAM routing has no Linux counterpart** (kernel single address space) — an ESP32-specific
+adaptation. Full new-code ↔ Linux table: `docs/rimba-mesh-ap-porting.md` §5.

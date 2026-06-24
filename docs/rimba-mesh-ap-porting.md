@@ -139,9 +139,79 @@ schedule the SP — is not required and is gated for AP vifs anyway; host-side d
 `twt/umac_twt_data.h`, `ies/s1g_capabilities.c`, `interface/umac_interface.c`,
 `supplicant_shim/{supplicant_core,driver_ap}.c`, and the one-idea `ap/umac_ap.c` flush-on-wake.
 
+> **Linux mapping re-verified (2026-06-23)** against `morse_driver` **1.17.8**
+> source on the reference node (`/home/chronium/halow/morse_driver`, the exact
+> driver loaded, `version 0-rel_1_17_8_2026_Mar_24`). Every §4.2 row's symbol +
+> line is current: `morse_twt_init_vif` `twt.c:2031`, `morse_mac_process_twt_ie`
+> `twt.c:1612`, `morse_mac_process_rx_twt_mgmt` `twt.c:1727`,
+> `morse_twt_process_pending_cmds` `twt.c:1355`, `morse_twt_agreement_wake_interval_add`
+> `twt.c:941`, responder gate `twt.c:1451` (`if (twt->responder)`), `twt.c:1457`
+> "Not a TWT responder but received a request". The port follows the driver.
+
 ---
 
-## 5. Open items / backlog
+## 5. AP STA-count scaling (63 → 127 → 255) — multi-block S1G TIM port
+
+The Mesh-gate only scales if the AP can hold many leaves. morselib originally
+capped the AP at a **single S1G TIM block** (`MAX_SUPPORTED_AID = 64`, AIDs 1..63).
+This work raised it to **two** (128 / AID ≤ 127) then **four** blocks
+(`MAX_SUPPORTED_AID = 256`, AIDs 1..255) — 255 being the ceiling of the public
+`uint8_t mmwlan_ap_args.max_stas` field.
+
+**Key finding — morselib's S1G TIM is a port of the Linux `dot11ah/tim.c`.** They
+share the constant *name and value* `S1G_TIM_MAX_BLOCK_SIZE = 256`
+(`s1g_tim.h:10` ↔ `dot11ah/tim.h`), the 8-subblocks/block · 8-AIDs/subblock ·
+64-AIDs/block structure, the entire-page page-slice sentinel `31`/`0x1F`, and the
+**same four PVB encoding modes** (`ENC_MODE_BLOCK/AID/OLB/ADE` ↔ morselib's four
+`ie_s1g_tim_*_has_aid` parsers). The encoder loop was *already* generic over
+`MAX_ENCODED_BLOCKS`, mirroring the driver — so morselib's single-block cap was a
+self-imposed embedded-footprint limit, **not** a behaviour difference. Raising it
+brings morselib toward what Linux always did (the driver sizes its AID bitmap to
+the full `AID_LIMIT`; mac80211 caps associations at `IEEE80211_MAX_AID = 2007`).
+
+### 5.1 Code map — morselib (changed) ↔ Linux `morse_driver` / `dot11ah`
+
+| Concern | morselib (this work) | Linux equivalent |
+|---|---|---|
+| **AID space / per-AP traffic bitmap** | `ap/traffic_bitmap.h:19` `MAX_SUPPORTED_AID` 64→128→256; `:20` `S1G_BITMAP_SUBBLOCKS`; `ap/umac_ap_data.h:25` `bitmap[S1G_BITMAP_SUBBLOCKS]` | `morse.h:398` `MORSE_AP_AID_BITMAP_SIZE = AID_LIMIT + 1`; `:415` `DECLARE_BITMAP(aid_bitmap, …)` — driver sizes to the full AID space |
+| **Block / subblock geometry** | `ies/s1g_tim.c` `MAX_SUBBLOCKS_IN_BLOCK = 8`; 8 bits/subblock = 8 AIDs → 64 AIDs/block | `dot11ah/tim.h:52` `S1G_TIM_NUM_SUBBLOCKS_PER_BLOCK = 8`; `S1G_TIM_NUM_AID_PER_SUBBLOCK = 8`; `S1G_TIM_NUM_AID_PER_BLOCK = 64` |
+| **Per-block encoded-size limit** | `ies/s1g_tim.h:10` `S1G_TIM_MAX_BLOCK_SIZE = 256` (checked at `s1g_tim.c:474`) | `dot11ah/tim.h` `S1G_TIM_MAX_BLOCK_SIZE = 256` *(identical name + value)* |
+| **PVB encoder (build the multi-block TIM)** | `ies/s1g_tim.c:397` `ie_s1g_tim_build` — `for (block < MAX_ENCODED_BLOCKS)` w/ `DOT11_TIM_BLOCK_HDR_SET_BLOCK_OFFSET` | `dot11ah/tim.c:1030` `morse_dot11ah_insert_s1g_tim`; block loop `block_offset = S1G_TIM_AID_TO_BLOCK_OFFSET(aid_base)`, `block_k = block_offset + subblock_m/8` (`tim.c:278`) |
+| **PVB encoding modes** | parsers `ie_s1g_tim_block_bitmap_has_aid` / `_single_aid_has_aid` / `_olb_has_aid` / `_ade_has_aid` | `dot11ah/tim.h` `enum dot11ah_tim_encoding_mode { ENC_MODE_BLOCK, _AID, _OLB, _ADE }` |
+| **Whole-page TIM (no page slicing)** | `s1g_tim.c` `page_slice = 0x1F`, `page_index = 0` | `beacon.c:256` `page_slice_no = S1G_TIM_PAGE_SLICE_ENTIRE_PAGE (31)`, `page_index = 0` (`dot11ah/tim.h:63`) |
+| **AID assignment / largest-AID** | `ap/umac_ap.c:513` `stas[aid]`, `aid < max_stas` (dense 1..N) | `mac.c:4934` `test_and_set_bit(aid, aid_bitmap)`; `mac.c:4614` `morse_aid_bitmap_update` (`find_last_bit` → `largest_aid`) |
+| **Max-STA ceiling** | `mmwlan.h` `uint8_t max_stas` → 255; `Kconfig HALOW_AP_MAX_STAS` 1..255 | `hostap morse.h:164` `MAX_AID = 2007` (`= IEEE80211_MAX_AID`); driver/RAW use `RAW_CMD_MAX_AID = 2007` |
+
+### 5.2 Divergence — per-STA state in PSRAM (no Linux equivalent)
+
+`CONFIG_HALOW_STA_DATA_IN_PSRAM` routes each `umac_sta_data` **and** the per-vif
+TWT agreement table to PSRAM (`umac_data.c`, `MALLOC_CAP_SPIRAM`, strict — no
+internal-SRAM fallback). **This has no Linux counterpart by design:** the kernel
+driver allocates per-STA state with `kmalloc`/`GFP_KERNEL` from one address space,
+the `aid_bitmap` is a static `DECLARE_BITMAP`, and per-STA TWT agreements live on
+mac80211's `ieee80211_sta`. The PSRAM split is an ESP32-S3-specific adaptation to
+keep a large cap out of the scarce internal-SRAM pool — a *platform* change, not a
+port. (Likewise, morselib's **fixed** `agreements[MMWLAN_AP_MAX_STAS_LIMIT]` table
+vs. Linux's *dynamic* per-STA list is an embedded-RAM choice, §4.4.)
+
+### 5.3 Progression + validation
+
+| Cap | `MAX_SUPPORTED_AID` | Blocks | `MAX_SUPPORTED_PVB_LEN` | Status |
+|---|---|---|---|---|
+| 63 | 64 | 1 | 10 | original morselib |
+| 127 | 128 | 2 | 20 | #6 — build + 3-node HW test |
+| 255 | 256 | 4 | 40 | build + 3-node HW test |
+
+Validated: builds clean at each step (four-block static asserts pass); on-air,
+1 ESP32 AP + 2 ESP32 STA + 1 chronium Linux STA associate concurrently (SAE) with
+TWT power-save active and no regression. **Not yet exercised: AID ≥ 64** (the 2nd–4th
+blocks) — the dense allocator only reaches block 1+ at 64+ live associations, beyond
+the 3-board bench. Worklogs: [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](worklog/2026-06-23-ap-sta-ceiling-100-psram.md),
+[`worklog/2026-06-23-ap-sta-ceiling-255.md`](worklog/2026-06-23-ap-sta-ceiling-255.md).
+
+---
+
+## 6. Open items / backlog
 
 Tracked TWT / AP work not yet done (mirrors the live task list):
 
@@ -165,26 +235,17 @@ Tracked TWT / AP work not yet done (mirrors the live task list):
     loads the right calibration; flaky association must be explained elsewhere (PS config / RF env).
   - Levers to try for real sleep: explicit `mmwlan_set_power_save_mode` + `mmwlan_set_dynamic_ps_timeout`,
     a longer AP beacon/DTIM + STA `mmwlan_set_listen_interval` (applied *post-assoc*), or WNM sleep.
-- **AP STA-count ceiling + PSRAM — RESOLVED (build-verified; HW-at-scale deferred).** ✅ Both the
-  cap and the per-STA RAM placement are now `sdkconfig`-selectable, and the structural ceiling was
-  raised from 63 to **127** (target 100). Knobs: `CONFIG_HALOW_AP_MAX_STAS` (range 1..127, default 20,
-  drives `MMWLAN_AP_MAX_STAS_LIMIT`) and `CONFIG_HALOW_STA_DATA_IN_PSRAM` (route each `umac_sta_data`,
-  ~912 B, to `MALLOC_CAP_SPIRAM` — **strictly PSRAM, no internal-SRAM fallback**). **Key finding:** the
-  real ceiling was *not* firmware capacity or the 20 `#define` — it was morselib's **S1G TIM partial
-  virtual bitmap**, which the shipped code asserted as a *single* block (`MAX_SUPPORTED_AID = 64`,
-  `MAX_SUPPORTED_PVB_LEN == 10`, vendor tripwire "Review the TIM logic"). The encoder
-  (`ies/s1g_tim.c ie_s1g_tim_build`) already loops over blocks generically, so raising
-  `MAX_SUPPORTED_AID` to **128** (two blocks → AIDs 1..127) + updating the tripwire (`== 20`) is all the
-  rework; the parse path was already multi-block. The reference AP app builds clean at cap=100 + PSRAM.
-  *Deferred:* on-air validation with a STA whose AID ≥ 64 (exercises the new block-1 code path) — needs
-  64+ live associations, not reproducible on a 3-board bench. Full record:
-  [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](worklog/2026-06-23-ap-sta-ceiling-100-psram.md).
+- **AP STA-count ceiling + PSRAM — RESOLVED (build-verified; HW-at-scale deferred).** ✅ Cap and
+  per-STA RAM placement are `sdkconfig`-selectable; structural ceiling raised 63 → **127** → **255**
+  (the `uint8_t max_stas` limit). The real ceiling was the multi-block **S1G TIM**, not firmware/`#define`
+  — and morselib's TIM is a port of Linux `dot11ah/tim.c`, so the fix follows Linux. **Full write-up +
+  Linux code map in §5 above.** *Deferred:* on-air validation with AID ≥ 64 (needs 64+ associations).
 - **Action-frame path not yet HW-exercised.** Mid-session TWT-Setup + teardown action frames are
   implemented and review-verified, but our test STA negotiates TWT in assoc IEs, not mid-session.
 - **Regression suite** for every built feature (hello / scan / AP-STA / IBSS / TWT / Mesh+AP) so
   firmware/morselib bumps don't silently regress earlier milestones.
 
-## 6. References
+## 7. References
 
 - Worklog (blow-by-blow + firmware byte-comparison): [`worklog/2026-06-22-mesh-ap-twt.md`](worklog/2026-06-22-mesh-ap-twt.md)
 - Worklog (STA-count ceiling → 100, two-block S1G TIM, per-STA PSRAM): [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](worklog/2026-06-23-ap-sta-ceiling-100-psram.md)

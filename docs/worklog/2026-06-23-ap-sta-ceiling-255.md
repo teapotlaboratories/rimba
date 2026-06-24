@@ -72,3 +72,34 @@ own ping) is the only downlink-RTT probe available.
   proven structurally (asserts + stable beaconing), not by a STA in block 1+.
 - MM6108 firmware's true concurrent-STA capacity remains unknown (Linux caps at 2007, spec
   8191); the 255 config number is a build/structural ceiling, not a firmware guarantee.
+
+---
+
+## Linux alignment (verified against `morse_driver` 1.17.8)
+
+Checked the multi-block TIM change against the actual Linux driver source on the reference
+node (`/home/chronium/halow/morse_driver`, the exact loaded driver
+`version 0-rel_1_17_8_2026_Mar_24`). morselib's S1G TIM is a **port of the Linux
+`dot11ah/tim.c`** — so raising the block count follows Linux, it doesn't diverge from it:
+
+- **Identical constant, name + value:** `S1G_TIM_MAX_BLOCK_SIZE = 256` in both morselib
+  (`ies/s1g_tim.h:10`) and Linux (`dot11ah/tim.h`).
+- **Same geometry:** Linux `dot11ah/tim.h:52` `S1G_TIM_NUM_SUBBLOCKS_PER_BLOCK = 8`,
+  `S1G_TIM_NUM_AID_PER_SUBBLOCK = 8` → 64 AIDs/block ≡ morselib's `MAX_SUBBLOCKS_IN_BLOCK = 8`.
+- **Same four encoding modes:** Linux `enum dot11ah_tim_encoding_mode { ENC_MODE_BLOCK, _AID,
+  _OLB, _ADE }` ≡ morselib's four `ie_s1g_tim_{block_bitmap,single_aid,olb,ade}_has_aid`.
+- **Same whole-page convention:** Linux `S1G_TIM_PAGE_SLICE_ENTIRE_PAGE = 31`
+  (`dot11ah/tim.h:63`), `page_index = 0` (`beacon.c:256`) ≡ morselib `page_slice = 0x1F`,
+  `page_index = 0`.
+- **Encoder:** Linux `morse_dot11ah_insert_s1g_tim()` (`dot11ah/tim.c:1030`) loops over blocks
+  (`block_offset = S1G_TIM_AID_TO_BLOCK_OFFSET(...)`) ≡ morselib `ie_s1g_tim_build` block loop.
+- **AID space:** Linux sizes its bitmap to the full space — `DECLARE_BITMAP(aid_bitmap,
+  MORSE_AP_AID_BITMAP_SIZE = AID_LIMIT + 1)` (`morse.h:398/415`), AIDs set via
+  `test_and_set_bit(aid, aid_bitmap)` (`mac.c:4934`); mac80211 caps at `IEEE80211_MAX_AID =
+  2007` (hostap `morse.h:164`). morselib's single-block cap was a self-imposed embedded limit,
+  not a behaviour difference — the encoder loop was already generic, mirroring the driver.
+
+**One divergence (no Linux counterpart):** routing per-STA state + the TWT table to PSRAM is
+ESP32-specific (Linux uses one kernel address space; the `aid_bitmap` is static and per-STA
+TWT lives on mac80211's `ieee80211_sta`). Documented as a platform adaptation. The full
+new-code ↔ Linux table is in `docs/rimba-mesh-ap-porting.md` §5.
