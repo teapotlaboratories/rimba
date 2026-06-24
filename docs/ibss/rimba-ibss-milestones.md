@@ -327,6 +327,17 @@ The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milesto
   (ADHOC iface, IBSS commands, beacon/probe-resp, RX-VIF fix) → re-apply + re-validate; keep
   **generation parity with the chronium Linux node** (a one-sided bump invalidates interop);
   keep cmake on 3.x; re-run the 3-board P0 bench + AP-STA ping after any bump.
+- ☐ **#19 Re-audit the adopted `momentary-systems` fork** (we adopted it at H2 — see the
+  "Implementation comparison" section above). Three checks:
+  - **Missing features:** re-diff against their current `ibss-support` branch — is anything
+    still in their repo that we haven't adopted? (the original gap table is mostly closed,
+    but they may have moved on since `5237495`.)
+  - **Linux fidelity:** does *their* implementation actually follow Morse's Linux
+    `morse_driver` + `net/mac80211/ibss.c`? We adopted it for the EEXIST fix, but they
+    self-describe it as "hackily forked… AI slop" and modify shared AP/STA files without
+    re-verifying those modes — audit the adopted paths against the reference (governing rule).
+  - **Test:** validate any adopted / changed behaviour on hardware — 3-board P0 bench +
+    Linux interop — per the verify rule.
 - ☐ **Regression suite** across every built feature (hello / scan / AP-STA / IBSS / TWT /
   Mesh+AP) so firmware/morselib bumps don't silently regress earlier milestones.
 
