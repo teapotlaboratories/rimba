@@ -12,6 +12,23 @@ when the owner explicitly asks for it in that request — a prior commit does no
 authorize the next one. When work is done, summarize what changed and leave it
 staged or unstaged for review rather than committing on your own initiative.
 
+## Branching & pull requests
+
+Once the owner asks you to land changes, how you land them depends on *what*
+changed:
+
+- **Feature work / code changes → branch and open a PR.** Anything touching
+  firmware, morselib, build config, or other code — **especially large changes** —
+  goes on a feature branch with a pull request, never a direct commit to the
+  default branch. This keeps `main` reviewable and CI-gated. (For submodule
+  changes, push the submodule branch + PR first so the superproject gitlink
+  resolves on merged `main`.)
+- **Documentation-only changes → direct to `main` is fine.** Edits confined to
+  docs, worklogs, READMEs, and `.ai/` guidance may be committed and pushed
+  straight to `main` without a branch or PR.
+
+When unsure whether a change counts as "doc-only," treat it as code and branch.
+
 ## Commit & attribution conventions
 
 When you *are* asked to commit, the history must read as solely the work of the
