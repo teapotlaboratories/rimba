@@ -3,6 +3,9 @@
 Project guidance for AI coding agents lives in [AGENTS.md](AGENTS.md) — read it.
 
 Most important rules:
+- **Every feature starts as a documented TODO** (in its area backlog, indexed from
+  `docs/rimba-todo.md`) before you build it. See
+  [AGENTS.md → Plan first](AGENTS.md#plan-first--every-feature-starts-as-a-documented-todo).
 - **Do not commit or push automatically** — only when explicitly asked. See
   [AGENTS.md → Committing](AGENTS.md#committing).
 - **Do not add AI co-author or session trailers to commits.** Commits are

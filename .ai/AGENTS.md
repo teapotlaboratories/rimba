@@ -4,6 +4,26 @@ Guidance for AI coding agents (Claude Code, Cursor, Copilot, and others) working
 in this repository. Follow these conventions in addition to anything a human
 maintainer asks for.
 
+## Plan first — every feature starts as a documented TODO
+
+**Before implementing a feature or any non-trivial change, write it down as a TODO
+first** — what it is, why, and how it will be verified — *then* build it. Don't start
+undocumented feature work.
+
+- **Put the item in the authoritative backlog for its area** — the per-L2 TODO
+  ([`docs/ibss/rimba-ibss-milestones.md`](../docs/ibss/rimba-ibss-milestones.md),
+  [`docs/mesh-ap/rimba-mesh-ap-milestones.md`](../docs/mesh-ap/rimba-mesh-ap-milestones.md)),
+  the phased plan ([`docs/rimba-development-plan.md`](../docs/rimba-development-plan.md)),
+  or the security plan — and make sure it's reachable from the master index
+  [`docs/rimba-todo.md`](../docs/rimba-todo.md) (which only points; the detail lives in
+  the area doc).
+- **State it clearly:** the change, the reason, and the acceptance/verification (which
+  hardware or unit test will prove it — see [Verifying changes](#verifying-changes)).
+- **Keep the status current:** mark it in progress when you start and done when it lands,
+  and reflect it in the relevant milestones.
+- **Trivial/mechanical changes don't need one** (typo/doc fixes, a rename) — this is for
+  features and substantive work.
+
 ## Committing
 
 **Do not commit or push automatically.** Make changes in the working tree and
