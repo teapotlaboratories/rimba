@@ -145,22 +145,18 @@ schedule the SP — is not required and is gated for AP vifs anyway; host-side d
 
 Tracked TWT / AP work not yet done (mirrors the live task list):
 
-- **TWT power-save validation — needs a current meter.** The responder is *functionally* validated
-  (assoc + multi-STA + teardown + setup action frames), but the **power-save win is unproven**. A
-  10 s-interval test on an *idle* leaf still saw the AP reach the STA every ~1 s at ~10 ms RTT — the
-  radio is awake, not sleeping the interval. Investigation findings:
-  - PS defaults to `MMWLAN_PS_ENABLED` (100 ms dynamic-PS); the STA app makes no explicit PS call.
-  - The requester agreement is built *implicit, announced (flow_type=0), non-triggered*.
-  - AP defaults: beacon interval 100 TU (~102 ms), DTIM period 1 → a PS STA wakes ~every 102 ms at
-    DTIM, and TWT's longer interval doesn't reduce that while downlink is buffered.
-  - The ping test **cannot** show radio sleep (any downlink forces a wake; an idle link has nothing
-    to observe). Only a **current meter on a fully-idle link** proves the µA floor + per-interval wake
-    spikes. Board caveat: no host power-enable line (RESET_N only), BUSY/WAKE on DNP pads (RISK-02).
-  - **Empirical (item (a)):** the radio *does* sleep — setting `mmwlan_set_listen_interval(10)`
-    *before* association made the STA sleep through the assoc handshake (0 associations), which proves
-    PS sleep engages. But the default wake cadence tracks the DTIM/beacon rate (~10 ms RTT to 1 s
-    pings), governed by listen_interval/DTIM rather than the TWT service period. A clean post-assoc
-    RTT-rise demo was thwarted by flaky association (cause still open — *not* the BCF; see below).
+- **TWT power-save — RESOLVED on hardware.** ✅ The STA now **deep-TWT-sleeps against our ESP32 AP**:
+  AP→STA ping RTT 17–953 ms (max ≈ the 1 s TWT interval), matching the Linux AP (~890 ms). Before the
+  fix it was a flat ~10 ms (the STA never slept). **Root cause:** hostapd calls `sta_remove` transiently
+  during (re)association cleanup; our `mmwpas_sta_remove` hook freed the STA's just-accepted TWT slot
+  (still `PENDING_INSTALLATION`) *before* `build_response_ie` ran, so the assoc-resp carried **no ACCEPT
+  IE** and the STA never established TWT. **Fix:** `umac_twt_responder_free_agreement` now frees only an
+  `INSTALLED` agreement — the transient assoc-time removal (PENDING) is ignored; a real post-authorized
+  departure (INSTALLED) is freed; `alloc_slot` reuse-by-SA still prevents leaks for re-associating STAs.
+  Isolated via a Linux-AP comparison (same STA sleeps there) + freeze-proof AP-side counters logged from
+  the beacon path; the STA + firmware were always fine — the bug was purely AP-side. *Remaining
+  nice-to-have:* a current-meter µA reading on a fully-idle link to quantify the floor (board caveat: no
+  host power-enable line, RESET_N only, BUSY/WAKE on DNP pads — RISK-02).
   - **BCF is correct (cleared a false lead).** The runtime "BCF board description: mf16858" is *not*
     a wrong/mislabeled file — `components/firmware/mm6108/bcf_fgh100mhaamd.mbin` is byte-identical to
     the genuine `bcf/quectel/bcf_fgh100mhaamd.bin` from Morse's `morse-firmware` repo (now vendored at
