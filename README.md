@@ -46,9 +46,10 @@ boundary (Issue #13).
 
 ## Where to start
 
-1. **[`docs/rimba-development-plan.md`](docs/rimba-development-plan.md)** — start here if you are building. Phased plan, risk register, and the Phase 1 IBSS-foundation tasks. Includes the RISK-01 fallback strategy (what to do if IBSS doesn't work, incl. the AP-STA path and its HELLO/discovery implications).
-2. **[`docs/rimba-protocol-spec.md`](docs/rimba-protocol-spec.md)** — the normative specification. Read for protocol details.
-3. The companion analyses (below) — background that informed the design.
+1. **[`docs/rimba-todo.md`](docs/rimba-todo.md)** — the master TODO / roadmap. One high-level page indexing all outstanding work, pointing to the detailed backlogs. Start here for "what's left."
+2. **[`docs/rimba-development-plan.md`](docs/rimba-development-plan.md)** — start here if you are building. Phased plan, risk register, and the Phase 1 IBSS-foundation tasks. Includes the RISK-01 fallback strategy (what to do if IBSS doesn't work, incl. the AP-STA path and its HELLO/discovery implications).
+3. **[`docs/rimba-protocol-spec.md`](docs/rimba-protocol-spec.md)** — the normative specification. Read for protocol details.
+4. The companion analyses (below) — background that informed the design.
 
 ## Hardware baseline
 
@@ -174,6 +175,7 @@ All documents live under `docs/`.
 
 | File | What it is |
 |---|---|
+| [`docs/rimba-todo.md`](docs/rimba-todo.md) | **Master TODO / roadmap** — one high-level index of all outstanding work, pointing to the per-area backlogs. |
 | [`docs/rimba-development-plan.md`](docs/rimba-development-plan.md) | **Phased implementation plan + risk register.** Start here to build. Phase 1 (IBSS foundation, BLOCKING) and the RISK-01 IBSS fallback strategy. |
 | [`docs/rimba-protocol-spec.md`](docs/rimba-protocol-spec.md) | **The normative specification** (Draft 0.28). 16 sections: architecture, frames, routing, DTN/mule protocol, custody, security, power, OTA, open issues, future investigations. |
 | [`docs/rimba-hardening-plan.md`](docs/rimba-hardening-plan.md) | Security hardening roadmap (Tier 0–4). |
