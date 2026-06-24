@@ -38,7 +38,7 @@ answer the power-save question from the chip side.
 
 ## 2. Core finding — the AP/STA gate is host policy, not firmware
 
-Full analysis: [`../rimba-mm6108-powersave-analysis.md`](../rimba-mm6108-powersave-analysis.md).
+Full analysis: [`../design-specification/rimba-mm6108-powersave-analysis.md`](../design-specification/rimba-mm6108-powersave-analysis.md).
 
 - The command sender `mmdrv_set_chip_power_save_enabled(vif_id,en)` is
   **interface-agnostic**; `CONFIG_PS`'s wire struct has no iftype field.
@@ -92,7 +92,7 @@ Not on the critical path (RTC design doesn't need it).
 ## 6. Power/battery rebaseline (datasheet currents)
 
 Discovered the docs used a **12 mA** idle-RX assumption; datasheet "Listen" at
-1 MHz is **26 mA**. Rebaselined [`../rimba-battery-analysis.md`](../rimba-battery-analysis.md)
+1 MHz is **26 mA**. Rebaselined [`../design-specification/rimba-battery-analysis.md`](../design-specification/rimba-battery-analysis.md)
 to 26 mA throughout (v1.1):
 
 - Relay **Continuous ≈ 28 mA** (was 14), **Scheduled K=6 ≈ 14.3 mA** (was 7.2).
@@ -106,18 +106,18 @@ to 26 mA throughout (v1.1):
 
 ## 7. Docs updated this session
 
-- **`rimba-mm6108-powersave-analysis.md`** — NEW; the source-of-truth analysis
+- **`design-specification/rimba-mm6108-powersave-analysis.md`** — NEW; the source-of-truth analysis
   (§1–§9: gate, wake, decompile evidence, datasheet modes, standby trace).
-- **`rimba-battery-analysis.md`** — rebaselined to 26 mA (v1.1); sleep-mode
+- **`design-specification/rimba-battery-analysis.md`** — rebaselined to 26 mA (v1.1); sleep-mode
   matrix; SPEC-UPDATE-PENDING note.
 - **`rimba-development-plan.md`** — relay figures (~28/~14.3 mA); task 1.12a +
   RISK-01 fallback notes (firmware-confirmed no IBSS PS); Phase-5 relay-power
   criterion revised; Open Issues #5 (approach resolved) / #6 (CLOSED); §7
   SPEC-UPDATE-PENDING note.
-- **`rimba-mesh-comparison.md`**, **`rimba-mesh-topology.md`** — relay current
+- **`design-specification/rimba-mesh-comparison.md`**, **`design-specification/rimba-mesh-topology.md`** — relay current
   reconciled to the 26 mA baseline (density conclusions unchanged).
 - **Intentionally untouched:** `halow-mesh-dtn-spec.md` (superseded), prior
-  worklogs (history), `rimba-protocol-spec.md` (flagged SPEC UPDATE PENDING —
+  worklogs (history), `design-specification/rimba-protocol-spec.md` (flagged SPEC UPDATE PENDING —
   deferred until bench numbers).
 
 ## 8. Open items / next steps
@@ -128,7 +128,7 @@ to 26 mA throughout (v1.1):
    efficiency and the leaf active-phase energy.
 3. (Optional) bench the `CONFIG_PS`-on-IBSS patch — confirm the radio physically
    dozes (radio-rail current / BUSY pin) for the leaf-sender case.
-4. **Update `rimba-protocol-spec.md`** (Section 12/13 power, §15 open issues)
+4. **Update `design-specification/rimba-protocol-spec.md`** (Section 12/13 power, §15 open issues)
    once 1–2 are measured.
 
 Caveat on all absolute power numbers: they rest on the datasheet 26 mA idle-RX

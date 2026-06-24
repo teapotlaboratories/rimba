@@ -48,7 +48,7 @@ boundary (Issue #13).
 
 1. **[`docs/rimba-todo.md`](docs/rimba-todo.md)** — the master TODO / roadmap. One high-level page indexing all outstanding work, pointing to the detailed backlogs. Start here for "what's left."
 2. **[`docs/rimba-development-plan.md`](docs/rimba-development-plan.md)** — start here if you are building. Phased plan, risk register, and the Phase 1 IBSS-foundation tasks. Includes the RISK-01 fallback strategy (what to do if IBSS doesn't work, incl. the AP-STA path and its HELLO/discovery implications).
-3. **[`docs/rimba-protocol-spec.md`](docs/rimba-protocol-spec.md)** — the normative specification. Read for protocol details.
+3. **[`docs/design-specification/rimba-protocol-spec.md`](docs/design-specification/rimba-protocol-spec.md)** — the normative specification. Read for protocol details.
 4. The companion analyses (below) — background that informed the design.
 
 ## Hardware baseline
@@ -119,7 +119,7 @@ cloning). Set up the vendored ESP-IDF first (below).
 ### 1. One-time toolchain setup
 
 > **Install [Git LFS](https://git-lfs.com) before cloning** (`git lfs install`) — some docs (e.g.
-> `docs/MM_APPNOTE-24_Linux_Porting_Guide.pdf`) are stored via LFS. If you cloned without it, run
+> `docs/design-specification/MM_APPNOTE-24_Linux_Porting_Guide.pdf`) are stored via LFS. If you cloned without it, run
 > `git lfs install && git lfs pull` to fetch the real files (otherwise you get small pointer stubs).
 
 ESP-IDF is **vendored as a git submodule at `vendor/esp-idf`** (pinned at v5.4.2,
@@ -177,18 +177,18 @@ All documents live under `docs/`.
 |---|---|
 | [`docs/rimba-todo.md`](docs/rimba-todo.md) | **Master TODO / roadmap** — one high-level index of all outstanding work, pointing to the per-area backlogs. |
 | [`docs/rimba-development-plan.md`](docs/rimba-development-plan.md) | **Phased implementation plan + risk register.** Start here to build. Phase 1 (IBSS foundation, BLOCKING) and the RISK-01 IBSS fallback strategy. |
-| [`docs/rimba-protocol-spec.md`](docs/rimba-protocol-spec.md) | **The normative specification** (Draft 0.28). 16 sections: architecture, frames, routing, DTN/mule protocol, custody, security, power, OTA, open issues, future investigations. |
-| [`docs/rimba-hardening-plan.md`](docs/rimba-hardening-plan.md) | Security hardening roadmap (Tier 0–4). |
+| [`docs/design-specification/rimba-protocol-spec.md`](docs/design-specification/rimba-protocol-spec.md) | **The normative specification** (Draft 0.28). 16 sections: architecture, frames, routing, DTN/mule protocol, custody, security, power, OTA, open issues, future investigations. |
+| [`docs/design-specification/rimba-hardening-plan.md`](docs/design-specification/rimba-hardening-plan.md) | Security hardening roadmap (Tier 0–4). |
 | [`docs/ibss/rimba-ibss-milestones.md`](docs/ibss/rimba-ibss-milestones.md) | **IBSS — the single doc.** RISK-01 bring-up milestones + hardening (H1–H6), the Linux-equivalence table (each port file/symbol ↔ its `net/mac80211` / `morse_driver` counterpart), the **fork comparison** (vs `momentary-systems`), the **TODO / open items**, and the **findings & decisions** (EEXIST, data-driven discovery, phantom-flood, no-IBSS-power-save, CCMP block). |
 | [`docs/ibss/rimba-ibss-test-plan.md`](docs/ibss/rimba-ibss-test-plan.md) | IBSS validation plan + results (P0 multi-node, I.1–I.5 Linux interop). |
-| [`docs/rimba-linux-node-setup.md`](docs/rimba-linux-node-setup.md) | Bring-up + interop commands for the Raspberry Pi + MM6108 Linux reference node (AP test §11; IBSS interop §12). |
+| [`docs/design-specification/rimba-linux-node-setup.md`](docs/design-specification/rimba-linux-node-setup.md) | Bring-up + interop commands for the Raspberry Pi + MM6108 Linux reference node (AP test §11; IBSS interop §12). |
 | [`docs/mesh-ap/rimba-mesh-ap-milestones.md`](docs/mesh-ap/rimba-mesh-ap-milestones.md) | **Mesh-gate (Mesh + AP) — the single doc.** The L2 alternative to IBSS: milestones (AP → TWT power-save → STA-count scaling 63→255 → multi-node validation), the **new-code ↔ Linux `morse_driver`/`dot11ah` porting maps** (TWT responder + multi-block S1G TIM), the IBSS-vs-Mesh-gate trade-off, the build methodology, and the **Mesh-gate TODO**. |
-| [`docs/rimba-mesh-comparison.md`](docs/rimba-mesh-comparison.md) | Comparison vs other mesh protocols. |
-| [`docs/rimba-routing-comparison.md`](docs/rimba-routing-comparison.md) | Routing-approach analysis and tradeoffs. |
-| [`docs/rimba-battery-analysis.md`](docs/rimba-battery-analysis.md) | Power budget and battery-life analysis. |
-| [`docs/rimba-latency-bandwidth.md`](docs/rimba-latency-bandwidth.md) | Latency and bandwidth analysis. |
-| [`docs/rimba-mesh-topology.md`](docs/rimba-mesh-topology.md) | Topology and density analysis. |
-| [`docs/rimba-rtc-comparison.md`](docs/rimba-rtc-comparison.md) | RTC selection and drift analysis (incl. NTP dev-mode for Phases 1–3). |
+| [`docs/design-specification/rimba-mesh-comparison.md`](docs/design-specification/rimba-mesh-comparison.md) | Comparison vs other mesh protocols. |
+| [`docs/design-specification/rimba-routing-comparison.md`](docs/design-specification/rimba-routing-comparison.md) | Routing-approach analysis and tradeoffs. |
+| [`docs/design-specification/rimba-battery-analysis.md`](docs/design-specification/rimba-battery-analysis.md) | Power budget and battery-life analysis. |
+| [`docs/design-specification/rimba-latency-bandwidth.md`](docs/design-specification/rimba-latency-bandwidth.md) | Latency and bandwidth analysis. |
+| [`docs/design-specification/rimba-mesh-topology.md`](docs/design-specification/rimba-mesh-topology.md) | Topology and density analysis. |
+| [`docs/design-specification/rimba-rtc-comparison.md`](docs/design-specification/rimba-rtc-comparison.md) | RTC selection and drift analysis (incl. NTP dev-mode for Phases 1–3). |
 | [`CHANGELOG.md`](CHANGELOG.md) | Per-draft change history. |
 
 ## Standards followed

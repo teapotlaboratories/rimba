@@ -1,7 +1,7 @@
 # Rimba Protocol — Development Plan
 ## Draft 0.5
 
-*Companion to: rimba-protocol-spec.md Draft 0.26*
+*Companion to: design-specification/rimba-protocol-spec.md Draft 0.26*
 
 *Last updated 2026-06-21: RISK-01 resolved + Phase-1 IBSS foundation validated; RISK-02 boot time measured (≈1.39 s); Wio-WM6180/FGH100M hardware baseline + schematic findings (no power-enable line; BUSY/WAKE DNP) folded in.*
 
@@ -21,7 +21,7 @@
 
 ## 1. Overview
 
-This document covers the practical implementation plan for Rimba on ESP32-S3 + MM6108. It is a companion to the Rimba Protocol Specification (rimba-protocol-spec.md) and addresses implementation risks, development sequence, and validation criteria.
+This document covers the practical implementation plan for Rimba on ESP32-S3 + MM6108. It is a companion to the Rimba Protocol Specification (design-specification/rimba-protocol-spec.md) and addresses implementation risks, development sequence, and validation criteria.
 
 **Target platform**: Espressif ESP32-S3 + Morse Micro MM6108 (802.11ah)  
 **SDK**: morselib (Apache 2.0, open source, mm-iot-sdk)  
@@ -105,12 +105,12 @@ Degree 1 — IBSS init quirks / slow boot (ANNOYING, not fatal):
     always-on relays; leaves still wake on RTC. Already specced — just
     don't use Scheduled. This is the path tasks 1.4/1.12 gate.
     ¹ Datasheet idle-RX baseline (26 mA Listen, 1 MHz); see
-    rimba-battery-analysis.md. Was ~14/~7.2 mA at the old 12 mA estimate —
+    design-specification/rimba-battery-analysis.md. Was ~14/~7.2 mA at the old 12 mA estimate —
     confirm idle-RX on hardware.
 
 Degree 2 — IBSS works but not as Rimba assumes (design adjustments):
   No ATIM doze window (Open Issue #6 — now CONFIRMED absent in mm6108 fw
-  1.17.6 by decompilation; see rimba-mm6108-powersave-analysis.md §9), or too
+  1.17.6 by decompilation; see design-specification/rimba-mm6108-powersave-analysis.md §9), or too
   few peers per cell.
   → No ATIM: relays use Continuous mode (as Degree 1).
   → Few peers: cap cluster size, add relays, lean on mules to bridge
@@ -252,7 +252,7 @@ Repeat 20×, report min/mean/max per phase.
 | < 30ms | Spec confirmed. No changes needed. |
 | 30–80ms | Update `LEAF_BOOT_MS` in spec. Increase `LEAF_SCAN_WINDOW_MS` to 250ms. Minor power impact. |
 | 80–200ms | Significant scan window increase. Leaf power may double. Recalculate power budget. Consider wake-on-interrupt from relay beacon as alternative. |
-| > 200ms | Fundamental issue. Investigate MM6108 IBSS fast-start options in morselib source. May need to keep MM6108 in low-power standby (not full off) between leaf wakes. **← ACTUAL (≈1389 ms). Resolution: not a per-frame cost — it's the per-wake tax of RTC-scheduled mode (1.12a). `LEAF_BOOT_MS` → ~1400 ms; fold into the power budget; no fast-resume IBSS state exists (standby/deep-sleep are STA-only — see rimba-mm6108-powersave-analysis.md §9), so the cold boot is unavoidable for sub-µA sleep.** |
+| > 200ms | Fundamental issue. Investigate MM6108 IBSS fast-start options in morselib source. May need to keep MM6108 in low-power standby (not full off) between leaf wakes. **← ACTUAL (≈1389 ms). Resolution: not a per-frame cost — it's the per-wake tax of RTC-scheduled mode (1.12a). `LEAF_BOOT_MS` → ~1400 ms; fold into the power budget; no fast-resume IBSS state exists (standby/deep-sleep are STA-only — see design-specification/rimba-mm6108-powersave-analysis.md §9), so the cold boot is unavoidable for sub-µA sleep.** |
 
 ---
 
@@ -365,7 +365,7 @@ Estimated effort: 5–8 weeks. Produces a more complete implementation but with 
 | 1.10 | **Implement Continuous mode relay sleep (FreeRTOS light sleep + MM6108 interrupt wake)** | 1 day | 1.9 |
 | 1.11 | **Verify Continuous mode: relay wakes on incoming frame, MCU sleeps between frames** | 1 day | 1.10 |
 | 1.12 | **Assess Scheduled mode feasibility** — ⚠️ **revised (2026-06-21):** boot is ≈1.39 s, far over the old 100 ms TDMA-sleep threshold, so per-frame TDMA sleep is off the table. Scheduled mode is instead the **RTC-driven cold-power-cycle** in 1.12a (wake → cold-boot ≈1.39 s → exchange → off); 1.39 s is the per-wake tax, viable for infrequent (minutes-scale) wakes. | 1 day | 1.4 |
-| 1.12a | **RTC-scheduled radio power-cycling = Scheduled mode** (early focus). The morse driver/firmware has **no IBSS radio power-save** (TWT is STA/AP-only — now **firmware-confirmed by decompilation**: TWT/WNM-sleep/Deep-sleep are STA-gated, ATIM is absent; only *Snooze* via `CONFIG_PS` is reachable in IBSS but is leaf-unsuitable — see [`rimba-mm6108-powersave-analysis.md`](rimba-mm6108-powersave-analysis.md) §7/§9), so drive the duty cycle from the **ESP32 + RTC**: wake on the RTC alarm → power the MM6108 on → join the pinned cell → exchange → power off → deep-sleep. Bypasses chip power-save *and* TSF sync (RTC is the clock). **Gating measurement = radio cold-boot-to-IBSS-joined time (RISK-02, task 1.4)** — that sets the viable wake period + power budget. Runs after the small Phase-1 validation. See [`rimba-ibss-milestones.md`](ibss/rimba-ibss-milestones.md) TODO #8/#9. | 2–3 days | 1.4 |
+| 1.12a | **RTC-scheduled radio power-cycling = Scheduled mode** (early focus). The morse driver/firmware has **no IBSS radio power-save** (TWT is STA/AP-only — now **firmware-confirmed by decompilation**: TWT/WNM-sleep/Deep-sleep are STA-gated, ATIM is absent; only *Snooze* via `CONFIG_PS` is reachable in IBSS but is leaf-unsuitable — see [`design-specification/rimba-mm6108-powersave-analysis.md`](design-specification/rimba-mm6108-powersave-analysis.md) §7/§9), so drive the duty cycle from the **ESP32 + RTC**: wake on the RTC alarm → power the MM6108 on → join the pinned cell → exchange → power off → deep-sleep. Bypasses chip power-save *and* TSF sync (RTC is the clock). **Gating measurement = radio cold-boot-to-IBSS-joined time (RISK-02, task 1.4)** — that sets the viable wake period + power budget. Runs after the small Phase-1 validation. See [`rimba-ibss-milestones.md`](ibss/rimba-ibss-milestones.md) TODO #8/#9. | 2–3 days | 1.4 |
 | 1.13 | **Implement NTP dev-mode time sync** (Phase 1 only — replaced by RTC in Phase 4) | 1 day | 1.1 |
 
 **Phase 1 success gate**: Two boards exchange `EtherType 0x88B5` frames over IBSS. Boot time measured and spec updated. Continuous mode relay sleep confirmed working. NTP dev-mode providing absolute time to both boards.
@@ -412,7 +412,7 @@ Add RTC before: Phase 4 (leaf wake scheduling) — accurate timing needed
                 for 15-minute sleep cycles and power measurement.
 ```
 
-See rimba-rtc-comparison.md for full NTP dev-mode implementation details.
+See design-specification/rimba-rtc-comparison.md for full NTP dev-mode implementation details.
 
 ---
 
@@ -474,7 +474,7 @@ See rimba-rtc-comparison.md for full NTP dev-mode implementation details.
 
 **Risks addressed**: RISK-03 (BPv7 implementation — resolved by tasks 4.1–4.4, the from-scratch RFC 9171 subset). Also resolves Open Issue #5 (leaf power without TWT — measured in task 4.12) and validates Scheduled-mode timing dependency on RISK-02 (RTC integration before task 4.9).
 
-**Time source note**: Tasks 4.1–4.8, 4.13–4.15 only need wall-clock time — use NTP once on boot via ESP32-S3 internal WiFi. **The RV-3028-C7 must be wired and its driver implemented before starting task 4.9** (leaf wake scheduling). From task 4.9 onward, the external RTC provides both accurate wall-clock time and the alarm interrupt used to wake the leaf from deep sleep. See rimba-rtc-comparison.md for wiring and driver details.
+**Time source note**: Tasks 4.1–4.8, 4.13–4.15 only need wall-clock time — use NTP once on boot via ESP32-S3 internal WiFi. **The RV-3028-C7 must be wired and its driver implemented before starting task 4.9** (leaf wake scheduling). From task 4.9 onward, the external RTC provides both accurate wall-clock time and the alarm interrupt used to wake the leaf from deep sleep. See design-specification/rimba-rtc-comparison.md for wiring and driver details.
 
 **Tasks**:
 
@@ -594,7 +594,7 @@ Only if GPS modules are included in target hardware.
 | Test | Pass criteria |
 |---|---|
 | 10-node delivery | Bundle from leaf reaches gateway in < 10 seconds (connected path) |
-| Relay power | Within range of datasheet baseline (measured, 6 backbone peers): Continuous ~28 mA, Scheduled (K=6) ~14.3 mA. ⚠️ targets revised from the old "< 12 mA" — that used a 12 mA idle-RX estimate; datasheet Listen is 26 mA. Confirm idle-RX here. See rimba-battery-analysis.md. |
+| Relay power | Within range of datasheet baseline (measured, 6 backbone peers): Continuous ~28 mA, Scheduled (K=6) ~14.3 mA. ⚠️ targets revised from the old "< 12 mA" — that used a 12 mA idle-RX estimate; datasheet Listen is 26 mA. Confirm idle-RX here. See design-specification/rimba-battery-analysis.md. |
 | Gateway failover | Remove one gateway; bundles route to second gateway in < 120 seconds |
 | Isolation recovery | Isolated relay with no route; mule collects bundles within 1 sweep |
 
@@ -619,15 +619,15 @@ Only if GPS modules are included in target hardware.
 ## 7. Known Open Issues from Spec
 
 > 📌 **SPEC UPDATE PENDING (2026-06-21):** the power-save investigation
-> (`rimba-mm6108-powersave-analysis.md`) and the rebaselined
-> `rimba-battery-analysis.md` (datasheet 26 mA idle-RX) supersede several spec
+> (`design-specification/rimba-mm6108-powersave-analysis.md`) and the rebaselined
+> `design-specification/rimba-battery-analysis.md` (datasheet 26 mA idle-RX) supersede several spec
 > figures: relay current (Continuous ~28 mA / Scheduled ~14.3 mA, was ~14/~7.2),
 > solar panel sizing (3 W / 2 W), and the chip-sleep story (ATIM absent,
 > Deep-sleep STA-only, Snooze leaf-unsuitable → Issue #6 closed). After the
 > Phase-1 idle-RX + boot-time measurements, fold the final numbers into
-> `rimba-protocol-spec.md` (Section 12/13 power, §15 open issues).
+> `design-specification/rimba-protocol-spec.md` (Section 12/13 power, §15 open issues).
 
-The following issues from the Rimba protocol specification (rimba-protocol-spec.md, Section 14) have direct development plan implications:
+The following issues from the Rimba protocol specification (design-specification/rimba-protocol-spec.md, Section 14) have direct development plan implications:
 
 | Issue # | Description | Dev plan impact |
 |---|---|---|
@@ -635,8 +635,8 @@ The following issues from the Rimba protocol specification (rimba-protocol-spec.
 | Issue #2 | Leaf peer link key lifetime | **RESOLVED** — addressed by Phase 2 (task 2.8, RTC memory storage) |
 | Issue #3 | BCF file dependency | Use Seeed HaLow module for prototype; flag for production (RISK linked) |
 | Issue #4 | RREQ storm validation at scale | Phase 3 bench testing (5-node, tasks 3.9–3.11); dense scale test in Phase 5 (task 5.10) |
-| Issue #5 | Leaf power without TWT | **Approach resolved**: RTC-scheduled full power-off (Hibernate ≈0.05 µA), not chip PS. Leaf life is sleep-dominated, ESP32-bound (~10–20 µA). Measure in Phase 4 (task 4.12). See rimba-mm6108-powersave-analysis.md / rimba-battery-analysis.md. |
-| Issue #6 | IBSS ATIM power save | **CLOSED — not available.** mm6108 fw 1.17.6 has no ATIM, and Deep sleep (1 µA timer-wake) is STA-only (firmware-confirmed by decompilation). The only IBSS-reachable chip sleep is Snooze (42 µA) via `CONFIG_PS`, which is leaf-unsuitable. v1 uses RTC power-off, not chip PS. See rimba-mm6108-powersave-analysis.md §9. |
+| Issue #5 | Leaf power without TWT | **Approach resolved**: RTC-scheduled full power-off (Hibernate ≈0.05 µA), not chip PS. Leaf life is sleep-dominated, ESP32-bound (~10–20 µA). Measure in Phase 4 (task 4.12). See design-specification/rimba-mm6108-powersave-analysis.md / design-specification/rimba-battery-analysis.md. |
+| Issue #6 | IBSS ATIM power save | **CLOSED — not available.** mm6108 fw 1.17.6 has no ATIM, and Deep sleep (1 µA timer-wake) is STA-only (firmware-confirmed by decompilation). The only IBSS-reachable chip sleep is Snooze (42 µA) via `CONFIG_PS`, which is leaf-unsuitable. v1 uses RTC power-off, not chip PS. See design-specification/rimba-mm6108-powersave-analysis.md §9. |
 | Issue #7 | Key rotation | Out of scope for v1 — see hardening plan Tier 4 |
 | Issue #8 | Bundle fragmentation | Out of scope for v1 — MSDU limit handles most cases |
 | Issue #9 | Mule authentication | Phase 4 basic custody only (task 4.13); auth deferred — see hardening plan Tier 1 |
@@ -645,4 +645,4 @@ The following issues from the Rimba protocol specification (rimba-protocol-spec.
 ---
 
 *Document status: Draft 0.5*  
-*Companion to: rimba-protocol-spec.md Draft 0.26*
+*Companion to: design-specification/rimba-protocol-spec.md Draft 0.26*

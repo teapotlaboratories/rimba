@@ -15,7 +15,7 @@ Self-contained record. Hardware: chronium = Raspberry Pi 5 + Seeed Wio-WM6180 (M
 
 ## Why this matters (the architecture signal)
 
-The IBSS power-save analysis ([`../rimba-mm6108-powersave-analysis.md`](../rimba-mm6108-powersave-analysis.md))
+The IBSS power-save analysis ([`../design-specification/rimba-mm6108-powersave-analysis.md`](../design-specification/rimba-mm6108-powersave-analysis.md))
 showed IBSS leaves have **no good chip power-save**: no TWT, no ATIM, no AP to buffer
 downlink — so the only sub-µA path was an **RTC cold-boot** every wake (≈1.39 s rejoin tax,
 measured — see [`2026-06-21-i4-beacon-source-addr-firmware-wall.md`](2026-06-21-i4-beacon-source-addr-firmware-wall.md)
@@ -93,7 +93,7 @@ this round — datasheet Snooze ≈42 µA is the expected dozing draw; timing/be
 ## 3. `wpa_supplicant_s1g` rebuilt with mesh
 
 chronium's `wpa_supplicant_s1g` had never been built (§6 of
-[`../rimba-linux-node-setup.md`](../rimba-linux-node-setup.md): deferred — DPP hit an
+[`../design-specification/rimba-linux-node-setup.md`](../design-specification/rimba-linux-node-setup.md): deferred — DPP hit an
 OpenSSL-3 `EC_KEY` deprecation-as-error). Rebuilt it: enabled `CONFIG_MESH=y`, **disabled
 `CONFIG_DPP/DPP2/DPP3`** to dodge that error. Clean build, **55 mesh symbols**, installed to
 `/usr/local/bin/wpa_supplicant_s1g`. Secured (SAE) 802.11s mesh is now possible (the §1 mesh

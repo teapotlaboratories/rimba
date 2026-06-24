@@ -30,7 +30,7 @@ This is also the porting guide's recommended path.
 
 ## Sources followed (authority order)
 
-1. **`docs/MM_APPNOTE-24_Linux_Porting_Guide.pdf`** — Morse's official Linux Porting Guide
+1. **`docs/design-specification/MM_APPNOTE-24_Linux_Porting_Guide.pdf`** — Morse's official Linux Porting Guide
    v2 (governing source; §2 reqs/kernels, §3 patches, §4 driver, §5 firmware/BCF, §6 DT, §7 bring-up).
 2. **`morse_driver` source** — ground truth for the DT contract (`spi.c`, `of.c`).
 3. **teapotlaboratories worklog** (WM6180→Luckfox over SPI) — same flow, different SoC/pins.
@@ -143,7 +143,7 @@ Note: `iw` lives in `/usr/sbin` (not in non-login SSH PATH); `morse_cli` in `/us
 ## UPDATE 2026-06-20 — version-matched + AP↔ESP32 interop PASSED
 
 Driven from quartz over SSH. Reproducible recipe extracted to
-`docs/rimba-linux-node-setup.md`.
+`docs/design-specification/rimba-linux-node-setup.md`.
 
 ### morse_cli `-28` root cause: it was `sudo` all along (not version skew)
 A long detour: `morse_cli -i wlan1 hw_version` returned `NL80211 code -28: Failed to

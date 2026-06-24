@@ -20,7 +20,7 @@ Mesh-gate) to compare before committing.
 
 ### Power-save (early focus — the battery-leaf model rests on it)
 - ✅ **RISK-02** radio cold-boot-to-joined time — measured ≈1.39 s (2026-06-21).
-- ☐ **RTC-scheduled "Scheduled mode"** prototype (ESP32 + RTC drives the duty cycle; chip has no IBSS radio PS) → ibss TODO #8; context in [`rimba-mm6108-powersave-analysis.md`](rimba-mm6108-powersave-analysis.md).
+- ☐ **RTC-scheduled "Scheduled mode"** prototype (ESP32 + RTC drives the duty cycle; chip has no IBSS radio PS) → ibss TODO #8; context in [`design-specification/rimba-mm6108-powersave-analysis.md`](design-specification/rimba-mm6108-powersave-analysis.md).
 
 ### Cross-cutting
 - ☐ **Regression suite** across every built feature (hello / scan / AP-STA / IBSS / TWT / Mesh+AP) so fw/morselib bumps don't silently regress milestones.
@@ -43,8 +43,8 @@ The phased plan + per-phase tasks live in [`rimba-development-plan.md`](rimba-de
 
 ## Security & hardening (spans all phases)
 
-Roadmap + tiers in [`rimba-hardening-plan.md`](rimba-hardening-plan.md); spec issues in
-[`rimba-protocol-spec.md`](rimba-protocol-spec.md) §15–§16.
+Roadmap + tiers in [`design-specification/rimba-hardening-plan.md`](design-specification/rimba-hardening-plan.md); spec issues in
+[`design-specification/rimba-protocol-spec.md`](design-specification/rimba-protocol-spec.md) §15–§16.
 
 - ☐ **Issue #13 — config-changeable-parameter scope** **[HIGH / URGENT]** — must be defined before any config-convergence work (spec §15, Issue #13).
 - ☐ **Issue #9 — mule custody authentication** **[HIGH]** (hardening §2.4).
@@ -66,6 +66,6 @@ Roadmap + tiers in [`rimba-hardening-plan.md`](rimba-hardening-plan.md); spec is
 | IBSS L2 | [`ibss/rimba-ibss-milestones.md`](ibss/rimba-ibss-milestones.md) | Milestones, Linux maps, fork comparison, **IBSS TODO**, findings |
 | Mesh-gate L2 | [`mesh-ap/rimba-mesh-ap-milestones.md`](mesh-ap/rimba-mesh-ap-milestones.md) | Milestones, Linux maps, **Mesh-gate TODO** |
 | Phased plan + risks | [`rimba-development-plan.md`](rimba-development-plan.md) | Phases 1–6, risk register, per-phase tasks |
-| Security | [`rimba-hardening-plan.md`](rimba-hardening-plan.md) | Threat model + Tier 0–4 |
-| Spec | [`rimba-protocol-spec.md`](rimba-protocol-spec.md) | §15 Open Issues, §16 Future Investigations |
+| Security | [`design-specification/rimba-hardening-plan.md`](design-specification/rimba-hardening-plan.md) | Threat model + Tier 0–4 |
+| Spec | [`design-specification/rimba-protocol-spec.md`](design-specification/rimba-protocol-spec.md) | §15 Open Issues, §16 Future Investigations |
 | Validation results | [`ibss/rimba-ibss-test-plan.md`](ibss/rimba-ibss-test-plan.md) | P0 / I.1–I.5 results |

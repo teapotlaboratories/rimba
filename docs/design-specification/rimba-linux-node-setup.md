@@ -3,7 +3,7 @@
 Reproducible build/setup for the **Linux MM6108 reference/interop node** (`chronium`)
 used by the open-IBSS test plan (P0.5). This is the canonical, from-scratch recipe;
 the day-by-day narrative is in
-[`worklog/2026-06-19-linux-node-halow-bringup.md`](worklog/2026-06-19-linux-node-halow-bringup.md).
+[`worklog/2026-06-19-linux-node-halow-bringup.md`](../worklog/2026-06-19-linux-node-halow-bringup.md).
 
 **Status: validated 2026-06-20** — ESP32 (`rimba-halow-sta`) ↔ this node
 (`hostapd_s1g` AP) associated with WPA3-SAE over 802.11ah, bidirectional ping
@@ -253,7 +253,7 @@ wpa_supplicant_s1g -D nl80211 -i wlan1 -c wpa_ibss.conf
 ```
 
 Results (I.1 discovery, I.2 beacon interop, I.3 data, I.4 on-air, I.5 mixed 4-node cell) are
-tabulated in [`rimba-ibss-test-plan.md`](ibss/rimba-ibss-test-plan.md) §5. Key interop findings:
+tabulated in [`rimba-ibss-test-plan.md`](../ibss/rimba-ibss-test-plan.md) §5. Key interop findings:
 discovery is **data-driven** (the firmware doesn't surface peer beacons; morse S1G beacons
 carry `source_addr = BSSID`), and I.4 on-air capture needs an external sniffer (morse monitor
 mode isn't compiled into this build).

@@ -159,7 +159,7 @@ The reference-implementation correctness check: our port talks to real Linux
 `morse_driver`/mac80211 IBSS on the **same silicon**. Also closes backlog #11
 (verify the S1G beacon on-wire), since the Linux node can capture/decode frames.
 
-> **Bring-up runbook:** [`rimba-linux-node-setup.md`](../rimba-linux-node-setup.md) §12 (IBSS interop)
+> **Bring-up runbook:** [`design-specification/rimba-linux-node-setup.md`](../design-specification/rimba-linux-node-setup.md) §12 (IBSS interop)
 > — concrete commands for I.1–I.5, the pinned cell params, and the open question of
 > the S1G IBSS *join* syntax (no vendor-documented IBSS recipe exists). Resolve the
 > working join command there and back-fill the `<S1G_FREQ_FOR_CH27>` placeholder below.
@@ -182,7 +182,7 @@ The reference-implementation correctness check: our port talks to real Linux
 
 **Run 2026-06-20** — 1 ESP32 (`rimba-halow-ibss`, ACM0, MAC `…6b:b7`→.183) + Linux
 node `chronium` (RPi 5 + MM6108, `morse_driver`/mac80211, all components 1.17.8 —
-see [`rimba-linux-node-setup.md`](../rimba-linux-node-setup.md)). Linux joined via
+see [`design-specification/rimba-linux-node-setup.md`](../design-specification/rimba-linux-node-setup.md)). Linux joined via
 `iw dev wlan1 ibss join rimba-ibss 5560 fixed-freq 02:12:34:56:78:9a` (the **5 GHz
 ch112 = S1G ch27 / 915.5 MHz / 1 MHz** mapping; `morse_cli channel` confirmed 1 MHz),
 IP `192.168.13.66`.
