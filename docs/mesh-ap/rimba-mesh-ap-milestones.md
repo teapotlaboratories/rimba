@@ -3,7 +3,7 @@
 The **Mesh-gate** is Rimba's second candidate L2: relays run **802.11s mesh** to
 each other and a **SoftAP** that leaf nodes associate to and **TWT**-sleep under.
 It is the alternative to the **IBSS** L2 (see
-[`rimba-ibss-milestones.md`](rimba-ibss-milestones.md)). This is the single doc
+[`rimba-ibss-milestones.md`](../ibss/rimba-ibss-milestones.md)). This is the single doc
 for the Mesh-gate on **ESP32-S3 + MM6108** (`mm-iot-sdk`/morselib): the milestone
 view, the **new-code ↔ Linux** porting maps, and the **TODO**.
 
@@ -16,7 +16,7 @@ documented), and ported code carries a new-code ↔ Linux mapping (below).
 **Hardware:** up to 3× Seeed XIAO ESP32-S3 + FGH100M (`boards/proto1-fgh100m`,
 `bcf_fgh100mhaamd`, fw **1.17.6**) **+ a Raspberry Pi 5 + Wio-WM6180 (MM6108)
 Linux reference node** (`morse_driver`/cli/fw **1.17.8** — the interop oracle,
-[`rimba-linux-node-setup.md`](rimba-linux-node-setup.md)). US 915.5 MHz, 1 MHz BW,
+[`rimba-linux-node-setup.md`](../rimba-linux-node-setup.md)). US 915.5 MHz, 1 MHz BW,
 S1G ch27 / op-class 68; SSID `rimba-ping`, WPA3-SAE; HaLow subnet 192.168.12.0/24.
 
 Paths: `MORSE = components/halow/components/mm-iot-sdk/framework/morselib/src`;
@@ -39,7 +39,7 @@ on hardware and comparing, rather than betting early.
 | Status | **RESOLVED + hardened + soaked** (RISK-01) | **AP + TWT + STA-scaling proven**; mesh+AP concurrency proven on Linux, not yet on ESP32 |
 
 The signal so far: IBSS's dead-end is **leaf power-save** — the morse firmware has
-no IBSS radio power-save ([`rimba-mm6108-powersave-analysis.md`](rimba-mm6108-powersave-analysis.md)).
+no IBSS radio power-save ([`rimba-mm6108-powersave-analysis.md`](../rimba-mm6108-powersave-analysis.md)).
 The Mesh-gate dissolves that (TWT + AP buffering), at the cost of always-on relays
 and more moving parts. Neither is chosen yet; this milestone set exists to make
 the Mesh-gate comparable on the same hardware.
@@ -72,16 +72,16 @@ beacon via the bundled hostapd. Boots and beacons stably.
 ### A2 — AP ↔ STA association + bidirectional IP ✅
 `rimba-halow-ap` + `rimba-halow-sta`: a STA associates (SAE 4-way) and exchanges IP
 (DHCP, ping). Foundation for the Mesh-gate (and the RISK-01 IBSS fallback).
-([`worklog/2026-06-18-halow-ap-sta-ping.md`](worklog/2026-06-18-halow-ap-sta-ping.md))
+([`worklog/2026-06-18-halow-ap-sta-ping.md`](../worklog/2026-06-18-halow-ap-sta-ping.md))
 
 ### A3 — Mesh + AP concurrency — proven on Linux, pending on ESP32 ◑
 On chronium one MM6108 ran AP (`hostapd_s1g`) + open 802.11s mesh-point
 (`iw … mesh join`) **co-channel** (ch27) + a TWT'ing ESP32 STA, all at once. Recipe
 + gotchas (`type mp` needs explicit `iw set type`; distinct locally-administered
-MAC; bare `freq` not `HT20`) in [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md)
+MAC; bare `freq` not `HT20`) in [`rimba-linux-node-setup.md`](../rimba-linux-node-setup.md)
 §12. On ESP32 this is blocked only by the **absence of 802.11s in morselib** (the AP
 half works; the mesh half doesn't exist) — the open structural item for an all-ESP32
-Mesh-gate. ([`worklog/2026-06-22-mesh-ap-twt.md`](worklog/2026-06-22-mesh-ap-twt.md))
+Mesh-gate. ([`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md))
 
 ### T1 — AP-side TWT responder port ✅
 Ported the TWT responder into morselib around hostapd. Detailed map below ("AP
@@ -109,7 +109,7 @@ firmware; morselib's TIM is a port of Linux `dot11ah/tim.c`.
 1 ESP32 AP + 2 ESP32 STA + 1 chronium **Linux STA** associate concurrently (3 STAs,
 all SAE); TWT power-save active; no regression across the 127 and 255 builds. New
 **chronium-as-infra-STA** recipe (`wpa_supplicant_s1g`, SAE, S1G ch27 ≡ nl80211 freq
-5560). ([`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](worklog/2026-06-23-ap-multinode-twt-hwtest.md))
+5560). ([`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](../worklog/2026-06-23-ap-multinode-twt-hwtest.md))
 
 ---
 
@@ -224,8 +224,8 @@ per-STA list is an embedded-RAM choice.)
 
 Builds clean at each step (four-block static asserts pass); on-air, 1 ESP32 AP + 2
 ESP32 STA + 1 chronium Linux STA associate concurrently (SAE), TWT power-save active,
-no regression. Worklogs: [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](worklog/2026-06-23-ap-sta-ceiling-100-psram.md),
-[`worklog/2026-06-23-ap-sta-ceiling-255.md`](worklog/2026-06-23-ap-sta-ceiling-255.md).
+no regression. Worklogs: [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](../worklog/2026-06-23-ap-sta-ceiling-100-psram.md),
+[`worklog/2026-06-23-ap-sta-ceiling-255.md`](../worklog/2026-06-23-ap-sta-ceiling-255.md).
 
 ---
 
@@ -259,7 +259,7 @@ firmware guarantee.
 
 ## Methodology — how future Mesh-gate (and Rimba) features get built
 
-Codified in [`.ai/AGENTS.md`](../.ai/AGENTS.md):
+Codified in [`.ai/AGENTS.md`](../../.ai/AGENTS.md):
 
 1. **Derive from Linux.** Root-cause against `morse_driver` / `net/mac80211` (same silicon
    Linux drives) and follow it; don't tolerate a symptom with a divergent local hack.
@@ -283,12 +283,12 @@ make flash APP=rimba-halow-sta BOARD=proto1-fgh100m PORT=/dev/ttyACM1
 
 chronium as a Linux STA (interop oracle) — `wpa_supplicant_s1g`, SAE, **freq 5560**
 (S1G ch27 in the 5 GHz model; on-air 915.5 MHz); full recipe in
-[`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](worklog/2026-06-23-ap-multinode-twt-hwtest.md) §3.
+[`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](../worklog/2026-06-23-ap-multinode-twt-hwtest.md) §3.
 
 ## References
 
-- Worklog (Mesh+AP+TWT blow-by-blow + firmware byte-comparison): [`worklog/2026-06-22-mesh-ap-twt.md`](worklog/2026-06-22-mesh-ap-twt.md)
-- Worklogs (STA-count): [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](worklog/2026-06-23-ap-sta-ceiling-100-psram.md), [`worklog/2026-06-23-ap-sta-ceiling-255.md`](worklog/2026-06-23-ap-sta-ceiling-255.md), multi-node test [`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](worklog/2026-06-23-ap-multinode-twt-hwtest.md)
-- Linux node + Mesh/AP/TWT bring-up: [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md) §11–§12
-- Power-save context (why TWT matters for leaves): [`rimba-mm6108-powersave-analysis.md`](rimba-mm6108-powersave-analysis.md)
+- Worklog (Mesh+AP+TWT blow-by-blow + firmware byte-comparison): [`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md)
+- Worklogs (STA-count): [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](../worklog/2026-06-23-ap-sta-ceiling-100-psram.md), [`worklog/2026-06-23-ap-sta-ceiling-255.md`](../worklog/2026-06-23-ap-sta-ceiling-255.md), multi-node test [`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](../worklog/2026-06-23-ap-multinode-twt-hwtest.md)
+- Linux node + Mesh/AP/TWT bring-up: [`rimba-linux-node-setup.md`](../rimba-linux-node-setup.md) §11–§12
+- Power-save context (why TWT matters for leaves): [`rimba-mm6108-powersave-analysis.md`](../rimba-mm6108-powersave-analysis.md)
 - Linux driver source (reference): `morse_driver/{twt.c,mac.c,command.c,beacon.c,dot11ah/tim.c}`; `net/mac80211` TWT/PS/mesh

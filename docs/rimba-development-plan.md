@@ -138,7 +138,7 @@ Degree 3 — no usable ad-hoc mode at all (the real threat):
       responder** (the leaf power-save win) are now ported to ESP32/morselib
       and verified on stock fw 1.17.6; 802.11s mesh for the backbone is NOT
       ported (Linux-only). Details + the new-code↔Linux comparison tables:
-      docs/rimba-mesh-ap-milestones.md.
+      docs/mesh-ap/rimba-mesh-ap-milestones.md.
 
     Fallback B — different sub-GHz PHY (big change, core survives):
       Port the DTN+mule+routing stack onto LoRa (cf. TU Darmstadt
@@ -365,7 +365,7 @@ Estimated effort: 5–8 weeks. Produces a more complete implementation but with 
 | 1.10 | **Implement Continuous mode relay sleep (FreeRTOS light sleep + MM6108 interrupt wake)** | 1 day | 1.9 |
 | 1.11 | **Verify Continuous mode: relay wakes on incoming frame, MCU sleeps between frames** | 1 day | 1.10 |
 | 1.12 | **Assess Scheduled mode feasibility** — ⚠️ **revised (2026-06-21):** boot is ≈1.39 s, far over the old 100 ms TDMA-sleep threshold, so per-frame TDMA sleep is off the table. Scheduled mode is instead the **RTC-driven cold-power-cycle** in 1.12a (wake → cold-boot ≈1.39 s → exchange → off); 1.39 s is the per-wake tax, viable for infrequent (minutes-scale) wakes. | 1 day | 1.4 |
-| 1.12a | **RTC-scheduled radio power-cycling = Scheduled mode** (early focus). The morse driver/firmware has **no IBSS radio power-save** (TWT is STA/AP-only — now **firmware-confirmed by decompilation**: TWT/WNM-sleep/Deep-sleep are STA-gated, ATIM is absent; only *Snooze* via `CONFIG_PS` is reachable in IBSS but is leaf-unsuitable — see [`rimba-mm6108-powersave-analysis.md`](rimba-mm6108-powersave-analysis.md) §7/§9), so drive the duty cycle from the **ESP32 + RTC**: wake on the RTC alarm → power the MM6108 on → join the pinned cell → exchange → power off → deep-sleep. Bypasses chip power-save *and* TSF sync (RTC is the clock). **Gating measurement = radio cold-boot-to-IBSS-joined time (RISK-02, task 1.4)** — that sets the viable wake period + power budget. Runs after the small Phase-1 validation. See [`rimba-ibss-milestones.md`](rimba-ibss-milestones.md) TODO #8/#9. | 2–3 days | 1.4 |
+| 1.12a | **RTC-scheduled radio power-cycling = Scheduled mode** (early focus). The morse driver/firmware has **no IBSS radio power-save** (TWT is STA/AP-only — now **firmware-confirmed by decompilation**: TWT/WNM-sleep/Deep-sleep are STA-gated, ATIM is absent; only *Snooze* via `CONFIG_PS` is reachable in IBSS but is leaf-unsuitable — see [`rimba-mm6108-powersave-analysis.md`](rimba-mm6108-powersave-analysis.md) §7/§9), so drive the duty cycle from the **ESP32 + RTC**: wake on the RTC alarm → power the MM6108 on → join the pinned cell → exchange → power off → deep-sleep. Bypasses chip power-save *and* TSF sync (RTC is the clock). **Gating measurement = radio cold-boot-to-IBSS-joined time (RISK-02, task 1.4)** — that sets the viable wake period + power budget. Runs after the small Phase-1 validation. See [`rimba-ibss-milestones.md`](ibss/rimba-ibss-milestones.md) TODO #8/#9. | 2–3 days | 1.4 |
 | 1.13 | **Implement NTP dev-mode time sync** (Phase 1 only — replaced by RTC in Phase 4) | 1 day | 1.1 |
 
 **Phase 1 success gate**: Two boards exchange `EtherType 0x88B5` frames over IBSS. Boot time measured and spec updated. Continuous mode relay sleep confirmed working. NTP dev-mode providing absolute time to both boards.
@@ -375,8 +375,8 @@ Estimated effort: 5–8 weeks. Produces a more complete implementation but with 
 >   momentary-systems fork + our Linux-derived fixes). Validated well beyond two
 >   boards: **3-board full mesh, per-peer state, drop/rejoin, Linux `morse_driver`
 >   interop, and a ~6.5 h 4-node soak** (0 reboots, no heap leak). See
->   [`rimba-ibss-milestones.md`](rimba-ibss-milestones.md),
->   [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md).
+>   [`rimba-ibss-milestones.md`](ibss/rimba-ibss-milestones.md),
+>   [`rimba-ibss-test-plan.md`](ibss/rimba-ibss-test-plan.md).
 > - **RISK-02 measured:** cold-boot-to-IBSS-joined **≈1.39 s** (task 1.4). The 30 ms
 >   `LEAF_BOOT_MS` assumption is retired; ≈1.4 s is the RTC-wake tax (1.12a).
 > - **Beacon/discovery (I.4 / Issue #6):** the MM6108 firmware does **not surface

@@ -20,8 +20,8 @@ defines the phased build order and the IBSS-foundation phase everything depends 
 bring-up, bidirectional IP/`0x88B5` data, a 3-board full mesh, peer age-out + drop/rejoin,
 interop with a Linux `morse_driver` IBSS node on the same silicon, and a **~6.5 h 4-node
 soak** (0 reboots, no heap leak) — all derived from and verified against the Linux
-implementation. See [`docs/rimba-ibss-milestones.md`](docs/rimba-ibss-milestones.md),
-the [test plan](docs/rimba-ibss-test-plan.md), and the [IBSS worklogs](docs/worklog/).
+implementation. See [`docs/ibss/rimba-ibss-milestones.md`](docs/ibss/rimba-ibss-milestones.md),
+the [test plan](docs/ibss/rimba-ibss-test-plan.md), and the [IBSS worklogs](docs/worklog/).
 **Next: power-save bring-up** (RTC-scheduled radio duty-cycle — the morse firmware has no
 IBSS radio power-save), then Phase-2 link security.
 
@@ -35,7 +35,7 @@ than committing early:
   under a relay-AP that buffers their downlink. **Proven on hardware:** AP-mode, the TWT
   responder + the power-save fix (a dozing leaf really sleeps), multi-STA TWT, and STA-count
   scaling to **255** (four-block S1G TIM). **Open:** ESP32 mesh+AP concurrency (proven on Linux
-  only). See [`docs/rimba-mesh-ap-milestones.md`](docs/rimba-mesh-ap-milestones.md) (milestones,
+  only). See [`docs/mesh-ap/rimba-mesh-ap-milestones.md`](docs/mesh-ap/rimba-mesh-ap-milestones.md) (milestones,
   the new-code ↔ Linux `morse_driver`/`dot11ah` maps, and the Mesh-gate TODO).
 
 Neither L2 is chosen yet — making them comparable on the same silicon is the point of this phase.
@@ -89,7 +89,7 @@ Several apps exist (select with `APP=`):
   binary on every node: N-node MAC-derived addressing, peer discovery, and pings
   to every peer. Validated on hardware — 3-board full mesh **and** interop with a
   Linux `morse_driver` IBSS node. See
-  [`docs/rimba-ibss-milestones.md`](docs/rimba-ibss-milestones.md).
+  [`docs/ibss/rimba-ibss-milestones.md`](docs/ibss/rimba-ibss-milestones.md).
 
 See [`firmware/README.md`](firmware/README.md) for per-example detail.
 
@@ -177,10 +177,10 @@ All documents live under `docs/`.
 | [`docs/rimba-development-plan.md`](docs/rimba-development-plan.md) | **Phased implementation plan + risk register.** Start here to build. Phase 1 (IBSS foundation, BLOCKING) and the RISK-01 IBSS fallback strategy. |
 | [`docs/rimba-protocol-spec.md`](docs/rimba-protocol-spec.md) | **The normative specification** (Draft 0.28). 16 sections: architecture, frames, routing, DTN/mule protocol, custody, security, power, OTA, open issues, future investigations. |
 | [`docs/rimba-hardening-plan.md`](docs/rimba-hardening-plan.md) | Security hardening roadmap (Tier 0–4). |
-| [`docs/rimba-ibss-milestones.md`](docs/rimba-ibss-milestones.md) | **IBSS — the single doc.** RISK-01 bring-up milestones + hardening (H1–H6), the Linux-equivalence table (each port file/symbol ↔ its `net/mac80211` / `morse_driver` counterpart), the **fork comparison** (vs `momentary-systems`), the **TODO / open items**, and the **findings & decisions** (EEXIST, data-driven discovery, phantom-flood, no-IBSS-power-save, CCMP block). |
-| [`docs/rimba-ibss-test-plan.md`](docs/rimba-ibss-test-plan.md) | IBSS validation plan + results (P0 multi-node, I.1–I.5 Linux interop). |
+| [`docs/ibss/rimba-ibss-milestones.md`](docs/ibss/rimba-ibss-milestones.md) | **IBSS — the single doc.** RISK-01 bring-up milestones + hardening (H1–H6), the Linux-equivalence table (each port file/symbol ↔ its `net/mac80211` / `morse_driver` counterpart), the **fork comparison** (vs `momentary-systems`), the **TODO / open items**, and the **findings & decisions** (EEXIST, data-driven discovery, phantom-flood, no-IBSS-power-save, CCMP block). |
+| [`docs/ibss/rimba-ibss-test-plan.md`](docs/ibss/rimba-ibss-test-plan.md) | IBSS validation plan + results (P0 multi-node, I.1–I.5 Linux interop). |
 | [`docs/rimba-linux-node-setup.md`](docs/rimba-linux-node-setup.md) | Bring-up + interop commands for the Raspberry Pi + MM6108 Linux reference node (AP test §11; IBSS interop §12). |
-| [`docs/rimba-mesh-ap-milestones.md`](docs/rimba-mesh-ap-milestones.md) | **Mesh-gate (Mesh + AP) — the single doc.** The L2 alternative to IBSS: milestones (AP → TWT power-save → STA-count scaling 63→255 → multi-node validation), the **new-code ↔ Linux `morse_driver`/`dot11ah` porting maps** (TWT responder + multi-block S1G TIM), the IBSS-vs-Mesh-gate trade-off, the build methodology, and the **Mesh-gate TODO**. |
+| [`docs/mesh-ap/rimba-mesh-ap-milestones.md`](docs/mesh-ap/rimba-mesh-ap-milestones.md) | **Mesh-gate (Mesh + AP) — the single doc.** The L2 alternative to IBSS: milestones (AP → TWT power-save → STA-count scaling 63→255 → multi-node validation), the **new-code ↔ Linux `morse_driver`/`dot11ah` porting maps** (TWT responder + multi-block S1G TIM), the IBSS-vs-Mesh-gate trade-off, the build methodology, and the **Mesh-gate TODO**. |
 | [`docs/rimba-mesh-comparison.md`](docs/rimba-mesh-comparison.md) | Comparison vs other mesh protocols. |
 | [`docs/rimba-routing-comparison.md`](docs/rimba-routing-comparison.md) | Routing-approach analysis and tradeoffs. |
 | [`docs/rimba-battery-analysis.md`](docs/rimba-battery-analysis.md) | Power budget and battery-life analysis. |

@@ -13,7 +13,7 @@ wake for unscheduled peer traffic.** It wakes only for its own TX (and its own
 beacon TBTT) and on a hardware GPIO edge. This is the root reason Rimba uses an
 **RTC-scheduled** duty cycle rather than chip power-save.
 
-Companion to [`rimba-ibss-milestones.md`](rimba-ibss-milestones.md)
+Companion to [`rimba-ibss-milestones.md`](ibss/rimba-ibss-milestones.md)
 (the "morse driver has no IBSS radio power-save" Finding + the IBSS TODO/decisions).
 
 ---

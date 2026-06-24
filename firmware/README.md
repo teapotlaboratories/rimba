@@ -151,8 +151,8 @@ Validated on hardware: 2- and 3-board **full mesh**, peer age-out + drop/rejoin
 resilience, and **interop with a Linux `morse_driver` IBSS node** on the same
 silicon. Background, the Linux-equivalence map, and the on-air debugging (the #17
 beacon phantom-flood; #16 data-driven discovery) are in
-[`../docs/rimba-ibss-milestones.md`](../docs/rimba-ibss-milestones.md),
-[`../docs/rimba-ibss-test-plan.md`](../docs/rimba-ibss-test-plan.md), and
+[`../docs/ibss/rimba-ibss-milestones.md`](../docs/ibss/rimba-ibss-milestones.md),
+[`../docs/ibss/rimba-ibss-test-plan.md`](../docs/ibss/rimba-ibss-test-plan.md), and
 [`../docs/worklog/2026-06-20-ibss-adoption-interop-phantom.md`](../docs/worklog/2026-06-20-ibss-adoption-interop-phantom.md).
 
 Key discovery detail worth knowing: peer discovery is **data-driven** (learned from

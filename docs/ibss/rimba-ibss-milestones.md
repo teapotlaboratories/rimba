@@ -5,8 +5,8 @@ Morse Micro MM6108** (`mm-iot-sdk`/morselib, which exposes no public IBSS API): 
 milestones, the new-code ↔ Linux comparison, the **fork comparison** (vs
 momentary-systems), the **TODO / open items**, and the **findings & decisions**. For
 the blow-by-blow (commands, captures, diagnoses) see the worklogs
-([`worklog/2026-06-18-risk01-ibss-recon.md`](worklog/2026-06-18-risk01-ibss-recon.md),
-[`…2026-06-20-ibss-adoption-interop-phantom.md`](worklog/2026-06-20-ibss-adoption-interop-phantom.md))
+([`worklog/2026-06-18-risk01-ibss-recon.md`](../worklog/2026-06-18-risk01-ibss-recon.md),
+[`…2026-06-20-ibss-adoption-interop-phantom.md`](../worklog/2026-06-20-ibss-adoption-interop-phantom.md))
 and the validation results in [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md).
 
 **Governing requirement:** the implementation is derived from the **Linux side**
@@ -17,7 +17,7 @@ set, merge, and ATIM — not improvised from morselib's AP path.
 **Hardware:** up to 3× Seeed XIAO ESP32-S3 + HaLow module (reports
 `mm6108-mf16858`, chip `0x0306`, firmware **v1.17.6**) **plus a Raspberry Pi +
 MM6108 Linux reference node** (`morse_driver`/mac80211, same silicon — the interop
-oracle, see [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md)); board config
+oracle, see [`rimba-linux-node-setup.md`](../rimba-linux-node-setup.md)); board config
 `boards/proto1-fgh100m` (`bcf_fgh100mhaamd`); US 915.5 MHz, 1 MHz BW, S1G channel
 27 / op-class 68 (the Linux `iw … ibss join` frequency for ch27 is **5560** — the
 5 GHz-model channel that `dot11ah` maps ch27 onto; on-air is still 915.5 MHz).
@@ -97,7 +97,7 @@ implementation. IBSS is a viable L2 for Rimba on the MM6108; the RISK-01 fallbac
 ## Post-RISK-01 — Phase-1 hardening & validation
 
 These extend the proven link toward a robust mesh. Detail:
-[`worklog/2026-06-20-ibss-adoption-interop-phantom.md`](worklog/2026-06-20-ibss-adoption-interop-phantom.md),
+[`worklog/2026-06-20-ibss-adoption-interop-phantom.md`](../worklog/2026-06-20-ibss-adoption-interop-phantom.md),
 plus the **TODO / open items** and **Findings & decisions** sections below, and
 [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md) (P0/I results).
 
@@ -335,8 +335,8 @@ The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milesto
 ## Findings & decisions
 
 Conclusions that shaped the implementation. Blow-by-blow in the worklogs
-([`…2026-06-20-ibss-adoption-interop-phantom.md`](worklog/2026-06-20-ibss-adoption-interop-phantom.md),
-[`…2026-06-21-mm6108-powersave-decompile.md`](worklog/2026-06-21-mm6108-powersave-decompile.md)).
+([`…2026-06-20-ibss-adoption-interop-phantom.md`](../worklog/2026-06-20-ibss-adoption-interop-phantom.md),
+[`…2026-06-21-mm6108-powersave-decompile.md`](../worklog/2026-06-21-mm6108-powersave-decompile.md)).
 
 **EEXIST(-17) on `IBSS_CONFIG(CREATE)` — root cause (2026-06-20).** Not firmware/command
 bytes (the `mm6108.mbin` + the `mmdrv_*` command code are byte-identical to the
@@ -371,7 +371,7 @@ driver mirrors firmware features, the firmware almost certainly has no IBSS radi
 Scheduled mode hard power-cycles the radio on the RTC schedule (#8); the RTC is the shared clock,
 which **demotes #18 (TSF sync)** and bypasses the missing chip PS. (TWT *does* work in AP-STA —
 held in reserve, and the basis for the **Mesh-gate** alternative, see
-[`rimba-mesh-ap-milestones.md`](rimba-mesh-ap-milestones.md).) The gating number is #9 (boot time).
+[`rimba-mesh-ap-milestones.md`](../mesh-ap/rimba-mesh-ap-milestones.md).) The gating number is #9 (boot time).
 
 **FINDING — beacon discovery does no real work; discovery is data-driven (2026-06-20, H5).**
 On-air `DBG-SA` probing showed (a) the mm6108 fw (1.17.6) **does not surface same-cell peer
@@ -406,7 +406,7 @@ make monitor APP=rimba-halow-ibss PORT=/dev/ttyACM0      # "reply from 192.168.1
 ```
 
 Linux interop (the 4th node) — Raspberry Pi + MM6108, `morse_driver`/mac80211; bring-up
-in [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md) §12 (IBSS interop). Join the
+in [`rimba-linux-node-setup.md`](../rimba-linux-node-setup.md) §12 (IBSS interop). Join the
 same pinned cell with **frequency 5560** (S1G ch27 in the 5 GHz model; on-air 915.5 MHz):
 
 ```bash

@@ -3,7 +3,7 @@
 First real multi-node exercise of the open 802.11ah IBSS foundation: 3 ESP32-S3 +
 HaLow boards in one cell, validating the per-peer station records (#14) that are
 invisible with 2 boards. Companion to the test plan
-([`rimba-ibss-test-plan.md`](../rimba-ibss-test-plan.md) §4) — results recorded
+([`rimba-ibss-test-plan.md`](../ibss/rimba-ibss-test-plan.md) §4) — results recorded
 there; this is the blow-by-blow.
 
 ## Setup

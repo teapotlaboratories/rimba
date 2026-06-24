@@ -253,7 +253,7 @@ wpa_supplicant_s1g -D nl80211 -i wlan1 -c wpa_ibss.conf
 ```
 
 Results (I.1 discovery, I.2 beacon interop, I.3 data, I.4 on-air, I.5 mixed 4-node cell) are
-tabulated in [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md) §5. Key interop findings:
+tabulated in [`rimba-ibss-test-plan.md`](ibss/rimba-ibss-test-plan.md) §5. Key interop findings:
 discovery is **data-driven** (the firmware doesn't surface peer beacons; morse S1G beacons
 carry `source_addr = BSSID`), and I.4 on-air capture needs an external sniffer (morse monitor
 mode isn't compiled into this build).
