@@ -76,8 +76,9 @@ adapt Linux code, **write a doc that maps the new code to its Linux equivalent**
 - Use a table or per-item mapping: *new code (`file:line` / function)* ↔
   *equivalent Linux code (`file:line` / function)*, with a note on what differs
   and why (host-side vs in-driver, firmware-gated, etc.).
-- Model it on the existing porting docs (e.g. `docs/rimba-mesh-ap-porting.md`
-  §"Code map" — new morselib ↔ `morse_driver`/`net/mac80211`).
+- Model it on the existing porting maps (e.g. `docs/rimba-mesh-ap-milestones.md`
+  "Code map" tables, or `docs/rimba-ibss-milestones.md` — new morselib ↔
+  `morse_driver`/`net/mac80211`).
 - Root-cause and follow the Linux implementation; don't tolerate a symptom with
   a local hack that diverges from the reference.
 

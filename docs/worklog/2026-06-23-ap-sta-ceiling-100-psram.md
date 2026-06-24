@@ -269,4 +269,5 @@ so the multi-block change follows Linux rather than diverging. Shared: the const
 AID_LIMIT + 1` (`morse.h:398`); morselib's single-block `MAX_SUPPORTED_AID = 64` cap was a
 self-imposed embedded limit, not a behaviour difference — the encoder loop was already generic.
 The **PSRAM routing has no Linux counterpart** (kernel single address space) — an ESP32-specific
-adaptation. Full new-code ↔ Linux table: `docs/rimba-mesh-ap-porting.md` §5.
+adaptation. Full new-code ↔ Linux table: `docs/rimba-mesh-ap-milestones.md`
+("AP STA-count scaling" section).

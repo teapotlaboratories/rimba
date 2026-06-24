@@ -102,4 +102,4 @@ node (`/home/chronium/halow/morse_driver`, the exact loaded driver
 **One divergence (no Linux counterpart):** routing per-STA state + the TWT table to PSRAM is
 ESP32-specific (Linux uses one kernel address space; the `aid_bitmap` is static and per-STA
 TWT lives on mac80211's `ieee80211_sta`). Documented as a platform adaptation. The full
-new-code ↔ Linux table is in `docs/rimba-mesh-ap-porting.md` §5.
+new-code ↔ Linux table is in `docs/rimba-mesh-ap-milestones.md` ("AP STA-count scaling").

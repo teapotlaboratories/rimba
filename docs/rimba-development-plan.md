@@ -137,8 +137,8 @@ Degree 3 — no usable ad-hoc mode at all (the real threat):
       Porting status (if this fallback is taken): AP mode + an AP **TWT
       responder** (the leaf power-save win) are now ported to ESP32/morselib
       and verified on stock fw 1.17.6; 802.11s mesh for the backbone is NOT
-      ported (Linux-only). Details + the new-code↔Linux comparison table:
-      docs/rimba-mesh-ap-porting.md.
+      ported (Linux-only). Details + the new-code↔Linux comparison tables:
+      docs/rimba-mesh-ap-milestones.md.
 
     Fallback B — different sub-GHz PHY (big change, core survives):
       Port the DTN+mule+routing stack onto LoRa (cf. TU Darmstadt
