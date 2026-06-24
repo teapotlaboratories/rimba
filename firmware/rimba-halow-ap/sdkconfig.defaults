@@ -1,3 +1,10 @@
 # rimba-halow-ap app config (layered on top of the board's boards/<BOARD>/ defaults).
 # Put the MM6108 driver into AP (SoftAP) mode.
 CONFIG_HALOW_AP_MODE=y
+
+# High-STA AP ceiling: accept up to 100 associated stations. Valid AIDs are
+# 1..127 now that the S1G TIM spans two PVB blocks (MAX_SUPPORTED_AID=128).
+CONFIG_HALOW_AP_MAX_STAS=100
+# Route per-STA umac_sta_data (~912 B each) to PSRAM, not internal SRAM — at 100
+# STAs that is ~90 KB that must not come out of the small internal-SRAM pool.
+CONFIG_HALOW_STA_DATA_IN_PSRAM=y
