@@ -7,9 +7,8 @@ discovery understanding (**#16**, now data-driven). All of it landed on `main`.
 
 Companion docs updated the same day:
 [`rimba-ibss-milestones.md`](../rimba-ibss-milestones.md) (H1–H5 + the Linux-
-equivalence table), [`rimba-ibss-hardening-todo.md`](../rimba-ibss-hardening-todo.md)
-(Findings + #16/#17), [`rimba-ibss-test-plan.md`](../rimba-ibss-test-plan.md) (P0.6,
-I.5), [`rimba-ibss-impl-comparison.md`](../rimba-ibss-impl-comparison.md) (corrected).
+equivalence table, the findings + #16/#17, the fork comparison, and the TODO — all
+consolidated there), and [`rimba-ibss-test-plan.md`](../rimba-ibss-test-plan.md) (P0.6, I.5).
 
 ---
 

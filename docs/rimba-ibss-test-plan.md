@@ -2,8 +2,8 @@
 
 Validate that the **open 802.11ah IBSS foundation** (Phase 1, RISK-01) is robust
 before Phase 2 (link security) is built on top of it. Companion to
-[`rimba-ibss-milestones.md`](rimba-ibss-milestones.md) and the hardening backlog
-[`rimba-ibss-hardening-todo.md`](rimba-ibss-hardening-todo.md).
+[`rimba-ibss-milestones.md`](rimba-ibss-milestones.md) (milestones, the hardening
+backlog/TODO, and the findings).
 
 Status legend: ☐ todo · ◐ in progress · ☑ passed · ✗ failed.
 

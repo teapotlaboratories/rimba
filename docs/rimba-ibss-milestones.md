@@ -1,9 +1,13 @@
 # RISK-01 — IBSS / ad-hoc on the MM6108: milestones
 
-Summary of the RISK-01 effort to bring up an **802.11ah (Wi-Fi HaLow) IBSS /
-ad-hoc** link on **ESP32-S3 + Morse Micro MM6108** via `mm-iot-sdk`/morselib,
-which exposes no public IBSS API. For the blow-by-blow (commands, captures,
-diagnoses) see [`worklog/2026-06-18-risk01-ibss-recon.md`](worklog/2026-06-18-risk01-ibss-recon.md).
+The single doc for the **802.11ah (Wi-Fi HaLow) IBSS / ad-hoc** L2 on **ESP32-S3 +
+Morse Micro MM6108** (`mm-iot-sdk`/morselib, which exposes no public IBSS API): the
+milestones, the new-code ↔ Linux comparison, the **fork comparison** (vs
+momentary-systems), the **TODO / open items**, and the **findings & decisions**. For
+the blow-by-blow (commands, captures, diagnoses) see the worklogs
+([`worklog/2026-06-18-risk01-ibss-recon.md`](worklog/2026-06-18-risk01-ibss-recon.md),
+[`…2026-06-20-ibss-adoption-interop-phantom.md`](worklog/2026-06-20-ibss-adoption-interop-phantom.md))
+and the validation results in [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md).
 
 **Governing requirement:** the implementation is derived from the **Linux side**
 — MorseMicro's `morse_driver` (mac80211) for the firmware command sequence, and
@@ -94,7 +98,7 @@ implementation. IBSS is a viable L2 for Rimba on the MM6108; the RISK-01 fallbac
 
 These extend the proven link toward a robust mesh. Detail:
 [`worklog/2026-06-20-ibss-adoption-interop-phantom.md`](worklog/2026-06-20-ibss-adoption-interop-phantom.md),
-plus [`rimba-ibss-hardening-todo.md`](rimba-ibss-hardening-todo.md) (backlog) and
+plus the **TODO / open items** and **Findings & decisions** sections below, and
 [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.md) (P0/I results).
 
 ### H1 — N-node addressing + 3-board bench (P0) ✅
@@ -230,6 +234,167 @@ mappings from this phase:
    so peers are learned from data-frame source addresses. This matches Linux+morse
    in practice (`ieee80211_ibss_rx_bss_info` keys `mgmt->sa`, but the morse RX
    path sets `mgmt->sa = bssid`). Morse hardware/firmware dependent.
+
+---
+
+## Implementation comparison — vs the `momentary-systems` fork
+
+The other public ESP32/MM6108 IBSS fork is **`momentary-systems/esp-halow-ibss`**
+(branch `ibss-support`, commit `5237495` 2026-06-02; from the Morse community thread
+[*Firmware support for IBSS/ad-hoc on FGH100M*](https://community.morsemicro.com/t/firmware-support-for-ibss-ad-hoc-on-fgh100m/1653/5)).
+Both fork `morsemicro/halow` and add host-side IBSS on stock fw, OPEN/no crypto.
+**We adopted their implementation** (`umac_ibss.c` + datapath, milestones **H2**) as
+the proper EEXIST fix + the robustness work, then fixed their latent #17 bug and
+validated against the Linux reference.
+
+Where theirs was ahead (these became our backlog, mostly now done via adoption):
+
+| Area | momentary-systems (`5237495`) | Ours (pre-adoption) | Item |
+|---|---|---|---|
+| Module structure | dedicated `umac/ibss/umac_ibss.c` | inline in `umac.c` | #12 ☑ |
+| Peer age-out | `mmwlan_ibss_age_peers`, LRU at 8-cap | grow-only | #14 ☑ |
+| Teardown / re-enable | `mmwlan_ibss_stop()` | assumed clean boot | #6 ◐ |
+| Membership events | ADDED/REMOVED cb + `foreach_peer` | snapshot API only | — |
+| Multicast | IPv4/IPv6 verified | basic IP | — |
+| Create/Join role | explicit `create` arg | MAC heuristic | #7 ☐ |
+
+What our Linux-interop testing changed: the original "our beacon discovery is ahead"
+claim was **wrong** (we thought chronium's beacon carried the node MAC; it carries
+`SA=BSSID`), so beacon discovery is moot — we converged on **their data-driven model**
+(#16 reverted to drop, H5). Where *we* added value: the **#17 phantom-flood fix** (their
+latent bug — IBSS bound to the AP-mode pre-assoc list omitting `S1G_BEACON`; *their fork
+still has it*), Linux interop validation (I.1–I.5), and P0.6 drop/rejoin via their age-out.
+Same in both: no TSF merge (both pin the BSSID), no link-layer crypto (both OPEN),
+data-driven discovery, `MAX_PEERS = 8`, TX shares one stad/queue. Residual cautions on
+the adopted code: they self-describe it as "hackily forked… AI slop," modify shared
+AP/STA files without re-verifying those modes, and `mmwlan_ibss_*` may collide with a
+future official Morse API.
+
+---
+
+## TODO / open items
+
+The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milestones above.
+**Governing rule:** derive from Linux (`net/mac80211/ibss.c`, `morse_driver`).
+
+**Protocol-critical**
+- ◐ **#3 Hop-by-hop CCMP (AES-128-CCM).** Move off OPEN. **Blocked at the firmware
+  boundary:** IBSS has no association → no AID to bind a pairwise key to, and
+  `SET_STA_STATE(peer_mac, aid, AUTHORIZED)` **returns -116 on the ADHOC interface**, so
+  the firmware won't mint a station handle for an IBSS peer (details in Findings → CCMP).
+  Next: understand the -116 (off the RX hot path); check `morse_driver`'s
+  `morse_op_sta_state` adhoc sequence. Then static-PSK-PTK or full IBSS-RSN (`ibss_rsn.c`).
+
+**Robustness / correctness**
+- ☐ **#5 Beacon contention.** Distributed beaconing (suppress own beacon if one was heard
+  this interval). Every node currently beacons unconditionally — fine for 2, a storm risk
+  as density grows.
+- ◐ **#6 Teardown / re-enable.** `mmwlan_ibss_stop()` exists (adoption); **verify**
+  stop→re-enable and runtime param/channel change (not yet tested).
+- ☐ **#7 Dynamic create-else-join** (`ieee80211_sta_find_ibss`). Role must not be
+  provisioned — decide at boot by **active scan against the agreed BSSID**: probe → got a
+  response → JOIN; silence → CREATE. Replaces the `mac[0]&0x80` bench heuristic; also the
+  vehicle for TSF sync (JOIN syncs to the cell). Fix the latent
+  `umac_connection_addr_matches_bssid` (connection BSSID not set in IBSS) here.
+- ☐ **#13 Audit STA/AP-only assumptions** in morselib for other ADHOC drops (the RX-VIF
+  bug was one).
+
+**Power & de-risking** *(early focus — Rimba's battery-leaf model rests on it)*
+- ☐ **#9 RISK-02 — measure radio cold-boot-to-IBSS-joined time (GATING, NEXT).** The number
+  that decides whether RTC-scheduled mode is viable. GPIO-toggle from MM6108 power-on →
+  firmware loaded → IBSS joined → **first frame exchanged**; also measure a *resume* path.
+  Dev plan targets `LEAF_BOOT_MS=30`; never measured (RISK-02 has since been measured ≈1.39 s,
+  2026-06-21 — confirm/refine).
+- ☐ **#8 RTC-scheduled radio power-cycling = "Scheduled mode".** Drive the duty cycle from
+  ESP32 + the precise RTC (RV-3028-C7, ≤1 ppm): alarm wakes ESP32 → power MM6108 on → join
+  the pinned cell → exchange → power radio off → deep-sleep. Bypasses the missing chip
+  IBSS-PS *and* TSF sync (RTC is the shared clock). Pins (`boards/proto1-fgh100m`):
+  `RESET_N`=GPIO1, `WAKE`=GPIO2, `BUSY`=GPIO5, `SPI_IRQ`=GPIO3. Depends on #7 + #9.
+- ☐ **#18 TSF sync — DEMOTED** to nice-to-have (the RTC is the schedule clock, not the radio
+  TSF). Keep only for fine intra-window timing. Experiment: expose `GET_TSF`; do same-BSSID
+  ESP32s converge; does JOIN sync while CREATE starts fresh.
+- ☐ **#10 >2-node test** beyond the 3-board bench (needs more boards) — beacons/discovery/data.
+- ☐ **#11 Verify the S1G beacon on-wire (I.4).** Only the probe-resp was decoded; the
+  `EXT/S1G_BEACON` framing is chip-side + unverified. **Root cause of the failed capture:**
+  chronium's `morse_driver` is built **without `CONFIG_MORSE_MONITOR`** (the `morse0` monitor
+  netdev is `#ifdef`'d out — a build flag, not hardware). Close via a rebuild with that flag,
+  or the ESP32 raw-frame hook (`mmwlan_register_rx_frame_cb` + `MMWLAN_FRAME_BEACON`). Open
+  Q: our ESP32 beacon's `source_addr` (MAC vs BSSID).
+
+**Code quality / maintenance**
+- ☐ **#15 Bump the ESP32 stack** (fw / SDK / IDF) from MM6108 fw **1.17.6**, `morsemicro/halow`
+  **`2.10.4-esp32-2`**, ESP-IDF **v5.4.2**. *Not a fast-forward:* the IBSS port patches morselib
+  (ADHOC iface, IBSS commands, beacon/probe-resp, RX-VIF fix) → re-apply + re-validate; keep
+  **generation parity with the chronium Linux node** (a one-sided bump invalidates interop);
+  keep cmake on 3.x; re-run the 3-board P0 bench + AP-STA ping after any bump.
+- ☐ **Regression suite** across every built feature (hello / scan / AP-STA / IBSS / TWT /
+  Mesh+AP) so firmware/morselib bumps don't silently regress earlier milestones.
+
+---
+
+## Findings & decisions
+
+Conclusions that shaped the implementation. Blow-by-blow in the worklogs
+([`…2026-06-20-ibss-adoption-interop-phantom.md`](worklog/2026-06-20-ibss-adoption-interop-phantom.md),
+[`…2026-06-21-mm6108-powersave-decompile.md`](worklog/2026-06-21-mm6108-powersave-decompile.md)).
+
+**EEXIST(-17) on `IBSS_CONFIG(CREATE)` — root cause (2026-06-20).** Not firmware/command
+bytes (the `mm6108.mbin` + the `mmdrv_*` command code are byte-identical to the
+momentary-systems fork). **Root cause = a divergence from the Linux flow:** Linux *removes*
+the active interface before switching to IBSS (`iw set type ibss` needs `ip link down` →
+`ieee80211_do_stop` → `morse_mac_ops_remove_interface` → `MORSE_CMD_ID_REMOVE_INTERFACE`).
+Our bring-up did `ADD_INTERFACE(ADHOC)` on top of the live boot vif, so the stale BSS context
+made `IBSS_CONFIG(CREATE)` report already-exists. **Why we tolerated it for a while:** porting
+*only* the teardown killed the EEXIST but **regressed the data path** (the boot vif's
+netif/datapath binding is lost when `active_interface_types` hits 0 and `mmdrv_rm_if` fires);
+even teardown + RX re-bind left ARP/ICMP broken. **Proper fix = adopt the momentary-systems
+integrated bring-up** (H2), which re-establishes the full post-boot data path holistically —
+proven on HW (no EEXIST *and* working data path).
+
+**DECISION — Rimba is a provisioned network → no IBSS merge (#4 closed, 2026-06-20).** Every
+node is deployed knowing the mesh's BSSID (provisioned, like Wi-Fi credentials), so all nodes
+share one agreed cell. TSF merge (`ieee80211_rx_bss_info`, higher-TSF wins) only exists to
+coalesce *uncoordinated* nodes that each rolled a random BSSID — moot with a pre-shared BSSID.
+Matches the momentary-systems choice and Linux pointed at a fixed BSSID. Reversal trigger: a
+deployment that must form cells with no pre-agreed BSSID (not anticipated). What remains is #7
+(dynamic create-else-join), not merge.
+
+**DECISION — role is dynamic, and power-save is an early focus via RTC (2026-06-20).** Field
+relays are equal and can't know who's "first," so the create/join role is decided at boot by
+active scan against the agreed BSSID (#7), not per-node config. Power-save is pulled early but
+driven by **ESP32 + the precise RTC**, not chip power-save — because:
+
+**FINDING — the morse driver has no IBSS radio power-save; TWT is STA/AP-only (2026-06-20).**
+The driver has a rich PS stack (`ps.c`, `twt.c` = 802.11ah TWT, `yaps.c`) but **every TWT path
+gates on `IFTYPE_STATION`/`IFTYPE_AP` — no ADHOC branch, no ATIM, no IBSS on-air PS**. Since the
+driver mirrors firmware features, the firmware almost certainly has no IBSS radio power-save. So
+Scheduled mode hard power-cycles the radio on the RTC schedule (#8); the RTC is the shared clock,
+which **demotes #18 (TSF sync)** and bypasses the missing chip PS. (TWT *does* work in AP-STA —
+held in reserve, and the basis for the **Mesh-gate** alternative, see
+[`rimba-mesh-ap-milestones.md`](rimba-mesh-ap-milestones.md).) The gating number is #9 (boot time).
+
+**FINDING — beacon discovery does no real work; discovery is data-driven (2026-06-20, H5).**
+On-air `DBG-SA` probing showed (a) the mm6108 fw (1.17.6) **does not surface same-cell peer
+beacons to the host** (0 beacons reached the handler in a pure 2-ESP32 cell), and (b) a
+`morse_driver` beacon carries `source_addr = BSSID` (the morse RX path sets `mgmt->sa = bssid`),
+so even surfaced beacons can't identify a peer. `process_s1g_beacon` now **drops** beacons;
+discovery is the data-frame path (`lookup_stad_by_peer_addr_ibss` on the real TA) — which is what
+Linux+morse effectively does too. Marked morse hardware/firmware dependent.
+
+**FINDING — CCMP is blocked on the chip key model (2026-06-19, #3).** HW CCMP RX uses the
+*pairwise* key for unicast, keyed by `aid`; IBSS has no association → no AID. Linux does IBSS
+CCMP via a `sta_info` per peer (keyed by MAC) + a per-pair 4-way handshake (higher-MAC =
+authenticator, `ibss_rsn.c`), installing the PTK against the peer's MAC; the driver maps
+`sta_info` → a HW station handle (the `aid`). morselib has the primitives (`SET_STA_STATE` 0x14,
+`INSTALL_KEY` 0x0A) but drives them only from AP association — and `SET_STA_STATE` **returns -116
+on ADHOC**. So per-peer CCMP is blocked at that firmware boundary (#3) until the -116 is
+understood. Host-side per-peer records + AID already exist (#2).
+
+**Other:** beacon interval = **100 TU**, matches the Linux node (`beacon_int=100`); Linux IBSS
+always emits *long* beacons (`beacon.c:388`, `if (type==ADHOC) short_beacon=false`) and our
+`umac_ibss` builder does the same.
+
+---
 
 ## Build / test
 
