@@ -86,7 +86,7 @@ no firmware change** — 18–23/18–23 ping replies, 0 timeouts, ~15 ms RTT, S
 | 7 | **Install agreement to firmware** (cmd `0x26`) — *gated on AP vif; harmless* | `twt/umac_twt.c:491` `umac_twt_responder_install` → `umac_twt_install_agreement` (`:286`) → `mmdrv_twt_agreement_install_req`; install hook at `driver_ap.c:277` (on `WPA_STA_AUTHORIZED`) | `mac.c:5024` → `morse_twt_process_pending_cmds` (`twt.c:1355`) → `morse_cmd_twt_agreement_install_req` (`command.c:2211`) |
 | 8 | **Agreement blob format** (15 B: control, req_type, twt, min_dur, mantissa, channel) | `twt/umac_twt.c:286` `umac_twt_install_agreement` (packs `&agr->control` + packed `params`) | `twt.c:2326` `morse_twt_initialise_agreement` |
 | 9 | **AP-side serving — deliver buffered downlink at the SP** ⭐ the load-bearing fix | `ap/umac_ap.c:890` `umac_ap_set_stad_sleep_state`: on STA asleep→awake with queued frames, `umac_core_evt_wake()` to flush now (PM-bit tracked at `datapath/umac_datapath.c:1528`) | `mac80211` PS buffering (`ieee80211_sta_ps_deliver_wakeup`) + `twt.c` wake-interval tree (`morse_twt_agreement_wake_interval_add` `twt.c:941`, dump `twt.c:201`) |
-| 10 | **Data structures** | `twt/umac_twt_data.h` `struct umac_twt_data` (added `responder_peer[6]`; `agreements[1]`) | `morse_twt` per-STA list + per-vif `twt_wake_interval_tree` |
+| 10 | **Data structures** (per-STA table) | `twt/umac_twt_data.h`: `agreements[MMWLAN_AP_MAX_STAS_LIMIT]` (20, = the AP's max-STA cap) + parallel `responder_peers[20][6]`; slot allocated by SA in `umac_twt.c` `umac_twt_responder_alloc_slot`, looked up by `umac_twt_responder_slot_for_peer`, freed on STA leave via `umac_twt_responder_free_agreement` (hooked in `driver_ap.c` `mmwpas_sta_remove`) | `morse_twt` per-STA agreement (stored on the sta) + per-vif `twt_wake_interval_tree` |
 
 ### 4.3 The decisive fix (row 9)
 
@@ -105,15 +105,32 @@ schedule the SP — is not required and is gated for AP vifs anyway; host-side d
 
 ### 4.4 Caveats / open items
 
-- **Single-STA agreement slot.** `umac_twt_data` holds one agreement + one `responder_peer`
-  (`UMAC_TWT_NUM_AGREEMENTS == 1`). Multi-STA needs the per-STA list Linux keeps (row 10).
+- **Multi-STA, bounded table.** ✅ The responder now keeps a per-STA agreement table
+  (`UMAC_TWT_NUM_AGREEMENTS == MMWLAN_AP_MAX_STAS_LIMIT == 20`, matching the AP's max-STA cap so
+  every associable leaf can hold TWT; parallel `responder_peers[]`), allocated by SA on the
+  assoc-req and freed on STA leave — so several leaves can hold TWT at once. The table is
+  bounded for embedded RAM: when full, the responder logs and drops the IE (implicit reject,
+  STA still associates without TWT). Linux keeps a dynamic per-STA list.
+  **Hardware-validated (1 AP + 2 STA):** one ESP32 AP held two TWT-requester ESP32 STAs
+  (`68:24:99:44:6a:56` and `bc:2a:33:96:b2:9f`) concurrently associated + authorized, stable
+  for ~69 s, with downlink served (ping RTT 10–201 ms — the spikes are TWT doze buffering) and
+  no disconnect/crash. (Aside: morselib `MMLOG_INF` doesn't reach the ESP console and the
+  USB-CDC console freezes during the association window, so the per-slot grant log isn't
+  capturable; validation is via the AP's authorized-STA callback count instead.)
 - **No SP-overlap scheduling.** Linux's `twt_wi_tree` spaces multiple STAs' SPs (`twt.c:941`);
-  this port uses the requested target-wake-time as-is (fine for one STA).
+  this port serves each STA's downlink reactively on wake (per-STA, via the flush-on-wake) but
+  does not yet *schedule* SPs to avoid overlap — fine until many leaves share tight intervals.
 - **Downlink latency = TWT interval.** Buffered downlink is delivered at the STA's next SP — the
   inherent TWT trade-off (fine for a leaf that wakes every N minutes; a short interval was used
   on the bench only to fit a 2 s ping timeout).
-- **Transport = assoc-IE only.** TWT is negotiated in (re)assoc IEs (matching the morselib STA
-  requester); the standalone TWT-Setup *action-frame* path Linux also supports is not ported.
+- **Transport: assoc-IE + TWT action frames.** TWT is negotiated in (re)assoc IEs (the common
+  requester flow) *and* via **S1G unprotected action frames** (category 22): a received **TWT Setup**
+  (action 6) is accepted and answered with a TWT-Setup response action frame carrying the ACCEPT IE
+  (`umac_twt_responder_tx_setup_response` → `umac_datapath_build_and_tx_mgmt_frame`); a **TWT
+  Teardown** (action 7) frees the STA's agreement. Both dispatch from `umac_datapath.c` →
+  `umac_twt_responder_handle_action`; the accept policy + IE build are shared with the assoc path
+  (`umac_twt_responder_accept_ie` / `_fill_ie`). *Not yet exercised on hardware* — our test STA app
+  negotiates TWT in the assoc IEs, not mid-session, so the action-frame path is review-verified only.
 - **Bench-verified only** (ping workload); no radio-rail current measurement of the µA draw.
 
 ### 4.5 Diff summary
@@ -124,7 +141,42 @@ schedule the SP — is not required and is gated for AP vifs anyway; host-side d
 
 ---
 
-## 5. References
+## 5. Open items / backlog
+
+Tracked TWT / AP work not yet done (mirrors the live task list):
+
+- **TWT power-save — RESOLVED on hardware.** ✅ The STA now **deep-TWT-sleeps against our ESP32 AP**:
+  AP→STA ping RTT 17–953 ms (max ≈ the 1 s TWT interval), matching the Linux AP (~890 ms). Before the
+  fix it was a flat ~10 ms (the STA never slept). **Root cause:** hostapd calls `sta_remove` transiently
+  during (re)association cleanup; our `mmwpas_sta_remove` hook freed the STA's just-accepted TWT slot
+  (still `PENDING_INSTALLATION`) *before* `build_response_ie` ran, so the assoc-resp carried **no ACCEPT
+  IE** and the STA never established TWT. **Fix:** `umac_twt_responder_free_agreement` now frees only an
+  `INSTALLED` agreement — the transient assoc-time removal (PENDING) is ignored; a real post-authorized
+  departure (INSTALLED) is freed; `alloc_slot` reuse-by-SA still prevents leaks for re-associating STAs.
+  Isolated via a Linux-AP comparison (same STA sleeps there) + freeze-proof AP-side counters logged from
+  the beacon path; the STA + firmware were always fine — the bug was purely AP-side. *Remaining
+  nice-to-have:* a current-meter µA reading on a fully-idle link to quantify the floor (board caveat: no
+  host power-enable line, RESET_N only, BUSY/WAKE on DNP pads — RISK-02).
+  - **BCF is correct (cleared a false lead).** The runtime "BCF board description: mf16858" is *not*
+    a wrong/mislabeled file — `components/firmware/mm6108/bcf_fgh100mhaamd.mbin` is byte-identical to
+    the genuine `bcf/quectel/bcf_fgh100mhaamd.bin` from Morse's `morse-firmware` repo (now vendored at
+    `vendor/morse-firmware` as the BCF source of truth), and that genuine FGH100M-H BCF simply carries
+    `.board_desc = "mf16858"` (the FGH100M-H shares the mf16858 board reference). So `BOARD=proto1-fgh100m`
+    loads the right calibration; flaky association must be explained elsewhere (PS config / RF env).
+  - Levers to try for real sleep: explicit `mmwlan_set_power_save_mode` + `mmwlan_set_dynamic_ps_timeout`,
+    a longer AP beacon/DTIM + STA `mmwlan_set_listen_interval` (applied *post-assoc*), or WNM sleep.
+- **AP STA-count ceiling + PSRAM.** morselib caps AP STAs at `MMWLAN_AP_MAX_STAS_LIMIT = 20` (a
+  software `#define`, not firmware). Per-STA host cost = **912 B** (`sizeof(umac_sta_data)`), which
+  defaults to internal SRAM (< the 16 KB `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` threshold). 8 MB PSRAM
+  ≈ ~8,700 structs — already covers the 802.11ah AID ceiling (8,191), so **firmware capacity is the
+  real limit**. To scale past ~20: route STA allocs to PSRAM (`MALLOC_CAP_SPIRAM`) and confirm the
+  firmware's per-STA context capacity.
+- **Action-frame path not yet HW-exercised.** Mid-session TWT-Setup + teardown action frames are
+  implemented and review-verified, but our test STA negotiates TWT in assoc IEs, not mid-session.
+- **Regression suite** for every built feature (hello / scan / AP-STA / IBSS / TWT / Mesh+AP) so
+  firmware/morselib bumps don't silently regress earlier milestones.
+
+## 6. References
 
 - Worklog (blow-by-blow + firmware byte-comparison): [`worklog/2026-06-22-mesh-ap-twt.md`](worklog/2026-06-22-mesh-ap-twt.md)
 - Linux node + Mesh/AP/TWT bring-up: [`rimba-linux-node-setup.md`](rimba-linux-node-setup.md) §11–§12

@@ -21,6 +21,7 @@
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
 #include "ping/ping_sock.h"
@@ -32,13 +33,51 @@
 #define LINK_PSK       "rimbahalow"   /* >= 8 chars, required for SAE */
 #define LINK_S1G_CHAN  27             /* US 915.5 MHz, 1 MHz BW (global op-class 68) */
 #define LINK_OP_CLASS  68
-#define LINK_MAX_STAS  1
+#define LINK_MAX_STAS  4              /* allow multiple leaves (multi-STA TWT test) */
 #define AP_IP          "192.168.12.1"
 #define STA_IP         "192.168.12.2"   /* the STA — our ping target */
 #define NETMASK        "255.255.255.0"
 /* ---------------------------------------------------------------------------- */
 
 static const char *TAG = "rimba-ap";
+
+/* --- multi-STA TWT validation: track + periodically report authorized stations.
+ * The per-STA status callback fires during the association window (when the USB-CDC
+ * console is frozen), so it only updates state here; a separate task logs the list
+ * every few seconds once the console is alive again. Seeing >1 authorized STA proves
+ * the AP admits multiple leaves concurrently (each a TWT requester). ----------- */
+#define TRACK_MAX 8
+static uint8_t s_sta_macs[TRACK_MAX][MMWLAN_MAC_ADDR_LEN];
+static volatile int s_sta_n;
+
+static void ap_sta_status_cb(const struct mmwlan_ap_sta_status *st, void *arg)
+{
+    (void)arg;
+    if (st == NULL) return;
+    int idx = -1;
+    for (int i = 0; i < s_sta_n; i++)
+        if (memcmp(s_sta_macs[i], st->mac_addr, MMWLAN_MAC_ADDR_LEN) == 0) { idx = i; break; }
+    if (st->state == MMWLAN_AP_STA_AUTHORIZED) {
+        if (idx < 0 && s_sta_n < TRACK_MAX)
+            memcpy(s_sta_macs[s_sta_n++], st->mac_addr, MMWLAN_MAC_ADDR_LEN);
+    } else if (st->state == MMWLAN_AP_STA_UNKNOWN && idx >= 0) {
+        for (int j = idx; j < s_sta_n - 1; j++)
+            memcpy(s_sta_macs[j], s_sta_macs[j + 1], MMWLAN_MAC_ADDR_LEN);
+        s_sta_n--;
+    }
+}
+
+static void sta_monitor_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        int n = s_sta_n;
+        ESP_LOGI(TAG, "=== authorized STAs: %d (max %d) ===", n, LINK_MAX_STAS);
+        for (int i = 0; i < n; i++)
+            ESP_LOGI(TAG, "    sta[%d] " MACSTR, i, MAC2STR(s_sta_macs[i]));
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+}
 
 static void on_ping_success(esp_ping_handle_t hdl, void *args)
 {
@@ -137,6 +176,7 @@ void app_main(void)
     cfg.ap.s1g_chan_num = LINK_S1G_CHAN;
     cfg.ap.op_class = LINK_OP_CLASS;
     cfg.ap.max_stas = LINK_MAX_STAS;
+    cfg.ap.sta_status_cb = ap_sta_status_cb;
 
     ESP_ERROR_CHECK(mmhalow_set_config(WIFI_IF_AP, &cfg));
 
@@ -149,4 +189,6 @@ void app_main(void)
 
     ESP_LOGI(TAG, "SoftAP up. Pinging the STA and answering its pings.");
     start_ping_sta();
+
+    xTaskCreate(sta_monitor_task, "stamon", 3072, NULL, 4, NULL);
 }
