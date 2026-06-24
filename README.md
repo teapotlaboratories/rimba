@@ -10,39 +10,26 @@ RTC-scheduled; traffic to the backend is always end-to-end encrypted.
 
 ## Status
 
-**Draft 0.28 — design stage; Phase-1 IBSS foundation validated on hardware.**
+**Draft 0.28 — Phase-1 foundation validated on hardware; currently in the L2-layer
+decision phase.**
 
-Development started with the BLOCKING hardware-validation phase. **Before writing
-any feature, read the [development plan](docs/rimba-development-plan.md)** — it
-defines the phased build order and the IBSS-foundation phase everything depends on.
+Rimba's link layer has two viable options on the MM6108, and **both are being built on
+hardware and compared** before committing to one:
 
-**RISK-01 (IBSS on the MM6108) is resolved, hardened, and validated**: 802.11ah ad-hoc
-bring-up, bidirectional IP/`0x88B5` data, a 3-board full mesh, peer age-out + drop/rejoin,
-interop with a Linux `morse_driver` IBSS node on the same silicon, and a **~6.5 h 4-node
-soak** (0 reboots, no heap leak) — all derived from and verified against the Linux
-implementation. See [`docs/ibss/rimba-ibss-milestones.md`](docs/ibss/rimba-ibss-milestones.md),
-the [test plan](docs/ibss/rimba-ibss-test-plan.md), and the [IBSS worklogs](docs/worklog/).
-**Next: power-save bring-up** (RTC-scheduled radio duty-cycle — the morse firmware has no
-IBSS radio power-save), then Phase-2 link security.
-
-**Current phase — the L2-layer decision: IBSS vs Mesh-gate.** Rimba's link layer has two
-viable options on the MM6108, so **both are being built on hardware and compared** rather
-than committing early:
-
-- **IBSS / ad-hoc** (above) — symmetric, infrastructure-free; **resolved + hardened + soaked**.
-  Its dead-end is **leaf power-save**: this firmware has no IBSS radio power-save.
-- **Mesh-gate (802.11s mesh + AP)** — relays mesh together; leaves are STAs that **TWT-sleep**
-  under a relay-AP that buffers their downlink. **Proven on hardware:** AP-mode, the TWT
-  responder + the power-save fix (a dozing leaf really sleeps), multi-STA TWT, and STA-count
-  scaling to **255** (four-block S1G TIM). **Open:** ESP32 mesh+AP concurrency (proven on Linux
-  only). See [`docs/mesh-ap/rimba-mesh-ap-milestones.md`](docs/mesh-ap/rimba-mesh-ap-milestones.md) (milestones,
-  the new-code ↔ Linux `morse_driver`/`dot11ah` maps, and the Mesh-gate TODO).
+- **IBSS / ad-hoc** — symmetric, infrastructure-free. Foundation resolved, hardened, and
+  soaked; the open question is leaf power-save (this firmware has no IBSS radio power-save).
+  → [`docs/ibss/rimba-ibss-milestones.md`](docs/ibss/rimba-ibss-milestones.md)
+- **Mesh-gate (802.11s mesh + AP)** — relays mesh; leaves TWT-sleep under a relay-AP that
+  buffers their downlink. AP mode, the TWT responder + leaf power-save, and STA-count scaling
+  to 255 are proven; ESP32 mesh+AP concurrency is the open item.
+  → [`docs/mesh-ap/rimba-mesh-ap-milestones.md`](docs/mesh-ap/rimba-mesh-ap-milestones.md)
 
 Neither L2 is chosen yet — making them comparable on the same silicon is the point of this phase.
 
-See Section 15 (Open Issues) and Section 16 (Future Investigations) in the spec
-for tracked work, including the urgent config-changeable-parameter-scope security
-boundary (Issue #13).
+For what's left, the phased plan, and the per-milestone history, see
+[`docs/rimba-todo.md`](docs/rimba-todo.md) (roadmap),
+[`docs/rimba-development-plan.md`](docs/rimba-development-plan.md) (phases + risk register),
+and the per-L2 milestone docs above.
 
 ## Where to start
 
