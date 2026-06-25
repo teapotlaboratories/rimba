@@ -245,9 +245,10 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
   the TWT `0x26` gating. *Derive from* `net/mac80211/mesh*.c` + `morse_driver/mesh.c`,
   follow Linux exactly, write the new-code↔Linux map. Blocks a real ESP32 Mesh-gate (A3).
   Phased (each its own branch + PR + HW validation):
-  - ☐ **P0 — firmware feasibility probe** *(gate; ~1 day).* Use the existing
-    `mmprobe_add_iface_raw(5)` hook + a `MESH_CONFIG` START wrapper; confirm the ESP32 fw
-    accepts `ADD_INTERFACE(type=5)` + beacons. Highest-information, cheapest step — do first.
+  - ✅ **P0 — firmware feasibility probe** *(done 2026-06-24 — `firmware/rimba-halow-mesh/`,
+    result in the recon worklog).* `ADD_INTERFACE(type=5)` **accepted** (`fw_status=0`) on
+    fw 1.17.6, vs BOGUS(99) rejected with -22 — firmware recognizes a mesh vif. Inverse of
+    the TWT `0x26` gating. Remaining fw unknown (does `MESH_CONFIG` beacon) folds into P1.
   - ☐ **P1 — mesh vif up + beacon.** Interface plumbing (3 type enums) + fw-cmd wrappers +
     Mesh ID/Config IEs in an S1G beacon. Oracle: chronium `iw mesh` sees the ESP32 node.
   - ☐ **P2 — peering (open MPM).** Port `mesh_plink.c` (open, no AMPE) + peer table + the

@@ -143,7 +143,37 @@ undertaking. If the goal is only "a relay that leaves can TWT-sleep under," the
 full ESP32 mesh (P1–P5) is what removes the Linux relay dependency. Worth weighing P0
 (cheap) before committing to P1+.
 
+## P0 result (executed 2026-06-24) — ✅ firmware recognizes MESH(5)
+
+Built a diagnostic app `firmware/rimba-halow-mesh/` that asks the blob directly. It
+sends `ADD_INTERFACE` for a matrix of interface types (each add immediately removed
+via the new `mmprobe_iface_type_supported()` helper, so slots aren't exhausted) and
+reports the firmware verdict per type. Flashed to one board, MM6108 fw **1.17.6**:
+
+| Type | `fw_status` | Verdict |
+|---|---|---|
+| STA (1) | 0 | accepted (known-good control) |
+| AP (2) | 0 | accepted (known-good control) |
+| ADHOC (4) | 0 | accepted (known-good — matches IBSS recon) |
+| **MESH (5)** | **0** | **accepted** |
+| BOGUS (99) | 4294967274 = `0xFFFFFFEA` = **-22 (EINVAL)** | rejected (known-bad control) |
+
+Stable across two passes. The firmware **actively rejects** an undefined type
+(BOGUS → -22), so MESH(5) returning `fw_status=0` like the real types — and unlike
+BOGUS — means the firmware genuinely recognizes a mesh interface. This is the inverse
+of the TWT `0x26` gating: mesh is **not** firmware-blocked at the interface level.
+
+**Gate passed → P1 unblocked.** (Caveat: this only proves `ADD_INTERFACE(MESH)` is
+accepted. The next firmware unknown is whether `MESH_CONFIG`/`SET_MESH_CONFIG` are
+honoured and the node actually beacons — that's the first task inside P1, but the
+expensive risk, "does the firmware know mesh at all", is now retired.)
+
+Evidence: `/tmp/mesh-p0.log`; app `firmware/rimba-halow-mesh/main/app_main.c`; helper
+`morselib/src/driver/driver.c` `mmprobe_iface_type_supported()`.
+
 ## Next
 
-- **P0 firmware probe** — cheapest, highest-information step; do it before scoping P1.
-  Add a tracked TODO in the Mesh-gate milestones (802.11s port, phased P0–P5).
+- **P1 — mesh vif up + beacon.** Interface-type plumbing (3 enums) + `MESH_CONFIG`
+  command wrapper + Mesh ID/Config IEs in an S1G beacon; confirm a Linux `iw mesh`
+  node sees the ESP32 node. First in-P1 step: verify `MESH_CONFIG` START is honoured
+  (the remaining firmware unknown).
