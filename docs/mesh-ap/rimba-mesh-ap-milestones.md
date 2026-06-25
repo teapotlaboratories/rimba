@@ -242,13 +242,19 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
 - **Linux STA as TWT *requester*** vs the ESP32 AP responder. Needs the Morse driver's
   requester-role bring-up (`twt_requester=1` global + the correct assoc-time negotiation;
   `morse_cli twt conf` alone returns -1 / "non-requester"). The strongest responder interop test.
-- ◐ **Action-frame TWT path on hardware** *(in progress).* The AP **responder** RX/TX action
-  path exists (`umac_twt_responder_handle_action` / `_tx_setup_response`) but is unexercised —
-  the test STA only negotiates in assoc IEs. HW test needs a **requester-side action-frame
-  sender** (no such path in morselib yet): TX a mid-session TWT-Setup action (cmd REQUEST) +
-  RX the AP's ACCEPT response → install via `umac_twt_process_ie`, plus a Teardown. Mirror
-  `morse_driver` `morse_mac_send_twt_action_frame` + the requester half of
-  `morse_mac_process_rx_twt_mgmt`. Then verify TWT engages mid-session (doze RTT) + teardown frees.
+- ✅ **Action-frame TWT path on hardware** *(done — see `docs/worklog/twt-action-frame.md`).*
+  Added the missing **requester-side action-frame sender** to morselib
+  (`umac_twt_requester_tx_setup` / `_tx_teardown` / `_handle_action`, public
+  `mmwlan_twt_setup_request()` / `mmwlan_twt_teardown()`), mirroring `morse_driver`
+  `morse_mac_send_twt_action_frame` + the requester half of `morse_mac_process_rx_twt_mgmt`.
+  Verified on HW: STA connects **without** assoc-IE TWT (flat ~12 ms baseline), then a
+  mid-session TWT-Setup **action** frame engages doze (RTT spikes to ~1 s = the wake interval),
+  and Teardown frees the agreement. Confirmed with **two ESP32 STAs concurrently** against the
+  ESP32 AP (`.159` max 1057 ms, `.86` max 1972 ms, both "authorized STAs: 2"). **Caveats:**
+  (1) Linux-AP interop blocked by PMF — the Morse AP sends the Setup *response* CCMP-protected;
+  morselib delivers it un-decrypted so the STA can't install (needs RMF RX decryption). The
+  request itself is accepted by the Linux AP (agreement built with exact params). (2) Teardown
+  frees the AP + local slot but not the firmware agreement (fw cmd `0x27` unwired).
 - ☐ **RAW (Restricted Access Window) — AP-side, port from Linux.** morselib has only RAW
   *types/caps* today (`MORSE_CAPS_RAW`, the S1G cap-6 RAW-operation bit, `raw_priority` in
   `mmwlan_sta_args`) — **no implementation**. Port the AP RAW from `morse_driver` **`raw.c`**
