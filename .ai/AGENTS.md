@@ -49,6 +49,24 @@ changed:
 
 When unsure whether a change counts as "doc-only," treat it as code and branch.
 
+### Merging pull requests
+
+**Default merge strategy: rebase + merge** (`gh pr merge --rebase`). Replay the
+branch's commits onto the base so `main` stays linear — no merge bubbles. Prefer
+this over a merge commit or squash unless there is a concrete reason not to.
+
+- **Squash + merge** only when the branch is noisy work-in-progress that is
+  clearer collapsed to a single commit.
+- **Merge commit** only when you must preserve an *exact* commit SHA on the base
+  (see the submodule caveat) or the branch's individual history matters as-is.
+- **Submodule caveat — rebase rewrites SHAs.** A rebase replays commits as *new*
+  SHAs, so the original branch commit will **not** exist on the submodule's
+  `main`. When the superproject's gitlink points at a *feature-branch* commit:
+  merge the submodule PR first, then update the superproject pointer to the
+  **post-rebase SHA now on the submodule's `main`** (commit + push that) before
+  merging the superproject PR — otherwise the gitlink dangles off a commit that
+  isn't on the submodule's `main`.
+
 ## Commit & attribution conventions
 
 When you *are* asked to commit, the history must read as solely the work of the

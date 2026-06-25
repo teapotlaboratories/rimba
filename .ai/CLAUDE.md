@@ -13,6 +13,9 @@ Most important rules:
   [AGENTS.md → Commit & attribution conventions](AGENTS.md#commit--attribution-conventions).
 - **Code/feature changes → branch + PR; doc-only changes → may push to `main`.**
   See [AGENTS.md → Branching & pull requests](AGENTS.md#branching--pull-requests).
+- **Merge PRs with rebase + merge by default** (`gh pr merge --rebase`); keep
+  `main` linear. Mind the submodule-SHA caveat. See
+  [AGENTS.md → Merging pull requests](AGENTS.md#merging-pull-requests).
 - **Verify every change** with a hardware or unit test; if you can't, document
   why. See [AGENTS.md → Verifying changes](AGENTS.md#verifying-changes).
 - **When porting Linux code, document the new ↔ Linux mapping.** See
