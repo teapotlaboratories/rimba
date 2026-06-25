@@ -233,10 +233,30 @@ no regression. Worklogs: [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](../w
 
 The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
 
-- **802.11s mesh in morselib — the big one.** Mesh + AP concurrency works on Linux but
-  needs an all-ESP32 implementation: mesh peering (PLINK), HWMP path selection, mesh
-  beacon/`mpath`. No 802.11s exists in morselib today. *Derive from* `net/mac80211/mesh*.c`
-  + `morse_driver` mesh paths. Blocks a real ESP32 Mesh-gate (A3).
+- ☐ **802.11s mesh in morselib — the big one** *(recon done — see
+  [`../worklog/2026-06-24-mesh-80211s-port-recon.md`](../worklog/2026-06-24-mesh-80211s-port-recon.md)).*
+  Mesh + AP concurrency works on Linux but needs an all-ESP32 implementation. **Largest
+  feature in the project**: ~6.9k lines `net/mac80211/mesh*.c` + ~1k lines
+  `morse_driver/mesh.{c,h}`, on a umac that lacks the kernel primitives mesh assumes
+  (rhashtable path table, RCU, cfg80211, **host timers — umac uses none today**). No
+  forwarding/relay logic exists in the datapath (strictly endpoint). **Good news:** the
+  firmware already supports mesh (`MESH_CONFIG` / `SET_MESH_CONFIG` /
+  `DYNAMIC_PEERING_CONFIG` / `ADD_INTERFACE(type=5)` defined in the same blob) — inverse of
+  the TWT `0x26` gating. *Derive from* `net/mac80211/mesh*.c` + `morse_driver/mesh.c`,
+  follow Linux exactly, write the new-code↔Linux map. Blocks a real ESP32 Mesh-gate (A3).
+  Phased (each its own branch + PR + HW validation):
+  - ☐ **P0 — firmware feasibility probe** *(gate; ~1 day).* Use the existing
+    `mmprobe_add_iface_raw(5)` hook + a `MESH_CONFIG` START wrapper; confirm the ESP32 fw
+    accepts `ADD_INTERFACE(type=5)` + beacons. Highest-information, cheapest step — do first.
+  - ☐ **P1 — mesh vif up + beacon.** Interface plumbing (3 type enums) + fw-cmd wrappers +
+    Mesh ID/Config IEs in an S1G beacon. Oracle: chronium `iw mesh` sees the ESP32 node.
+  - ☐ **P2 — peering (open MPM).** Port `mesh_plink.c` (open, no AMPE) + peer table + the
+    new umac host-timer scaffolding. Two ESP32 nodes establish a peer link.
+  - ☐ **P3 — path table + HWMP.** Port `mesh_pathtbl.c` (replace rhashtable) + `mesh_hwmp.c`
+    + airtime metric. Routing converges on a 3-node line; PREQ/PREP observed.
+  - ☐ **P4 — 4-addr forwarding datapath.** Mesh control header + relay + TTL. End-to-end
+    ping across a 3-node mesh where the middle node forwards.
+  - ☐ **P5 — hardening.** MBCA, dynamic peering, mesh sync, mesh-PS, AMPE (encrypted mesh).
 - **AID ≥ 64 on air.** The 2nd–4th TIM blocks aren't exercised — the dense allocator only
   reaches block 1+ at 64+ live associations, beyond the 3-board bench.
 - **Linux STA as TWT *requester*** vs the ESP32 AP responder. Needs the Morse driver's
