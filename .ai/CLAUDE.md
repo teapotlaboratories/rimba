@@ -8,9 +8,10 @@ Most important rules:
   [AGENTS.md → Plan first](AGENTS.md#plan-first--every-feature-starts-as-a-documented-todo).
 - **Do not commit or push automatically** — only when explicitly asked. See
   [AGENTS.md → Committing](AGENTS.md#committing).
-- **Do not add AI co-author or session trailers to commits.** Commits are
-  attributed solely to the repo's human owner. See
-  [AGENTS.md → Commit & attribution conventions](AGENTS.md#commit--attribution-conventions).
+- **No AI attribution anywhere** — not in code comments, docs, commit messages, or
+  GitHub PR/issue text. Everything reads as the human owner's work; commits use the
+  repo's git identity only. See
+  [AGENTS.md → Attribution](AGENTS.md#attribution--no-ai-self-reference-anywhere).
 - **Code/feature changes → branch + PR; doc-only changes → may push to `main`.**
   See [AGENTS.md → Branching & pull requests](AGENTS.md#branching--pull-requests).
 - **Merge PRs with rebase + merge by default** (`gh pr merge --rebase`); keep
