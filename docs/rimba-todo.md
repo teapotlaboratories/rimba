@@ -15,7 +15,8 @@ Mesh-gate) to compare before committing.
 
 ### L2 link layer — pick IBSS vs Mesh-gate (build both, compare)
 - ◐ **IBSS hardening** → [`ibss/rimba-ibss-milestones.md`](ibss/rimba-ibss-milestones.md) (TODO section). Headline open items: hop-by-hop **CCMP** (#3, 🔒 on the firmware station-handle), **dynamic create-else-join** (#7), beacon contention (#5).
-- ◐ **Mesh-gate (Mesh + AP)** → [`mesh-ap/rimba-mesh-ap-milestones.md`](mesh-ap/rimba-mesh-ap-milestones.md) (TODO section). Headline open items: **port 802.11s mesh into morselib** (the big one — blocks an all-ESP32 relay), **AID ≥ 64** on-air validation, Linux STA as TWT requester.
+- ◐ **Mesh-gate (Mesh + AP)** → [`mesh-ap/rimba-mesh-ap-milestones.md`](mesh-ap/rimba-mesh-ap-milestones.md) (TODO section). Headline open items: **port 802.11s mesh into morselib** (the big one — blocks an all-ESP32 relay), **RAW (Restricted Access Window)** AP-side port (next; see below), **AID ≥ 64** on-air validation, Linux STA as TWT requester. *(Action-frame TWT now ✅ — [PR #15](https://github.com/teapotlaboratories/rimba/pull/15).)*
+- ☐ **RAW (Restricted Access Window) — AP-side, port from Linux** → [`mesh-ap/rimba-mesh-ap-milestones.md`](mesh-ap/rimba-mesh-ap-milestones.md) (TODO, RAW item). Big standalone feature: port the RPS IE + AID grouping + slot definition from `morse_driver` `raw.c` (1742 lines) + `page_slicing.c`, follow Linux exactly, write the new-code↔Linux map. **Recon/feasibility pass first** (does the fw accept the RAW config cmd; minimum-viable scope). Its own branch + PR.
 - ☐ **Decision:** choose the L2 after the comparison (or define when each applies). Trade-off table in both milestone docs.
 
 ### Power-save (early focus — the battery-leaf model rests on it)
