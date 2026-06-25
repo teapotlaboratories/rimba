@@ -14,6 +14,7 @@
  */
 
 #include <inttypes.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -49,6 +50,8 @@ static const char *TAG = "rimba-ap";
 #define TRACK_MAX 8
 static uint8_t s_sta_macs[TRACK_MAX][MMWLAN_MAC_ADDR_LEN];
 static volatile int s_sta_n;
+static bool s_pinged[256];                 /* one ping session per STA, keyed by mac[5] */
+static void start_ping_octet(uint8_t octet);
 
 static void ap_sta_status_cb(const struct mmwlan_ap_sta_status *st, void *arg)
 {
@@ -73,8 +76,11 @@ static void sta_monitor_task(void *arg)
     for (;;) {
         int n = s_sta_n;
         ESP_LOGI(TAG, "=== authorized STAs: %d (max %d) ===", n, LINK_MAX_STAS);
-        for (int i = 0; i < n; i++)
+        for (int i = 0; i < n; i++) {
             ESP_LOGI(TAG, "    sta[%d] " MACSTR, i, MAC2STR(s_sta_macs[i]));
+            uint8_t octet = s_sta_macs[i][5];   /* STA IP = 192.168.12.<mac[5]> */
+            if (!s_pinged[octet]) { s_pinged[octet] = true; start_ping_octet(octet); }
+        }
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
 }
@@ -100,13 +106,17 @@ static void on_ping_timeout(esp_ping_handle_t hdl, void *args)
     ESP_LOGW(TAG, "ping timeout, seq=%u (STA not up yet?)", seqno);
 }
 
-/* Ping the STA continuously. Times out until the STA associates + configures its
- * static IP, then replies — confirming the AP->STA (downlink) direction. */
-static void start_ping_sta(void)
+/* Ping one STA (192.168.12.<octet>) continuously. Times out until that STA configures
+ * its static IP, then replies — confirming the AP->STA (downlink) direction, and showing
+ * the TWT doze signature once the STA establishes a TWT agreement. One session per STA. */
+static void start_ping_octet(uint8_t octet)
 {
+    char ipbuf[20];
+    snprintf(ipbuf, sizeof(ipbuf), "192.168.12.%u", (unsigned)octet);
+
     ip_addr_t target = { 0 };
     target.type = IPADDR_TYPE_V4;
-    target.u_addr.ip4.addr = esp_ip4addr_aton(STA_IP);
+    target.u_addr.ip4.addr = esp_ip4addr_aton(ipbuf);
 
     esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
     cfg.target_addr = target;
@@ -122,10 +132,10 @@ static void start_ping_sta(void)
 
     esp_ping_handle_t ping;
     if (esp_ping_new_session(&cfg, &cbs, &ping) == ESP_OK) {
-        ESP_LOGI(TAG, "Pinging STA %s every %" PRIu32 " ms...", STA_IP, cfg.interval_ms);
+        ESP_LOGI(TAG, "Pinging STA %s every %" PRIu32 " ms...", ipbuf, cfg.interval_ms);
         esp_ping_start(ping);
     } else {
-        ESP_LOGE(TAG, "failed to create ping session");
+        ESP_LOGE(TAG, "failed to create ping session for %s", ipbuf);
     }
 }
 
@@ -187,8 +197,8 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(1500));
     assign_static_ip();
 
-    ESP_LOGI(TAG, "SoftAP up. Pinging the STA and answering its pings.");
-    start_ping_sta();
+    ESP_LOGI(TAG, "SoftAP up. Pinging each authorized STA and answering their pings.");
 
+    /* sta_monitor_task starts one ping session per authorized STA (at 192.168.12.<mac[5]>). */
     xTaskCreate(sta_monitor_task, "stamon", 3072, NULL, 4, NULL);
 }
