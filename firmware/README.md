@@ -57,11 +57,11 @@ reuses a stale config.
   registry. Get them when cloning:
   ```bash
   git clone --recurse-submodules <repo>          # or, in an existing clone:
-  git submodule update --init components/halow components/firmware
+  git submodule update --init components/halow vendor/morse-firmware
   ```
   The `rimba-halow-scan` project adds `components/` to the build via
-  `EXTRA_COMPONENT_DIRS`. The `vendor/mm-iot-sdk` submodule is separate, optional
-  reference (`git submodule update --init vendor/mm-iot-sdk`).
+  `EXTRA_COMPONENT_DIRS`. The firmware image is generated at build time from
+  `vendor/morse-firmware` (ELF → `.mbin`, see `cmake/mm-fw-gen/`).
 
 ## Build / flash / monitor
 

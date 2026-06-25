@@ -1,6 +1,3 @@
-[submodule "vendor/mm-iot-sdk"]
-	path = vendor/mm-iot-sdk
-	url = https://github.com/MorseMicro/mm-iot-sdk
 [submodule "components/halow"]
 	path = components/halow
 	url = ../mm-esp32-halow.git

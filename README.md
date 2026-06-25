@@ -95,9 +95,10 @@ ESP32-S3  (runs ESP-IDF) ──SPI──▶ MM6108  (driven by morselib from mor
    host MCU                          HaLow radio
 ```
 
-> The `vendor/mm-iot-sdk` submodule is **reference only** (full docs + the
-> complete BCF set). The build does *not* use it — the radio code comes from the
-> vendored `components/halow` + `components/firmware` submodules.
+> The MM6108 radio code comes from the vendored `components/halow` submodule
+> (morselib). The firmware image is **generated at build time** from the
+> `vendor/morse-firmware` submodule (ELF → `.mbin`, see `cmake/mm-fw-gen/`) — no
+> firmware blobs are vendored.
 
 So **ESP-IDF is the mandatory toolchain**; it is vendored at `vendor/esp-idf`, and
 the MM6108 radio code ships as git submodules under `components/` (init them when
@@ -130,8 +131,8 @@ the vendored toolchain automatically (override `IDF_PATH=...` for a different on
 ### 2. Build / flash / monitor
 
 Run from the **repo root** (the `Makefile` wraps `idf.py` and sources the ESP-IDF
-environment for you). Make sure the `components/` submodules are checked out first
-(`git submodule update --init components/halow components/firmware`).
+environment for you). Make sure the submodules are checked out first
+(`git submodule update --init components/halow vendor/morse-firmware`).
 
 `APP` selects the example (default `rimba-halow-scan`) and `BOARD` selects the
 board config under `boards/` (default `proto1`):
