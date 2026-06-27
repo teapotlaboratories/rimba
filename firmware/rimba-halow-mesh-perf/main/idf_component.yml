@@ -1,0 +1,7 @@
+# The Morse Micro components are vendored locally at the repo root under components/ and added
+# via EXTRA_COMPONENT_DIRS (see ../CMakeLists.txt). The only registry dependency is the iperf
+# console used by the temporary MESH_IPERF throughput-test build (esp_console + `iperf` command).
+dependencies:
+  idf: ">=5.4.2,<6.0"
+  espressif/iperf-cmd: "~0.1.1"
+  esp-qa/ping-cmd: "~1.0.0"
