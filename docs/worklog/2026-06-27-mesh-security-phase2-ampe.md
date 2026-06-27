@@ -175,17 +175,28 @@ originates a group frame encrypted under its own MGTK, board0 decrypts it under 
 also changed vs P2b (`9f1d7647` vs `477aa0b3`) because nonces are fresh per peering, while the AEK
 stayed `3702c4a2` (no nonce input) — a nice consistency check.
 
-### Finding (pre-existing, NOT a P2c regression): forwarded group frames are plaintext
+### Finding (pre-existing, NOT a P2c regression) — FIXED: forwarded group frames were plaintext
 
-The same capture shows board0's **re-broadcast** (group-forward) of board1's frame goes out in the
-clear. The mesh group-forward path (`umac_mesh_build_rebcast` → `umac_datapath_tx_mgmt_frame`,
-introduced in `c16e9a8a`, the original mesh data plane — predates all security work) re-emits via the
-**management-frame TX path, which bypasses CCMP**. Linux re-encrypts a forwarded mesh group frame
-with the local MGTK on the normal TX path; the ESP forward does not. This is orthogonal to P2c's key
-exchange (it concerns *re-transmitting others'* frames, not originating) but it is a real
-secured-mesh gap — a forwarded multicast leaks in plaintext. Tracked as a follow-up (route the
-group-forward through the encrypted data TX path, encrypting with the forwarder's own MGTK), to fold
-into the secured-forwarding work alongside / after P2d.
+The P2c capture showed board0's **re-broadcast** (group-forward) of board1's frame going out in the
+clear (DHCP/ARP content visible, TA=board0). The mesh group-forward path (`umac_mesh_build_rebcast` →
+`umac_datapath_tx_mgmt_frame`, from `c16e9a8a`, the original mesh data plane — predates all security
+work) re-emits via the **management-frame TX path, which only encrypts robust *management* frames**
+(PMF/pairwise) and overwrites the tx metadata, so a forwarded *data* frame goes out unencrypted.
+Linux re-encrypts a forwarded mesh group frame with the local MGTK on re-TX; the ESP forward did not.
+Orthogonal to P2c's key exchange (it concerns *re-transmitting others'* frames), but a real
+secured-mesh gap — a forwarded multicast leaked in plaintext.
+
+**Fix:** a dedicated `umac_datapath_tx_mesh_group_frame(stad, txbuf)` (umac_datapath.c) applies the
+*data-path* rule to the pre-built re-broadcast: when the stad's security != OPEN, encrypt under the
+**GROUP** key (`umac_keys_get_active_key_id(stad, GROUP)` = the forwarder's own MGTK on the common
+stad), set the Protected bit + `MMDRV_TX_FLAG_HW_ENC` + key_idx + increment the PN. The mesh
+group-forward (`umac_mesh_handle_group_data`) now calls it instead of `umac_datapath_tx_mgmt_frame`,
+so a forwarded multicast is CCMP-protected on every hop. **Verified on-air:** board0's forwarded
+frames (TA=board0, SA=board1, group DA) are now all Protected=1 / CCMP **Key Index 1** (board0's own
+MGTK), PN incrementing — the DHCP/ARP plaintext is gone. Unicast steady-state ping 0% loss (one
+boot-time transient timeout during peering churn). The same gap on the *unicast* relay forward
+(`umac_mesh_forward_data`, which needs the next-hop **pairwise** MTK, not the group key) remains a
+separate follow-up.
 
 ## Bench note
 
