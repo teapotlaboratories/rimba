@@ -4,21 +4,28 @@ Practical reference to the physical test bench: what's connected, how to reach e
 device, and the gotchas. Stable facts (ports, MACs, addresses) are reliable; the
 "currently running" notes are a snapshot — verify live before depending on them.
 
-Last verified: 2026-06-25.
+Last verified: 2026-06-27.
 
 ---
 
 ## At a glance
 
 - **3× ESP32 HaLow nodes** (XIAO ESP32-S3 + FGH100M / MM6108) on the dev host's USB.
-- **2× Linux HaLow nodes** (Raspberry Pi 5 + MM6108 HAT) on the LAN — both fully set up,
-  **same 1.17.8 morse stack**. Both can run a real morse mesh and **peer with each other**
-  (chronium↔chronite plink ESTAB, ping 0% loss — the working 802.11s reference).
-  - **chronium** `192.168.7.187` — `CONFIG_MORSE_MONITOR=y` build (the `morse0` raw tap is
-    currently broken / 0 frames; observe via the normal vif `station dump`/`mpath` instead).
-  - **chronite** `192.168.7.191` — the **Linux testing + code-comparison** node (run mesh /
-    IBSS / AP / STA here; its `~/halow` source trees are the reference for comparing against
-    the ESP morselib). Set up 2026-06-25 by cloning chronium's stack.
+- **4× Linux HaLow nodes** on the LAN, **all 1.17.8 morse stack**. Steady-state roles:
+  **chronium = dedicated on-air monitor/sniffer**; the **other 3 form a live SAE+AMPE-encrypted
+  802.11s mesh** (`rimba-smesh`, ch27/915.5) — plink ESTAB, encrypted ping 0% loss, mesh IPs
+  `10.9.9.2`–`10.9.9.4`. (chronium *can* rejoin as `10.9.9.1` if you need a 4-node mesh instead;
+  monitor and mesh can't run on one radio at the same time.)
+  - **2× Raspberry Pi 5 + MM6108 HAT** — `wm6108-spi-pi5` wiring:
+    - **chronium** `192.168.7.187` — **the sniffer** (`CONFIG_MORSE_MONITOR=y`; `wlan1` in monitor
+      type on ch27 → `morse0` raw tap delivers radiotap frames; see the Monitor section). Captures
+      S1G beacons + SAE auth + AMPE action + data off-air — the gold standard for the ESP port.
+    - **chronite** `192.168.7.191` (mesh `10.9.9.2`) — **testing + code-comparison** node (its
+      `~/halow` source trees are the reference for diffing against the ESP morselib).
+  - **2× Raspberry Pi Zero 2 W + `fgh100mhaamd` MM6108 board** — `fgh100mhaamd-spi` wiring,
+    built 2026-06-27, both power-stable (`throttled=0x0`):
+    - **chronosalt** `192.168.7.194` (mesh `10.9.9.3`) — distant node for the airtime test.
+    - **chronogen** `192.168.7.165` (mesh `10.9.9.4`) — distant node for the airtime test.
 - **Dev host** — the machine these run from: holds the `rimba` repo + ESP-IDF
   toolchain; all builds/flashing happen here; SSH to the Pis over the LAN.
 
@@ -95,13 +102,19 @@ ssh chronite@192.168.7.191     # testing / code-comparison node
   HaLow Wi-Fi MAC `3c:22:7f:37:50:42`. Reachable on **wired `eth0`** (primary) + wlan0.
 - `morse_driver` rebuilt + installed with **`CONFIG_MORSE_MONITOR=y`** (2026-06-26), so the
   `morse0` netdev exists. Source `~/halow/morse_driver`.
-- **The `morse0` raw monitor tap currently delivers 0 frames** (verified 2026-06-26 with an
-  active mesh on-channel) — do NOT rely on it as a sniffer. Whatever worked once doesn't now;
-  treat raw-tap capture as broken/unreliable. NB the monitor build does **not** break normal
-  operation: chronium peers + passes traffic over mesh fine on this build (see below).
-- For mesh/peer observation use the **normal vif** instead: `iw dev wlan1 station dump`
-  (plink state, signal), `iw dev wlan1 mpath dump`, `page_stats` (Beacon Tx). Both Pis can run
-  a real morse mesh and peer with each other — that's the working reference, not morse0.
+- **`morse0` WORKS as a sniffer — it is NOT broken** (re-confirmed 2026-06-27: ~1100 frames in
+  32 s, including S1G beacons + SAE auth + AMPE mesh-peering action + data, captured off the live
+  mesh). The earlier "0 frames" note was a capture attempted with `wlan1` in mesh type — the driver
+  only forwards to `morse0` when `mors->monitor_mode` is true, i.e. **only when `wlan1` is set to
+  monitor type** (`mac.c:morse_mac_skb_recv` / `mac.c:3901`). Set monitor mode first (see the
+  Monitor section), then capture on `morse0`.
+- **`tcpdump` installed** (`/usr/bin/tcpdump` 4.99.5, added 2026-06-27): `sudo tcpdump -i morse0 -e -nn`
+  shows radiotap (tsft/MCS/freq/signal) — handy for per-node signal (the 3 mesh nodes show distinct
+  dBm). It prints S1G frames as "unknown 802.11 frame type (3)" (no S1G body decode), so for the
+  SAE/AMPE bytes use `sudo tcpdump -i morse0 -w cap.pcap` and open in Wireshark (decodes S1G + mesh
+  action + SAE). A Python AF_PACKET reader on `morse0` also works for quick frame-type counts.
+- For mesh/peer *state* (when not monitoring) use the normal vif: `iw dev wlan1 station dump`
+  (plink/signal), `iw dev wlan1 mpath dump`, `page_stats` (Beacon Tx).
 
 ### chronite — `192.168.7.191` (the Linux TESTING / code-comparison node) ✅
 Set up 2026-06-25 by cloning chronium's stack (faster than a from-scratch kernel build,
@@ -130,6 +143,79 @@ since the hardware is identical). Now a full second morse node, same 1.17.8 stac
 
 ---
 
+## Pi Zero 2 W nodes (2×) — `fgh100mhaamd` MM6108 board
+
+**chronosalt** `192.168.7.194` (user `chronosalt`) and **chronogen** `192.168.7.165` (user
+`chronogen`), both pass `hermanudin`, SSH key auth + **passwordless sudo**, fresh Debian 13
+(trixie). Built 2026-06-27 as identical twins. (chronosalt replaced a retired flaky RPi-3B rig;
+chronogen was the old `rpi-linkarta-1`, reflashed.) `iw` is installed but in `/usr/sbin` — same
+PATH gotcha as the Pi 5s.
+
+- **Same `6.12.21-v8+` morse kernel + 1.17.8 stack as the Pi 5s** (the Pi Zero 2 W is the same
+  BCM2710/aarch64 family, so the kernel + `morse.ko` built for the old Pi-3 chronosalt are reused
+  verbatim; the 1.17.8 `morse_cli`/`wpa_supplicant_s1g`/`hostapd_s1g` are copied from chronium and
+  run fine on Debian 13). morse device = **wlan1**; SSH rides **wlan0** (brcmfmac43430).
+- HaLow MACs: chronosalt `68:24:99:44:6a:56`, chronogen `68:24:99:44:6b:80`. firmware `mm6108.bin`
+  (crc32 `0x9edcc720`) + `bcf_fgh100mhaamd.bin` — byte-identical to the Pi 5s.
+- **Reliable, unlike the old RPi-3B chronosalt**: chip detects clean first-try @ 10 MHz SPI,
+  `vcgencmd get_throttled` = `0x0`. The `fgh100mhaamd` board has on-board pull-ups, so the overlay
+  needs **no `output-high` patch** and the micro-USB power holds under the MM6108's TX load.
+- **`fgh100mhaamd-spi` overlay wiring** (BCM GPIO ↔ MM6108; *different from the Pi-5 HAT*):
+  reset=**GPIO5** (pin 29), wake=**GPIO3** (pin 5), busy=**GPIO7** (pin 26), spi-irq=**GPIO25**
+  (pin 22), CS0=**GPIO8** (pin 24), SPI SCLK/MOSI/MISO = GPIO11/10/9 (pins 23/19/21), + 3V3/GND.
+  The overlay self-enables spi0 (no `dtparam=spi=on`). `.dtbo` lives in `/boot/firmware/overlays/`.
+- **Boot:** morse kernel is the promoted default (`config.txt` carries `kernel=kernel-morse.img` +
+  `dtoverlay=fgh100mhaamd-spi`; backup `config.txt.pre-morse` is stock 6.18). Test changes with
+  one-shot tryboot: `sudo reboot '0 tryboot'` (plain form works here — these are not systemd's
+  `--reboot-argument` case like chronite; it boots `tryboot.txt` once).
+
+---
+
+## Secured mesh — `rimba-smesh` (SAE + AMPE, the working reference)
+
+The live 4-node encrypted mesh (Phase-0 reference for the mesh-security port). All nodes run the
+**same** `wpa_supplicant_s1g` config (only the mesh IP differs). Config + full handshake capture:
+`docs/reference/captures/wpa-smesh.conf` + `…/secured-mesh-sequence.txt`; details in
+`docs/worklog/2026-06-27-linux-secured-mesh-reference.md`.
+
+Bring-up recipe (per node). Kill the daemon with **`pkill -9 wpa_supplicant`** (substring match on
+`comm`): `pkill -x wpa_supplicant_s1g` silently 0-matches (the `comm` is truncated to 15 chars,
+`wpa_supplicant_`), and `pkill -f wpa_supplicant_s1g` self-kills the launching ssh.
+```sh
+export LC_ALL=C; export PATH=$PATH:/usr/sbin:/usr/local/bin
+# /tmp/wpa-smesh.conf = the open-mesh config with key_mgmt=SAE + sae_password="rimbamesh2026"
+sudo iw dev wlan1 mesh leave 2>/dev/null; sudo pkill -9 wpa_supplicant; sleep 1
+sudo rm -f /var/run/wpa_supplicant_s1g/wlan1
+sudo ip link set wlan1 down; sudo iw dev wlan1 set type managed; sudo ip link set wlan1 up
+sudo wpa_supplicant_s1g -B -D nl80211 -i wlan1 -c /tmp/wpa-smesh.conf -f /tmp/wpa-smesh.log -dd
+sudo ip addr add 10.9.9.<N>/24 dev wlan1     # N = 1 chronium / 2 chronite / 3 chronosalt / 4 chronogen
+```
+Verify: `sudo grep MESH-PEER-CONNECTED /tmp/wpa-smesh.log`, `sudo iw dev wlan1 station dump | grep ESTAB`.
+**Runtime-only** — the kernel boot is permanent but the mesh JOIN is not a service; re-run after reboot.
+
+---
+
+## Monitor / sniffer (chronium) — capture HaLow frames off-air
+
+chronium is the dedicated sniffer (the bench's only working HaLow monitor). `morse0` only delivers
+frames while `wlan1` is in **monitor** type, and monitor ≠ mesh on one radio, so chronium can't be
+a mesh member and a sniffer at once. To put chronium into monitor mode:
+```sh
+export LC_ALL=C; export PATH=$PATH:/usr/sbin:/usr/local/bin
+sudo pkill -9 wpa_supplicant; sudo iw dev wlan1 mesh leave 2>/dev/null   # free the radio
+sudo ip link set wlan1 down; sudo iw dev wlan1 set type monitor; sudo ip link set wlan1 up
+sudo iw dev wlan1 set freq 5560                  # S1G ch27 (915.5 MHz on-air)
+sudo ip link set morse0 up
+# capture: tcpdump (installed) — live view or pcap for Wireshark:
+sudo tcpdump -i morse0 -e -nn                 # live, with radiotap (signal/MCS/freq)
+sudo tcpdump -i morse0 -w /tmp/cap.pcap       # pcap -> Wireshark decodes S1G + SAE/AMPE/action
+```
+Verify tuned: `iw dev wlan1 info` → `type monitor` + `channel 112 (5560 MHz)`. To return chronium to
+the mesh, run the mesh bring-up recipe above (it resets `wlan1` to mesh type). Full recipe + a richer
+decoder: `docs/reference/rimba-linux-halow-monitor.md`.
+
+---
+
 ## Radio / channel reference
 - Link params: **S1G channel 27**, **915.5 MHz**, **1 MHz BW**, US, global op-class 68.
 - In the Linux morse/dot11ah "5 GHz model": **ch27 ↔ 5 GHz ch112 ↔ freq `5560`** — use
@@ -138,6 +224,8 @@ since the hardware is identical). Now a full second morse node, same 1.17.8 stac
 ## Related docs
 - `docs/reference/rimba-linux-node-setup.md` — full Linux node build (kernel, driver, cli).
 - `docs/worklog/2026-06-25-mesh-p1-vif-beacon.md` — ESP mesh P1 (vif up + firmware beacon).
-- `docs/worklog/2026-06-26-linux-mesh-reference.md` — **working Linux mesh reference**
+- `docs/worklog/2026-06-26-linux-mesh-reference.md` — **working OPEN Linux mesh reference**
   (wpa_supplicant_s1g recipe, chronium↔chronite peer + ping, the two fork pitfalls).
+- `docs/worklog/2026-06-27-linux-secured-mesh-reference.md` — **SECURED (SAE+AMPE) mesh reference**
+  (the Phase-0 gold standard for the mesh-security port: SAE/AMPE/key-install sequence).
 - `docs/ibss/rimba-ibss-milestones.md` — IBSS milestones + TODO backlog.
