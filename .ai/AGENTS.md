@@ -106,6 +106,8 @@ fits — before you call it done.** Pick the appropriate kind:
 - **Firmware / radio / driver behaviour** → flash it and test on hardware (see
   [radio-silent-workflow.md](radio-silent-workflow.md)); capture the evidence
   (console logs, ping RTT, association state, measured values).
+- **Any frame the ESP transmits on the air** → also do the **on-air verification**
+  below — it is mandatory, not optional, for radio-frame work.
 - **Host-side logic, parsing, pure functions, build-time invariants** → a unit
   test or a build that exercises the relevant static assertions.
 
@@ -115,6 +117,52 @@ concrete blocker (e.g. "needs 64+ associated STAs to exercise AID ≥ 64; not
 reproducible on a 3-board bench", or "no current meter on the bench, so the µA
 floor is not measured"). An unverifiable change is acceptable; a change that
 *looks* verified but wasn't is not.
+
+### On-air frame verification (always)
+
+**For every frame the ESP transmits — mesh, IBSS, AP, TWT, beacons, action,
+data — you MUST capture it on the air and confirm it is byte-identical to what Linux
+emits.** This is a hard requirement for any change that alters what goes on the wire; it
+is not satisfied by serial logs or a working ping. There are two tiers (below): matching
+the Linux **source layout** is the floor; matching what a **live Linux device actually
+transmits** on the bench is the gold standard, and it's the bar to aim for.
+
+- **Why logs/ping are not enough.** Endpoint serial logs and a successful ping only
+  prove that a *tolerant peer accepted* the frame (a real `net/mac80211` stack will
+  forgive many wrong fields). They do **not** prove the on-air bytes match Linux. The
+  requirement is that the ESP produce the *same frames as Linux*, not merely frames
+  that happen to work. Only a third-party capture off the air is ground truth.
+- **The sniffer.** Use **chronium's `morse0` monitor** — the bench's only reliable
+  HaLow sniffer (the ESP raw hook and the `morse0` tap on other nodes are flaky). It
+  has the `CONFIG_MORSE_MONITOR=y` driver. Monitor is exclusive with normal operation
+  on that radio, so chronium sniffs while the ESPs (and/or chronite as a Linux peer)
+  generate traffic — a *third* node is always the sniffer. Tune it to the system under
+  test's channel (e.g. `iw dev wlan1 set type monitor` + `set freq 5560` for S1G ch27).
+  Full recipe + decode script:
+  [reference/rimba-linux-halow-monitor.md](../docs/reference/rimba-linux-halow-monitor.md).
+- **What to check — two tiers.** Decode the captured frames and diff them field-by-field:
+  element IDs/lengths, field order, little-endian sequence numbers, and the constants
+  (TTL, lifetime, metric, reason codes, capability bits, ack policy). A clean decode
+  table like [`docs/worklog/2026-06-26-mesh-mpm-peering-frames.md`](../docs/worklog/2026-06-26-mesh-mpm-peering-frames.md)
+  Updates 13–15 is the reference standard.
+  - **Baseline (the floor):** the ESP's on-air bytes match the **Linux source layout**
+    (`net/mac80211` + `morse_driver` — the authoritative element definition). This proves
+    the *structure* is right.
+  - **Gold standard (do this whenever a Linux node can be put on the channel):** capture
+    what a **live Linux device actually transmits** on the same bench (e.g. bring chronite
+    up as a mesh node) and diff the ESP's frame against *that*, byte for byte. The source
+    layout only fixes the structure; the live device pins the **values** — field values,
+    units (TUs vs ms), and flag bits Linux sets in practice. This catches what the
+    source-only check cannot: it is exactly how the TO flag, the TU-vs-ms lifetime, and the
+    No-Ack group ack-policy deltas were found (Updates 14–15) *after* the bytes already
+    "matched the spec." A change is only fully verified once it matches the live device, not
+    just the spec.
+- **Record it.** In the worklog/PR, state for **each frame** which tier it reached —
+  *log-only* / *matches source layout* / *matches live Linux device* — and treat anything
+  short of the gold standard as not-yet-fully-verified. If the live-device A/B is genuinely
+  blocked (no spare Linux node — e.g. a frame only a *forwarder* emits, with the only Linux
+  node acting as an endpoint; sniffer tooling dead), say so explicitly and name the blocker —
+  same rule as any unverifiable change above.
 
 ## Porting Linux code
 

@@ -19,6 +19,12 @@ Most important rules:
   [AGENTS.md → Merging pull requests](AGENTS.md#merging-pull-requests).
 - **Verify every change** with a hardware or unit test; if you can't, document
   why. See [AGENTS.md → Verifying changes](AGENTS.md#verifying-changes).
+- **Always on-air-verify radio frames** — capture every frame the ESP transmits on
+  chronium's `morse0` monitor and byte-diff it against Linux. Serial logs + a working ping
+  are not sufficient. Floor: match the Linux **source layout**; **gold standard** (the bar):
+  match what a **live Linux device actually transmits** on the bench — that's what catches
+  value/unit/flag deltas the spec check misses. See
+  [AGENTS.md → On-air frame verification](AGENTS.md#on-air-frame-verification-always).
 - **When porting Linux code, document the new ↔ Linux mapping.** See
   [AGENTS.md → Porting Linux code](AGENTS.md#porting-linux-code).
 - **Cite sources** when finding, researching, or comparing. See
