@@ -5,7 +5,16 @@ each other and a **SoftAP** that leaf nodes associate to and **TWT**-sleep under
 It is the alternative to the **IBSS** L2 (see
 [`rimba-ibss-milestones.md`](../ibss/rimba-ibss-milestones.md)). This is the single doc
 for the Mesh-gate on **ESP32-S3 + MM6108** (`mm-iot-sdk`/morselib): the milestone
-view, the **new-code ↔ Linux** porting maps, and the **TODO**.
+view, the **new-code ↔ Linux** porting maps, and the **TODO**. It also houses the
+standalone **802.11s mesh** status + the full Linux/ESP32 feature comparison — see
+[§802.11s mesh point (morselib)](#80211s-mesh-point-morselib--status--linuxesp32-comparison).
+
+**Headline (2026-06-26): the 802.11s mesh half is built.** An ESP32 joins a Linux HaLow
+802.11s mesh and pings it, **originates** multi-hop traffic, **relays** others' traffic,
+does **group/multicast forwarding**, and **PERR** broken-link teardown — phases **P0–P6b ✅**
+(details + full feature table in the [802.11s mesh section](#80211s-mesh-point-morselib--status--linuxesp32-comparison)).
+The remaining Mesh-gate gap is now just **mesh + AP concurrency on one ESP32 radio** (A3) —
+both halves exist on the ESP32 individually; running them co-channel together is untested.
 
 **Governing requirement (memory `proper-fix-follow-linux`, same as IBSS):** the
 implementation is **derived from the Linux side** — MorseMicro's `morse_driver`
@@ -52,14 +61,16 @@ the Mesh-gate comparable on the same hardware.
 |---|---|---|---|
 | **AP mode** (S1G, SAE) | ✅ | ✅ | morselib 2.10.4+ (hostapd-backed) |
 | **STA mode** + TWT requester | ✅ | ✅ | `mmwlan_twt_add_configuration` |
-| **802.11s mesh point** | ✅ (`mesh.c`, `CONFIG_MAC80211_MESH`) | ❌ **not ported** | morselib has only the bare `MORSE_CMD_INTERFACE_TYPE_MESH=5` enum — no 802.11s code (peering/HWMP/mpath) |
-| **Mesh + AP concurrent** | ✅ (`iface_combination` AP\|MESH, `#chan<=1`) | ❌ (blocked on mesh) | one radio, co-channel; the Mesh-gate pattern |
+| **802.11s mesh point** | ✅ (`mesh.c`, `CONFIG_MAC80211_MESH`) | ✅ **ported (P0–P6b)** | full control + data plane: MPM peering, HWMP (PREQ/PREP/PERR + path table), 4/3-addr forwarding, group forwarding, link-failure teardown — [§below](#80211s-mesh-point-morselib--status--linuxesp32-comparison) |
+| **Mesh + AP concurrent** | ✅ (`iface_combination` AP\|MESH, `#chan<=1`) | ◑ (both halves exist; not yet co-channel together) | one radio, co-channel; the Mesh-gate pattern (A3) |
 | **AP TWT responder** (leaf power-save) | ✅ (host-side, `mac80211` + `twt.c`) | ✅ **ported** (below) | stock fw 1.17.6, no firmware change |
 | **AP STA-count ceiling** | up to `IEEE80211_MAX_AID = 2007` | ✅ **255** (`uint8_t max_stas`) | four-block S1G TIM (below) |
 
-**Bottom line:** AP, the AP-TWT-responder, and a 255-STA ceiling are usable on the
-ESP32 today. **Mesh (802.11s) is the missing piece** for a full ESP32 Mesh-gate —
-a substantial morselib feature (no 802.11s exists there); the open structural item.
+**Bottom line:** AP, the AP-TWT-responder, a 255-STA ceiling, **and now the 802.11s mesh
+point (P0–P6b)** are all usable on the ESP32. The last structural item for a full all-ESP32
+Mesh-gate is **mesh + AP concurrency on one radio** (A3): each half works on the ESP32 alone;
+running a mesh point and a SoftAP co-channel on the same MM6108 is proven on Linux but not yet
+brought up on the ESP32.
 
 ---
 
@@ -79,9 +90,12 @@ On chronium one MM6108 ran AP (`hostapd_s1g`) + open 802.11s mesh-point
 (`iw … mesh join`) **co-channel** (ch27) + a TWT'ing ESP32 STA, all at once. Recipe
 + gotchas (`type mp` needs explicit `iw set type`; distinct locally-administered
 MAC; bare `freq` not `HT20`) in [`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md)
-§12. On ESP32 this is blocked only by the **absence of 802.11s in morselib** (the AP
-half works; the mesh half doesn't exist) — the open structural item for an all-ESP32
-Mesh-gate. ([`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md))
+§12. The earlier blocker — **no 802.11s in morselib** — is now resolved: the ESP32 mesh
+point is built (P0–P6b, [§below](#80211s-mesh-point-morselib--status--linuxesp32-comparison)).
+What's left for A3 is bringing up an ESP32 **mesh vif and a SoftAP vif co-channel on the same
+MM6108** (the firmware allows one channel; the host must run both MLME paths at once) and
+re-running the concurrency + TWT test all-ESP32.
+([`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md))
 
 ### T1 — AP-side TWT responder port ✅
 Ported the TWT responder into morselib around hostapd. Detailed map below ("AP
@@ -229,35 +243,172 @@ no regression. Worklogs: [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](../w
 
 ---
 
+## 802.11s mesh point (morselib) — status & Linux/ESP32 comparison
+
+The mesh half of the Mesh-gate, built bottom-up in morselib to mirror the **Linux
+`net/mac80211` mesh** + **morse_driver** reference. The Linux nodes (chronium/chronite) are
+the oracle; the ESP firmware is matched against them. Test apps use `firmware/rimba-halow-mesh`
+on the mesh subnet `10.9.9.0/24` (the AP work above uses `192.168.12.0/24`).
+
+**An ESP32 joins a Linux 802.11s HaLow mesh and pings it:**
+```
+board0 (ESP, 10.9.9.136)  ->  chronite (Linux, 10.9.9.2)
+reply from 10.9.9.2: seq=10 time=11 ms  (steady ~11-30 ms; first packets higher = ARP/HWMP setup)
+```
+Full control + data plane: beacon → peer (MPM) → path (HWMP) → IP, both as an **endpoint**
+(`board0 → chronite(relay) → chronium`, 2-hop) and as a **relay** forwarding others' traffic
+(`board1 → board0(ESP relay) → board2`), unicast and group/broadcast.
+
+### Mesh milestone checklist
+
+| Phase | What | Status |
+|---|---|---|
+| P0 | Firmware accepts MESH(5) vif type | ✅ done |
+| P1 | Mesh vif up + periodic **S1G** beacon (Mesh ID/Config IEs) | ✅ done |
+| P2 | **MPM** peering (Open/Confirm/Close, FSM, timers) — ESP↔ESP + ESP↔Linux ESTAB | ✅ done |
+| P3 | S1G-beacon peer discovery (initiator) + S1G mesh beacon (not legacy) | ✅ done |
+| P4 | Mesh **data path** (4-addr/3-addr + Mesh Control), link-up, **HWMP** path resolution, **IP ping** | ✅ done (single-hop) |
+| P5 | HWMP **source role** (PREQ originate + PREP install + path table) + PREQ/PREP forwarding; **multi-hop ping** ESP→relay→far node | ✅ done (ESP as endpoint) |
+| P5b | ESP **data-frame relay** (ESP as an intermediate hop forwarding others' traffic) | ✅ done |
+| P6a | **Group/multicast forwarding** (re-broadcast + RMC dedup) — ARP traverses a relay, no static ARP | ✅ done |
+| P6b | **PERR broken-link teardown** + **peer-inactivity link-failure detection** | ✅ done |
+| P6c | Full airtime metric, mesh security (SAE/AMPE), power save, proxy/gate | ⬜ backlog |
+
+### Feature comparison: Linux (`net/mac80211`) vs ESP32 (morselib)
+
+Legend: ✅ implemented · 🟡 partial/minimal · ⬜ not implemented · n/a not needed here
+
+**Mesh interface & beaconing**
+| Feature | Linux | ESP32 | Notes |
+|---|---|---|---|
+| Mesh vif (`NL80211_IFTYPE_MESH_POINT`) | ✅ | ✅ | `MMDRV_INTERFACE_TYPE_MESH` |
+| S1G short beacon (ext type3/sub1) | ✅ | ✅ | host-built; firmware only auto-S1G's AP vifs |
+| Mesh ID (114) + Mesh Configuration (113) IEs | ✅ | ✅ | path=HWMP, metric=airtime, sync=nbr-offset, auth=open |
+| S1G Capabilities/Operation + Beacon Compatibility IEs | ✅ | ✅ | |
+| MBCA (beacon collision avoidance) | n/a (Linux TSF) | ✅ | morse firmware MESH_CONFIG/MBCA; ESP relies on it |
+| Beacon timing / TBTT selection | ✅ | ✅ (fw) | firmware-served beacons |
+
+**Peering — MPM (`mesh_plink.c`)**
+| Feature | Linux | ESP32 | Notes |
+|---|---|---|---|
+| Peer link FSM (LISTEN→OPN_SNT→OPN_RCVD→CNF_RCVD→ESTAB→HOLDING) | ✅ | ✅ | mirrors mesh_plink.c |
+| Self-Protected Open/Confirm/Close (cat 15) + Mesh Peering Mgmt IE (117) | ✅ | ✅ | link-id (llid/plid) handling |
+| Open on heard candidate beacon (initiator) | ✅ | ✅ | from S1G-beacon discovery |
+| Retransmit / holding timers (retry, MaxRetries) | ✅ | ✅ | + interval jitter |
+| Stale-session guard (peer reboot → close/reopen) | ✅ | ✅ | llid-echo mismatch |
+| Peer-inactivity expiry (link-failure detection) | ✅ | ✅ | ESTAB idle > 6 s → Close + flush paths (`ieee80211_sta_expire`) |
+| `user_mpm` vs driver MPM | both | driver/host | ESP runs MPM in morselib |
+| Max peer links | configurable | 🟡 4 | small fixed table |
+| Authenticated peering (AMPE/SAE) | ✅ | ⬜ | open mesh only |
+
+**Path selection — HWMP (`mesh_hwmp.c`)**
+| Feature | Linux | ESP32 | Notes |
+|---|---|---|---|
+| Reply to PREQ targeting us → **PREP** (target role) | ✅ | ✅ | lets a peer resolve a path to us |
+| Originate PREQ for an unknown dest (source role) | ✅ | ✅ | `umac_mesh_start_discovery`; path-based TX with direct fallback |
+| Accept PREP / build mesh **path table** | ✅ | ✅ | `mesh_path_*`; fresh-info rule (SN/metric); next-hop lookup |
+| PERR (path error / broken link) | ✅ | ✅ | `umac_mesh_invalidate_paths_via` flushes paths via a lost next hop + announces each (one dest/PERR); RX tears down + floods on |
+| RANN / root mode / proactive PREP | ✅ | ⬜ | |
+| Airtime link metric | ✅ | 🟡 | fixed per-hop cost (accumulates correctly); not rate-derived |
+| Gate announcement protocol | ✅ | ⬜ | |
+
+**Forwarding & data path (`mesh.c`, `mesh_pathtbl.c`)**
+| Feature | Linux | ESP32 | Notes |
+|---|---|---|---|
+| Mesh Control header (flags/ttl/seqnum) on data | ✅ | ✅ | TX insert + RX strip; QoS "Mesh Ctrl Present" bit |
+| 4-addr unicast (toDS=fromDS) | ✅ | ✅ | A1=nexthop, A2=us, A3=DA, A4=SA |
+| 3-addr group-addressed (fromDS) | ✅ | ✅ | bcast/mcast (ARP etc.) |
+| Address Extension (AE_A4 / AE_A5_A6) for proxy/multi-hop | ✅ | 🟡 | RX parses AE length; TX uses flags=0 (no proxy) |
+| Multi-hop forwarding — **ESP as endpoint** over a relay | ✅ | ✅ | demoed board0→chronite→chronium, 2-hop ping |
+| Multi-hop forwarding — **ESP as relay** (forward others' data) | ✅ | ✅ | `umac_mesh_forward_data`; demoed board1→**board0(ESP)**→board2 |
+| Proxy path table (mpp — non-mesh STAs behind us) | ✅ | ⬜ | the Mesh-gate's eventual bridge to AP leaves |
+| Mesh gate / portal to external net | ✅ | ⬜ | |
+| Mesh seqnum + duplicate cache (RMC) | ✅ | ✅ | per-(SA,seqnum) cache; suppresses bcast loops |
+| Group/multicast forwarding (re-broadcast bcast/mcast) | ✅ | ✅ | `umac_mesh_handle_group_data`; ARP traverses a relay (no static ARP) |
+
+**Synchronization, power save, security**
+| Feature | Linux | ESP32 | Notes |
+|---|---|---|---|
+| Mesh synchronization (neighbor offset, `mesh_sync.c`) | ✅ | n/a | advertised sync=nbr-offset; timing handled by firmware/MBCA |
+| Mesh power save (`mesh_ps.c`, peer service periods) | ✅ | ⬜ | always-on |
+| SAE authentication + AMPE | ✅ | ⬜ | open mesh only |
+| Management Frame Protection (MFP/PMF) | ✅ | ⬜ | |
+| Congestion control | ✅ (mode field) | ⬜ | advertised "none" |
+
+### Mesh known limitations / next
+- **HWMP gaps**: fixed per-hop metric (not airtime), no RANN/root/gate. PERR teardown is one
+  destination per frame (mac80211 packs many). Unicast-relayed frames regenerate TTL/seqnum
+  (group frames preserve the originator's seqnum for RMC dedup) — fine for trees/lines. Paths
+  expire after 30 s; a broken next hop is torn down within ~6 s (peer-inactivity) instead.
+- **No proxy / gate** (`mpp`), so an ESP can't yet bridge non-mesh traffic or act as a portal —
+  this is exactly what the Mesh-gate needs to bridge its AP leaves onto the mesh.
+- **Open mesh only** (no SAE/AMPE/MFP), **no mesh power save**.
+
+### Forced-topology test note
+On an all-in-range bench HWMP resolves a direct 1-hop path even between non-peers (PREQ/PREP +
+data flood over RF regardless of plinks). To demo real multi-hop the ESP firmware has test
+scaffolding (app `MESH_LINE_RELAY_DEMO` / `MESH_MULTIHOP_DEMO`): a per-node **peer allowlist**
+(`mmwlan_mesh_set_peer_allowlist`) so a node only *peers* with its chosen neighbour(s), plus
+filters that ignore HWMP and data frames whose immediate transmitter isn't an allowed peer, so a
+node only *reaches* others via its relay. Two topologies demoed: `board0→chronite→chronium` (ESP
+endpoint, Linux relay) and `board1→board0(ESP)→board2` (ESP relay; ARP relayed via group
+forwarding, no static ARP). None of this is production behaviour — it only forces a line on an
+all-in-range bench.
+
+### On-air frame verification (chronium monitor)
+Every ESP mesh frame type was captured **on the air by a third node** — chronium as a
+`CONFIG_MORSE_MONITOR` sniffer on S1G ch27 (`docs/reference/rimba-linux-halow-monitor.md`) — and
+decoded byte-for-byte against both the ESP encoders (`umac_mesh.c`) and the Linux `mesh_hwmp.c`
+element layouts: **4-addr data** (QoS Mesh-Control-Present bit, ttl=31, seqnum, A4/mesh-SA
+preserved through the relay), **PREQ** (lifetime 30000, per-hop metric +100, ttl decrement),
+**PREP** (target/orig, metric accumulation), **PERR** (ttl/num_dest/target/sn, reason 62, plus
+forward at ttl−1), and **peering** (cat 15). The element **structure** is byte-identical to the
+Linux layouts — not just functionally accepted by a peer.
+
+A further A/B against a **live Linux node** (chronite brought up as a mesh node, its frames
+captured on the same monitor) confirmed the structure but surfaced **3 value-level deltas** the
+source-format check missed — **all since fixed and re-verified on air** (Update 15): group/bcast
+**QoS Ack Policy** (No-Ack `0x20`), **PREQ Target-Only flag** (set on refresh), **PREQ lifetime**
+in TUs (`MSEC_TO_TU`). The fixed board0 now byte-matches live chronite. Also captured live from
+chronite: **beacon, group ARP, PREQ, and PREP** (chronite as a PREQ target). A live Linux **PERR**
+was *not* elicitable — it's a forwarder's frame, and the single Linux mesh node here is only ever
+an endpoint (it doesn't PERR on its own next-hop loss; the morse driver gives mac80211 no
+TX-failure feedback). Decode tables in
+[`../worklog/2026-06-26-mesh-mpm-peering-frames.md`](../worklog/2026-06-26-mesh-mpm-peering-frames.md)
+Updates 13–15.
+
+---
+
 ## TODO / open items (Mesh-gate)
 
 The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
 
-- ☐ **802.11s mesh in morselib — the big one** *(recon done — see
-  [`../worklog/2026-06-24-mesh-80211s-port-recon.md`](../worklog/2026-06-24-mesh-80211s-port-recon.md)).*
-  Mesh + AP concurrency works on Linux but needs an all-ESP32 implementation. **Largest
-  feature in the project**: ~6.9k lines `net/mac80211/mesh*.c` + ~1k lines
-  `morse_driver/mesh.{c,h}`, on a umac that lacks the kernel primitives mesh assumes
-  (rhashtable path table, RCU, cfg80211, **host timers — umac uses none today**). No
-  forwarding/relay logic exists in the datapath (strictly endpoint). **Good news:** the
-  firmware already supports mesh (`MESH_CONFIG` / `SET_MESH_CONFIG` /
-  `DYNAMIC_PEERING_CONFIG` / `ADD_INTERFACE(type=5)` defined in the same blob) — inverse of
-  the TWT `0x26` gating. *Derive from* `net/mac80211/mesh*.c` + `morse_driver/mesh.c`,
-  follow Linux exactly, write the new-code↔Linux map. Blocks a real ESP32 Mesh-gate (A3).
-  Phased (each its own branch + PR + HW validation):
-  - ✅ **P0 — firmware feasibility probe** *(done 2026-06-24 — `firmware/rimba-halow-mesh/`,
-    result in the recon worklog).* `ADD_INTERFACE(type=5)` **accepted** (`fw_status=0`) on
-    fw 1.17.6, vs BOGUS(99) rejected with -22 — firmware recognizes a mesh vif. Inverse of
-    the TWT `0x26` gating. Remaining fw unknown (does `MESH_CONFIG` beacon) folds into P1.
-  - ☐ **P1 — mesh vif up + beacon.** Interface plumbing (3 type enums) + fw-cmd wrappers +
-    Mesh ID/Config IEs in an S1G beacon. Oracle: chronium `iw mesh` sees the ESP32 node.
-  - ☐ **P2 — peering (open MPM).** Port `mesh_plink.c` (open, no AMPE) + peer table + the
-    new umac host-timer scaffolding. Two ESP32 nodes establish a peer link.
-  - ☐ **P3 — path table + HWMP.** Port `mesh_pathtbl.c` (replace rhashtable) + `mesh_hwmp.c`
-    + airtime metric. Routing converges on a 3-node line; PREQ/PREP observed.
-  - ☐ **P4 — 4-addr forwarding datapath.** Mesh control header + relay + TTL. End-to-end
-    ping across a 3-node mesh where the middle node forwards.
-  - ☐ **P5 — hardening.** MBCA, dynamic peering, mesh sync, mesh-PS, AMPE (encrypted mesh).
+- ✅ **802.11s mesh in morselib — the big one — DONE through P6b** *(recon
+  [`../worklog/2026-06-24-mesh-80211s-port-recon.md`](../worklog/2026-06-24-mesh-80211s-port-recon.md);
+  full status + feature table in [§802.11s mesh point](#80211s-mesh-point-morselib--status--linuxesp32-comparison) above).*
+  The project's largest feature (~6.9k lines `net/mac80211/mesh*.c` + ~1k lines
+  `morse_driver/mesh.{c,h}`), ported onto a umac that lacked the kernel primitives mesh assumes
+  (path table, host timers, forwarding datapath). Built bottom-up, each phase its own HW
+  validation: **P0** fw mesh-vif probe → **P1** vif+S1G beacon → **P2** MPM peering → **P3**
+  S1G-beacon discovery → **P4** data path + HWMP + ping → **P5/P5b** HWMP source role + ESP
+  relay (multi-hop) → **P6a** group forwarding → **P6b** PERR + peer-inactivity teardown.
+  Remaining is rolled into the items below (mesh + AP concurrency = A3) and **P6c**:
+  - ☐ **P6c — mesh hardening.** Rate-derived **airtime metric** (currently a fixed per-hop
+    cost — unverifiable on a single-path forced-line bench), **RANN/root** mode, **proxy/gate
+    (`mpp`)** so the Mesh-gate can bridge AP leaves onto the mesh, **AMPE/SAE** (encrypted
+    mesh), **mesh power save**. Derive each from `net/mac80211/mesh*.c` + `morse_driver/mesh.c`.
+  - ✅ **Frame deltas vs live Linux fixed + re-verified on air** (Update 15): PREQ **Target-Only
+    flag** on refresh, **No-Ack** QoS on group/broadcast, PREQ **lifetime in TUs** (`MSEC_TO_TU`).
+    board0 (fixed) now emits `target_flags=01`, `lifetime=0x7270` (TU), group `QoS=0x20` —
+    byte-matching live chronite; old-firmware boards in the same capture were the control.
+  - ☐ **Throughput test with iperf** over the mesh (not just ping): ESP↔Linux and ESP↔ESP
+    single-hop, plus multi-hop via a relay (board1→board0→board2). Linux runs `iperf3 -s`; the
+    ESP needs an iperf client on the mesh netif (ESP-IDF `iperf` console cmd). Capture goodput +
+    loss + the multi-hop penalty, and watch for path re-discovery stalls (30 s lifetime) under load.
+  - ☐ **Production cleanup of the demo scaffolding** before merge: revert the forced-topology
+    test toggles (`MESH_LINE_RELAY_DEMO` / `MESH_MULTIHOP_DEMO`, peer allowlist + HWMP/data TA
+    filters) and demote the bring-up `MMLOG_ERR` diagnostics (PREQ/PREP/path-install/ESTAB/
+    PERR/link-up) to `INF`.
 - **AID ≥ 64 on air.** The 2nd–4th TIM blocks aren't exercised — the dense allocator only
   reaches block 1+ at 64+ live associations, beyond the 3-board bench.
 - **Linux STA as TWT *requester*** vs the ESP32 AP responder. Needs the Morse driver's
@@ -308,9 +459,19 @@ Codified in [`.ai/AGENTS.md`](../../.ai/AGENTS.md):
    Linux drives) and follow it; don't tolerate a symptom with a divergent local hack.
 2. **Verify on hardware** (or unit test) — and if you *can't*, document why (e.g. "AID ≥ 64
    needs 64+ associations; not reproducible on a 3-board bench").
-3. **Write the new-code ↔ Linux map** for any port (as the two code-map tables above), and
+3. **On-air verify against Linux** (two tiers; the gold standard is the bar). For any frame the
+   ESP transmits, capture it on the air with **chronium's `morse0` monitor**
+   (`docs/reference/rimba-linux-halow-monitor.md`) and byte-diff it. *Floor:* match the Linux
+   **source layout** (`net/mac80211` + `morse_driver` element definitions) — proves the structure.
+   ***Gold standard:*** match what a **live Linux device actually transmits** on the bench (bring
+   chronite up as a mesh node and A/B against it) — this pins the field *values*, units, and flag
+   bits the spec check misses (it's how the TO-flag / lifetime-units / No-Ack deltas were found
+   *after* the structure already matched — §802.11s mesh point, Updates 14–15). Endpoint serial
+   logs + a working ping only prove a tolerant peer *accepted* the frame. Record, per frame, which
+   tier it reached (log-only / source layout / live device).
+4. **Write the new-code ↔ Linux map** for any port (as the two code-map tables above), and
    call out deliberate divergences (PSRAM, fixed-size tables) with the reason.
-4. **Cite sources** — `file:line`/SHA for code, command+output for hardware, URLs for
+5. **Cite sources** — `file:line`/SHA for code, command+output for hardware, URLs for
    external facts; prefer authoritative (vendored source) over marketing.
 
 ---
@@ -328,10 +489,37 @@ chronium as a Linux STA (interop oracle) — `wpa_supplicant_s1g`, SAE, **freq 5
 (S1G ch27 in the 5 GHz model; on-air 915.5 MHz); full recipe in
 [`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](../worklog/2026-06-23-ap-multinode-twt-hwtest.md) §3.
 
+## Reference source revisions
+
+The ESP32 AP/TWT and 802.11s mesh code is matched line-for-line against these exact Morse Micro
+upstream revisions (checked out on the Linux reference node `chronite`). The two **primary**
+references are the patched kernel's `net/mac80211` stack (mesh + TWT/PS) and the out-of-tree
+`morse_driver`:
+
+| Component | Repo | Branch / version | Commit |
+|---|---|---|---|
+| **Kernel** (`net/mac80211/{mesh*,twt}.c`, dot11ah) | `github.com/MorseMicro/rpi-linux` | `mm/rpi-6.12.21/1.17.x` (Linux 6.12.21) | `372414fd42cdd4d8bfcf888cac62db9da947fdb6` |
+| **morse_driver** | `github.com/MorseMicro/morse_driver` | `1.17.8` (`0-rel_1_17_8_2026_Mar_24`) | `3eef5a0a43645808e501ff4b83f29d675588bd9b` |
+
+Supporting references (S1G beacon conversion, peering/SAE supplicant, on-air checks):
+
+| Component | Repo | Commit |
+|---|---|---|
+| morse-firmware (mm6108 + BCF) | `github.com/MorseMicro/morse-firmware` | `ea18605f53387281c1029ea9eb8e0de2bda7bae2` |
+| hostap (`wpa_supplicant_s1g` / hostapd) | `github.com/MorseMicro/hostap` | `4acb6f6f46380d3c9fe50da77aa15a6ba565c49d` |
+| morse_cli | `github.com/MorseMicro/morse_cli` | `8f06222bee104327b5f09a9339f24bac1ef3420d` |
+
+Mesh files leaned on: `mesh_plink.c` (MPM FSM/timers), `mesh_hwmp.c` (PREQ/PREP/PERR,
+`mesh_path_error_tx`, `hwmp_perr_frame_process`, airtime metric), `mesh_pathtbl.c` (path table),
+`mesh.c` (`ieee80211_sta_expire`/`mesh_sta_cleanup` inactivity, group forwarding,
+`mesh_rmc_check`), and the driver's `morse_dot11ah_beacon_to_s1g` (S1G short-beacon build).
+AP/TWT files: `morse_driver/{twt.c,mac.c,command.c,beacon.c,dot11ah/tim.c}`.
+
 ## References
 
+- Mesh worklogs (decoded frames + per-phase implementation): [`worklog/2026-06-26-mesh-mpm-peering-frames.md`](../worklog/2026-06-26-mesh-mpm-peering-frames.md) (P2–P6b), [`worklog/2026-06-25-mesh-p1-vif-beacon.md`](../worklog/2026-06-25-mesh-p1-vif-beacon.md) (P1), [`worklog/2026-06-26-linux-mesh-reference.md`](../worklog/2026-06-26-linux-mesh-reference.md) (Linux bring-up), [`worklog/2026-06-24-mesh-80211s-port-recon.md`](../worklog/2026-06-24-mesh-80211s-port-recon.md) (recon/P0)
 - Worklog (Mesh+AP+TWT blow-by-blow + firmware byte-comparison): [`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md)
 - Worklogs (STA-count): [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](../worklog/2026-06-23-ap-sta-ceiling-100-psram.md), [`worklog/2026-06-23-ap-sta-ceiling-255.md`](../worklog/2026-06-23-ap-sta-ceiling-255.md), multi-node test [`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](../worklog/2026-06-23-ap-multinode-twt-hwtest.md)
 - Linux node + Mesh/AP/TWT bring-up: [`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md) §11–§12
 - Power-save context (why TWT matters for leaves): [`design-specification/rimba-mm6108-powersave-analysis.md`](../design-specification/rimba-mm6108-powersave-analysis.md)
-- Linux driver source (reference): `morse_driver/{twt.c,mac.c,command.c,beacon.c,dot11ah/tim.c}`; `net/mac80211` TWT/PS/mesh
+- Linux driver source on `chronite`: `~/halow/rpi-linux/net/mac80211/`, `~/halow/morse_driver/`
