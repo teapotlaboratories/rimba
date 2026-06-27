@@ -65,7 +65,33 @@ the diff). Revert before merge, or wire MMLOG to the console properly.
   on-air SA/category decode; the board-side console (`netif up`) + the clean PHASE1 A/B were ground
   truth. Lesson: for MPM, the node's own FSM log/state beats a lossy sniffer decode.
 
-## Next (P1→P2)
-P1 boundary is proven. Remaining for a *working* static-key encrypted mesh: install the own MGTK
-(group TX) after first ESTAB (so broadcast encrypts) and confirm encrypted data on-air via the
-chronium monitor. Then P2: replace static keys with AMPE (AES-SIV MIC + MTK derive + MGTK exchange).
+## Trying to "finish P1": keys install but DATA STAYS PLAINTEXT (the real blocker)
+
+Added the own MGTK install at first ESTAB (deferred): now all six commands return 0 (own MGTK
+aid=0 + sta_state + MTK + peer MGTK), the link **stays up**, and board1↔board0 ping at **0% loss**.
+But the chronium monitor decode is decisive: **every ESP data frame is `Protected=0` — unencrypted.**
+The keys are live in the chip but **dormant**; the ping works because both sides send plaintext.
+
+**Root cause (architectural).** morselib only encrypts a data frame when the *stad* it TXes through
+has `security_type != OPEN` **and** the **umac keychain** holds the key
+(`umac_datapath.c:1922-1930`: `umac_keys_get_active_key_id(stad, ...)` → sets `FC PROTECTED` +
+`tx_metadata->key_idx`). My Phase-1 code called the **raw `mmdrv_install_key`** (firmware level,
+correct per-peer AIDs) and **never** went through `umac_keys_install_key` (which populates the stad
+keychain) nor set `security_type`. So the TX path doesn't know a key exists → plaintext.
+
+And the mesh has only ONE `common_stad` for all TX (`umac_datapath.c:2994-3019` both lookups return
+`umac_mesh_get_common_stad()`; **no per-peer stads** — the long-standing TODO). The group key (aid=0)
+*can* live on the common_stad, but the **pairwise MTK needs the peer's AID**, which the common_stad
+(aid 0) can't carry. So unicast encryption fundamentally needs **per-peer stads**.
+
+## The real Next step (P1-encryption == P2 foundation)
+Enabling actual encryption is the proper key-management layer, not a quick finish:
+1. **Per-peer stads** — allocate a `umac_sta_data` per mesh peer (its AID + keychain), mirroring
+   mac80211's `sta_info`. Make `umac_datapath_lookup_stad_by_tx_dest_addr_mesh` return the peer's
+   stad for unicast (so the MTK is found + Protected set), keep `common_stad` for group/broadcast.
+2. Install keys via **`umac_keys_install_key(stad, …)`** (populates keychain + firmware) instead of
+   raw `mmdrv_install_key`; set `umac_sta_data_set_security(stad, …)` to non-OPEN.
+3. Then unicast encrypts with the per-peer MTK, broadcast with the common_stad MGTK. Verify on-air
+   (Protected=1 + CCMP header), byte-diff vs a live Linux secured node.
+This per-peer-stad infrastructure is the foundation P2 (AMPE) builds on anyway, so P1 and P2 merge
+here. **P1's pivotal result — the firmware accepts mesh key-install — stands.**
