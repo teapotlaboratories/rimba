@@ -25,7 +25,9 @@ Most important rules:
   match what a **live Linux device actually transmits** on the bench — that's what catches
   value/unit/flag deltas the spec check misses. See
   [AGENTS.md → On-air frame verification](AGENTS.md#on-air-frame-verification-always).
-- **When porting Linux code, document the new ↔ Linux mapping.** See
+- **Every porting effort ships a code-map doc** — a function-level, side-by-side
+  new-code ↔ Linux mapping (`file:line` ↔ `file:line`) + a deliberate-divergences
+  section. Verify every cited line by grepping both trees; never cite from memory. See
   [AGENTS.md → Porting Linux code](AGENTS.md#porting-linux-code).
 - **Cite sources** when finding, researching, or comparing. See
   [AGENTS.md → Research & citations](AGENTS.md#research--citations).

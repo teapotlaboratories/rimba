@@ -167,18 +167,36 @@ transmits** on the bench is the gold standard, and it's the bar to aim for.
 ## Porting Linux code
 
 This project derives much of its HaLow work from the Linux reference
-(`net/mac80211`, `morse_driver`, `wpa_supplicant`/`hostapd`). When you port or
-adapt Linux code, **write a doc that maps the new code to its Linux equivalent**
-— a side-by-side comparison so a reviewer can check the port against the source.
+(`net/mac80211`, `morse_driver`, `wpa_supplicant`/`hostapd`).
 
-- Use a table or per-item mapping: *new code (`file:line` / function)* ↔
-  *equivalent Linux code (`file:line` / function)*, with a note on what differs
-  and why (host-side vs in-driver, firmware-gated, etc.).
-- Model it on the existing porting maps (e.g. `docs/mesh-ap/rimba-mesh-ap-milestones.md`
-  "Code map" tables, or `docs/ibss/rimba-ibss-milestones.md` — new morselib ↔
-  `morse_driver`/`net/mac80211`).
+**Every porting effort MUST ship a code-map doc** — a function-level, side-by-side
+**new-code ↔ Linux** mapping — as a deliverable of the port, not an afterthought. It
+is what lets a reviewer check the port against the source line by line. A port isn't
+done until its code map exists.
+
+- **Form.** A table, one row per ported function/structure: *new code
+  (`file:line` + symbol)* ↔ *equivalent Linux code (`file:line` + symbol)*, grouped
+  by sub-area (e.g. for mesh: interface/beacon, peering, HWMP, path table,
+  forwarding). Include a final **"deliberate divergences"** section that lists every
+  intentional difference (fixed array vs rhashtable, host-timer scaffolding,
+  firmware-served, PSRAM, …) **with the reason** — divergences are flagged, not hidden.
+- **Separate doc for a large port** (mesh-sized): its own file, e.g.
+  `docs/<area>/rimba-<feature>-code-map.md`, linked from the area's status/milestones
+  doc ("feature view here, code view there"). A small port may use a "Code map"
+  section inside the area doc (as the TWT-responder / STA-count ports do in
+  `docs/mesh-ap/rimba-mesh-ap-milestones.md`).
+- **Verify every cited `file:line` — do NOT cite from memory.** Grep both trees (the
+  new working tree + the pinned reference checkout) to confirm each symbol is at the
+  line you cite, that it's the *definition* (not a call site or a log line), and that
+  the function still exists in that reference revision. Pin the reference commit SHAs
+  at the top and add a "verified <date>" stamp. (Lines drift — including from your own
+  later edits — so a code map written from memory is reliably wrong; this is a real,
+  observed failure mode.)
 - Root-cause and follow the Linux implementation; don't tolerate a symptom with
   a local hack that diverges from the reference.
+
+Model: `docs/mesh-ap/rimba-mesh-80211s-code-map.md` (separate, function-level, verified)
+and the in-doc "Code map" tables in `docs/mesh-ap/rimba-mesh-ap-milestones.md`.
 
 ## Research & citations
 
