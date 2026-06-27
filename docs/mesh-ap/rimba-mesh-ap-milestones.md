@@ -406,17 +406,61 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
     flag** on refresh, **No-Ack** QoS on group/broadcast, PREQ **lifetime in TUs** (`MSEC_TO_TU`).
     board0 (fixed) now emits `target_flags=01`, `lifetime=0x7270` (TU), group `QoS=0x20` —
     byte-matching live chronite; old-firmware boards in the same capture were the control.
-  - ◐ **Throughput test with iperf — mesh vs AP↔STA, across node types.** Goodput matrix
+  - ✅ **Throughput test with iperf — mesh vs AP↔STA, across node types.** Goodput matrix
     (not just ping latency): rows = link type (mesh, AP↔STA), columns = node pair
     (Linux↔Linux, Linux↔ESP32, ESP32↔ESP32); plus a multi-hop mesh row (board1→board0→board2).
     Capture goodput (TCP + UDP) + loss + the multi-hop penalty; watch for path re-discovery
     stalls (30 s lifetime) under load. On 1 MHz S1G the ceiling is low (sub-Mbps to a few Mbps).
 
-    | | Linux↔Linux | Linux↔ESP32 | ESP32↔ESP32 |
+    | TCP goodput | Linux↔Linux | Linux↔ESP32 | ESP32↔ESP32 |
     |---|---|---|---|
-    | **Mesh** | chronite↔chronium (both mesh) | chronite↔board0 | board0↔board1 |
-    | **AP↔STA** | chronite-AP↔chronium-STA | Linux-AP↔ESP-STA | ESP-AP↔ESP-STA |
-    | **Mesh multi-hop** | — | — | board1→board0(relay)→board2 |
+    | **Mesh** (1 hop) | ✅ **0.20 Mbps** (open) | ✅ **0.13 Mbps** | ✅ **0.16 Mbps** |
+    | **AP↔STA** | ✅ **0.79 Mbps** (WPA3) | ✅ **1.10 Mbps** | ✅ **0.84 Mbps** |
+    | **Mesh multi-hop** (2 hops) | — | — | ✅ **~0.03–0.06 Mbps** (board1→board0→board2) |
+
+    **Matrix complete (TCP goodput, 1 MHz S1G).** Headlines: (1) **AP↔STA single-hop (~0.8–1.1
+    Mbps) is ~5× the mesh single-hop (~0.13–0.20 Mbps)** — the mesh's 4-addr + Mesh-Control
+    overhead and HWMP cost real airtime on a 1 MHz channel; (2) the **second hop roughly quarters
+    it** (0.16 → ~0.04), and the multi-hop run stalled mid-test (path re-discovery under load —
+    the 30 s lifetime); (3) within a row, **node type barely matters** — the channel airtime
+    dominates, not Linux-vs-ESP. Real goodput is sub-Mbps everywhere despite the 72 Mbit/s PHY.
+
+    **Method.** ESP iperf via the temporary **`MESH_IPERF`/`IPERF` builds** (`esp_console` REPL +
+    `espressif/iperf-cmd`), driven over serial — `iperf -s` one end, `iperf -c <ip>` the other.
+    Multi-hop reuses the line allowlist (board1↔board2 only via board0) and needs **all 3 boards
+    reset together** (else stale peer state breaks the line) + a couple of connect retries (no
+    auto-ping, so the first TCP connect resolves ARP/HWMP, then it flows). **Tool note:** L↔L used
+    `iperf3`; ESP cells use the ESP's **iperf v2** (`iperf-cmd`, port 5001), so `iperf` v2.2.1 is
+    installed on chronite/chronium too (v2 ⇎ iperf3 — don't cross them). ESP↔Linux +
+    Linux-AP↔ESP-STA confirmed both ends.
+
+    **Dedicated perf firmware** (so the production apps stay clean — no `IPERF` toggles):
+    `firmware/rimba-halow-{mesh,ap,sta}-perf`, each = the production app's bring-up + an
+    `esp_console` REPL with `iperf` (`espressif/iperf-cmd`) **and `ping` (`esp-qa/ping-cmd`)**,
+    no auto-ping/TWT. (`rimba-halow-ap-perf` needs a custom 2 MB app partition — hostapd + the
+    two cmd components overflow the default ~1 MB; 16 MB flash.) Production `mesh`/`ap`/`sta`
+    apps reverted to clean. Drive over serial; **ping first to warm up ARP/HWMP, then iperf**
+    (the no-auto-ping build's first TCP connect otherwise fails `errno 118` until ARP resolves).
+
+    **Ping RTT (median, over the perf fw):**
+
+    | Ping RTT | Linux↔Linux | Linux↔ESP32 | ESP32↔ESP32 |
+    |---|---|---|---|
+    | **Mesh** (1 hop) | ~25 ms | ~11–20 ms | **~18 ms** (0% loss) |
+    | **AP↔STA** | ~14 ms | ~10–15 ms | **~15 ms** (0% loss) |
+    | **Mesh multi-hop** (2 hops) | — | — | **~50 ms median** (35–59 ms, occasional ~850 ms spike, ~8% loss) |
+
+    Latency tracks the hop count, not the link type: single-hop ~15–25 ms either mode; the second
+    mesh hop roughly **doubles RTT** (~18 → ~50) and adds loss/spikes (path re-discovery). The
+    iperf goodput numbers are unchanged from the table above (the perf apps are the same code).
+
+    **Linux↔Linux measured (1 MHz S1G, signal −21 dBm, PHY 72 Mbit/s VHT-MCS7):** mesh (open,
+    `10.9.9.x`) = TCP **203 Kbit/s** / UDP **582 Kbit/s** @0% loss; AP↔STA (WPA3-SAE/CCMP,
+    `192.168.12.x`) = TCP **786 Kbit/s** (downlink, `-R`) / UDP **472 Kbit/s** @2.6% loss.
+    **Test gotchas (carry into the ESP cells):** offered UDP rate must stay under the link
+    ceiling — `-b 5M` overran it to 70% loss, `-b 500k` was clean; and there's a TCP **direction
+    asymmetry** (AP→STA 786 Kbit/s vs STA→AP ~0 in one run) so report both directions. Real
+    goodput is sub-Mbps despite the 72 Mbit/s PHY rate — the 1 MHz channel airtime is the cap.
 
     Tooling status: **`iperf3` 3.18 installed on chronite + chronium ✅**. The ESP ends (4 of 6
     cells) need an **iperf console** built in — add the `espressif/iperf-cmd` managed component +
@@ -426,8 +470,14 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
     monitor (chronium) is freed from sniffer duty for the L↔L cells.
   - ☐ **Production cleanup of the demo scaffolding** before merge: revert the forced-topology
     test toggles (`MESH_LINE_RELAY_DEMO` / `MESH_MULTIHOP_DEMO`, peer allowlist + HWMP/data TA
-    filters) and demote the bring-up `MMLOG_ERR` diagnostics (PREQ/PREP/path-install/ESTAB/
-    PERR/link-up) to `INF`.
+    filters). (Bring-up `MMLOG_ERR` diagnostics already demoted to `INF`; `S1Gbcn diag` → `DBG`.)
+  - ☐ **Remove unused firmware code** (the temporary test scaffolding, once its job is done):
+    the app build toggles + their branches — `MESH_IPERF` (iperf console + `idf_component.yml`
+    `espressif/iperf-cmd` dep + the `console` REQUIRES once throughput is measured),
+    `MESH_LINUX_INTEROP`, `MESH_LINE_RELAY_DEMO`; the **disabled static-ARP path** in
+    `app_main.c` (`g_static_arp_*` — superseded by group forwarding, never enabled now); and any
+    one-off test apps no longer needed (`rimba-halow-meshscan`, `rimba-halow-mesh-monitor`).
+    Goal: the committed mesh app is a clean "bring up a mesh + use it" demo with no dead toggles.
 - **AID ≥ 64 on air.** The 2nd–4th TIM blocks aren't exercised — the dense allocator only
   reaches block 1+ at 64+ live associations, beyond the 3-board bench.
 - **Linux STA as TWT *requester*** vs the ESP32 AP responder. Needs the Morse driver's
@@ -537,6 +587,7 @@ AP/TWT files: `morse_driver/{twt.c,mac.c,command.c,beacon.c,dot11ah/tim.c}`.
 ## References
 
 - Mesh worklogs (decoded frames + per-phase implementation): [`worklog/2026-06-26-mesh-mpm-peering-frames.md`](../worklog/2026-06-26-mesh-mpm-peering-frames.md) (P2–P6b), [`worklog/2026-06-25-mesh-p1-vif-beacon.md`](../worklog/2026-06-25-mesh-p1-vif-beacon.md) (P1), [`worklog/2026-06-26-linux-mesh-reference.md`](../worklog/2026-06-26-linux-mesh-reference.md) (Linux bring-up), [`worklog/2026-06-24-mesh-80211s-port-recon.md`](../worklog/2026-06-24-mesh-80211s-port-recon.md) (recon/P0)
+- Performance (iperf throughput + ping latency, mesh vs AP↔STA): [`worklog/2026-06-26-mesh-ap-perf-iperf-ping.md`](../worklog/2026-06-26-mesh-ap-perf-iperf-ping.md)
 - Worklog (Mesh+AP+TWT blow-by-blow + firmware byte-comparison): [`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md)
 - Worklogs (STA-count): [`worklog/2026-06-23-ap-sta-ceiling-100-psram.md`](../worklog/2026-06-23-ap-sta-ceiling-100-psram.md), [`worklog/2026-06-23-ap-sta-ceiling-255.md`](../worklog/2026-06-23-ap-sta-ceiling-255.md), multi-node test [`worklog/2026-06-23-ap-multinode-twt-hwtest.md`](../worklog/2026-06-23-ap-multinode-twt-hwtest.md)
 - Linux node + Mesh/AP/TWT bring-up: [`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md) §11–§12
