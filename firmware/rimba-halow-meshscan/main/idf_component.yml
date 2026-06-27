@@ -1,0 +1,23 @@
+## Morse Micro Wi-Fi HaLow (MM6108) ESP32 port.
+##
+## These are NO LONGER pulled from the ESP Component Registry. They are vendored
+## locally at the repo root under components/{halow,firmware} (each its own git
+## repo / submodule) so we can (a) guarantee reproducibility independent of the
+## registry and (b) track local modifications to morselib/mmhalow. The repo-root
+## components/ dir is added via EXTRA_COMPONENT_DIRS in this project's top-level
+## CMakeLists.txt; IDF then uses those local components in place of the registry
+## packages of the same name (local-component override).
+##
+## Forked from registry version 2.10.4-esp32-2 (requires ESP-IDF >= 5.4.2):
+##   https://components.espressif.com/components/morsemicro/halow
+##   https://components.espressif.com/components/morsemicro/firmware
+##
+## To restore the registry dependencies instead, remove components/{halow,firmware}
+## and uncomment:
+# dependencies:
+#   morsemicro/halow:
+#     version: "^2.10.4-esp32-2"
+#   morsemicro/firmware:
+#     version: "^2.10.4-esp32-2"
+dependencies:
+  idf: ">=5.4.2,<6.0"
