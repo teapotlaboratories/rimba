@@ -20,8 +20,10 @@ hardware and compared** before committing to one:
   soaked; the open question is leaf power-save (this firmware has no IBSS radio power-save).
   → [`docs/ibss/rimba-ibss-milestones.md`](docs/ibss/rimba-ibss-milestones.md)
 - **Mesh-gate (802.11s mesh + AP)** — relays mesh; leaves TWT-sleep under a relay-AP that
-  buffers their downlink. AP mode, the TWT responder + leaf power-save, and STA-count scaling
-  to 255 are proven; ESP32 mesh+AP concurrency is the open item.
+  buffers their downlink. AP mode, the TWT responder + leaf power-save, STA-count scaling to
+  255, and the **802.11s mesh point** (an ESP32 joins a Linux HaLow mesh, pings, relays
+  multi-hop, group-forwards, PERR teardown — P0–P6b) are all proven; ESP32 mesh+AP concurrency
+  on one radio is the remaining open item.
   → [`docs/mesh-ap/rimba-mesh-ap-milestones.md`](docs/mesh-ap/rimba-mesh-ap-milestones.md)
 
 Neither L2 is chosen yet — making them comparable on the same silicon is the point of this phase.
@@ -170,7 +172,7 @@ All documents live under `docs/`.
 | [`docs/ibss/rimba-ibss-milestones.md`](docs/ibss/rimba-ibss-milestones.md) | **IBSS — the single doc.** RISK-01 bring-up milestones + hardening (H1–H6), the Linux-equivalence table (each port file/symbol ↔ its `net/mac80211` / `morse_driver` counterpart), the **fork comparison** (vs `momentary-systems`), the **TODO / open items**, and the **findings & decisions** (EEXIST, data-driven discovery, phantom-flood, no-IBSS-power-save, CCMP block). |
 | [`docs/ibss/rimba-ibss-test-plan.md`](docs/ibss/rimba-ibss-test-plan.md) | IBSS validation plan + results (P0 multi-node, I.1–I.5 Linux interop). |
 | [`docs/reference/rimba-linux-node-setup.md`](docs/reference/rimba-linux-node-setup.md) | Bring-up + interop commands for the Raspberry Pi + MM6108 Linux reference node (AP test §11; IBSS interop §12). |
-| [`docs/mesh-ap/rimba-mesh-ap-milestones.md`](docs/mesh-ap/rimba-mesh-ap-milestones.md) | **Mesh-gate (Mesh + AP) — the single doc.** The L2 alternative to IBSS: milestones (AP → TWT power-save → STA-count scaling 63→255 → multi-node validation), the **new-code ↔ Linux `morse_driver`/`dot11ah` porting maps** (TWT responder + multi-block S1G TIM), the IBSS-vs-Mesh-gate trade-off, the build methodology, and the **Mesh-gate TODO**. |
+| [`docs/mesh-ap/rimba-mesh-ap-milestones.md`](docs/mesh-ap/rimba-mesh-ap-milestones.md) | **Mesh-gate (Mesh + AP) — the single doc.** The L2 alternative to IBSS: milestones (AP → TWT power-save → STA-count scaling 63→255 → multi-node validation), the **new-code ↔ Linux `morse_driver`/`dot11ah` porting maps** (TWT responder + multi-block S1G TIM), the IBSS-vs-Mesh-gate trade-off, and the **Mesh-gate TODO** — plus the **full 802.11s mesh-point status + Linux/ESP32 feature comparison** (P0–P6b: peering, HWMP, forwarding, PERR), consolidated here. |
 | [`docs/design-specification/rimba-mesh-comparison.md`](docs/design-specification/rimba-mesh-comparison.md) | Comparison vs other mesh protocols. |
 | [`docs/design-specification/rimba-routing-comparison.md`](docs/design-specification/rimba-routing-comparison.md) | Routing-approach analysis and tradeoffs. |
 | [`docs/design-specification/rimba-battery-analysis.md`](docs/design-specification/rimba-battery-analysis.md) | Power budget and battery-life analysis. |

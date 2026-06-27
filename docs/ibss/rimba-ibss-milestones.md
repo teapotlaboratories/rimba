@@ -328,6 +328,56 @@ The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milesto
   netdev is `#ifdef`'d out — a build flag, not hardware). Close via a rebuild with that flag,
   or the ESP32 raw-frame hook (`mmwlan_register_rx_frame_cb` + `MMWLAN_FRAME_BEACON`). Open
   Q: our ESP32 beacon's `source_addr` (MAC vs BSSID).
+- ☐ **#20 Beacon RX source-address: re-open the "firmware wall" (surfaced by the mesh P2
+  work, 2026-06-25).** H5 concluded "the firmware does not surface same-cell peer beacons"
+  from **0 beacons reaching `process_s1g_beacon`**. But the mesh P2 work found foreign
+  beacons **do** reach the host — as **legacy MGMT/Beacon frames at
+  `umac_datapath_rx_frame_filter`** (FC `0x80`, `A2/A3 = 00:00`), a path that bypasses
+  `process_s1g_beacon` entirely. So beacons *are* surfaced; H5's "0 surfaced" was measured
+  only at the S1G/EXT handler and **missed the legacy path** — worth re-instrumenting the
+  IBSS case the same way (tap `rx_frame_filter`, not just `process_s1g_beacon`). **Why it
+  matters more for mesh than IBSS:** the S1G beacon carries a single address = the BSSID; for
+  IBSS that's the *shared* cell BSSID (useless for per-node ID → data-driven discovery is
+  correct regardless), but for **mesh** the BSSID = the node's *own* MAC, so that single
+  address IS the peer's identity. **Open questions:** (a) is the address truly stripped by the
+  firmware before morselib, or is it recoverable (e.g. could the mesh vif be made to receive
+  raw `EXT/S1G_BEACON` so `process_s1g_beacon` reads `source_addr`)? (b) does a Linux mesh
+  node (morse_driver `s1g_to_beacon` → `sa = bssid = source_addr`) see the real per-node MAC,
+  confirming the address is on-air? Verify by rebuilding `morse_driver` with
+  `CONFIG_MORSE_MONITOR` (see #11) and capturing a mesh beacon's addresses. If recoverable,
+  normal beacon-based mesh discovery works and provisioned peer MACs aren't needed. The old
+  `i4-beacon-source-addr-firmware-wall` worklog (referenced but never created) called this a
+  firmware wall — this re-opens it. See `docs/worklog/2026-06-25-mesh-p1-vif-beacon.md`.
+  - **UPDATE (2026-06-25): the mesh half of this is RESOLVED — and it was a host bug, not a
+    firmware wall.** The mesh vif built beacons with `mesh_mac = 00:00` because the bring-up
+    used `umac_interface_get_vif_mac_addr()` (STA/AP-roles only → returns zero for mesh).
+    Fixed to use the vif's real `if_addr` / `get_device_mac_addr()`. **Verified on Linux**:
+    rebuilt chronium's `morse_driver` with `CONFIG_MORSE_MONITOR=y` and captured on `morse0` —
+    after the fix the mesh beacons carry the real per-node MAC (`SA = BSSID = e2:72:…`); before
+    the fix Linux saw `00:00` too (confirming we were *transmitting* zeros). **For IBSS this is
+    DIFFERENT and likely fine:** IBSS builds beacons from `args->if_addr` (not the broken
+    getter), and the beacon source is the *shared cell BSSID* by design — so IBSS's
+    data-driven discovery is correct regardless. **Still worth doing for IBSS:** (a) confirm
+    the IBSS beacon's on-air SA with the now-working `morse0` monitor (is it the real
+    per-node MAC or the shared BSSID?); (b) re-check the "0 beacons surfaced" claim by tapping
+    `rx_frame_filter` (legacy path), not just `process_s1g_beacon`.
+- ☐ **#21 Verify IBSS on-air behavior with the working `morse0` monitor.** chronium's
+  `morse_driver` is now rebuilt with `CONFIG_MORSE_MONITOR=y`, so the `morse0` raw-monitor
+  netdev finally delivers S1G frames (this was the blocker behind #11 and the I.4 gap). With an
+  IBSS cell running on ch27, capture on `morse0` and confirm, on-wire:
+  1. **Beacon source address** — is the IBSS beacon's SA the **shared cell BSSID**
+     (`02:12:34:56:78:9a`, as H5 claims) or a real per-node MAC? Settles whether IBSS has any
+     residual of the mesh `00:00` bug (it shouldn't — IBSS builds from `args->if_addr`).
+  2. **"0 beacons surfaced" recheck** — H5 measured this only at `process_s1g_beacon`; the mesh
+     work showed beacons also arrive as **legacy MGMT frames at `rx_frame_filter`**. Confirm
+     whether same-cell IBSS peer beacons reach the host at all (legacy path included), which
+     would refine the "firmware doesn't surface peer beacons" finding.
+  3. **Frame formats** — decode the `EXT/S1G_BEACON` framing and the probe-resp on-wire (the
+     original I.4 goal, #11) now that capture works.
+  Does **not** change the IBSS data-driven-discovery decision (source = shared BSSID is correct
+  regardless) — it's verification + closing #11/I.4. Reference sniffer setup:
+  `docs/worklog/2026-06-25-mesh-p1-vif-beacon.md`; build cmd in
+  `reference/rimba-linux-node-setup.md` + `CONFIG_MORSE_MONITOR=y`.
 
 **Code quality / maintenance**
 - ☐ **#15 Bump the ESP32 stack** (fw / SDK / IDF) from MM6108 fw **1.17.6**, `morsemicro/halow`
