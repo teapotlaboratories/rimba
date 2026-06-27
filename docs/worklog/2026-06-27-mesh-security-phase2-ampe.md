@@ -9,8 +9,9 @@ four independently on-air-verifiable increments:
   (queue + dequeue per peer, like the AP datapath) instead of the single common stad. Prerequisite
   for per-pair keys; verified with the existing static keys so the TX-architecture change is
   de-risked from the crypto.
-- **P2b — derived per-pair MTK + nonce exchange** (next): `MTK = sha256_prf(PMK, "Temporal Key
-  Derivation", min/max nonce ‖ LID ‖ AKM ‖ MAC)` on a static PMK; nonces carried in a throwaway IE.
+- **P2b — derived per-pair MTK + nonce exchange** (DONE, see below): `MTK = sha256_prf(PMK,
+  "Temporal Key Derivation", min/max nonce ‖ LID ‖ AKM ‖ MAC)` on a static PMK; nonces in a
+  throwaway IE.
 - **P2c — per-node MGTK exchange**: each node generates its own MGTK and ships it to each peer.
 - **P2d — real AES-SIV AMPE element**: the standard AMPE IE (139) + MIC IE (140) SIV-encrypted under
   the AEK, replacing the P2b/P2c scaffolding. Gold-standard byte-diff vs a live Linux secured node.
@@ -85,6 +86,52 @@ P2b's per-pair derived MTK installs onto.
 Multi-peer drain (one relay node with two established peers) is verified by construction — the
 scheduler loops over all peer slots — and is deferred to a later 3-node on-air run once board2 is
 free of the profiling rig.
+
+## P2b — derived per-pair MTK + nonce exchange (DONE)
+
+Replaces Phase-1's shared `mesh_p1_mtk` with a per-pair MTK derived from a static PMK + the peering
+nonces, byte-exact with hostap `mesh_rsn_derive_mtk`/`mesh_rsn_derive_aek` (verified against the
+bundled `wpa_supplicant/mesh_rsn.c`, not from memory). All crypto is reused via the `mmint_*` ABI —
+no crypto ported.
+
+`umac/mesh/umac_mesh.c`:
+- `extern int mmint_sha256_prf(...)` + `extern int mmint_crypto_get_random(...)` — a morselib-local
+  shim onto the mangled hostap crypto (avoids pulling `src/crypto/*.h` and its `utils/common.h`
+  type clashes). Confirmed at link time: no undefined references, so morselib resolves the mangled
+  hostap symbols — the linkage assumption behind all of P2 (incl. P2d's `aes_siv`).
+- `struct mesh_peer`: `my_nonce[32]`, `peer_nonce[32]`, `peer_nonce_valid`, `mtk[16]`, `aek[32]`.
+- `mesh_peer_alloc`: `mmint_crypto_get_random(my_nonce, 32)` — a fresh local nonce per (re)alloc
+  (the `memset(p,0,...)` clears `peer_nonce_valid`, so a re-peer can't reuse a stale MTK).
+- Constants: `mesh_p2_pmk[32]` (the static PMK, identical on every node) + `mesh_ampe_akm_sae[4]`
+  = `00 0f ac 08` (SAE, big-endian like `RSN_SELECTOR_PUT`).
+- `mesh_derive_mtk(peer)`: ctx[84] = `min/max(myNonce,peerNonce)` ‖ `min/max LID` (LE16, **numeric**
+  order) ‖ `AKM` ‖ `min/max(myMAC,peerMAC)`; `sha256_prf(PMK,32,"Temporal Key Derivation",ctx,84,
+  mtk,16)`. Nonces/MACs ordered by `memcmp`.
+- `mesh_derive_aek(peer)`: ctx[16] = `AKM` ‖ `min/max MAC`; **key = PMK(32)‖32 zeros, length 64**
+  (mirrors hostap's `sizeof(sae->pmk)=SAE_MAX_PMK_LEN`; the MTK uses len 32 — mixing the two is the
+  #1 byte-exactness break). Derived in P2b to validate the 64-byte path; consumed by P2d's AES-SIV.
+- `umac_mesh_peer_secure_estab`: derive MTK+AEK, then install `peer->mtk` (was `mesh_p1_mtk`) on the
+  per-peer stad. The peer/own MGTK stays static (`mesh_p1_mgtk`) until P2c.
+- Nonce exchange (throwaway scaffolding, replaced by the real AMPE element in P2d): a vendor IE (221,
+  marker `'RIM'`/type 1) carrying the 32-byte local nonce on Open + Confirm; `mesh_parse_peering_ie`
+  extended to also return the peer nonce, stored into `peer->peer_nonce` before ESTAB.
+
+### On-air proof (2026-06-27, board0 + board1, chronium `morse0` monitor)
+
+```
+board1 console:  MESH-SEC derive aid=1 nonce_ok=1 mtk=477aa0b3 aek=3702c4a2   ; 55 replies, 0 timeouts
+board0 console:  MESH-SEC derive aid=2 nonce_ok=1 mtk=477aa0b3 aek=3702c4a2   ; (ping responder)
+chronium pcap:   board1<->board0 unicast QoS-Data ALL Protected=1 / CCMP (28 + 30 frames)
+```
+
+Decisive points: the MTK is **derived** (`477aa0b3`), not the static `00 11 22 33…`; board0 and board1
+independently derived the **identical** MTK **and** AEK (`3702c4a2`) — proof the min/max byte order
+(memcmp nonces/MACs, numeric LIDs) is correct on both ends; `nonce_ok=1` confirms the nonce carrier
+worked; and 0% loss proves the derived key actually encrypts and decrypts. board0 also had board2
+(older fw, no nonce IE) allocated as a peer slot but it never reached ESTAB, so it stayed isolated
+from the secured board0↔board1 link. Each pair derives a distinct MTK by construction (different
+nonces/MACs per pair); the explicit 3-node A↔B ≠ A↔C demonstration and the Linux byte-diff are
+deferred to a 3-new-fw-node run / the P2d gold standard.
 
 ## Bench note
 
