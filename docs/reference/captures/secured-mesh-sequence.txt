@@ -1,0 +1,40 @@
+84:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=0 addr=(nil) key_idx=0 set_tx=0 seq_len=0 key_len=0 key_flag=0x10 link_id=-1
+87:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=0 addr=(nil) key_idx=1 set_tx=0 seq_len=0 key_len=0 key_flag=0x10 link_id=-1
+90:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=0 addr=(nil) key_idx=2 set_tx=0 seq_len=0 key_len=0 key_flag=0x10 link_id=-1
+93:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=0 addr=(nil) key_idx=3 set_tx=0 seq_len=0 key_len=0 key_flag=0x10 link_id=-1
+96:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=0 addr=(nil) key_idx=4 set_tx=0 seq_len=0 key_len=0 key_flag=0x10 link_id=-1
+99:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=0 addr=(nil) key_idx=5 set_tx=0 seq_len=0 key_len=0 key_flag=0x10 link_id=-1
+302:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=3 addr=0x5555c4cc7380 key_idx=1 set_tx=1 seq_len=6 key_len=16 key_flag=0x1a link_id=-1
+361:nl80211: NL80211_CMD_NEW_STATION STA Flags:2 3c:22:7f:37:50:42
+370:SAE: Selecting supported ECC group 19
+371:wlan1: SME: Selected SAE group 19
+537:SAE: own commit-scalar - hexdump(len=32): 17 b2 0b 0d 85 23 c6 59 69 70 fc 43 65 a0 e4 48 37 d1 05 a5 71 91 26 02 24 58 15 d9 cf bc d5 d2
+540:authentication reply: STA=3c:22:7f:37:50:42 auth_alg=3 auth_transaction=1 resp=0 (IE len=98) (dbg=sae-send-commit)
+547:SAE: State Nothing -> Committed for peer 3c:22:7f:37:50:42 (Init and sent commit)
+549:nl80211: Drv Event 19 (NL80211_CMD_NEW_STATION) received for wlan1
+560:SAE: own commit-scalar - hexdump(len=32): 17 b2 0b 0d 85 23 c6 59 69 70 fc 43 65 a0 e4 48 37 d1 05 a5 71 91 26 02 24 58 15 d9 cf bc d5 d2
+563:authentication reply: STA=3c:22:7f:37:50:42 auth_alg=3 auth_transaction=1 resp=0 (IE len=98) (dbg=sae-send-commit)
+579:SAE: own commit-scalar - hexdump(len=32): 17 b2 0b 0d 85 23 c6 59 69 70 fc 43 65 a0 e4 48 37 d1 05 a5 71 91 26 02 24 58 15 d9 cf bc d5 d2
+582:authentication reply: STA=3c:22:7f:37:50:42 auth_alg=3 auth_transaction=1 resp=0 (IE len=98) (dbg=sae-send-commit)
+605:authentication: STA=3c:22:7f:37:50:42 auth_alg=3 auth_transaction=1 status_code=0 wep=0 seq_ctrl=0xb0
+608:authentication: STA=3c:22:7f:37:50:42 auth_alg=3 auth_transaction=1 status_code=0 wep=0 seq_ctrl=0xb0 (from queue)
+646:authentication: STA=3c:22:7f:37:50:42 auth_alg=3 auth_transaction=1 status_code=0 wep=0 seq_ctrl=0xc0
+649:authentication: STA=3c:22:7f:37:50:42 auth_alg=3 auth_transaction=1 status_code=0 wep=0 seq_ctrl=0xc0 (from queue)
+820:SAE: own commit-scalar - hexdump(len=32): ab 04 4c 7f 52 18 63 7d c4 bd 76 0d 65 37 1e 6a b7 6a 35 43 92 a4 a3 83 f7 65 ef e0 de 49 91 e2
+823:authentication reply: STA=3c:22:7f:37:50:42 auth_alg=3 auth_transaction=1 resp=0 (IE len=98) (dbg=sae-send-commit)
+869:hostapd_logger: STA 3c:22:7f:37:50:42 - SAE authentication (RX confirm, status=0 (SUCCESS))
+876:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=0 addr=0x5556000b9a20 key_idx=0 set_tx=1 seq_len=6 key_len=0 key_flag=0x20 link_id=-1
+881:mesh: Initializing AMPE, Peering Start
+886:mesh: Plaintext AMPE element - hexdump(len=98): [REMOVED]
+888:mesh: encrypted AMPE element - hexdump(len=114): [REMOVED]
+898:SAE: State Confirmed -> Accepted for peer 3c:22:7f:37:50:42 (Accept Confirm)
+899:RSN: Cache PMK from SAE - hexdump(len=32): [REMOVED]
+916:mesh: GTKdata - MGTK - hexdump(len=16): [REMOVED]
+917:mesh: GTKdata - MGTK - Key RSC - hexdump(len=8): 00 00 00 00 00 00 00 00
+918:mesh: GTKdata - MGTK - GTKExpirationTime: 4294967295 seconds
+923:mesh: Plaintext AMPE element - hexdump(len=70): [REMOVED]
+925:mesh: encrypted AMPE element - hexdump(len=86): [REMOVED]
+963:wlan1: mesh plink with 3c:22:7f:37:50:42 established
+964:mesh: MTK - hexdump(len=16): [REMOVED]
+965:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=3 addr=0x5556000d24d0 key_idx=0 set_tx=0 seq_len=6 key_len=16 key_flag=0x2c link_id=-1
+973:wpa_driver_nl80211_set_key: ifindex=4 (wlan1) alg=3 addr=0x5556000d24d0 key_idx=1 set_tx=0 seq_len=6 key_len=16 key_flag=0x14 link_id=-1
