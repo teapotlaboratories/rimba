@@ -250,6 +250,11 @@ The mesh half of the Mesh-gate, built bottom-up in morselib to mirror the **Linu
 the oracle; the ESP firmware is matched against them. Test apps use `firmware/rimba-halow-mesh`
 on the mesh subnet `10.9.9.0/24` (the AP work above uses `192.168.12.0/24`).
 
+> **Function-level porting map:** the side-by-side **new-code ↔ Linux** table (each `umac_mesh_*`
+> / datapath function ↔ its `net/mac80211` / `morse_driver` `file:line` equivalent) lives in
+> [`rimba-mesh-80211s-code-map.md`](rimba-mesh-80211s-code-map.md). The tables below are the
+> *feature/status* view; that doc is the *code* view.
+
 **An ESP32 joins a Linux 802.11s HaLow mesh and pings it:**
 ```
 board0 (ESP, 10.9.9.136)  ->  chronite (Linux, 10.9.9.2)
@@ -401,10 +406,24 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
     flag** on refresh, **No-Ack** QoS on group/broadcast, PREQ **lifetime in TUs** (`MSEC_TO_TU`).
     board0 (fixed) now emits `target_flags=01`, `lifetime=0x7270` (TU), group `QoS=0x20` —
     byte-matching live chronite; old-firmware boards in the same capture were the control.
-  - ☐ **Throughput test with iperf** over the mesh (not just ping): ESP↔Linux and ESP↔ESP
-    single-hop, plus multi-hop via a relay (board1→board0→board2). Linux runs `iperf3 -s`; the
-    ESP needs an iperf client on the mesh netif (ESP-IDF `iperf` console cmd). Capture goodput +
-    loss + the multi-hop penalty, and watch for path re-discovery stalls (30 s lifetime) under load.
+  - ◐ **Throughput test with iperf — mesh vs AP↔STA, across node types.** Goodput matrix
+    (not just ping latency): rows = link type (mesh, AP↔STA), columns = node pair
+    (Linux↔Linux, Linux↔ESP32, ESP32↔ESP32); plus a multi-hop mesh row (board1→board0→board2).
+    Capture goodput (TCP + UDP) + loss + the multi-hop penalty; watch for path re-discovery
+    stalls (30 s lifetime) under load. On 1 MHz S1G the ceiling is low (sub-Mbps to a few Mbps).
+
+    | | Linux↔Linux | Linux↔ESP32 | ESP32↔ESP32 |
+    |---|---|---|---|
+    | **Mesh** | chronite↔chronium (both mesh) | chronite↔board0 | board0↔board1 |
+    | **AP↔STA** | chronite-AP↔chronium-STA | Linux-AP↔ESP-STA | ESP-AP↔ESP-STA |
+    | **Mesh multi-hop** | — | — | board1→board0(relay)→board2 |
+
+    Tooling status: **`iperf3` 3.18 installed on chronite + chronium ✅**. The ESP ends (4 of 6
+    cells) need an **iperf console** built in — add the `espressif/iperf-cmd` managed component +
+    an `esp_console` UART REPL to the mesh/STA/AP apps (gated by a build flag, ping disabled in
+    iperf mode), then drive `iperf -s` / `iperf -c <ip>` over the serial console. Method: one end
+    `-s` (server), the other `-c` (client); for ESP↔ESP, one board server + one client; the
+    monitor (chronium) is freed from sniffer duty for the L↔L cells.
   - ☐ **Production cleanup of the demo scaffolding** before merge: revert the forced-topology
     test toggles (`MESH_LINE_RELAY_DEMO` / `MESH_MULTIHOP_DEMO`, peer allowlist + HWMP/data TA
     filters) and demote the bring-up `MMLOG_ERR` diagnostics (PREQ/PREP/path-install/ESTAB/
