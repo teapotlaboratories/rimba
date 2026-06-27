@@ -95,3 +95,31 @@ Enabling actual encryption is the proper key-management layer, not a quick finis
    (Protected=1 + CCMP header), byte-diff vs a live Linux secured node.
 This per-peer-stad infrastructure is the foundation P2 (AMPE) builds on anyway, so P1 and P2 merge
 here. **P1's pivotal result — the firmware accepts mesh key-install — stands.**
+
+## DONE — working static-key encrypted mesh (on-air proven)
+
+Built the per-peer-stad + `umac_keys` layer (design workflow + verified vs the IBSS per-peer-stad
+model). Result: **ESP mesh unicast data is genuinely CCMP-encrypted on-air.**
+
+```
+chronium morse0 monitor: 29 ESP data frames, ALL Protected=1 (vs prot=0 before)
+CCMP header 3d 00 00 20 00 00 00 00  -> ExtIV set, keyid=0 (pairwise MTK), PN increments
+board1<->board0 ping: 0% loss (encrypted AND correctly decrypted by the peer)
+```
+
+What landed (`umac_mesh.c`, `umac_mesh.h`, `umac_datapath.c`):
+1. **Per-peer stad** on `struct mesh_peer` — `umac_sta_data_alloc` at `mesh_peer_alloc` (aid, peer_addr,
+   `security=MMWLAN_SAE`), freed at every close/teardown/`mesh_stop` (`mesh_peer_free`). Mirrors IBSS.
+2. **Keys via `umac_keys_install_key`** (populates the host keychain that gates TX + installs to
+   firmware) — replacing the raw `mmdrv_install_key`. Per-peer MTK/MGTK keyed by `peer->aid`.
+3. **The decisive fix:** mesh TX is **common-stad-driven** (all frames dequeue from the common stad,
+   like IBSS — my first cut wrongly enqueued unicast on the per-peer stad, so frames stuck and never
+   TXed). So the common_stad holds BOTH keys (MTK key_idx 0 + MGTK key_idx 1); the TX path
+   (`umac_datapath.c:1922`) then sets Protected + the right key_idx. Per-peer stads serve RX
+   (`lookup_stad_by_peer_addr_mesh`) + the firmware per-peer AID slots.
+
+**The P1→P2 seam:** the common-stad single MTK works because P1 keys are **static/shared** (every peer
+the same MTK). P2 (AMPE) derives a **distinct MTK per pair**, so a single common-stad MTK no longer
+suffices — P2 must drive TX from the **per-peer stad** (queue/dequeue per peer, like AP), the proper
+form. The per-peer stads added here are exactly that foundation. Cleanup TODO unchanged: the `printf`
+MESH-SEC traces are TEMP (MMLOG isn't on the ESP console); revert before merge to main.
