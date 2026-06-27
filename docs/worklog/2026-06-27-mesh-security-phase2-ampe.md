@@ -12,7 +12,8 @@ four independently on-air-verifiable increments:
 - **P2b — derived per-pair MTK + nonce exchange** (DONE, see below): `MTK = sha256_prf(PMK,
   "Temporal Key Derivation", min/max nonce ‖ LID ‖ AKM ‖ MAC)` on a static PMK; nonces in a
   throwaway IE.
-- **P2c — per-node MGTK exchange**: each node generates its own MGTK and ships it to each peer.
+- **P2c — per-node MGTK exchange** (DONE, see below): each node generates its own MGTK and ships
+  it to each peer.
 - **P2d — real AES-SIV AMPE element**: the standard AMPE IE (139) + MIC IE (140) SIV-encrypted under
   the AEK, replacing the P2b/P2c scaffolding. Gold-standard byte-diff vs a live Linux secured node.
 
@@ -132,6 +133,59 @@ worked; and 0% loss proves the derived key actually encrypts and decrypts. board
 from the secured board0↔board1 link. Each pair derives a distinct MTK by construction (different
 nonces/MACs per pair); the explicit 3-node A↔B ≠ A↔C demonstration and the Linux byte-diff are
 deferred to a 3-new-fw-node run / the P2d gold standard.
+
+## P2c — per-node MGTK exchange (DONE)
+
+Replaces P2b's still-static MGTK with a per-node group key: each node generates its own MGTK once at
+mesh start, advertises it to each peer in its Open, and installs the peer's MGTK as a group-RX key so
+the peer's broadcast/multicast decrypts under the peer's own key (mac80211 `__mesh_rsn_auth_init` +
+`mesh_mpm_plink_estab`). The static `mesh_p1_mgtk` is removed.
+
+`umac/mesh/umac_mesh.c`:
+- `struct umac_mesh_context.own_mgtk[16]`: generated once at mesh start (`mmint_crypto_get_random`),
+  before any Open carries it. Install onto the common stad (group-TX, key_idx 1) stays deferred to
+  first ESTAB (a group key at start breaks OPEN peering — the P1 gotcha; moves to start only in P2d).
+- `struct mesh_peer.peer_mgtk[16]/peer_mgtk_rsc[8]/peer_mgtk_valid`: the peer's own MGTK, learned
+  from its Open, installed as our group-RX key for that peer at ESTAB.
+- Carrier IE extended: the 'RIM' vendor IE now has type 1 (nonce only, Confirm) and type 2 (nonce +
+  16-byte MGTK + 8-byte RSC, Open). `mesh_parse_peering_ie` returns the peer MGTK; stored pre-ESTAB.
+- RSC advertised as 0 (own MGTK PN starts at 0 when sent in the Open, before group TX); applying a
+  non-zero RSC is deferred to P2d. (`umac_key.rx_seq` is a uint64 replay-counter array, not the RSC
+  bytes — left zeroed.)
+- No RX change needed: a received group frame already resolves to the **transmitter's** per-peer stad
+  (`lookup_stad_by_peer_addr_mesh` is called with the frame's TA, `umac_datapath.c:1460/1643`), which
+  is exactly where that originator's MGTK lives. The P2a per-peer-stad model already routes it.
+
+### On-air proof (2026-06-27, board0 + board1, chronium `morse0` monitor)
+
+```
+board0 console:  own MGTK (group TX) = 12a33130 ; installs peer MGTK (group RX) = 65529a3e
+board1 console:  own MGTK (group TX) = 65529a3e ; installs peer MGTK (group RX) = 12a33130
+  -> board0-own == board1-installed, board1-own == board0-installed, and 12a33130 != 65529a3e
+     (each node's MGTK is distinct and exchanged correctly).
+board1 broadcasts on-air: QoS-Data, Protected=1, CCMP Key Index 1 (group MGTK), PN increments.
+ping board1->board0: 0% loss.
+```
+
+**Decryption proved on-air (stronger than planned):** the monitor caught board0 re-broadcasting
+board1's DHCP-Discover / ARP content with **TA=board0, SA=board1** — board0 could only emit that
+plaintext content by first **decrypting board1's keyid-1 broadcast with board1's per-node MGTK**
+(installed as group-RX on board0's per-peer stad for board1). So the full path works: board1
+originates a group frame encrypted under its own MGTK, board0 decrypts it under the same key. The MTK
+also changed vs P2b (`9f1d7647` vs `477aa0b3`) because nonces are fresh per peering, while the AEK
+stayed `3702c4a2` (no nonce input) — a nice consistency check.
+
+### Finding (pre-existing, NOT a P2c regression): forwarded group frames are plaintext
+
+The same capture shows board0's **re-broadcast** (group-forward) of board1's frame goes out in the
+clear. The mesh group-forward path (`umac_mesh_build_rebcast` → `umac_datapath_tx_mgmt_frame`,
+introduced in `c16e9a8a`, the original mesh data plane — predates all security work) re-emits via the
+**management-frame TX path, which bypasses CCMP**. Linux re-encrypts a forwarded mesh group frame
+with the local MGTK on the normal TX path; the ESP forward does not. This is orthogonal to P2c's key
+exchange (it concerns *re-transmitting others'* frames, not originating) but it is a real
+secured-mesh gap — a forwarded multicast leaks in plaintext. Tracked as a follow-up (route the
+group-forward through the encrypted data TX path, encrypting with the forwarder's own MGTK), to fold
+into the secured-forwarding work alongside / after P2d.
 
 ## Bench note
 
