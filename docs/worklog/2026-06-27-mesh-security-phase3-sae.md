@@ -366,3 +366,38 @@ place board0 within chronium's RF range → capture that frame on `morse0` → b
 `-K` log and (b) board0's runtime RX inputs. That single capture yields BOTH the on-air confirmation and
 the runtime board0 input check (#12) at once. Until then: AMPE crypto = "offline-validated vs hostap",
 **not** "on-air verified".
+
+## #13 — cross-vendor SAE re-sync deadlock RESOLVED (restore hostap reauth on ACCEPTED+Commit)
+
+**Root cause.** board0's SAE FSM deviated from hostap on the `MESH_SAE_ACCEPTED` + Commit (txn 1) case.
+hostap mesh (ieee802_11.c:1140-1148) does `ap_free_sta` — frees the STA + PMKSA and re-runs SAE from
+scratch — because a Commit arriving on an already-ACCEPTED link can only mean the peer genuinely
+**restarted** (a peer still in simultaneous-open retransmits its *Confirm* (txn 2), never a Commit). P3d
+had replaced that with "retransmit our cached Confirm", so after a one-sided restart (peer reboot /
+supplicant restart) board0 stayed ACCEPTED and **replayed a stale Confirm the restarted peer could never
+verify against its new commit pair** → permanent deadlock (board0 races to MPM Open; Linux stays "SAE not
+yet accepted"). P3d removed the reauth to stop a thrash, but that thrash was the *CLOSE handler* freeing
+our SAE (a separate cascade, fixed in P3d and kept); reauth itself was not the cause.
+
+**Fix.** Restored `mesh_sae_reauth_free` (invalidate paths + free peer == `ap_free_sta`) for the
+ACCEPTED+Commit case; ACCEPTED+Confirm (txn 2) still resends our Confirm (== hostap's else branch). The
+big-sync lockout is the anti-thrash backstop (== hostap `sae_check_big_sync`). One-line behavioural diff,
++24/−12, no scaffolding.
+
+**Verified against the LIVE Linux peer (chronite, 2026-06-28).** Parked board1/board2 (clean air), flashed
+board0 (fix + interop), restarted chronite. chronite's own state machine now **completes SAE with board0**
+— repeated `SAE: State Nothing -> Committed -> Confirmed -> Accepted for peer e2:72:a1:f8:ef:a4` — whereas
+before the fix it was stuck emitting only `MPM: SAE not yet accepted for peer` (deadlock). The deadlock is
+broken and SAE now converges reliably cross-vendor.
+
+**The remaining re-cycle is the #12 AMPE blocker, NOT a #13 thrash.** chronite receives **only PLINK
+action 1 (Open) from board0 (×4552), never action 2 (Confirm)**, and board0 **never reaches plink ESTAB**:
+board0 cannot verify chronite's Open AMPE element (the AES-SIV MIC, #12), so it never answers with a
+Confirm → chronite times out → CLOSE flood (×2237) → peer torn down → fresh SAE. So #13 (SAE) is fixed;
+ESTAB is gated on #12 (AMPE). Bonus: reliable SAE convergence now unblocks capturing board0's runtime
+`AMPEDBG` for #12.
+
+**On-air gap (same as #12):** this is verified via the live Linux peer's state machine (the Linux node
+received + verified board0's SAE frames on-air and advanced to Accepted), **not** yet a chronium `morse0`
+byte-capture of board0's frames — board0 is still out of chronium's RF range. To fully close: relocate
+board0 into chronium range and capture the SAE 4-frame exchange + reauth on `morse0`.
