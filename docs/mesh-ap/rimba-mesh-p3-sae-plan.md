@@ -105,11 +105,17 @@ and hardened it with a status+well-formed+non-reflection gate. Verified vs the l
 completes SAE with board0 (`State Nothing→Committed→Confirmed→Accepted`); the gate doesn't block
 genuine-restart recovery. See worklog § "#13" + code-map § #13.
 
-**Still open:** (a) **task #12** — capture board0's *runtime* `AMPEDBG` AES-SIV inputs during a completed
-SAE→AMPE and diff vs the validator (now feasible since SAE converges reliably; chronite shows board0 sends
-only MPM Open, never Confirm, never ESTAB ⇒ its AES-SIV verify of chronite's Open is failing). (b) on-air
-`morse0` byte-capture (board0 RF range). (c) follow-up hardening tasks #14 (ACCEPTED+Confirm anti-replay)
-and #15 (MPM-Open SAE-start gating). No encrypted ESP↔Linux ICMP yet. See worklog § P3d (continued) + § #13.
+**task #12 — AMPE MIC ROOT CAUSE FOUND (2026-06-28).** Captured board0's runtime AES-SIV inputs (SAE now
+converges via #13): board0's `crypt` == chronite's ciphertext exactly, but the 6-byte MIC **AAD diverges** —
+board0 `body[0:6]=0f011000dd0e` vs chronite `0f011000 0108` (bytes [4:5]: **S1G** vendor `dd0e` vs **legacy**
+Supported-Rates `0108`). The morse driver converts received S1G→11n before mac80211/hostap
+(`morse_dot11ah_s1g_to_11n_rx_packet`, mac.c:6628), so hostap MICs over 11n; **morselib MICs over raw S1G**
+→ cross-vendor AAD mismatch. ESP↔ESP works (both S1G). **THE blocker is now task #16** — port the morse
+`dot11ah` S1G↔11n conversion so morselib's AMPE MIC is over the 11n representation. See worklog § #12.
+
+**Still open:** (a) **task #16** — the S1G↔11n conversion (the AMPE-MIC blocker above). (b) on-air `morse0`
+byte-capture (board0 RF range). (c) hardening tasks #14 (ACCEPTED+Confirm anti-replay) + #15 (MPM-Open
+SAE-start gating) + the #13 residual (full sae_parse_commit crypto). No encrypted ESP↔Linux ICMP yet.
 
 chronosalt/chronogen run `wpa_supplicant_s1g` (`sae_password='rimbamesh2026'`, group 19,
 `dtim_period=1`; NOT `iw mesh join`). Match group/H2E/AKM(`00-0f-ac-08`)/mesh_id/channel/password.
