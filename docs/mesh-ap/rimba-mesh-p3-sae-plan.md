@@ -96,3 +96,25 @@ status-126 H2E path); password byte-exactness; simultaneous-open timing vs Linux
 Ship a function-level new-code↔Linux code-map (each umac SAE handler → its `ieee802_11.c sae_sm_step`/
 `mesh_rsn.c` line). No build gate (sae.c is unconditionally compiled) — only morselib include/link
 exposure of `sae_*`/`wpabuf_*` (P3a.5). The full recon output is in the workflow task log.
+
+## Follow-ups / open investigations (post-P3c)
+- **Unicast relay forward — re-encrypt under the next-hop pairwise MTK.** `umac_mesh_forward_data`
+  (`umac_mesh.c:2148`) currently relays via `umac_datapath_tx_mgmt_frame(common_stad, …)`, whose
+  encryption is for robust *mgmt* frames only — so a forwarded unicast data frame goes out unprotected
+  / under the wrong key, and the next hop drops it (the cause of the board1→board2 relay-ping timeout).
+  Fix = mirror the merged *group*-forward fix (`umac_datapath_tx_mesh_group_frame`) but for the pairwise
+  key: resolve `umac_mesh_get_peer_stad(next_hop)` + a data-path helper selecting `UMAC_KEY_TYPE_PAIRWISE`.
+  **This is exactly mac80211's behaviour** — verified in `net/mac80211`: the forward handler re-injects
+  the (RX-decrypted) frame with the next-hop as RA, and `ieee80211_tx_h_select_key` (`tx.c:615`) selects
+  `tx->sta->ptk` = the next-hop MTK. mac80211 derives the key generically from the frame's addressing in
+  one shared stage; morselib has no such stage, so each forward call site must hand-wire the stad + key
+  type. `morse_driver` is soft-MAC (the forwarding + key selection are in mac80211; morse only installs
+  the per-peer key to the firmware for HW CCMP).
+- **mac80211-generic-key-selection vs morselib-hand-wired TX — confirm it doesn't break (A) Linux
+  interop of the encrypted DATA/forward path (distinct from P3d's SAE-frame interop — byte-diff ESP
+  forwarded/originated frames vs a live Linux relay) and (B) dynamic device join at runtime** (new
+  beacon → SAE → ESTAB → keyed → routable, no restart). Known limits to check: per-peer stad pool fixed
+  `UMAC_MESH_MAX_PEERS=4`; the relay-demo allowlist is test-only; multi-hop reachability of a new node
+  needs BOTH this relay-forward fix AND TX-side PREQ origination ("we don't originate PREQs yet").
+  Deliverable: a verified map of every place morselib's hand-wired key/route selection could diverge from
+  mac80211 under interop + dynamic-join, with the concrete fixes.
