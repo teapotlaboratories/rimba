@@ -93,12 +93,23 @@ the byte-identical PMKID `855627ac3141c41d7e75f0e269d10283`** (the H2E/group/pas
 the AMPE AES-SIV model (AEK = `sha256_prf(PMK64,"AEK Derivation",AKM‖min‖max)`, AAD = `{own,peer,cat6}`,
 cat6 = first-6 action-body bytes) was offline-validated by replaying chronite's own logged PMK + AMPE
 frame through pycryptodome (`docs/mesh-ap/ampe-siv-validate.py`, VERIFIED PASS); the ESP source matches
-line-for-line and `mmint_aes_siv_*` IS hostap's `aes-siv.c`. **Still open:** (a) capture board0's
-*runtime* `AMPEDBG` AES-SIV inputs during a completed SAE→AMPE and diff vs the validator — gated on (b) a
-**cross-vendor SAE re-sync deadlock** (board0 accepts SAE + races to MPM Open while chronite stays "SAE
-not yet accepted"; neither re-prompts — board0 should retransmit its Confirm while ACCEPTED-but-not-ESTAB,
-a dynamic-join robustness fix tied to task #9). No encrypted ESP↔Linux ICMP yet. See worklog § P3d
-(continued).
+line-for-line and `mmint_aes_siv_*` IS hostap's `aes-siv.c`.
+
+**SAE re-sync deadlock — FIXED (task #13, committed 1cef689f/bedb07d).** The actual root cause was NOT
+"board0 should retransmit its Confirm" — it was board0's SAE FSM deviating from hostap on ACCEPTED+Commit:
+P3d had it resend a stale Confirm, but hostap mesh does `ap_free_sta` (reauth, ieee802_11.c:1144-1151) on a
+Commit received in ACCEPTED (= a genuine peer restart; a peer mid-handshake retransmits its *Confirm*, not
+a Commit). Restored `mesh_sae_reauth_free`, then an adversarial verification found the free was
+unconditional (a DoS divergence — hostap frees only after the Commit clears status/parse/reflection checks)
+and hardened it with a status+well-formed+non-reflection gate. Verified vs the live Linux peer: chronite now
+completes SAE with board0 (`State Nothing→Committed→Confirmed→Accepted`); the gate doesn't block
+genuine-restart recovery. See worklog § "#13" + code-map § #13.
+
+**Still open:** (a) **task #12** — capture board0's *runtime* `AMPEDBG` AES-SIV inputs during a completed
+SAE→AMPE and diff vs the validator (now feasible since SAE converges reliably; chronite shows board0 sends
+only MPM Open, never Confirm, never ESTAB ⇒ its AES-SIV verify of chronite's Open is failing). (b) on-air
+`morse0` byte-capture (board0 RF range). (c) follow-up hardening tasks #14 (ACCEPTED+Confirm anti-replay)
+and #15 (MPM-Open SAE-start gating). No encrypted ESP↔Linux ICMP yet. See worklog § P3d (continued) + § #13.
 
 chronosalt/chronogen run `wpa_supplicant_s1g` (`sae_password='rimbamesh2026'`, group 19,
 `dtim_period=1`; NOT `iw mesh join`). Match group/H2E/AKM(`00-0f-ac-08`)/mesh_id/channel/password.
