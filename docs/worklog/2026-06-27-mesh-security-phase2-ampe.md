@@ -253,9 +253,13 @@ MTK. Then encrypted unicast pings at 0% loss. The on-air wire format matches `me
   placeholder — the real cross-vendor PMKID needs **P3 (SAE)**). The parser excludes the trailing PMKID
   from its plid-present check (else an Open's PMKID is misread as a plid) and skips the RSN IE. The
   PRIVACY cap is inside the 6-byte AMPE AAD window, but both ESP ends change together so the SIV still
-  verifies. **Verified on-air:** both nodes AMPE verify=0 on Open+Confirm, netif up, and the ESP Open's
-  IE tags are now `217, 48, 114, 113, 117, 140` — the security tail `48,114,113,117,140` matches Linux.
-  (Beacon RSN IE deferred — only a Linux node *initiating* to the ESP needs it, which also needs P3.)
+  verifies. **Verified on-air + byte-diffed vs the live Linux frame:** both nodes AMPE verify=0 on
+  Open+Confirm + netif up; the ESP Open's IE tags are now `217, 48, 114, 113, 117, 140` (security tail
+  `48,114,113,117,140` matches Linux), and the raw bytes are byte-identical — RSN IE
+  `30 14 01 00 00 0f ac 04 01 00 00 0f ac 04 01 00 00 0f ac 08 00 00`, MPM IE `75 14 01 00 …`
+  (protocol=1), MIC IE `8c 10 …` — the ONLY difference is the PMKID value (placeholder vs SAE-derived,
+  which P3 supplies). (Beacon RSN IE deferred — only a Linux node *initiating* to the ESP needs it,
+  which also needs P3.)
 - **P2d.4** — own-MGTK install moved from first-ESTAB back to mesh start: **DONE.**
   `umac_mesh_install_common_keys()` now runs in `mmwlan_mesh_start` (after `own_mgtk` is generated +
   the common stad is set up), matching hostap `__mesh_rsn_auth_init`; the first-ESTAB install +
