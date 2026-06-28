@@ -252,6 +252,39 @@ network={
 wpa_supplicant_s1g -D nl80211 -i wlan1 -c wpa_ibss.conf
 ```
 
+**Secured 802.11s mesh interop (chronite ↔ ESP, P3d).** Persisted at `chronite:~/wpa-interop.conf`
+(copy to `/tmp` before use — `/tmp` is cleared on reboot):
+```
+ctrl_interface=/run/wpa_supplicant_s1g
+country=US                       # GLOBAL — REQUIRED (enables the S1G channels)
+sae_pwe=0                        # GLOBAL — H2E off, matches the ESP
+sae_groups=19                    # GLOBAL
+network={
+    ssid="rimba-mesh"
+    mode=5                       # WPAS_MODE_MESH
+    key_mgmt=SAE
+    sae_password="rimbamesh2026"
+    country="US"
+    op_class=68                  # S1G global op-class, ch27 / 1 MHz — NOT frequency=
+    channel=27
+    s1g_prim_chwidth=0
+    s1g_prim_1mhz_chan_index=0
+    dtim_period=1                # REQUIRED (mesh join bails / firmware rejects without it)
+    beacon_int=100
+}
+```
+```sh
+cp ~/wpa-interop.conf /tmp/; sudo iw dev wlan1 set type managed; sudo ip link set wlan1 up
+sudo wpa_supplicant_s1g -B -D nl80211 -i wlan1 -c /tmp/wpa-interop.conf -f /tmp/wpa-interop.log -dd -K
+# expect "MESH-GROUP-STARTED", then: sudo ip addr add 10.9.9.2/24 dev wlan1
+```
+**⚠ Gotcha (cost a long debug):** a *wrong* channel form in the config (e.g. `frequency=5560` — the mapped
+5 GHz freq, NOT the S1G channel) and/or omitting `country=US` makes the nl80211 mesh-join **hard-wedge the
+morse chip** (it blocks trying to tune an un-enabled S1G channel → `rmmod morse` hangs uninterruptibly →
+only a reboot recovers; it *looks* like a HW fault but is purely the config). Use `op_class=68 channel=27`
+(or `frequency=915500`, the actual sub-GHz value), `country=US`, and `dtim_period=1`. Rapid
+`wpa_supplicant_s1g` restarts can also wedge it — bring it up once and leave it.
+
 Results (I.1 discovery, I.2 beacon interop, I.3 data, I.4 on-air, I.5 mixed 4-node cell) are
 tabulated in [`rimba-ibss-test-plan.md`](../ibss/rimba-ibss-test-plan.md) §5. Key interop findings:
 discovery is **data-driven** (the firmware doesn't surface peer beacons; morse S1G beacons
