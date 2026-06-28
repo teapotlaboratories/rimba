@@ -42,6 +42,10 @@ Smallest slice: emit one SAE Commit on-air + route received AUTH into a stub han
 byte-diff the group/scalar/element vs a live Linux Commit.
 
 ## P3b — Per-peer SAE FSM: Commit/Confirm → PMK + PMKID (AMPE still on static PMK)
+**DONE + on-air PROVEN (2026-06-27).** Two ESP peers derived a byte-identical `pmkid` (`cff6be63…3212d57e`);
+on-air SAE 4-frame (`auth_alg=3`, len 98 group-19) + AMPE MPM frames byte-shape-intact (no regression).
+Worklog `docs/worklog/2026-06-27-mesh-security-phase3-sae.md` (§P3b); code-map `rimba-mesh-security-codemap.md` (§P3b).
+
 `struct mesh_peer` += `struct sae_data *sae; uint8_t sae_state; unsigned sae_sync; uint8_t pmk[32];
 bool pmk_valid; uint8_t pmkid[16];`. `sae` is heap (`os_zalloc`), freed in `mesh_peer_free` +
 teardown (`sae_clear_data`+free). Native FSM porting `sae_sm_step` (the `mesh & MESH_ENABLED`
