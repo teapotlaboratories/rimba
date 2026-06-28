@@ -531,3 +531,25 @@ PEERING (the load-bearing P3d milestone) is done.
 **Bench note:** rapid `wpa_supplicant_s1g` restarts wedge chronite's `wlan1` (`Failed to initialize driver
 interface`) → recover with `modprobe -r morse; modprobe morse` + `ip link set wlan1 down/up`, restart the
 supplicant (`MESH-GROUP-STARTED`); only ever touch wlan1, never wlan0/SSH.
+
+### #17 progress — board0 runtime keys captured; matched comparison bench-blocked
+
+Instrumented board0 to dump its runtime data keys at ESTAB (periodic `KEYDBG` printf from the plink tick,
+reverted). Captured (board0's peering with chronite):
+- **board0 MTK** (pairwise, derived) = `d36094d5af8ca39561d889b338caeed9`
+- **board0 own MGTK** (group, board0's own — chronite installs it as RX) = `998642cf946f318f1222c19064eeb5c7`
+- nonces (prefix) myn=`dcff4d81…` pen=`067c1396…`, llid=`31d7` plid=`0ff4`.
+
+chronite logs its installed keys with `-K` (`mesh: MTK - hexdump`, `mesh: RX MGTK - hexdump`), so the
+**decisive next test is a direct compare**: board0 MTK == chronite MTK? (derivation/inputs agree) and board0
+own-MGTK == chronite's RX-MGTK-for-board0? (the exchange/install works). If equal → the data failure is the
+mesh-data CCMP/frame format (deep, HW/firmware); if not → a runtime key/derivation-input mismatch (fixable).
+
+**Blocked on the bench:** getting board0's and chronite's keys for the SAME peering needs a clean
+co-peering, but (a) board0's RTS reset doesn't actually reset the chip (USB drops, app keeps running → same
+keys), so a reliable reset = reflash; and (b) chronite's HaLow wedged again — after repeated supplicant
+restarts the mesh won't come up (`Failed to set interface to mode 2: -16 Device or resource busy`,
+`Failed to initialize driver interface`), and a `modprobe -r morse; modprobe morse` + iface reset did not
+clear it this time — **chronite likely needs a reboot** to recover the morse chip. Resume #17 with: reboot
+chronite → clean mesh → reflash board0 (periodic KEYDBG) → capture board0 MTK/MGTK + chronite's logged
+MTK/MGTK for the SAME peering (match by the nonces) → compare. Repo reverted clean (diagnostic only).
