@@ -218,3 +218,14 @@ pending (board0 RF range).
 `mesh: Decrypted AMPE element` both ways + `mesh plink … established` + `iw station: mesh plink ESTAB,
 authorized: yes`; board0 sends a Confirm (never did pre-#16). Cross-vendor encrypted mesh peering works.
 **Open:** the encrypted DATA path (ICMP ping) — task #17 (group MGTK + pairwise MTK cross-vendor CCMP).
+
+## #17 — broadcast HWMP encrypted under the MGTK (cross-vendor encrypted mesh data)
+
+| New code (`umac_mesh.c`) | Linux/morse counterpart |
+| --- | --- |
+| `umac_mesh_tx_hwmp`: route group/broadcast-DA HWMP (`p->da[0]&0x01` → PREQ/PERR) through `umac_datapath_tx_mesh_group_frame` (MGTK/CCMP); unicast PREP stays on `umac_datapath_tx_mgmt_frame` | net/mac80211 mesh_hwmp.c `mesh_path_sel_frame_tx` + `ieee80211_select_key`: a broadcast PREQ is group-addressed robust mgmt, CCMP-protected with the MGTK (not BIP) |
+| (was) `umac_datapath_tx_mgmt_frame` DROPS BC/MC robust-mgmt (`umac_datapath.c:2230-2237`) — the infra BIP case, unsupported | mac80211 protects group robust mgmt with BIP/IGTK in infra, but with the MGTK (CCMP) in a mesh |
+
+**Verified (2026-06-28, live Linux peer):** board0↔chronite encrypted ICMP 5/5; chronite mpath ACTIVE/RESOLVED
+(flags 0x15). Full encrypted ESP↔Linux mesh (SAE→AMPE→ESTAB→HWMP→CCMP→ping). Follow-ups: RX PREP for
+no-static-ARP dynamic join; encrypt the unicast relay.
