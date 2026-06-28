@@ -553,3 +553,32 @@ restarts the mesh won't come up (`Failed to set interface to mode 2: -16 Device 
 clear it this time — **chronite likely needs a reboot** to recover the morse chip. Resume #17 with: reboot
 chronite → clean mesh → reflash board0 (periodic KEYDBG) → capture board0 MTK/MGTK + chronite's logged
 MTK/MGTK for the SAME peering (match by the nonces) → compare. Repo reverted clean (diagnostic only).
+
+### #17 update — keys AGREE cross-vendor → the blocker is the mesh-DATA CCMP frame format (not keys)
+
+Recovered chronite (see bench note) and instrumented board0 (periodic `KEYDBG`, reverted) to dump its
+runtime data keys, then compared against chronite's `-K`-logged keys for the **same** peering:
+
+| key | board0 (ESP) | chronite (Linux) | |
+| --- | --- | --- | --- |
+| MTK (pairwise, derived) | `3da2341263436e3b740636831818599f` | `3d a2 34 12 63 43 6e 3b 74 06 36 83 18 18 59 9f` | **identical** |
+| MGTK (group, board0's own / chronite RX) | `0d2fe61fbf6efe9cea5a98597377154c` | `0d 2f e6 1f bf 6e fe 9c ea 5a 98 59 73 77 15 4c` | **identical** |
+
+So the derived **pairwise MTK** AND the exchanged **group MGTK** agree byte-for-byte cross-vendor — the SAE
+PMK, the MTK derivation, and the MGTK exchange/install are all correct. Yet with the keys matching, the
+encrypted data STILL fails both ways (board0 ping 0/26; chronite tcpdump sees no decrypted ARP/ICMP). **The
+blocker is therefore the mesh-DATA CCMP frame format, not the keys** — almost certainly the same class of
+S1G↔11n representation gap that broke the AMPE MIC (#16), but now for a DATA frame's CCMP AAD (the 4-address
+mesh MAC header / mesh-control / QoS that CCMP authenticates). Next: determine whether the morse Linux side
+does mesh-data CCMP in HW (over the S1G frame) or in mac80211 SW (over the converted 11n frame), and what
+header bytes its CCMP AAD covers, vs the ESP/MM6108 — then align. (ESP↔ESP data works because both are
+S1G-consistent, same as the #16 story.)
+
+**Bench — chronite RECOVERED (root cause was a bad config I reconstructed from memory):** the mesh wouldn't
+come up because my recreated `/tmp/wpa-interop.conf` was wrong — it used `frequency=5560` and omitted
+`country=US`, so the nl80211 mesh-join wedged the morse chip trying to tune an un-enabled S1G channel (each
+failed join hard-wedged the chip → `rmmod` blocked → only a reboot cleared it, looking like a hardware
+fault). The CORRECT config (per `docs/reference/captures/wpa-smesh.conf`) uses GLOBAL `country=US` +
+`op_class=68`/`channel=27`/`s1g_prim_chwidth=0`/`s1g_prim_1mhz_chan_index=0` + `dtim_period=1` (mesh join
+bails without it), NOT `frequency=`. With it: `MESH-GROUP-STARTED`, stable, board0 re-peers to ESTAB. The
+working config is now persisted at `chronite:~/wpa-interop.conf` (survives reboots; `/tmp` does not).
