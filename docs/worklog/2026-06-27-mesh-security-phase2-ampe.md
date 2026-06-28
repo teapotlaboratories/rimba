@@ -14,8 +14,9 @@ four independently on-air-verifiable increments:
   throwaway IE.
 - **P2c — per-node MGTK exchange** (DONE, see below): each node generates its own MGTK and ships
   it to each peer.
-- **P2d — real AES-SIV AMPE element**: the standard AMPE IE (139) + MIC IE (140) SIV-encrypted under
-  the AEK, replacing the P2b/P2c scaffolding. Gold-standard byte-diff vs a live Linux secured node.
+- **P2d — real AES-SIV AMPE element** (P2d.2 DONE, see below): the standard AMPE element (139) + MIC
+  IE (140) SIV-encrypted under the AEK, replacing the P2b/P2c 'RIM' scaffolding. Remaining sub-steps:
+  P2d.3 RSN-IE/PMKID (Linux interop only), P2d.4 own-MGTK-at-start, P2d.5 gold-standard byte-diff vs Linux.
 
 ## Pivotal design finding: P2 is integration, not crypto authorship
 
@@ -197,6 +198,65 @@ MGTK), PN incrementing — the DHCP/ARP plaintext is gone. Unicast steady-state 
 boot-time transient timeout during peering churn). The same gap on the *unicast* relay forward
 (`umac_mesh_forward_data`, which needs the next-hop **pairwise** MTK, not the group key) remains a
 separate follow-up.
+
+## P2d.2 — real AES-SIV-protected AMPE element (DONE)
+
+Replaces the throwaway 'RIM' carrier IE with the standard AMPE element (`WLAN_EID_AMPE`=139) wrapped
+in a `WLAN_EID_MIC`=140 element, AES-SIV-encrypted under the **AEK** — the real 802.11s AMPE,
+byte-exact with hostap `mesh_rsn_protect_frame` / `mesh_rsn_process_ampe` (this Morse
+`CONFIG_IEEE80211AH=1` build → the **fixed-6 AAD** variant). All crypto reused.
+
+Build integration (P2d.1): `components/hostap/CMakeLists.txt` adds `aes-ctr.c` + `aes-siv.c` to SRCS
+(`omac1`/`aes_encrypt` already provided by `crypto_mbedtls_mm.c`); `hostap_morse_common.h` mangles
+`aes_siv_encrypt/decrypt → mmint_aes_siv_*`. morselib calls them through `extern int mmint_aes_siv_*`
+shims — links clean (the same `mmint_*` mechanism proven for `sha256_prf` in P2b).
+
+`umac/mesh/umac_mesh.c`:
+- AEK is derived at **`mesh_peer_alloc`** (not ESTAB) + `aek_valid` flag — it depends only on the MACs
+  + PMK, and must be ready to verify the very first incoming Open (whose AMPE element carries the
+  peer's nonce). MTK still derives at ESTAB (needs the exchanged nonces).
+- TX (`umac_mesh_build_peering`): build the plaintext AMPE element — `[139][len]`,
+  `selected_pairwise_suite = CCMP 00 0f ac 04` (**not** the SAE AKM), `local_nonce[32]`,
+  `peer_nonce[32]`, and on **Open** the GTKdata (`MGTK[16] ‖ RSC[8] ‖ GTKExpiry=0xffffffff`); len 68
+  (Confirm) / 96 (Open). Append `[140][16]` then `aes_siv_encrypt(AEK, key_len=32, ampe_element,
+  num_elem=3, AAD={TA=us, RA=peer, first-6-body}, lens={6,6,6})`: the 16-byte SIV IV is the MIC IE
+  body, the ciphertext spills past it. Two-pass consbuf — encrypt only on the fill pass; the 6-byte
+  AAD is read from `(uint8_t*)hdr + sizeof(*hdr)` (the category byte) once the body is final.
+- RX (`mesh_parse_peering_ie` + `mesh_process_ampe`): the parser locates the MPM IE (117) link ids and
+  the MIC IE (140), stopping at 140 (the ciphertext is not valid TLV). `mesh_process_ampe`
+  `aes_siv_decrypt(AEK, 32, IV‖ciphertext, AAD SWAPPED {TA=peer, RA=us, first-6}, {6,6,6})`; on
+  success checks `eid==139`, the peer_nonce echo (zero or == our nonce), learns the peer's local_nonce
+  → `peer->peer_nonce`, and (Open) the MGTK → `peer->peer_mgtk`. A verify failure drops the frame
+  without advancing the FSM.
+
+### On-air proof (2026-06-27, board0 + board1, chronium `morse0` monitor)
+
+```
+both consoles:  MESH-SEC ampe rx action=1 (Open)    verify=0 eid=139   (crypt_len 114 = 16 + 98)
+                MESH-SEC ampe rx action=2 (Confirm)  verify=0 eid=139   (crypt_len  86 = 16 + 70)
+                estab nonce_ok=1 mgtk_ok=1 ; board0 mtk == board1 mtk (identical, e.g. 77b9090d)
+ping board1->board0:  43 replies, 0 timeouts ; 78 unicast frames all Protected=1.
+Open frame IEs on-air: 217, 114, 113, 117, 140  — NO vendor IE (221); the 'RIM' carrier is gone, and
+                no plaintext AMPE(139) tag appears (it is the encrypted ciphertext after the MIC IE).
+```
+
+Decisive: **the AES-SIV verify succeeds on both Open and Confirm, and both nodes independently derive
+the IDENTICAL per-pair MTK from the AMPE-exchanged nonces** — any wrong byte (AAD order/length, the
+32-byte AEK key length, the nonce offsets, the CCMP-vs-SAE suite) would fail the verify or mismatch the
+MTK. Then encrypted unicast pings at 0% loss. The on-air wire format matches `mesh_rsn_protect_frame`
+(MPM IE then `[140][16][SIV-IV][ciphertext]`). The AMPE port is functionally complete for ESP↔ESP.
+
+### Remaining P2d sub-steps (deferred)
+- **P2d.3** — Linux-shaped Peering Mgmt IE (`protocol=1` + PMKID), RSN IE (48), PRIVACY capability.
+  Not needed for ESP↔ESP (our parser owns both ends); a strict Linux peer needs them, and a real
+  cross-vendor PMKID needs **P3 (SAE)**.
+- **P2d.4** — move the own-MGTK install from first-ESTAB back to mesh start (the P1 deferral can be
+  undone now peering is AMPE-protected). Uncertain on the MM6108 (the P1 gotcha was firmware
+  expecting protected frames once a group key is installed — the AMPE action frames are still
+  802.11-unprotected, so this may still regress); verify before keeping.
+- **P2d.5** — gold-standard byte-diff of an ESP AMPE Open against a live Linux secured-mesh node
+  (same static PMK forced into `sta->sae->pmk`). Needs the AH-patched Morse Linux build (the fixed-6
+  AAD must match) — chronosalt/chronogen (1.17.8 morse) qualify.
 
 ## Bench note
 
