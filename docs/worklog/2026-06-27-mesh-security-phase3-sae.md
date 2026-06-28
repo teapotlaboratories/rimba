@@ -582,3 +582,37 @@ fault). The CORRECT config (per `docs/reference/captures/wpa-smesh.conf`) uses G
 `op_class=68`/`channel=27`/`s1g_prim_chwidth=0`/`s1g_prim_1mhz_chan_index=0` + `dtim_period=1` (mesh join
 bails without it), NOT `frequency=`. With it: `MESH-GROUP-STARTED`, stable, board0 re-peers to ESTAB. The
 working config is now persisted at `chronite:~/wpa-interop.conf` (survives reboots; `/tmp` does not).
+
+## #17 — RESOLVED: encrypted ESP↔Linux ICMP works (broadcast HWMP must be MGTK-encrypted)
+
+The data-path blocker was NOT the CCMP-AAD format and NOT a key mismatch (keys agree, the open mesh
+worked). An investigate-workflow (read morse_driver + mac80211 + the ESP datapath) found the real cause:
+**morselib has no group-addressed robust-management TX path.** `umac_datapath_tx_mgmt_frame` DROPS any
+BC/MC robust-mgmt frame when PMF is required — `"Unsupported attempt to TX a BC/MC RMF, frame dropped"`
+(`umac_datapath.c:2230-2237`; that branch is the infrastructure BIP case, unsupported here) — and the
+broadcast HWMP PREQ/PERR from `umac_mesh_tx_hwmp` (`umac_mesh.c:1873`) routed straight through it. So in a
+**secured** mesh board0 silently emitted **no PREQ**: it could not originate a mesh path (ping 0/26) and
+chronite's HWMP mpath to board0 stayed `RESOLVING` (next_hop=0, frames queued). The **open** mesh worked
+only because PMF is off and the drop was skipped — exactly the open-works/secured-fails asymmetry.
+
+A secured 802.11s mesh protects a **group-addressed** HWMP frame with the **MGTK (CCMP)**, not BIP. **Fix:**
+in `umac_mesh_tx_hwmp`, route a group/broadcast-DA HWMP frame (PREQ/PERR) through the existing mesh
+group-key path `umac_datapath_tx_mesh_group_frame` (encrypt under the common-stad MGTK + set
+Protected/HW_ENC, leaving the ACTION subtype intact — same as a forwarded group DATA frame); keep the
+unicast PREP on the pairwise mgmt path. 16-line change, no FW changes (the chip already does the cipher +
+S1G conversion).
+
+**VERIFIED on-air vs the live Linux peer (chronite, 2026-06-28):**
+- board0 ping to chronite: **0/26 → 5/5 replies (67–298 ms)**.
+- chronite's mpath to board0: `RESOLVING, next_hop=00:00:00:00:00:00` → **`ACTIVE/RESOLVED, flags 0x15,
+  next_hop=e2:72:a1:f8:ef:a4`**; chronite TX-to-board0 jumped ~11 → 97 packets.
+
+**This is the full cross-vendor encrypted 802.11s mesh — the P3d goal:** SAE → AMPE → ESTAB (#16) → HWMP
+path resolution (encrypted PREQ, this fix) → CCMP data → **encrypted ICMP ESP↔Linux**.
+
+**Verified with the interop test config's static ARP** (so board0 ORIGINATES the PREQ, which sets chronite's
+reverse path too). **Follow-ups (no-static-ARP dynamic operation):** (1) RX — board0 must answer Linux's
+encrypted broadcast PREQ with a PREP (group robust-mgmt RX replay space + CCMP-under-MGTK decrypt,
+`umac_datapath.c:1129-1167`/`:371-385`); (2) encrypt the unicast mesh relay path (`umac_mesh_forward_data`).
+Bench note: chronite rebooted once during testing (bench instability / morse-chip wedge, not the fix — the
+fix's encrypted PREQ verified working after); avoid hammering chronite's sshd with rapid SSH (MaxStartups).
