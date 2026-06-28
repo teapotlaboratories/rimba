@@ -401,3 +401,29 @@ ESTAB is gated on #12 (AMPE). Bonus: reliable SAE convergence now unblocks captu
 received + verified board0's SAE frames on-air and advanced to Accepted), **not** yet a chronium `morse0`
 byte-capture of board0's frames — board0 is still out of chronium's RF range. To fully close: relocate
 board0 into chronium range and capture the SAE 4-frame exchange + reauth on `morse0`.
+
+### #13 verification (adversarial workflow) + hardening — "does it follow Linux?"
+
+Ran an adversarial verify→refute→synthesize workflow (5 dimensions, each grepped against chronite's
+actual hostap tree + the ESP source, then a skeptic tried to refute each). Verdict: the reauth **direction
+is faithful** (free on genuine restart == `ap_free_sta`; beacon-driven re-init; retransmit state→frame
+mapping all match), but the first cut was **NOT a line-by-line port** — it freed on **any** Commit (txn 1)
+in ACCEPTED, skipping hostap's `handle_auth_sae` validation envelope. The refute pass caught a subtle
+point the verify pass got wrong: hostap's reject paths (`reply:`/`remove_sta:`) do **not** free an MPM
+mesh peer (`added_unassoc` is false, ieee802_11.c:1657), so hostap **keeps** an ACCEPTED link on a
+malformed/reflected/status-bearing Commit — while the ESP tore it down. That made the unconditional free a
+real **single-frame link-flap / DoS** on an established secure link (a forged Commit spoofing the peer MAC
+flaps the link + invalidates its paths).
+
+**Hardening (follow hostap exactly).** Gate the reauth before `mesh_sae_reauth_free`: require
+`status==0` (== :1466) + a well-formed Commit for our group (length + group-id match, == :1457-1462) +
+non-reflection (received scalar‖element ≠ our cached commit's, == :1511). Only the well-formed, success,
+non-reflected Commit a genuine restart emits tears the link down; anything else is dropped with the link
+intact (matching hostap). **On-air re-verified (2026-06-28):** with the gate, chronite still reaches
+`SAE: State …→Accepted for peer e2:72:a1:f8:ef:a4` (×33) — the gate does NOT block genuine-restart
+recovery, so the deadlock fix is preserved. **Residual:** the gate does length/group/reflection but not the
+full `sae_parse_commit` crypto validation (scalar-in-range / element-on-curve) — a narrower crafted-garbage
+vector; tracked as a follow-up. Two adjacent divergences the workflow surfaced (pre-existing, tasks #14/#15):
+ACCEPTED+Confirm has no rc/0xffff anti-replay + big_sync (ESP↔ESP Confirm-storm risk); the MPM-Open
+SAE-start is ungated vs hostap's PLINK_OPEN + cached-PMKSA check (mesh_mpm.c:1257-1265). Code-map: § #13 in
+the security code-map.
