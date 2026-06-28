@@ -99,3 +99,42 @@ Details: [worklog 2026-06-27-mesh-security-phase1-keyinstall.md](../worklog/2026
 P2 then replaces the static keys with real AMPE-derived MTK + AES-SIV MIC (hostap `mesh_rsn.c`);
 P3 replaces the static PMK with SAE (`sae.c` + mbedTLS P-256); P4 adds IGTK/MFP. Each verified
 on-air against the live reference via chronium's monitor (`morse0`).
+
+## P3b — SAE FSM (per-peer Dragonfly handshake → PMK + PMKID)
+
+The Dragonfly crypto is hostap's compiled `src/common/sae.c`, reached through the `mesh_sae` shim
+(`src/hostap/mesh_sae.c`, P3a). `sae.c` is **pure crypto** — it never advances `sae->state`; the
+simultaneous-open **state machine** lives in `src/ap/ieee802_11.c` (`sae_sm_step` + `handle_auth_sae`)
+with the per-peer kick + key derivation in `wpa_supplicant/mesh_rsn.c`. P3b ports that FSM natively
+into `umac_mesh.c` (morselib has no wpa_supplicant). Every Linux line below was grep-verified
+2026-06-27 in this tree (`.../framework/src/hostap/`). ESP side = `.../morselib/src/umac/mesh/umac_mesh.c`.
+
+**Scope:** SAE runs alongside the P2 MPM/AMPE flow and is **not yet load-bearing** — AMPE still keys
+off the static `mesh_p2_pmk`. P3b's only output is `peer->pmk`/`peer->pmkid`; **P3c** does the PMK
+seam + the SAE-before-Open reorder.
+
+| ESP new code (`umac_mesh.c`) | Linux/hostap reference (file:line) | Notes |
+|---|---|---|
+| `mesh_sae_start` (:815) — alloc + build/send Commit → `COMMITTED` | `mesh_rsn.c:371` `mesh_rsn_auth_sae_sta` + `ieee802_11.c:1696` `auth_sae_init_committed` | Commit built **once**, bytes cached (build is destructive: `sae_set_group`→`sae_clear_data`) |
+| `mesh_sae_handle_rx` (:915) — parse + dispatch | `ieee802_11.c:1329` `handle_auth_sae` + `ieee802_11.c:990` `sae_sm_step` | mesh branches only |
+| ↳ lazy responder alloc on first Commit | `ieee802_11.c:1375-1390` | txn==1 + success only |
+| ↳ `COMMITTED`+Commit → process + Confirm → `CONFIRMED` | `ieee802_11.c:1074-1083` | the mesh "send Confirm" |
+| ↳ `CONFIRMED`+Commit → resend Commit + reprocess + Confirm | `ieee802_11.c:1121-1137` | resync (peer restart) |
+| ↳ `COMMITTED`+Confirm → resend Commit (body not validated) | `ieee802_11.c:1084-1097` (+ gate `:1584`) | mesh skips `check_confirm` < CONFIRMED |
+| ↳ `CONFIRMED`+Confirm → `check_confirm` + `get_keys` → `ACCEPTED` | `ieee802_11.c:1138-1140` + `sae_accept_sta` `:940`; PMK copy `:983` | **PMK/PMKID land here** |
+| ↳ `ACCEPTED`+Confirm → replay cached Confirm | `ieee802_11.c:1163-1172` | lets a stuck peer complete |
+| ↳ `ACCEPTED`+Commit → `mesh_sae_restart_in_place` (:897) | `ieee802_11.c:1144-1151` | **P3b divergence:** Linux `ap_free_sta`s; P3b re-derives in place (SAE not gating yet) |
+| `mesh_sae_tx_confirm` (:853) | `ieee802_11.c:756` `auth_sae_send_confirm` / `sae.c:2354` `sae_write_confirm` | caches bytes for ACCEPTED replay |
+| SAE retransmit in `umac_mesh_plink_tick` (~:1090) | `ieee802_11.c:861-895` `auth_sae_retransmit_timer` + `:904-913` `sae_set_retransmit_timer` | ~1 s, mesh-only, independent of MPM-Open retransmit |
+| `mesh_sae_check_big_sync` (:884) / `mesh_sae_big_sync_reset` (:868) | `ieee802_11.c:821-836` `sae_check_big_sync` | cap `MESH_SAE_SYNC_MAX=3` (== `conf->sae_sync`, strict `>`), 10 s lockout |
+| `mesh_sae_clear_temp` shim (`mesh_sae.c:152`) → `sae_clear_temp_data` | `ieee802_11.c:1169` | drop bignums at accept, keep pmk/pmkid |
+| `umac_mesh_handle_auth` (:1037) — find peer → drive FSM | `ieee802_11.c:3315-3334` (SAE case) | unknown-peer auth dropped (== `mesh_pending_auth` `:3160-3177`) |
+| `mesh_sae_start` at discovery: `mmwlan_mesh_peer_open` + `umac_mesh_handle_action` new-peer | `mesh_mpm.c:899` `mesh_rsn_auth_sae_sta` | **P3b keeps the Open at discovery** (`mesh_mpm.c:897` SEC_NONE shape); P3c reorders |
+| `peer->sae` free in `mesh_peer_free` | `sta_info.c:427-428` `sae_clear_data` + `os_free` | one site, all 5 teardown paths |
+| `mesh_sae_get_keys` → `peer->pmk`(32)/`pmkid`(16) | `sae.c:1637-1639`; `mesh_rsn_get_pmkid` `mesh_rsn.c:435` | 32/64 convention matches `mesh_derive_mtk`(32)/`_aek`(64) → P3c is a source swap |
+
+**Deferred to P3c/P3d (intentional divergences, flagged so the byte-diff isn't misread):** SAE-before-Open
+reorder + `pmk_valid` gating (`mesh_mpm.c:894-900`, `mesh_mpm_auth_peer` `:679-717`); the RX SAE-accept
+drop gate (`mesh_mpm.c:1272-1278`); real PMKID in the MPM IE + `chosen_pmk` check (`mesh_rsn.c:689-695`);
+the `sae->rc` send-confirm anti-replay (`ieee802_11.c:1599-1616`); H2E status path (126/127). PMKSA
+caching (`mesh_rsn.c:392-413`) is not ported (no `wpa_auth` PMKSA cache on morselib).
