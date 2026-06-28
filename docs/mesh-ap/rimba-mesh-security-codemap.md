@@ -138,3 +138,30 @@ reorder + `pmk_valid` gating (`mesh_mpm.c:894-900`, `mesh_mpm_auth_peer` `:679-7
 drop gate (`mesh_mpm.c:1272-1278`); real PMKID in the MPM IE + `chosen_pmk` check (`mesh_rsn.c:689-695`);
 the `sae->rc` send-confirm anti-replay (`ieee802_11.c:1599-1616`); H2E status path (126/127). PMKSA
 caching (`mesh_rsn.c:392-413`) is not ported (no `wpa_auth` PMKSA cache on morselib).
+
+## P3c — SAE PMK load-bearing (PMK seam + real PMKID + SAE-before-Open reorder)
+
+P3c moves the previously-deferred items above into the live path: the AMPE AEK + per-pair MTK derive from
+the SAE `peer->pmk`, the real SAE PMKID goes on-wire (reciprocal-checked), and the MPM Open is deferred
+until SAE accepts. All Linux lines below were grep-verified 2026-06-28 in this tree (`.../src/hostap/`).
+
+| ESP change (`umac_mesh.c`) | Linux/hostap reference (file:line) |
+|---|---|
+| `mesh_derive_mtk` reads `peer->pmk` (32 B) | `mesh_rsn.c:529` `sha256_prf(sta->sae->pmk, SAE_PMK_LEN, …)` |
+| `mesh_derive_aek` reads `peer->pmk` (PMK‖32 zeros = 64 B) | `mesh_rsn.c:468` `sha256_prf(sta->sae->pmk, sizeof=SAE_MAX_PMK_LEN=64, …)` |
+| delete static `mesh_p2_pmk` | — (Linux PMK is always `sta->sae->pmk`) |
+| `mesh_peer_alloc`: remove alloc-time AEK | AEK is in `mesh_rsn_init_ampe_sta` `mesh_rsn.c:536-544` (line 543), called from `mesh_mpm_auth_peer`, **not** at add_peer |
+| `mmwlan_mesh_peer_open`: SAE only, defer the Open (peer stays LISTEN) | `mesh_mpm.c:894-900` SEC_AMPE else-branch: `mesh_rsn_auth_sae_sta` with no `mesh_mpm_plink_open` |
+| SAE-accept hook: derive AEK + send first protected Open → OPN_SNT | `sae_accept_sta` `ieee802_11.c:940` → `WPA_AUTH` `wpa_auth.c:2318` → `auth_start_ampe` `mesh_rsn.c:127/141` → `mesh_mpm_auth_peer` `mesh_mpm.c:679-717` (Open at 716) |
+| `handle_action` `pmk_valid` gate (drop peering pre-SAE) | `mesh_mpm.c:1272-1278` (`sta->sae && state != SAE_ACCEPTED` → return) |
+| `build_peering`/`tx_peering`/`params` write `peer->pmkid`; placeholder deleted | `mesh_mpm.c:359-366` (`mesh_rsn_get_pmkid` into the Open) + `mesh_rsn.c:435-438` (copies `sta->sae->pmkid`) |
+| `mesh_parse_peering_ie` emits advertised PMKID; `handle_action` reciprocal `memcmp` (drop-only) | `mesh_rsn.c:689-695` (`chosen_pmk` vs `sta->sae->pmkid`, PMKID_LEN → return −1) |
+| `mesh_sae_reauth_free` (ACCEPTED+Commit → free + invalidate paths) | `ieee802_11.c:1144-1151` `ap_free_sta`, `*sta_removed=1` |
+| MTK derive at ESTAB edge (`umac_mesh_peer_secure_estab`) | `mesh_mpm.c:1062-1066` / `:1090-1096` (`if SEC_AMPE mesh_rsn_derive_mtk` then `plink_estab`) |
+| `peer->retries=0` on auth-frame RX (asymmetric-timing fix) | (ESP-specific: keeps the faster peer's MPM budget alive while the slower side finishes SAE) |
+
+**On-air verified (2026-06-28):** direct-peer encrypted ping 33/33 replies on the SAE-derived MTK; all
+pairs ESTAB `pmk_valid=1/nonce_ok=1/mgtk_ok=1` with byte-identical SAE PMKIDs; tshark shows the MPM IE
+PMKID is the SAE value (not the placeholder). The multi-hop **unicast relay** ping remains a separate
+pre-existing follow-up (`umac_mesh_forward_data` needs the next-hop pairwise MTK). **Next: P3d**
+(ESP↔live-Linux SAE byte-diff + cross-vendor PMK/PMKID agreement).

@@ -170,3 +170,60 @@ exceed the instance resets to `NOTHING` and is disabled 10 s (`sae_check_big_syn
 
 **Next:** P3c — feed `peer->pmk` into `mesh_derive_mtk/_aek`, put the real `peer->pmkid` in the MPM IE,
 reorder SAE-before-Open (gate the Open on `pmk_valid`), then P3d gold-standard ESP↔live-Linux SAE.
+
+## P3c — SAE PMK made load-bearing: PMK seam + real PMKID + SAE-before-Open reorder
+
+P3c flips SAE from observational (P3b) to **load-bearing**: the AMPE AEK + per-pair MTK now derive from
+the SAE-negotiated `peer->pmk`, the real SAE PMKID goes on-wire in the MPM IE (reciprocal-checked on RX),
+and the MPM Open is **deferred until SAE accepts** — converging to the Linux secure-mesh shape (discover →
+SAE only → on accept derive AEK + send the protected Open → MPM/AMPE → ESTAB, MTK from the SAE PMK). The
+static `mesh_p2_pmk` and the placeholder PMKID are deleted.
+
+**Designed via a recon→design→adversarial-review workflow.** The review caught three real issues folded
+into the implementation (not in the first design): (1) the P3b in-place SAE-reauth desyncs keys under a
+per-handshake PMK — replaced with hostap's **free-and-restart** (`mesh_sae_reauth_free` == `ap_free_sta`,
+ieee802_11.c:1144-1151); (2) the AEK must be derived **inside** the `state==LISTEN` guard so a reauth
+can't swap the AEK out from under an installed MTK; (3) asymmetric SAE-finish timing could time out the
+faster peer's MPM budget — fixed by resetting `peer->retries` on every auth-frame RX.
+
+### What landed (`umac_mesh.c`)
+- **PMK seam:** `mesh_derive_mtk` reads `peer->pmk` (32 B); `mesh_derive_aek` reads `peer->pmk` (PMK ‖ 32
+  zeros = 64 B). The 32/64 convention is unchanged — only the source moves off the deleted static PMK.
+- **PMKID seam:** `mesh_peering_params += pmkid`; `tx_peering` / `build_peering` write `peer->pmkid`
+  (placeholder deleted); `mesh_parse_peering_ie` emits the advertised PMKID; `handle_action` adds the
+  **reciprocal check** (`memcmp(adv, peer->pmkid)` — drop-frame-only on mismatch, == mesh_rsn.c:689-695),
+  hardened to also drop an AMPE Open/Confirm with no PMKID.
+- **Reorder:** alloc-time AEK removed; `mmwlan_mesh_peer_open` starts SAE with **no Open** (peer stays
+  LISTEN); the SAE-accept hook derives the AEK from `peer->pmk` and sends the first protected Open →
+  OPN_SNT (== `mesh_mpm_auth_peer` mesh_mpm.c:716); `handle_action` gains the **`pmk_valid` gate** (drop
+  peering until SAE accepted, == mesh_mpm.c:1272-1278). MTK installs at ESTAB from `peer->pmk`.
+
+### On-air verification — DONE + PROVEN (2026-06-28, board0/board1/board2, chronium monitor)
+Diagnosed with TEMP `printf` traces (P3a-style, no INF flood — reverted before commit):
+- **SAE load-bearing for the datapath (decisive):** with board1 pointed at its **direct** peer board0,
+  `reply from 10.9.9.136: seq=1..33` — **33/33 encrypted ICMP replies (~18-35 ms, 0% loss after warmup)**.
+  The unicast MTK = `sha256_prf(peer->pmk, …)`, so a working encrypted ping proves the SAE PMK feeds AMPE
+  + CCMP end-to-end.
+- **All pairs ESTAB on the SAE PMK:** board0↔board1 and board0↔board2 both reach ESTAB with
+  `pmk_valid=1 nonce_ok=1 mgtk_ok=1`; SAE PMKIDs are byte-identical per pair (board0↔board1
+  `54f7af73…4826e6d8`, board0↔board2 `7289a11c…1a723436`); the reciprocal PMKID check passes (`match=1`),
+  AMPE verify passes (no failures).
+- **PMKID seam on-air (tshark):** the Mesh Peering Management IE (117) now carries **SAE PMKIDs**
+  (`58e45457…`, `811b01d2…`), **not** the old placeholder `52494d42…` ("RIMBA-MESH-PMKID").
+- **Reorder on-air:** the SAE auth (Commit/Confirm) exchange precedes the MPM Open on each link; the Open
+  is emitted only after SAE accept.
+
+**Scope note — the multi-hop relay ping is a *separate, pre-existing* open item, not a P3c regression.**
+The relay topology (board1 → board2 via board0) times out because the **unicast relay forward**
+(`umac_mesh_forward_data`) still needs the next-hop **pairwise** MTK — a follow-up flagged before P3c. P3c
+only changed the per-link keying/ordering, which the direct-peer encrypted ping confirms works. (A
+verification-build caveat carries over from P3b: the committed `MMLOG_INF` proof lines are
+`printf_blackhole` no-ops at the default `MMLOG_LEVEL=ERR`; raising MMLOG globally crash-loops the boards
+via an interrupt-WDT timeout from the log flood, so proofs are captured with targeted printf, reverted.)
+
+**Code-map:** function-level new-code↔Linux map in
+[`docs/mesh-ap/rimba-mesh-security-codemap.md`](../mesh-ap/rimba-mesh-security-codemap.md) (§ P3c).
+
+**Next:** P3d — ESP joins a LIVE Linux SAE+AMPE mesh; byte-diff the ESP Commit/Confirm vs a real Linux
+peer and confirm cross-vendor dragonfly PMK/PMKID agreement + encrypted ICMP ESP↔Linux. (Plus the
+deferred unicast-relay-forward next-hop-MTK follow-up.)
