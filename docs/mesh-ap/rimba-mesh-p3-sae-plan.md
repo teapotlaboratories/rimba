@@ -119,10 +119,17 @@ live Linux peer chronite: ESP↔Linux SAE→AMPE→ESTAB** (chronite: `Decrypted
 plink … established`, `iw station: ESTAB/authorized=yes`; board0 sends a Confirm — never did pre-#16).
 This was the load-bearing P3d blocker. See worklog + code-map § #16.
 
-**Still open:** (a) **task #17** — the encrypted **DATA path** (ICMP ping): plink is ESTAB but board0's
-ping to chronite times out; broadcast ARP (group MGTK) + unicast (pairwise MTK) cross-vendor CCMP untested
-(ESP↔ESP data works, P3c 33/33). This is the final piece for the stated end-to-end encrypted ESP↔Linux
-ICMP. (b) on-air `morse0` byte-capture (board0 RF range). (c) hardening #14/#15 + the #13 residual.
+**task #17 — encrypted DATA path: NARROWED (keys agree → it's the data-frame CCMP format, not keys).**
+plink ESTAB but board0's ping to chronite times out. Runtime key compare (board0 KEYDBG vs chronite `-K`
+log, same peering): the pairwise **MTK** (`3da23412..`) AND the group **MGTK** (`0d2fe61f..`) are **identical
+cross-vendor**, yet encrypted data fails both ways (ping 0/26, chronite tcpdump sees no decrypted ARP/ICMP).
+⇒ the blocker is the mesh-**DATA CCMP frame format** — almost certainly the same S1G↔11n representation gap
+as the #16 AMPE MIC, now for a DATA frame's CCMP AAD (4-addr mesh header / mesh-control / QoS). ESP↔ESP data
+works (both S1G). **Next:** does morse Linux do mesh-data CCMP in HW (over S1G) or mac80211 SW (over 11n)?
+what header bytes does its CCMP AAD cover vs the ESP/MM6108? then align (a #16-style fix). See worklog § #17.
+
+**Still open:** (a) **task #17** above (the final piece for end-to-end encrypted ESP↔Linux ICMP).
+(b) on-air `morse0` byte-capture (board0 RF range). (c) hardening #14/#15 + the #13 residual.
 
 chronosalt/chronogen run `wpa_supplicant_s1g` (`sae_password='rimbamesh2026'`, group 19,
 `dtim_period=1`; NOT `iw mesh join`). Match group/H2E/AKM(`00-0f-ac-08`)/mesh_id/channel/password.
