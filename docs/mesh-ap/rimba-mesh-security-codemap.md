@@ -204,3 +204,17 @@ Confirmed→Accepted`, was deadlocked at "SAE not yet accepted"); the hardening 
 genuine-restart recovery (chronite still reaches Accepted ×33). The remaining re-cycle is the #12 AMPE MIC
 blocker (board0 sends only Open, never Confirm, never ESTAB). On-air `morse0` byte-capture of board0 frames
 pending (board0 RF range).
+
+## #16 — AMPE MIC AAD canonicalisation (S1G→11n, aad-prefix-only)
+
+| New code (`umac_mesh.c`) | morse driver / hostap counterpart |
+| --- | --- |
+| `#define WLAN_EID_SUPP_RATES (1)` + the AAD-canonicalisation note | the IE hostap's 11n view has first (`WLAN_EID_SUPP_RATES`) |
+| RX: `mesh_process_ampe` copies `body[0:6]`→`aad2`, and for `action==WLAN_SP_MESH_PEERING_OPEN` sets `aad2[4]=1, aad2[5]=8` | driver `morse_dot11ah_s1g_to_11n_rx_packet` strips S1G caps + force-inserts legacy Supported Rates (EID 1, len 8) as the first IE before hostap (`morse_driver/mac.c:6628`); hostap MICs over that 11n body |
+| TX: `umac_mesh_build_peering` AMPE protect, after the `aad2` copy, `if (is_open) aad2[4]=1, aad2[5]=8` | symmetric: the peer's driver reconstructs the 11n body on RX, so our SIV must bind to `01 08`; reverse 11n→S1G TX conversion in the driver |
+| CONFIRM: no substitution (gate `action==OPEN`) — its `body[4:5]` is the AID, a fixed field | hostap CONFIRM AAD window = cat/action/cap/AID; first IE at body[6], outside the 6-byte window |
+
+**Verified (2026-06-28, live Linux peer chronite):** ESP↔Linux SAE→AMPE→ESTAB — chronite logs
+`mesh: Decrypted AMPE element` both ways + `mesh plink … established` + `iw station: mesh plink ESTAB,
+authorized: yes`; board0 sends a Confirm (never did pre-#16). Cross-vendor encrypted mesh peering works.
+**Open:** the encrypted DATA path (ICMP ping) — task #17 (group MGTK + pairwise MTK cross-vendor CCMP).

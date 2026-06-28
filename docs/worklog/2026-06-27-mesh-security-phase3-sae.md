@@ -462,3 +462,41 @@ needed so morselib computes the mesh self-protected-action AMPE MIC over the **1
 (RX: S1G→11n before the AAD/verify; TX: build/MIC in 11n, emit S1G), matching `morse_dot11ah_s1g_to_11n_*`.
 Derive from `morse_driver` (`dot11ah` lib) per the follow-Linux directive. Until then: no encrypted
 ESP↔Linux ICMP. (board0 holds a diagnostic interop binary in flash; repo reverted clean.)
+
+## #16 — cross-vendor AMPE MIC FIXED: ESP↔Linux encrypted mesh peering ESTAB
+
+The #12 root cause (the AMPE AES-SIV MIC AAD differs S1G-vs-11n) was fixed with a minimal,
+spec-driven change (an investigate→design workflow read the morse `dot11ah` driver source and proved the
+scope is **aad-prefix-only**). The morse driver, on RX, converts the S1G frame to 11n before mac80211/
+hostap and force-inserts a legacy **Supported Rates** IE (EID 1, len 8) as the first IE
+(`morse_dot11ah_s1g_to_11n_rx_packet`); so hostap's 6-byte MIC AAD has `body[4:5] = 01 08`, while the ESP's
+on-air S1G OPEN has the S1G-caps vendor IE there (`body[4:5] = dd 0e`). Fix: **canonicalise the OPEN AAD's
+`body[4:5]` to `01 08`** — a 2-byte substitution applied symmetrically on TX (`umac_mesh_build_peering`
+AMPE protect, gated by `is_open`) and RX (`mesh_process_ampe`, gated by `action==OPEN`), plus a local
+`#define WLAN_EID_SUPP_RATES (1)`. CONFIRM's 6-byte window is all fixed fields (cat/action/cap/AID) so its
+`body[4:5]` is the AID — **not** substituted (the gate is essential); CLOSE carries no MIC. The AMPE
+ciphertext/SIV are keyed only by the AEK and were already byte-identical to a Linux peer, so only the AAD
+the tag binds to changes. No full frame conversion — the ciphertext is representation-independent.
+
+**Verified on the LIVE Linux node (chronite, 2026-06-28).** After flashing board0 with the fix and reviving
+chronite (the repeated rapid restarts had wedged its `wlan1` morse driver — `Failed to initialize driver
+interface`; fixed by `modprobe -r morse; modprobe morse` + interface reset → `MESH-GROUP-STARTED`),
+board0 ↔ chronite now complete the **full encrypted peering**:
+- board0 sends a **Confirm (PLINK action 2)** — it never did before #16 (it could not verify chronite's
+  Open AMPE, so it never advanced past Open).
+- chronite logs **`mesh: Decrypted AMPE element`** (×2) — the AES-SIV MIC **verifies both directions**.
+- **`wlan1: mesh plink with e2:72:a1:f8:ef:a4 established`** → **`MPM … into ESTAB`**; `iw station dump`:
+  **`mesh plink: ESTAB, authorized: yes`** — a stable single peering (counts 1–2, no re-SAE loop).
+
+So the **cross-vendor encrypted 802.11s mesh peering (SAE → AMPE → ESTAB) between an ESP and a live Linux
+HaLow node works.** This was the load-bearing P3d blocker.
+
+**Still open — the encrypted DATA path (ICMP ping), a separate layer (new task #17).** board0's ping to
+chronite (`10.9.9.2`) still times out though the plink is ESTAB/authorized: board0 has no static ARP, so it
+relies on broadcast ARP (group MGTK) to resolve chronite, then unicast (pairwise MTK). The cross-vendor
+CCMP **data** path (group + pairwise) is untested and is the next blocker for an end-to-end encrypted
+ESP↔Linux ping — distinct from the AMPE peering MIC fixed here. (ESP↔ESP data already works — P3c 33/33.)
+
+**On-air note:** verified via the live Linux node's own state machine + crypto (it decrypted the ESP's
+AMPE element and authorized the plink) — strong cross-vendor evidence; the chronium `morse0` byte-capture
+remains pending (board0 RF range), same standing gap.
