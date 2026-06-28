@@ -119,17 +119,19 @@ live Linux peer chronite: ESP↔Linux SAE→AMPE→ESTAB** (chronite: `Decrypted
 plink … established`, `iw station: ESTAB/authorized=yes`; board0 sends a Confirm — never did pre-#16).
 This was the load-bearing P3d blocker. See worklog + code-map § #16.
 
-**task #17 — encrypted DATA path: NARROWED (keys agree → it's the data-frame CCMP format, not keys).**
-plink ESTAB but board0's ping to chronite times out. Runtime key compare (board0 KEYDBG vs chronite `-K`
-log, same peering): the pairwise **MTK** (`3da23412..`) AND the group **MGTK** (`0d2fe61f..`) are **identical
-cross-vendor**, yet encrypted data fails both ways (ping 0/26, chronite tcpdump sees no decrypted ARP/ICMP).
-⇒ the blocker is the mesh-**DATA CCMP frame format** — almost certainly the same S1G↔11n representation gap
-as the #16 AMPE MIC, now for a DATA frame's CCMP AAD (4-addr mesh header / mesh-control / QoS). ESP↔ESP data
-works (both S1G). **Next:** does morse Linux do mesh-data CCMP in HW (over S1G) or mac80211 SW (over 11n)?
-what header bytes does its CCMP AAD cover vs the ESP/MM6108? then align (a #16-style fix). See worklog § #17.
+**task #17 — DONE: ENCRYPTED ESP↔Linux ICMP WORKS = the P3d goal.** Keys agreed (MTK/MGTK byte-identical)
+and the open mesh worked, so it was neither keys nor the CCMP-AAD. A workflow found it: morselib has no
+group-addressed robust-mgmt TX path — `umac_datapath_tx_mgmt_frame` DROPS BC/MC robust-mgmt when PMF is
+required (umac_datapath.c:2230-2237, the infra BIP case), so the broadcast HWMP PREQ/PERR was silently
+dropped in a secured mesh → board0 never originated a path → Linux mpath stayed RESOLVING. Fix: route a
+group/broadcast-DA HWMP through the existing MGTK group-key path (`umac_datapath_tx_mesh_group_frame`);
+unicast PREP stays pairwise. **Verified on-air: board0↔chronite encrypted ICMP 0/26 → 5/5; chronite mpath
+RESOLVING → ACTIVE/RESOLVED.** Full cross-vendor encrypted mesh: SAE→AMPE→ESTAB(#16)→HWMP→CCMP→ping. See
+worklog + code-map § #17.
 
-**Still open:** (a) **task #17** above (the final piece for end-to-end encrypted ESP↔Linux ICMP).
-(b) on-air `morse0` byte-capture (board0 RF range). (c) hardening #14/#15 + the #13 residual.
+**Still open:** (a) **task #18** — RX PREP (board0 answer Linux's encrypted broadcast PREQ → no-static-ARP
+dynamic join). (b) **task #19** — encrypt the unicast mesh relay path. (c) on-air `morse0` byte-capture
+(board0 RF range). (d) hardening #14/#15 + the #13 residual.
 
 chronosalt/chronogen run `wpa_supplicant_s1g` (`sae_password='rimbamesh2026'`, group 19,
 `dtim_period=1`; NOT `iw mesh join`). Match group/H2E/AKM(`00-0f-ac-08`)/mesh_id/channel/password.
