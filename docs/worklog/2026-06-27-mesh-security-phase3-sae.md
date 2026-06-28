@@ -292,3 +292,77 @@ ESP↔ESP, never against real Linux. No encrypted ESP↔Linux ICMP yet; that wai
 CLOSE/HOLDING stability, re-auth→retransmit-Confirm). The `MESH_LINUX_INTEROP` A/B flag in `app_main.c`
 and all `SAEDBG`/`MPMDBG` scaffolding were reverted. **Code-map:** § P3d in
 [`docs/mesh-ap/rimba-mesh-security-codemap.md`](../mesh-ap/rimba-mesh-security-codemap.md).
+
+## P3d (continued) — AMPE AES-SIV MIC: crypto model offline-validated vs hostap; blocker narrowed
+
+The post-SAE blocker (board0's AES-SIV MIC verify of chronite's MPM Open fails) was **de-risked
+analytically** before more bench churn. Method: extract chronite's own ground truth from its
+`wpa_supplicant_s1g -dd -K` log (it dumps `SAE: PMK`, the MPM frame, the plaintext + encrypted AMPE
+element), then **replay it offline** through a known-correct AES-SIV (pycryptodome `MODE_SIV`, first
+checked against the RFC 5297 §A.1 KAT). Script: `docs/mesh-ap/ampe-siv-validate.py`.
+
+**Result — the entire ESP AMPE crypto model is byte-correct vs hostap.** Using chronite's logged PMK
+`8c8110bc…` for the peering at log line 4009 and its transmitted Confirm-bearing frame, the offline
+oracle reproduces chronite's encrypt exactly:
+- **AEK** = `sha256_prf(PMK‖32 zeros [64 B], "AEK Derivation", AKM_SAE(00 0f ac 08) ‖ min(MAC) ‖ max(MAC))`.
+  (HMAC zero-pads a 32-B key to 64, so `PMK‖zeros` ≡ `PMK` — the 64-vs-32 question is moot; both yield
+  the same AEK, and the ESP's `pmk64` is correct.)
+- **AAD** = `{ own_MAC, peer_MAC, cat6 }` in that order, where `cat6` = the **first 6 action-body bytes**
+  (`0f 03 72 0a 72 69` = category, action, then the Mesh ID IE's `EID/len/'r'/'i'`). Every other AAD
+  ordering or `cat` length **fails** the verify — only this one passes, recovering the logged plaintext
+  `8b 44 00 0f ac 04 …`.
+- **AES-SIV** key length 32 (AES-128-SIV); `crypt` = `SIV(16) ‖ ciphertext`.
+
+The ESP source (`mesh_derive_aek`, `mesh_process_ampe`'s `aad = {sa, mesh_ctx.mesh_mac, body}` +
+`crypt = &body[mic_off+2]`) **matches this validated model line-for-line**. And `mmint_aes_siv_*` is
+hostap's own `src/crypto/aes-siv.c` compiled into the morse lib (per the extern's comment) — i.e. the
+same reference the oracle confirmed. So the AES-SIV algorithm, the AEK derivation, and the AAD are **not**
+the bug.
+
+**Blocker therefore narrowed to board0's *runtime* AES-SIV inputs** — i.e. whether, on the live RX frame,
+board0's `peer->aek`, `body[0:6]`, and reconstructed `crypt` are the bytes the model expects. Capturing
+that needs a one-shot `AMPEDBG` dump (added in `mesh_process_ampe`, reverted after) during a *completed*
+ESP↔Linux SAE→AMPE exchange — and that exchange is the bottleneck (next paragraph). The dump fired
+**once** (board0 did reach `mesh_process_ampe` on chronite's Open), but a clean capture needs the SAE to
+converge reliably.
+
+**NEW finding — cross-vendor SAE re-sync deadlock (blocks reliable AMPE testing; dynamic-join concern).**
+After a one-sided restart, the bench wedges in a repeatable state: board0 **accepts SAE and races to the
+MPM Open**, while chronite stays `MPM: SAE not yet accepted for peer` and just drops the Opens. Neither
+re-prompts: chronite won't re-send its Commit, and board0 (ACCEPTED) only retransmits its Confirm *in
+response to* a Commit — so board0's Confirm, if lost once, is never re-offered and chronite waits forever.
+The earlier breakthrough run converged by frame-timing luck; the steady state can deadlock. This is the
+same class as task #9 (dynamic device join) — a robust ESP should retransmit its SAE Confirm while
+ACCEPTED-but-not-yet-ESTAB, not only on a received Commit. (USB-CDC also drops on RTS-reset and on heavy
+per-byte `printf` in the beacon-TX/irq context — dump via one prebuilt-buffer `printf`, and reset by
+reflashing, not RTS.)
+
+**Status:** P3d's headline (cross-vendor SAE) is committed and the AMPE crypto is proven correct on paper
+against the live Linux peer; the remaining work is (1) make cross-vendor SAE converge deterministically
+(fix the re-sync deadlock), then (2) capture board0's runtime `AMPEDBG` and diff vs
+`ampe-siv-validate.py`. No encrypted ESP↔Linux ICMP yet.
+
+### ⚠ On-air verification GAP (P3d AMPE crypto) — NOT yet satisfied
+
+The P3d AMPE-crypto result above is **offline-validated only** — against chronite's *own*
+`wpa_supplicant_s1g -dd -K` log (the transmitter's claim of what it sent) + the RFC 5297 KAT, replayed
+through pycryptodome. It is **NOT** independently confirmed on chronium's `morse0` monitor, so per
+[[verify-onair-chronium-monitor]] (logs/replay are not sufficient; the gold standard is the actual
+on-air bytes byte-diffed against a live Linux device) this finding is **pending on-air confirmation**.
+
+Attempted the chronium capture (2026-06-28) and confirmed three concrete blockers (evidence, not
+assumption — 30 s `morse0` capture, raw-hex MAC presence):
+- **board0 (`e272…efa4`) = 0 frames** on chronium, while **chronite (`3c22…5138`) = 297** and
+  **board1 (`…f9:40`) = 310**. chronium is on the right channel (it hears the Linux node) but board0 is
+  **out of chronium's RF range** — chronite hears board0 (short hop) but chronium does not. The earlier
+  ESP↔ESP on-air diffs worked only because those boards sat in chronium's range.
+- **chronite is SAE-deadlocked** (re-sync deadlock, this worklog) → it emits **no fresh AMPE frame** to
+  capture until SAE converges.
+- **stock tshark mis-parses S1G self-protected action frames** (8 of 896 decoded as mgmt) → a byte-diff
+  needs raw-hex extraction (`tcpdump -xx` + manual parse), not `tshark -Y`.
+
+**To close (fold into #12/#13):** fix the SAE re-sync deadlock so chronite transmits a real AMPE Open →
+place board0 within chronium's RF range → capture that frame on `morse0` → byte-diff vs (a) chronite's
+`-K` log and (b) board0's runtime RX inputs. That single capture yields BOTH the on-air confirmation and
+the runtime board0 input check (#12) at once. Until then: AMPE crypto = "offline-validated vs hostap",
+**not** "on-air verified".
