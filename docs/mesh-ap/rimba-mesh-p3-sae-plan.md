@@ -89,9 +89,16 @@ the live `wpa_supplicant_s1g` SAE node. Two beacon fixes (Mesh-Config auth byte 
 chronite to accept the ESP as a candidate and run SAE; three SAE-lifetime fixes (keep `sta->sae` across
 CLOSE/HOLDING, re-auth→retransmit-Confirm) cracked the cross-vendor thrash → **board0 and chronite derive
 the byte-identical PMKID `855627ac3141c41d7e75f0e269d10283`** (the H2E/group/password risks below did
-**not** bite — group 19 + `sae_pwe=0` matched first try). **Still open:** post-SAE AMPE — board0's
-AES-SIV MIC verify of chronite's MPM Open fails (cross-vendor AAD/SIV detail); no encrypted ESP↔Linux ICMP
-yet. See worklog § P3d + code-map § P3d.
+**not** bite — group 19 + `sae_pwe=0` matched first try). **AMPE crypto: PROVEN CORRECT vs hostap** —
+the AMPE AES-SIV model (AEK = `sha256_prf(PMK64,"AEK Derivation",AKM‖min‖max)`, AAD = `{own,peer,cat6}`,
+cat6 = first-6 action-body bytes) was offline-validated by replaying chronite's own logged PMK + AMPE
+frame through pycryptodome (`docs/mesh-ap/ampe-siv-validate.py`, VERIFIED PASS); the ESP source matches
+line-for-line and `mmint_aes_siv_*` IS hostap's `aes-siv.c`. **Still open:** (a) capture board0's
+*runtime* `AMPEDBG` AES-SIV inputs during a completed SAE→AMPE and diff vs the validator — gated on (b) a
+**cross-vendor SAE re-sync deadlock** (board0 accepts SAE + races to MPM Open while chronite stays "SAE
+not yet accepted"; neither re-prompts — board0 should retransmit its Confirm while ACCEPTED-but-not-ESTAB,
+a dynamic-join robustness fix tied to task #9). No encrypted ESP↔Linux ICMP yet. See worklog § P3d
+(continued).
 
 chronosalt/chronogen run `wpa_supplicant_s1g` (`sae_password='rimbamesh2026'`, group 19,
 `dtim_period=1`; NOT `iw mesh join`). Match group/H2E/AKM(`00-0f-ac-08`)/mesh_id/channel/password.
