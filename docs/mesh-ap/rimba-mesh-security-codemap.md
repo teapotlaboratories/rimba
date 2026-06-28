@@ -165,3 +165,22 @@ pairs ESTAB `pmk_valid=1/nonce_ok=1/mgtk_ok=1` with byte-identical SAE PMKIDs; t
 PMKID is the SAE value (not the placeholder). The multi-hop **unicast relay** ping remains a separate
 pre-existing follow-up (`umac_mesh_forward_data` needs the next-hop pairwise MTK). **Next: P3d**
 (ESP↔live-Linux SAE byte-diff + cross-vendor PMK/PMKID agreement).
+
+## P3d — ESP ↔ live-Linux SAE interop (cross-vendor beacon + SAE lifetime)
+
+Verified against chronite's reference trees (`~/halow/rpi-linux` kernel `net/mac80211/mesh.c`,
+`~/halow/hostap` `src/ap/*`). Every line below was `grep`-confirmed in those trees, not recalled.
+
+| New code (`umac_mesh.c`, unless noted) | Linux / hostap counterpart |
+| --- | --- |
+| `mesh_build_config_ie`: Mesh-Config Authentication-Protocol byte `0x00`→`0x01` (SAE) | Beacon emits `*pos++ = ifmsh->mesh_auth_id;` `net/mac80211/mesh.c:291`; candidacy gate compares it `mesh_matches_local` `mesh.c:87` (`ifmsh->mesh_auth_id == ie->mesh_config->meshconf_auth`) |
+| `umac_mesh_build_beacon`: prepend `mesh_rsn_ie` (CCMP-128 group+pairwise, AKM 8 = SAE) before Mesh ID; `mesh_rsn_ie`+`DOT11_IE_RSN(48)` moved above the builder | `mesh_add_rsn_ie` `net/mac80211/mesh.c:374`, emitted into the beacon at `mesh.c:1108`; candidacy at `mesh.c:1501` |
+| `handle_action` CLOSE while `state!=ESTAB && (sae||pmk_valid)`: reset plink→LISTEN, **keep** SAE/PMK, re-Open if AEK ready (no free) | Linux keeps `sta->sae` across plink resets; SAE freed **only** in `ap_free_sta` `hostap/src/ap/sta_info.c:427-428` (`sae_clear_data(sta->sae); os_free(sta->sae);`) — a CLOSE/HOLDING never destroys it |
+| `umac_mesh_plink_tick` OPN_SNT retries-exhausted: `pmk_valid` peer resets retries + re-Opens instead of CLOSE→HOLDING→free | same SAE-lifetime invariant — the dragonfly survives MPM retransmission; only `ap_free_sta` (`sta_info.c:427-428`) frees it |
+| ACCEPTED+Commit retransmits cached `peer->sae_confirm` (`mesh_sae_reauth_free` deleted) | hostap answers a retransmitted commit; temp-only reset is `sae_clear_temp_data(sta->sae)` `ieee802_11.c:1166`, **not** a full free |
+
+**On-air verified (2026-06-28):** with the beacon fixes, chronite (`3c:22:7f:37:51:38`) accepts the ESP as
+a mesh candidate and runs SAE; with the SAE-lifetime fixes, board0 and chronite derive the **byte-identical
+PMKID `855627ac3141c41d7e75f0e269d10283`** (confirm mismatch = 0) — cross-vendor dragonfly agreement.
+**Open (next):** post-SAE AMPE — board0's AES-SIV MIC verify of chronite's MPM Open fails
+(cross-vendor AAD/SIV detail); no encrypted ESP↔Linux ICMP yet.

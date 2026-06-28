@@ -227,3 +227,68 @@ via an interrupt-WDT timeout from the log flood, so proofs are captured with tar
 **Next:** P3d — ESP joins a LIVE Linux SAE+AMPE mesh; byte-diff the ESP Commit/Confirm vs a real Linux
 peer and confirm cross-vendor dragonfly PMK/PMKID agreement + encrypted ICMP ESP↔Linux. (Plus the
 deferred unicast-relay-forward next-hop-MTK follow-up.)
+
+## P3d — ESP ↔ live-Linux SAE interop (cross-vendor dragonfly agreement)
+
+**Goal.** The gold standard from the porting directive: not "ESP↔ESP agree", but "ESP agrees with a
+*real Linux* HaLow SAE peer". Bench: **chronite** (Pi, HaLow MAC `3c:22:7f:37:51:38`, `~/halow/rpi-linux`
+kernel + `~/halow/hostap`) brought up as a live `wpa_supplicant_s1g` mesh node — `ssid=rimba-mesh`,
+`key_mgmt=SAE`, `sae_pwe=0`, `sae_groups=19`, `op_class=68 channel=27`, `sae_password=rimbamesh2026`,
+`dtim_period=1` — sharing the air with board0. (chronite's SSH rides `wlan0`; only the `wlan1` s1g
+supplicant is ever killed.)
+
+**Two blockers found and fixed; one remains.**
+
+**(1) chronite never treated the ESP as a candidate.** Linux's `mesh_matches_local`
+(`net/mac80211/mesh.c:62`) gates candidacy on, among other fields, the beacon's **mesh authentication
+protocol identifier** (`ifmsh->mesh_auth_id == ie->mesh_config->meshconf_auth`, `mesh.c:87`) — and a
+secured mesh additionally needs an **RSN IE** in the beacon. The ESP beacon was advertising
+`meshconf_auth = 0x00` (Open) and carried **no** RSN IE, so chronite silently rejected it. Two beacon
+fixes:
+- `mesh_build_config_ie`: the Mesh Configuration IE's Authentication Protocol byte `0x00` → **`0x01`**
+  (SAE). This is the byte Linux emits at `mesh.c:291` (`*pos++ = ifmsh->mesh_auth_id;`) and compares at
+  `mesh.c:87`.
+- `umac_mesh_build_beacon`: prepend the **RSN IE** (`mesh_rsn_ie`, group+pairwise CCMP-128, AKM 8 = SAE)
+  before the Mesh ID, mirroring Linux `mesh_add_rsn_ie` (`mesh.c:374`, emitted into the beacon at
+  `mesh.c:1108`). The `mesh_rsn_ie` blob + `DOT11_IE_RSN(48)` had to move **above** the beacon builder
+  (it was defined later in the file, after its first use).
+
+After (1) chronite accepts the ESP and **runs SAE** with it (Commit/Confirm exchanged on-air).
+
+**(2) cross-vendor SAE thrashed — confirm never matched.** Both sides simultaneous-open; both kept
+**restarting their commit**, so the send-confirm counters never lined up and the confirm hash never
+verified. Root cause, traced with targeted `SAEDBG`/`MPMDBG` printf (reverted): board0 was **destroying
+its SAE session on every MPM CLOSE/HOLDING**. While the ESP finished the AMPE side, chronite's plink FSM
+floods CLOSE (action 3) — and the ESP's old CLOSE/HOLDING paths freed the peer **and its `sae`**, so the
+next beacon started a *fresh* commit, resetting the dragonfly. Linux never does this: `sta->sae` lives in
+the station and is freed **only** in `ap_free_sta` (`hostap/src/ap/sta_info.c:427-428`), not on a plink
+reset. Fixes, matching that lifetime:
+- **CLOSE while mid-SAE / PMK-valid no longer tears down the SAE.** `handle_action`'s CLOSE branch, when
+  `peer->state != ESTAB && (peer->sae || peer->pmk_valid)`, now resets the *plink* to LISTEN, keeps the
+  SAE/PMK intact, and re-fires the protected Open if the AEK is ready — instead of invalidating + freeing.
+- **HOLDING/retries-exhausted keeps a PMK-valid peer alive** (`umac_mesh_plink_tick`): rather than CLOSE→
+  HOLDING→free, a `pmk_valid` peer resets its retry budget and re-sends the Open.
+- **Re-auth retransmits the cached Confirm instead of freeing.** The ACCEPTED-state Commit case (a peer
+  that already finished SAE seeing a duplicate Commit) now retransmits `peer->sae_confirm` if present,
+  rather than the old free-and-restart (`mesh_sae_reauth_free`, deleted) — Linux answers a retransmitted
+  commit, it doesn't reset.
+
+**Result — cross-vendor SAE CRACKED.** board0 and chronite derive **byte-identical PMKIDs**
+(`855627ac3141c41d7e75f0e269d10283` on both consoles) and the confirm mismatch count dropped from
+constant to **zero**. This is the P3d headline: an ESP and a real Linux HaLow node complete the SAE
+dragonfly handshake and agree on the same PMK/PMKID. (Verified on chronium's `morse0` monitor + both
+consoles; MMLOG proof lines are `printf_blackhole` no-ops at the default `MMLOG_LEVEL=ERR`, so the
+PMKID/confirm proof was captured with targeted printf, reverted before commit.)
+
+**Remaining blocker (next task, distinct layer): the AMPE MIC verify.** After SAE, chronite sends its MPM
+Open (action 1, ~226 B); board0's **AES-SIV AMPE-MIC verification of that Open fails**
+(`mesh_process_ampe` → `mmint_aes_siv_decrypt(peer->aek, …, 3, aad, aad_len, …)`), so board0 never
+answers → chronite's plink → HOLDING → `BLOCKED` (~300 s). Since the PMK/PMKID agree, the AEK
+(`= PRF(pmk‖0…, …)`) should too — so this is a **cross-vendor AES-SIV detail**, most likely the AAD
+component order (`{SA, RA/own-MAC, body}`) or a length/field framing that was only ever validated
+ESP↔ESP, never against real Linux. No encrypted ESP↔Linux ICMP yet; that waits on this MIC.
+
+**Committed in P3d:** the four real fixes above (beacon auth byte `0x01`, beacon RSN IE, SAE
+CLOSE/HOLDING stability, re-auth→retransmit-Confirm). The `MESH_LINUX_INTEROP` A/B flag in `app_main.c`
+and all `SAEDBG`/`MPMDBG` scaffolding were reverted. **Code-map:** § P3d in
+[`docs/mesh-ap/rimba-mesh-security-codemap.md`](../mesh-ap/rimba-mesh-security-codemap.md).
