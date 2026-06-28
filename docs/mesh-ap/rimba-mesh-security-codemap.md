@@ -184,3 +184,23 @@ a mesh candidate and runs SAE; with the SAE-lifetime fixes, board0 and chronite 
 PMKID `855627ac3141c41d7e75f0e269d10283`** (confirm mismatch = 0) — cross-vendor dragonfly agreement.
 **Open (next):** post-SAE AMPE — board0's AES-SIV MIC verify of chronite's MPM Open fails
 (cross-vendor AAD/SIV detail); no encrypted ESP↔Linux ICMP yet.
+
+## #13 — SAE re-sync deadlock fix (ACCEPTED+Commit reauth) + hardening
+
+Verified by an adversarial verify→refute workflow against chronite's hostap tree (`~/halow/hostap`); every
+row grep-confirmed on both sides, not recalled.
+
+| New code (`umac_mesh.c`) | hostap counterpart |
+| --- | --- |
+| `mesh_sae_handle_rx` txn1 `case MESH_SAE_ACCEPTED` → `mesh_sae_reauth_free(peer); return` | `sae_sm_step` `case SAE_ACCEPTED` + `auth_transaction==1` && mesh → `wpa_auth_pmksa_remove` + `ap_free_sta` + `*sta_removed=1` (`src/ap/ieee802_11.c:1140-1148`) |
+| `mesh_sae_reauth_free` = `umac_mesh_invalidate_paths_via` + `mesh_peer_free` | `ap_free_sta` STA teardown + `wpa_auth_pmksa_remove` PMKSA drop; `sae_clear_data(sta->sae)`+`os_free` (`src/ap/sta_info.c:426-428`) |
+| **Reauth gate (hardening):** free only on `status==0` + well-formed-for-our-group (len + group-id) + non-reflection (scalar‖element ≠ our cached commit) | `handle_auth_sae` txn1 validation BEFORE `sae_sm_step`: status-success (`:1466`), group-supported (`:1457-1462`), `sae_parse_commit` (`:1502`), reflection→`SAE_SILENTLY_DISCARD` (`:1511`); reject paths do NOT free an MPM peer (`added_unassoc`=false, `:1657`) |
+| txn2 `case MESH_SAE_ACCEPTED` resends cached Confirm (no anti-replay yet — task #14) | ACCEPTED else-branch: `sae_check_big_sync`+`sync++`+`auth_sae_send_confirm`+`sae_clear_temp_data` (`:1162-1170`) + Sc/rc/0xffff anti-replay (`:1581-1613`) |
+| `umac_mesh_plink_tick` SAE retransmit: COMMITTED→Commit, CONFIRMED→Confirm, ~1s, big-sync each fire | `auth_sae_retransmit_timer`: big_sync+sync++ + COMMITTED→`auth_sae_send_commit`, CONFIRMED→`auth_sae_send_confirm`, default (incl ACCEPTED)→no frame (`:858-892`) |
+| beacon-driven re-init after free: beacon → `mmwlan_mesh_peer_open` → `mesh_peer_alloc`+`mesh_sae_start` | `wpa_mesh_notify_peer`→`wpa_mesh_new_mesh_peer`→`mesh_mpm_add_peer`+`mesh_rsn_auth_sae_sta` (`src/ap/mesh.c`, `mesh_mpm.c:851/899`, `mesh_rsn.c:386-389`) |
+
+**Verified (2026-06-28):** chronite (live Linux) completes SAE with board0 (`State Nothing→Committed→
+Confirmed→Accepted`, was deadlocked at "SAE not yet accepted"); the hardening gate does not block
+genuine-restart recovery (chronite still reaches Accepted ×33). The remaining re-cycle is the #12 AMPE MIC
+blocker (board0 sends only Open, never Confirm, never ESTAB). On-air `morse0` byte-capture of board0 frames
+pending (board0 RF range).
