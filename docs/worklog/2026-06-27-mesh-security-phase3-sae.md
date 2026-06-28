@@ -500,3 +500,34 @@ ESP↔Linux ping — distinct from the AMPE peering MIC fixed here. (ESP↔ESP d
 **On-air note:** verified via the live Linux node's own state machine + crypto (it decrypted the ESP's
 AMPE element and authorized the plink) — strong cross-vendor evidence; the chronium `morse0` byte-capture
 remains pending (board0 RF range), same standing gap.
+
+## #17 — encrypted ESP↔Linux DATA path (ICMP ping): characterized, NOT yet fixed
+
+With the peering layer solid (#16: ESTAB/authorized), the encrypted **data** path was probed. Findings:
+- **Both directions fail at L2→L3.** board0's ping to chronite times out; chronite→board0 ping = 100% loss.
+  chronite's `iw station` for board0 shows a healthy plink (`ESTAB, authorized: yes`, rx_packets growing
+  into the thousands, `rx drop misc` ~11) — frames arrive at chronite's mac80211 but **tcpdump on `wlan1`
+  shows zero ARP/ICMP**, i.e. no decrypted data reaches the IP stack either way.
+- **Not a broadcast-ARP-only problem.** Added a static ARP on board0 for chronite (`10.9.9.2 →
+  3c:22:7f:37:51:38`) so the ICMP goes out **unicast** (pairwise MTK), bypassing broadcast-ARP (group
+  MGTK) resolution, and pinned board0 in chronite's neigh. Still 0 replies → the **unicast MTK data path
+  itself fails**, not just broadcast.
+- **The MTK derivation formula MATCHES hostap byte-for-byte.** board0 `mesh_derive_mtk` vs chronite
+  `mesh_rsn_derive_mtk`: identical context `min/max(nonce)‖min/max(LID, LE16 numeric)‖AKM(00 0f ac 08)‖
+  min/max(MAC)`, key=PMK(32), label "Temporal Key Derivation", out 16. Nonces+LIDs are symmetric, so the
+  MTK *should* agree — derivation is **not** the smoking gun.
+
+So the encrypted CCMP **data** path is broken cross-vendor while the encrypted **peering** (AMPE) works —
+even though ESP↔ESP direct encrypted ping works (P3c 33/33). Remaining suspects, for a focused next effort:
+(a) runtime key **disagreement** despite the matching formula (nonce/LID actually exchanged wrong → MTK
+differs at runtime) — verify by dumping board0's runtime MTK/MGTK and comparing to chronite's `-K` log;
+(b) board0's MGTK **install** on chronite (broadcast key) — confirm chronite installed board0's MGTK;
+(c) the mesh-data **CCMP/S1G↔11n** format (the 4-address mesh data header / CCMP AAD differing across the
+driver's S1G↔11n data-frame conversion) — capture board0's actual data frame and chronite's RX-drop reason;
+(d) board0's data-path firmware key install (idx/format). Needs board0 runtime instrumentation (dump MTK +
+the TX data frame) + a chronite RX-drop trace. **No encrypted ESP↔Linux ICMP yet** — but the encrypted
+PEERING (the load-bearing P3d milestone) is done.
+
+**Bench note:** rapid `wpa_supplicant_s1g` restarts wedge chronite's `wlan1` (`Failed to initialize driver
+interface`) → recover with `modprobe -r morse; modprobe morse` + `ip link set wlan1 down/up`, restart the
+supplicant (`MESH-GROUP-STARTED`); only ever touch wlan1, never wlan0/SSH.
