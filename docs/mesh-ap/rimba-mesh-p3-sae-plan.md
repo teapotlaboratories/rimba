@@ -64,6 +64,13 @@ branches as the default):
 `peer->pmk`/`pmkid` are byte-identical (the proof the handshake is real). Group 19 + H2E must match Linux.
 
 ## P3c — Feed the SAE PMK into AMPE; real PMKID; reorder SAE-before-Open (ESP↔ESP)
+**DONE + on-air PROVEN (2026-06-28).** SAE PMK is load-bearing: direct-peer encrypted ping 33/33 on the
+SAE-derived MTK; all pairs ESTAB `pmk_valid=1/nonce_ok=1/mgtk_ok=1` with identical SAE PMKIDs; tshark shows
+the MPM IE PMKID is the SAE value (not the placeholder). Designed via a recon→design→adversarial-review
+workflow (the review caught the SAE-reauth key-desync → free-and-restart, the AEK-in-LISTEN guard, and the
+asymmetric-timing retry reset). Worklog §P3c + code-map §P3c. The multi-hop unicast relay ping is a
+separate pre-existing follow-up (next-hop pairwise MTK).
+
 - **PMK seam:** `mesh_derive_mtk` + `mesh_derive_aek` read `peer->pmk` instead of `mesh_p2_pmk`
   (the 32/64 convention is unchanged); delete `mesh_p2_pmk`.
 - **PMKID seam:** `mesh_peering_params += pmkid`; `tx_peering` sets `.pmkid=peer->pmkid`;
