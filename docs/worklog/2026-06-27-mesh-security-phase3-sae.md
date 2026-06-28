@@ -616,3 +616,29 @@ encrypted broadcast PREQ with a PREP (group robust-mgmt RX replay space + CCMP-u
 `umac_datapath.c:1129-1167`/`:371-385`); (2) encrypt the unicast mesh relay path (`umac_mesh_forward_data`).
 Bench note: chronite rebooted once during testing (bench instability / morse-chip wedge, not the fix — the
 fix's encrypted PREQ verified working after); avoid hammering chronite's sshd with rapid SSH (MaxStartups).
+
+### #18 progress — no-static-ARP dynamic operation is multi-faceted (diagnosed, not fixed)
+
+The #17 encrypted ping works WITH a static ARP (board0 originates the PREQ). For no-static-ARP dynamic
+operation board0 must both (a) get its broadcast ARP to the Linux peer and (b) answer the Linux peer's
+encrypted PREQ with a PREP. Attempted the RX-replay-space fix and tested without the static ARP — still
+0 replies (36 `send error` = ARP never resolves). Diagnosis (chronite side):
+- **board0's broadcast ARP never reaches chronite's IP** (tcpdump on wlan1: no ARP) — board0's *originated
+  group-data broadcast* (under board0's MGTK) isn't decrypted/delivered by chronite. A separate group-DATA
+  cross-vendor issue (or board0 isn't emitting the broadcast at all), distinct from the HWMP-mgmt path.
+- **chronite's mpath to board0 stays `RESOLVING`** (next_hop=0) — board0 still doesn't PREP chronite's
+  encrypted broadcast PREQ.
+
+**RX-replay-space fix attempted (reverted, unverified, insufficient alone):** `umac_datapath.c:1156`
+`process_mgmt_frame_ccmp_header` validates a protected mgmt frame's PN against
+`UMAC_KEY_RX_COUNTER_SPACE_IND_ROBUST_MGMT` (the pairwise key's mgmt counter) — wrong for a group-addressed
+PREQ, whose key_id selects the MGTK and whose PN is the group key's sequence. Tried switching to
+`UMAC_KEY_RX_COUNTER_SPACE_DEFAULT` when `mm_mac_addr_is_multicast(dot11_get_da(header))`. It's a plausible
+correctness fix but did NOT make the no-static-ARP ping work, so the blocker is elsewhere too. **Open
+question that gates it:** does the MM6108 firmware HW-DECRYPT a group-addressed MANAGEMENT frame with the
+MGTK at all (set `MMDRV_RX_FLAG_DECRYPTED`)? If not, the frame is dropped at `umac_datapath.c:1143-1148`
+before any replay check, and no morselib change helps. **Next session:** add a one-shot diagnostic in
+`process_mgmt_frame_ccmp_header` (for a multicast-DA protected mgmt frame: log the DECRYPTED flag + the
+replay result) AND check board0's group-DATA broadcast TX path — determine, empirically, which of {firmware
+no-decrypt, replay space, PREP generation, group-data-broadcast} is the blocker for each of the two halves.
+The static-ARP interop config remains the working path for the #17 milestone.
