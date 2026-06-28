@@ -247,9 +247,15 @@ MTK. Then encrypted unicast pings at 0% loss. The on-air wire format matches `me
 (MPM IE then `[140][16][SIV-IV][ciphertext]`). The AMPE port is functionally complete for ESP↔ESP.
 
 ### Remaining P2d sub-steps (deferred)
-- **P2d.3** — Linux-shaped Peering Mgmt IE (`protocol=1` + PMKID), RSN IE (48), PRIVACY capability.
-  Not needed for ESP↔ESP (our parser owns both ends); a strict Linux peer needs them, and a real
-  cross-vendor PMKID needs **P3 (SAE)**.
+- **P2d.3** — Linux-shaped peering wrapper: **DONE.** `umac_mesh_build_peering` now emits the RSN IE
+  (48, the exact live-Linux bytes `30 14 01 00 00 0f ac 04 01 00 00 0f ac 04 01 00 00 0f ac 08 00 00`),
+  the **PRIVACY capability** (`10 00`), and the MPM IE with **`protocol=1` + a 16-byte PMKID** (a
+  placeholder — the real cross-vendor PMKID needs **P3 (SAE)**). The parser excludes the trailing PMKID
+  from its plid-present check (else an Open's PMKID is misread as a plid) and skips the RSN IE. The
+  PRIVACY cap is inside the 6-byte AMPE AAD window, but both ESP ends change together so the SIV still
+  verifies. **Verified on-air:** both nodes AMPE verify=0 on Open+Confirm, netif up, and the ESP Open's
+  IE tags are now `217, 48, 114, 113, 117, 140` — the security tail `48,114,113,117,140` matches Linux.
+  (Beacon RSN IE deferred — only a Linux node *initiating* to the ESP needs it, which also needs P3.)
 - **P2d.4** — move the own-MGTK install from first-ESTAB back to mesh start (the P1 deferral can be
   undone now peering is AMPE-protected). Uncertain on the MM6108 (the P1 gotcha was firmware
   expecting protected frames once a group key is installed — the AMPE action frames are still
