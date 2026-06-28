@@ -84,6 +84,15 @@ encrypted ping ESP↔ESP; the AMPE element bytes still match the P2 gold-standar
 only change is PMK provenance).
 
 ## P3d — Gold standard: ESP joins a LIVE Linux SAE+AMPE mesh (the P2-unreachable milestone)
+**Status (2026-06-28): SAE half DONE, AMPE half OPEN.** Brought up **chronite** (`3c:22:7f:37:51:38`) as
+the live `wpa_supplicant_s1g` SAE node. Two beacon fixes (Mesh-Config auth byte `0x01`, beacon RSN IE) got
+chronite to accept the ESP as a candidate and run SAE; three SAE-lifetime fixes (keep `sta->sae` across
+CLOSE/HOLDING, re-auth→retransmit-Confirm) cracked the cross-vendor thrash → **board0 and chronite derive
+the byte-identical PMKID `855627ac3141c41d7e75f0e269d10283`** (the H2E/group/password risks below did
+**not** bite — group 19 + `sae_pwe=0` matched first try). **Still open:** post-SAE AMPE — board0's
+AES-SIV MIC verify of chronite's MPM Open fails (cross-vendor AAD/SIV detail); no encrypted ESP↔Linux ICMP
+yet. See worklog § P3d + code-map § P3d.
+
 chronosalt/chronogen run `wpa_supplicant_s1g` (`sae_password='rimbamesh2026'`, group 19,
 `dtim_period=1`; NOT `iw mesh join`). Match group/H2E/AKM(`00-0f-ac-08`)/mesh_id/channel/password.
 **Verify (match a LIVE device):** ESP Commit/Confirm byte-diff vs chronosalt's live frames; Linux
