@@ -254,9 +254,43 @@ MTK. Then encrypted unicast pings at 0% loss. The on-air wire format matches `me
   undone now peering is AMPE-protected). Uncertain on the MM6108 (the P1 gotcha was firmware
   expecting protected frames once a group key is installed — the AMPE action frames are still
   802.11-unprotected, so this may still regress); verify before keeping.
-- **P2d.5** — gold-standard byte-diff of an ESP AMPE Open against a live Linux secured-mesh node
-  (same static PMK forced into `sta->sae->pmk`). Needs the AH-patched Morse Linux build (the fixed-6
-  AAD must match) — chronosalt/chronogen (1.17.8 morse) qualify.
+- **P2d.5** — gold-standard byte-diff vs a live Linux secured-mesh node: **DONE, see below.**
+
+## P2d.5 — gold-standard byte-diff vs a live Linux secured mesh (DONE)
+
+Stood up the real Linux SAE+AMPE mesh (`wpa_supplicant_s1g -dd -K` on chronosalt + chronogen, the
+AH-patched 1.17.8 morse build → the same fixed-6 AAD; `rimba-smesh`, SAE), peered them (plink ESTAB),
+and pulled a live node's **un-redacted plaintext AMPE element** plus the on-air frame, to byte-diff
+against the ESP's P2d.2 output. (The PMKs differ — Linux SAE vs ESP static — so the *encrypted* bytes
+and the random nonces/MGTK necessarily differ; the comparison is the element layout + the fixed
+fields + the sizes + the on-air framing.)
+
+Live Linux plaintext AMPE element, Open (`wpa-K.log`, len=98):
+```
+8b 60 | 00 0f ac 04 | <32B local_nonce> | <32B peer_nonce = 00…00> | <16B MGTK> | <8B RSC = 00…00> | ff ff ff ff
+```
+Field-for-field vs what the ESP `umac_mesh_build_peering` emits — **every fixed field is identical**:
+
+| field | live Linux | ESP P2d.2 |
+|---|---|---|
+| EID / len | `8b 60` (139 / 96) | `8b 60` (139 / 96) |
+| selected_pairwise_suite | `00 0f ac 04` (CCMP) | `00 0f ac 04` (CCMP) |
+| local_nonce(32) ‖ peer_nonce(32) | nonce ‖ **all-zero on the first Open** | nonce ‖ **all-zero until peer heard** |
+| GTKdata (Open) | MGTK(16) ‖ **RSC=0**(8) ‖ **`ff ff ff ff`** | MGTK(16) ‖ **RSC=0**(8) ‖ **`ff ff ff ff`** |
+| encrypted size | **114** (Open) / **86** (Confirm) | **114** (Open) / **86** (Confirm) |
+
+On-air (chronium `morse0`), the Linux Open's IE tags are `221, 217, 232, 48, 114, 113, 117, 140`; the
+ESP's are `217, 114, 113, 117, 140`. The **security-relevant tail `…114, 113, 117, 140`** (Mesh ID,
+Mesh Config, MPM IE, then the **MIC IE 140** with the encrypted AMPE spilling past it) is **identical**.
+The Linux-only extras are precisely the deferred **P2d.3** items: the **RSN IE (48)**, the MPM IE with
+**`protocol=1` + a 16-byte PMKID** (`75 14 01 00 …`), and the **PRIVACY capability** (`10 00`). The
+remaining tag diffs (`221`/`232` vendor + S1G-operation IEs) are PHY-layer, from the morse 5 GHz-model
+representation, not AMPE.
+
+**Conclusion:** the ESP's AMPE element is byte-exact with a live Linux Morse device — same EID/len,
+CCMP suite, nonce + GTKdata layout, RSC, expiry, and encrypted sizes — and it sits in the same on-air
+IE position. The only gap to a strict Linux peer is the RSN-IE/PMKID/PRIVACY wrapper (P2d.3), and a
+real cross-vendor PMKID needs **P3 (SAE)**. The Linux mesh was stopped afterward (bench restored).
 
 ## Bench note
 
