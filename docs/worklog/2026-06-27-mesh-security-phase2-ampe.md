@@ -256,10 +256,13 @@ MTK. Then encrypted unicast pings at 0% loss. The on-air wire format matches `me
   verifies. **Verified on-air:** both nodes AMPE verify=0 on Open+Confirm, netif up, and the ESP Open's
   IE tags are now `217, 48, 114, 113, 117, 140` — the security tail `48,114,113,117,140` matches Linux.
   (Beacon RSN IE deferred — only a Linux node *initiating* to the ESP needs it, which also needs P3.)
-- **P2d.4** — move the own-MGTK install from first-ESTAB back to mesh start (the P1 deferral can be
-  undone now peering is AMPE-protected). Uncertain on the MM6108 (the P1 gotcha was firmware
-  expecting protected frames once a group key is installed — the AMPE action frames are still
-  802.11-unprotected, so this may still regress); verify before keeping.
+- **P2d.4** — own-MGTK install moved from first-ESTAB back to mesh start: **DONE.**
+  `umac_mesh_install_common_keys()` now runs in `mmwlan_mesh_start` (after `own_mgtk` is generated +
+  the common stad is set up), matching hostap `__mesh_rsn_auth_init`; the first-ESTAB install +
+  deferral comment are removed. The P1 gotcha (firmware dropping the unprotected peering frames once a
+  group key is installed) **does NOT recur** now peering is AMPE-protected — **verified on bench:**
+  with the MGTK installed at start, both nodes still AMPE verify=0 on Open+Confirm and reach netif-up.
+  Bonus: this closes the P2c startup plaintext-broadcast window (the group key is live before netif-up).
 - **P2d.5** — gold-standard byte-diff vs a live Linux secured-mesh node: **DONE, see below.**
 
 ## P2d.5 — gold-standard byte-diff vs a live Linux secured mesh (DONE)
