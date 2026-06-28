@@ -427,3 +427,38 @@ vector; tracked as a follow-up. Two adjacent divergences the workflow surfaced (
 ACCEPTED+Confirm has no rc/0xffff anti-replay + big_sync (ESP↔ESP Confirm-storm risk); the MPM-Open
 SAE-start is ungated vs hostap's PLINK_OPEN + cached-PMKSA check (mesh_mpm.c:1257-1265). Code-map: § #13 in
 the security code-map.
+
+## #12 — AMPE AES-SIV MIC: ROOT CAUSE FOUND (S1G-vs-11n frame representation in the AAD)
+
+With #13 making SAE converge reliably, board0 reliably reaches `mesh_process_ampe` on chronite's Open, so
+I captured board0's **runtime** AES-SIV inputs (one-shot `printf` of `aek` + the 3 AAD components + `crypt`)
+and replayed them through the offline oracle (`ampe-siv-validate.py`). Decisive result:
+
+- **board0's `crypt` is byte-for-byte chronite's transmitted ciphertext** (matched chronite's logged
+  `encrypted AMPE element`) — so crypt reconstruction (MIC element SIV ‖ trailing ciphertext) is correct.
+- **The AAD diverges.** Oracle `decrypt_and_verify` FAILS on board0's inputs, and CTR-only (AEK+crypt,
+  AAD-independent) yields garbage → so it's not just the AAD order; the AEK or the AAD bytes differ. Pinned
+  to the **AAD body6**: board0 sees `body[0:6] = 0f 01 10 00 dd 0e`, but chronite's frame body is
+  `0f 01 10 00 01 08 …`. First 4 bytes (category, action, capability) match; **bytes [4:5] differ —
+  `dd 0e` vs `01 08`**, the EID+len of the first element. (Dumping `body[0:72]`: board0's frame carries
+  **S1G** IEs — vendor `dd 0e`, EID 217 `d9 0f` — where chronite's *logged* frame carries **legacy** IEs —
+  Supported Rates `01 08`, Ext Supported Rates `32 0e`.)
+
+**Why:** the morse Linux driver **converts every received S1G frame to 11n (legacy) before handing it to
+mac80211/hostap** — `morse_dot11ah_s1g_to_11n_rx_packet` (`morse_driver/mac.c:6628-6629`, *"Perform S1G to
+11n conversion prior to passing to mac80211"*; entry `morse_mac_process_s1g_mgmt_or_beacon` :6593), and the
+reverse 11n→S1G on TX. So **hostap always computes the AMPE MIC over the 11n representation** (first IE =
+legacy Supported Rates `01 08`). **morselib has NO such conversion** — it computes the AES-SIV AAD over the
+*raw S1G* frame (`dd 0e`). The 6-byte MIC AAD (`MESH_RSN_FRAME_MIC_OFFSET`) includes those first-IE bytes,
+so board0's AAD ≠ chronite's → AES-SIV MIC verify fails. **ESP↔ESP AMPE works** because both ends are
+S1G-self-consistent; **only cross-vendor breaks**, on the representation gap — which is exactly why every
+prior P2/P3 AMPE proof (ESP↔ESP) passed while ESP↔Linux does not.
+
+**This is also the on-air explanation:** chronite's *logged* CMD_FRAME (what hostap built, pre-driver) is
+11n; the *on-air* frame (post-driver) is S1G = what board0 receives. The two representations are the gap.
+
+**Fix (new task #16, substantial):** port the morse `dot11ah` S1G↔11n conversion — at minimum the subset
+needed so morselib computes the mesh self-protected-action AMPE MIC over the **11n** representation
+(RX: S1G→11n before the AAD/verify; TX: build/MIC in 11n, emit S1G), matching `morse_dot11ah_s1g_to_11n_*`.
+Derive from `morse_driver` (`dot11ah` lib) per the follow-Linux directive. Until then: no encrypted
+ESP↔Linux ICMP. (board0 holds a diagnostic interop binary in flash; repo reverted clean.)
