@@ -35,11 +35,26 @@ Last verified: 2026-06-27.
 
 XIAO ESP32-S3 + FGH100M (MM6108). `BOARD=proto1-fgh100m` for all of them.
 
-| Board | Serial port | ESP32 efuse serial | Mesh MAC (derived) |
-|---|---|---|---|
-| board0 | `/dev/ttyACM0` | `E0:72:A1:F8:EF:A4` | `e2:72:a1:f8:ef:a4` |
-| board1 | `/dev/ttyACM1` | `E0:72:A1:F8:F9:40` | `e2:72:a1:f8:f9:40` |
-| board2 | `/dev/ttyACM2` | `E0:72:A1:F8:F0:08` | `e2:72:a1:f8:f0:08` |
+| Board | Serial port (volatile!) | ESP32 efuse serial | Mesh MAC (derived) | Mesh IP |
+|---|---|---|---|---|
+| board0 | `/dev/ttyACM0` | `E0:72:A1:F8:EF:A4` | `e2:72:a1:f8:ef:a4` | `10.9.9.136` |
+| board1 | `/dev/ttyACM1` | `E0:72:A1:F8:F9:40` | `e2:72:a1:f8:f9:40` | `10.9.9.100` |
+| board2 | `/dev/ttyACM4` | `E0:72:A1:F8:F0:08` | `e2:72:a1:f8:f0:08` | `10.9.9.108` |
+
+**⚠ The `/dev/ttyACM*` numbers RE-ENUMERATE** (USB hotplug order) — the column above is a 2026-06-28
+snapshot. **Always identify a board by its efuse MAC, not the ACM number:**
+`python vendor/esp-idf/components/esptool_py/esptool/esptool.py --port /dev/ttyACMx --after hard_reset
+read_mac` (Espressif VID = `303a`). board2 is currently on **`ttyACM4`** (was `ttyACM2`); `ttyACM2`/`ttyACM3`
+are now the **PPK2** (see below). Mesh IP = `10.9.9.{100 + (mesh_mac[5] & 0x3f)}` in app code.
+
+**nRF PPK2 (Nordic `1915:c00a`, `/dev/ttyACM2` + `/dev/ttyACM3`)** powers **board2's DUT rail at 5 V** in
+**ampere-meter mode, DUT ON** (held by `/tmp/ppk2_hold.py`; the `ppk2-api` pip pkg is in the IDF python env).
+Clean power-cycle of board2 = toggle DUT OFF→ON in ampere-meter mode (**no source voltage to set** → no
+wrong-voltage risk). `fuser -k` on the PPK2 port cuts board2's power — identify by VID:PID first.
+
+**chronium RF range (2026-06-28):** chronium's `morse0` monitor now sees **all three ESP boards** on ch27
+(board0/1/2 each ~300+ frames in 25 s) — the earlier "board0 out of chronium range" note no longer holds, so
+ESP relay/forward frames are byte-capturable for the on-air gold standard.
 
 **Important:** all three MM6108 modules share the **same factory MAC
 `bc:2a:33:96:b2:9f`**. A receiver drops frames whose source == its own MAC, so every
