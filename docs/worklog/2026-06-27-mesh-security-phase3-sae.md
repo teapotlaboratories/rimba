@@ -867,3 +867,36 @@ probe board2's RX entry for the frame arriving with `prot=1 DEC=0`) before commi
 multi-session implementation (host-side CCMP), not a quick fix — the call is whether multi-hop forwarding is
 worth that vs the single-hop-on-HW-crypto status quo (#19 + broadcast-HWMP already give a working 1-hop
 secured mesh ESP↔Linux).
+
+### #20 — SW-crypto GREENLIT: firmware delivers protected frames raw with no key (no-key test PASSED)
+
+The make-or-break feasibility gate, tested directly. board2 was patched to skip its FW key offload at ESTAB
+(`umac_mesh_peer_secure_estab` — sta_state still done, so board0 is a known station, but no key installed);
+board0 (normal HW crypto) pinged board2 directly. board2's RX-entry probe captured board0's frames as
+**`#20NOKEYRX from-board0 st=8(QoS Data) prot=1 DEC=0` ×29** — i.e. the firmware **delivered board0's
+HW-encrypted frame to the host RAW** (Protected set, NOT decrypted) because board2 had no key for it. Same as
+Linux `no_hwcrypt=Y`. So host-side CCMP is viable: skip key offload → firmware delivers raw → morselib
+decrypts in SW keyed by the link/TA → forwarded frames (A4≠TA) decrypt → multi-hop works.
+
+**=> SW crypto is GREENLIT (decision: multi-hop is required).** This is the next phase — a real port, planned:
+
+**Host-side CCMP port (phased):**
+- **P5a — crypto in the build.** Add `aes-ccm.c` (+ reuse hostap `ccmp.c` shape: PN/nonce/AAD, `aes_ccm_ae`/
+  `aes_ccm_ad`) to the hostap CMake + `mmint_aes_ccm_*` shim (mirror the aes-siv.c integration). Unit-check
+  against a CCMP KAT.
+- **P5b — host key state.** Keep MTK (pairwise) + own/peer MGTK in morselib (already on the per-peer / common
+  stad keychain); add a per-key **TX PN** counter + **RX replay** window. Stop offloading keys to the FW
+  (gate `umac_keys_install_key`'s `mmdrv_install_key` for mesh, or a mesh "sw_crypto" flag) — the seam is
+  `umac_mesh_peer_secure_estab` (umac_mesh.c:1430).
+- **P5c — TX.** In the mesh data TX helpers (`umac_datapath_tx_mesh_unicast/group_frame`, the normal mesh
+  data path, and `_tx_mgmt_frame` for unicast PREP): instead of `HW_ENC`+key_idx, build the CCMP header (PN),
+  `aes_ccm_ae` the payload under the link key (unicast) / own-MGTK (group), send plaintext-to-FW. Broadcast
+  HWMP stays unprotected (already).
+- **P5d — RX.** For a protected mesh data frame (now `prot=1 DEC=0`): look up the key by **TA** (pairwise for
+  unicast, the TA's peer-MGTK for group), `aes_ccm_ad`, replay-check the PN, strip the CCMP header, deliver.
+  This is where the forwarded-frame (A4≠TA) finally decrypts.
+- **P5e — verify on-air** (chronium): direct + the full board1→board0→board2 relay ping, byte-diff the CCMP
+  frames; re-confirm ESP↔Linux #17/#18 still work (Linux side stays HW crypto — interop must still hold).
+
+Scope note: this moves ALL mesh-data crypto to the host (no hybrid possible — the FW drops un-decryptable
+protected frames when keyed). ESP32-S3 + mbedTLS AES-NI-equivalent HW makes SW CCMP cheap.
