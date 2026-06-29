@@ -795,3 +795,37 @@ board2 308 frames — the earlier "board0 out of range" no longer holds). tshark
 
 This also **pins #20**: board0's forwards are on-air-correct (Protected, valid incrementing PNs), so the
 relay-ping failure is definitively **board2's RX-decrypt** of the forwarded 4-addr unicast, not board0's TX.
+
+## #20 — multi-hop relay last hop: MM6108 HW-crypto can't decrypt a forwarded frame (firmware limitation)
+
+After #19 (forward correctly keyed + on-air CCMP-verified) the relay ping still fails at the last hop:
+board2 doesn't decrypt board0's forwarded unicast. Investigated per the "confirm firmware behavior" plan.
+
+**1. Direct vs forward (isolates the difference to A4).** board0→board2 **DIRECT** ping = **38/0** — board2
+decrypts board0's direct unicast fine (key/path/HW-decrypt all OK). The **forwarded** unicast is dropped.
+The only frame difference is **A4 (mesh-SA)**: direct `A4=board0=TA`; forward preserves `A4=board1≠TA`.
+
+**2. Firmware DROPS the forwarded frame (board2 umac never sees it).** An RX-entry probe on board2
+(`umac_datapath_process_rx_frame`, filtered to TA=board0 + 4-addr) fired **0×** while chronium's `morse0`
+monitor simultaneously showed board0 transmitting **16 Protected QoS-Data forwards** to board2. So the
+firmware discards the forwarded frame before delivering it to the host → a morselib software-decrypt isn't
+viable as-is (the host never gets the frame).
+
+**3. Same firmware + HW crypto on Linux → same limitation.** chronite (the live Linux mesh) runs
+`no_hwcrypt=N` + `thin_lmac=N` → HW crypto (firmware CCMP), identical to the ESP. The morse driver
+(`mac.c:5845`) only reads the firmware's `MORSE_RX_STATUS_FLAGS_DECRYPTED` per-frame — the *firmware* decides
+deliver-vs-drop. So Linux multi-hop forwarding would hit the same wall; it has just never surfaced because
+the bench mesh is all single-hop (every node in RF range → direct peering). morselib has **no** sw-crypto mode.
+
+**Conclusion:** the MM6108 firmware in HW-crypto mode keys CCMP decryption by the **mesh-SA (A4)** and drops a
+forwarded 4-address frame whose origin (A4) isn't a peer of the receiver. Multi-hop mesh **forwarding**
+fundamentally requires **SW crypto** (Linux `no_hwcrypt`/`thin_lmac` → `set_key=NULL` → host CCMP keyed by the
+link/TA), which morselib doesn't implement. This is a firmware/architecture boundary, not a #19 keying bug
+(#19's forward is on-air-correct). It also bounds task #9 (multi-hop reachability).
+
+**Fix options (a design decision):** (1) **SW crypto on the ESP** — architecturally correct, large (host-side
+CCMP + a firmware mode that delivers un-decrypted frames, which the morselib build may not expose). (2)
+**A4-rewrite at the relay** (set A4=relay so the firmware decrypts by A4=TA) — works around the SA-keying but
+diverges from 802.11s and loses the true origin for 3+ hops. (3) **Accept single-hop-only** for HW-crypto
+deployments. **Pending definitive proof:** a *forced* Linux multi-hop relay (direct peering blocked) to show
+Linux also fails — impractical on the all-in-range bench without a peer-block mechanism.
