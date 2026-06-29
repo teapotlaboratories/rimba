@@ -267,5 +267,8 @@ ESP↔ESP relay ping has a separate downstream blocker (board2 doesn't decrypt t
 
 **Verified (2026-06-28):** #19 forward correctly keyed (`key_type=PAIRWISE key_id=0`, ~20×); ESP↔ESP PREQ
 chain resolves (board1→board0→board2, board2 PREPs); **no #17/#18 regression** (board0↔chronite dynamic
-encrypted ping 39/3 + 5/5, mpath `0x15`). **Open:** board2 doesn't decrypt board0's forwarded 4-addr
-unicast (firmware RX, #9-adjacent) — the relay ping doesn't complete yet.
+encrypted ping 39/3 + 5/5, mpath `0x15`). **On-air gold standard (chronium morse0 monitor):** board1/board0
+PREQ = Action `protected=False`; board0→board2 forward = 4-addr QoS Data `protected=True`, CCMP, `RA=board2
+TA=board0 A3=board2 A4=board1(origin)`, incrementing PNs — the relayed unicast is on-air CCMP-encrypted for
+the next hop. **Open:** board2 doesn't decrypt board0's forwarded 4-addr unicast (firmware RX, #9-adjacent;
+board0's TX is on-air-correct) — the relay ping doesn't complete yet → task #20.

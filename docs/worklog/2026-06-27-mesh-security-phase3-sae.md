@@ -779,3 +779,19 @@ key-lookup/decrypt. This is firmware-RX territory (#9-adjacent), downstream of #
 chronite's secured mesh was stopped (wlan1 down) to clear the channel for the ESP relay test, then brought
 back up for the regression check. Scoped stop/restart only ever touches the **wlan1 s1g** supplicant
 (`pkill -x wpa_supplicant_` — the truncated comm; never the wlan0 `wpa_supplicant` carrying SSH).
+
+### #19 + rework — ON-AIR VERIFIED (chronium morse0 monitor, 2026-06-28)
+Gold-standard off-air capture (chronium in monitor on ch27, `tcpdump -i morse0`, 1123 frames, the 3-ESP
+relay running with static ARPs). **All three ESPs are in chronium's range now** (board0 325 / board1 316 /
+board2 308 frames — the earlier "board0 out of range" no longer holds). tshark decode:
+- **board1 PREQ**: `0x000d` (Action) **protected=False** broadcast — the broadcast-HWMP-unprotected rework,
+  confirmed on-air. board0 re-broadcasts it the same way (`0x000d protected=False` ×7).
+- **board0 PREP → board1**: `0x000d` **protected=True** unicast ×15 — unicast PREP stays pairwise-encrypted.
+- **#19 forward — board0 → board2 QoS Data** (`0x0028`) **protected=True** ×23. Verbose decode of one frame:
+  `RA=board2  TA=board0  A3(DA)=board2  A4(SA)=board1` (origin preserved), **CCMP** with sequential Ext IVs
+  (…B1, B2, … C8). So the relayed unicast is on-air a 4-address CCMP QoS-Data frame keyed for the next hop —
+  exactly what #19 builds + `umac_datapath_tx_mesh_unicast_frame` encrypts. The mac80211 mesh-forward shape
+  (4-addr, A4=origin, GTK-not, next-hop-PTK) matches.
+
+This also **pins #20**: board0's forwards are on-air-correct (Protected, valid incrementing PNs), so the
+relay-ping failure is definitively **board2's RX-decrypt** of the forwarded 4-addr unicast, not board0's TX.
