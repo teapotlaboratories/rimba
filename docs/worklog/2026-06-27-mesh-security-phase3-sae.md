@@ -900,3 +900,21 @@ decrypts in SW keyed by the link/TA → forwarded frames (A4≠TA) decrypt → m
 
 Scope note: this moves ALL mesh-data crypto to the host (no hybrid possible — the FW drops un-decryptable
 protected frames when keyed). ESP32-S3 + mbedTLS AES-NI-equivalent HW makes SW CCMP cheap.
+
+### #21 P5a DONE — AES-CCM compiled into the build + byte-validated on the ESP
+
+The ESP build uses **`components/hostap/CMakeLists.txt`** (explicit SRCS list, lines 25-32), NOT the `.mk`
+files (those are upstream-only) — this is where the AMPE `aes-siv.c` was added and where `aes-ccm.c` goes
+(the recon's `.mk` analysis was the wrong file; verifying first avoided an inert edit). Two changes:
+- `components/hostap/CMakeLists.txt`: add `${ROOT_DIR}/src/crypto/aes-ccm.c` (next to aes-ctr/aes-siv). Its
+  only cross-module deps (`aes_encrypt_init/encrypt/deinit`) are already mangled+provided → zero new
+  unresolved symbols.
+- `src/hostap/hostap_morse_common.h`: add `#define aes_ccm_ae mmint_aes_ccm_ae` + `#define aes_ccm_ad
+  mmint_aes_ccm_ad` (the text-level mangle also covers the aes_wrap.h prototypes).
+
+**Byte-validated on hardware** via a temporary boot KAT (reverted): `mmint_aes_ccm_ae`/`_ad` over an offline
+**OpenSSL reference vector** (python `cryptography.AESCCM`, 16B key / 13B nonce / M=8 / 16B AAD / 18B PT):
+encrypt produced `ct=34841c…1be1` + `mic=70175299c5e94f49` (ct_match=1, mic bytes match), and decrypt of the
+reference ct+mic returned rc=0 (MIC verified) + recovered the plaintext (pt_match=1). So AES-CCM compiles,
+links via the mmint_ shim, runs on the ESP, and is byte-exact. (An ESP nano-printf vararg quirk garbled two
+of the KAT's %d ints, but the crypto outputs + pointer args were all correct → ABI is fine.) Next: P5b.
