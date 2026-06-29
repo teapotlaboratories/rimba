@@ -642,3 +642,85 @@ before any replay check, and no morselib change helps. **Next session:** add a o
 replay result) AND check board0's group-DATA broadcast TX path — determine, empirically, which of {firmware
 no-decrypt, replay space, PREP generation, group-data-broadcast} is the blocker for each of the two halves.
 The static-ARP interop config remains the working path for the #17 milestone.
+
+## #18 — RESOLVED: no-static-ARP dynamic ESP↔Linux join (group-privacy-action RX exemption)
+
+**Result (2026-06-28, board0 ↔ chronite, on-air + functional):** board0 joins the live secured Linux
+mesh and pings chronite **with no static ARP** — fully dynamic ARP + HWMP path resolution, bidirectional,
+CCMP-encrypted. board0→chronite **46/0 then 39/0 then 11/0** replies (was **0 replies / all timeouts**
+before the fix); chronite→board0 **5/5, 0% loss** (was 0/8); chronite's mpath to board0 =
+`FLAGS 0x15` (ACTIVE+RESOLVED), `NEXT_HOP=e2:72:a1:f8:ef:a4` direct, `HOP_COUNT=1`. Verified on the
+**clean fix build** (no debug probes, `MESH_LINUX_INTEROP` only as test scaffolding).
+
+**The prior "#18 progress" hypothesis above was WRONG and is superseded.** It assumed board0 had to
+*decrypt an MGTK-encrypted broadcast PREQ* and that the gate was "does the MM6108 HW-decrypt group
+MANAGEMENT frames." On-air capture overturned both premises.
+
+### What it actually is — on-air gold standard (chronium morse0 monitor, tshark)
+Triggered chronite to originate a PREQ for board0 (`ip neigh replace 10.9.9.136 lladdr <board0> … ;
+ping 10.9.9.136`) while capturing on chronium. Frame-type histogram of chronite's TX (`wlan.fc.type_subtype`):
+- `0x0031` ×825 — S1G Beacons.
+- `0x0028` ×78 — **QoS Data, `protected=True`, broadcast** → chronite's group DATA *is* MGTK-encrypted on-air.
+- `0x000d` ×25 — **Action, `protected=False`, broadcast** → chronite's broadcast HWMP Action frames are
+  **NOT encrypted**.
+
+`tshark -V` on a `0x000d` frame = **Category MESH(13) / HWMP Mesh Path Selection / Path Request**,
+Originator `3c:22:7f:37:51:38` (chronite), **Target `e2:72:a1:f8:ef:a4` (board0)**, TO=1, `protected=False`.
+So board0's PREQ arrives **in the clear**, not encrypted. A throwaway board0 RX probe at the umac RX entry
+(`umac_datapath_process_rx_frame`) independently logged the same: `t=0 st=13 prot=0 DEC=0 stad=1 da=ff:…ff`
+(mgmt / Action / unprotected / broadcast, from chronite's peer record), ×26.
+
+### Root cause — morselib drops the unprotected group PREQ before HWMP sees it
+board0 receives the PREQ at the umac RX entry but a throwaway probe in `umac_mesh_handle_hwmp` showed it
+was **never reached** (no PREQ target-match, no PREP). The drop is in
+`umac_datapath_process_rx_mgmt_frame` (`umac/datapath/umac_datapath.c:356-385`), the generic pre-dispatch
+PMF check:
+- `frame_is_robust_mgmt()` → `frame_is_robust_action()` (`umac/frames/action.c`) classifies category
+  **MESH(13)** as **robust** (it excludes SELF_PROTECTED(15) — which is why the unprotected AMPE peering
+  frames pass — but not MESH/MULTIHOP). ✓ matches mac80211 (`_ieee80211_is_robust_mgmt_frame` also does
+  NOT exclude MESH).
+- `umac_sta_data_pmf_is_required(stad)` is **true** for the secured-mesh peer, and the frame is unprotected
+  and multicast with **no MMIE** (a PREQ carries no BIP Management MIC IE) → falls to the `else` branch →
+  `umac_datapath_process_unprotected_robust_mgmt_frame()` + `return`. The frame never reaches
+  `data->ops->process_rx_mgmt_frame` → `…_mesh` → `umac_mesh_handle_action` → `umac_mesh_handle_hwmp`, so
+  board0 never PREPs, so chronite can never resolve a path to board0 — and therefore can't even ARP-reply
+  to board0 (chronite needs board0's path to unicast the reply), which is why board0's *own* ping to
+  chronite also failed (ARP never completes). One drop blocks both directions.
+
+This is the **RX mirror of the #17 TX bug**: morse's infra PMF logic mishandles legitimately-unprotected
+group-addressed mesh HWMP frames (#17 was the TX side dropping broadcast robust mgmt; #18 is the RX side).
+
+### Why Linux accepts it — net/mac80211 (chronite ~/halow/rpi-linux), line by line
+`ieee80211_rx_h_mgmt_check` (`net/mac80211/rx.c:3400`) → `ieee80211_drop_unencrypted_mgmt` (`rx.c:2436`).
+For our frame the only branch that could drop it is the multicast-robust-mgmt/BIP check at `rx.c:2473`
+(`ieee80211_is_multicast_robust_mgmt_frame && get_mmie_keyidx < 0`) — but that whole block is inside
+`if (rx->sta && test_sta_flag(rx->sta, WLAN_STA_MFP))` (`rx.c:2454`). **mac80211 mesh peers are MFP=no**
+(confirmed at runtime: `iw dev wlan1 station dump` on chronite shows the board0 peer with **`MFP: no`**;
+mesh STAs are added via `cfg.c` without `NL80211_STA_FLAG_MFP`), so the block is **skipped** and the frame
+falls through to `RX_CONTINUE` → the mesh HWMP handler. mac80211 also formalises this class as
+`_ieee80211_is_group_privacy_action` (`include/linux/ieee80211.h:4611`): a group-addressed **MESH(13) /
+MULTIHOP(14)** action frame is MGTK/group-privacy class, **not** BIP — so the no-MMIE drop must not apply.
+
+### The fix (morselib, 4 files — mirrors mac80211)
+1. `dot11/dot11.h` — add `DOT11_ACTION_CATEGORY_MESH = 13`, `DOT11_ACTION_CATEGORY_MULTIHOP = 14` to
+   `enum dot11_action_category` (= mac80211 `WLAN_CATEGORY_MESH_ACTION` / `…_MULTIHOP_ACTION`).
+2. `umac/frames/action.c` — new `frame_is_group_privacy_action(view)`, a line-for-line port of
+   `_ieee80211_is_group_privacy_action`: a mgmt Action frame with the group bit set on the DA (addr1) and
+   category MESH or MULTIHOP.
+3. `umac/frames/frames_common.h` — declare it (next to `frame_is_robust_mgmt`).
+4. `umac/datapath/umac_datapath.c:356-385` — add `&& !frame_is_group_privacy_action(rxbufview)` to the
+   unprotected-robust-mgmt drop guard, so a group-addressed mesh/multihop action frame skips the BIP/MMIE
+   drop and proceeds to the mesh handler — exactly mac80211's MFP=no behaviour for these frames.
+
+`pmf_is_required` is left **true** (so board0's *unicast* PREP to chronite stays CCMP-encrypted under the
+pairwise MTK, matching what chronite does for its PREP, proven in #17). The broader morselib/mac80211
+mismatch — morselib gates robust-mgmt TX/RX on `pmf_is_required`, mac80211 on the per-STA MFP flag + key
+presence (mesh peers MFP=no but still key-encrypt) — is recorded against task #9.
+
+### Verification chain (all four links)
+1. **on-air (chronium):** chronite TX's an *unprotected* group PREQ targeting board0 (frame 45, tshark `-V`).
+2. **board0 RX:** receives it unprotected at the umac entry (`#18ENTRY t=0 st=13 prot=0`).
+3. **board0 HWMP:** with the fix, reaches the PREQ target-match — captured
+   `#18PREQ sa=3c:22:7f:37:51:38 tgt=e2:72:a1:f8:ef:a4 me=e2:72:a1:f8:ef:a4` (target == self).
+4. **functional:** bidirectional dynamic ping (board0→chronite 46+39+11/0; chronite→board0 5/5; chronite
+   mpath `0x15` direct). Before the fix every one of these was 0 / `RESOLVING`.

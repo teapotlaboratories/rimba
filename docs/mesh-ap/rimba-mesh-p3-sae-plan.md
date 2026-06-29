@@ -129,9 +129,22 @@ unicast PREP stays pairwise. **Verified on-air: board0↔chronite encrypted ICMP
 RESOLVING → ACTIVE/RESOLVED.** Full cross-vendor encrypted mesh: SAE→AMPE→ESTAB(#16)→HWMP→CCMP→ping. See
 worklog + code-map § #17.
 
-**Still open:** (a) **task #18** — RX PREP (board0 answer Linux's encrypted broadcast PREQ → no-static-ARP
-dynamic join). (b) **task #19** — encrypt the unicast mesh relay path. (c) on-air `morse0` byte-capture
-(board0 RF range). (d) hardening #14/#15 + the #13 residual.
+**task #18 — DONE: no-static-ARP DYNAMIC join works.** The premise ("encrypted broadcast PREQ → does the
+MM6108 HW-decrypt group mgmt?") was WRONG: chronium on-air capture shows chronite's broadcast HWMP PREQ is
+**unprotected** (Category MESH(13) Path Request, `protected=False`; only group DATA is MGTK-encrypted).
+board0 received it but morselib's infra PMF pre-dispatch (`umac_datapath.c:356-385`) dropped the
+unprotected robust group-mgmt frame before the HWMP handler → board0 never PREP'd → Linux couldn't resolve
+a path to board0 (nor ARP-reply), blocking BOTH directions. This is the RX mirror of #17's TX drop. Fix
+(mirrors mac80211): group-addressed MESH/MULTIHOP action frames are `_ieee80211_is_group_privacy_action`
+(MGTK/group-privacy class, not BIP) and mesh peers are **MFP=no** (`iw station dump` on chronite →
+`MFP: no`), so `ieee80211_drop_unencrypted_mgmt`'s MFP block is skipped — ported as
+`frame_is_group_privacy_action` (umac/frames/action.c) + a guard exemption in the drop.
+**Verified on-air (clean build): board0↔chronite DYNAMIC (no static ARP) — board0→chronite 0 → 46/0;
+chronite→board0 0/8 → 5/5; chronite mpath `0x15` ACTIVE/RESOLVED.** See worklog + code-map § #18.
+
+**Still open:** (a) **task #19** — encrypt the unicast mesh relay path. (b) on-air `morse0` byte-capture
+(board0 RF range). (c) hardening #14/#15 + the #13 residual. (d) **task #9** — morselib `pmf_is_required`
+vs mac80211 `WLAN_STA_MFP`+key-presence (mesh peers MFP=no but still key-encrypt robust mgmt).
 
 chronosalt/chronogen run `wpa_supplicant_s1g` (`sae_password='rimbamesh2026'`, group 19,
 `dtim_period=1`; NOT `iw mesh join`). Match group/H2E/AKM(`00-0f-ac-08`)/mesh_id/channel/password.

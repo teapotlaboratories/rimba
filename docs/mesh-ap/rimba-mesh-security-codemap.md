@@ -229,3 +229,25 @@ authorized: yes`; board0 sends a Confirm (never did pre-#16). Cross-vendor encry
 **Verified (2026-06-28, live Linux peer):** board0↔chronite encrypted ICMP 5/5; chronite mpath ACTIVE/RESOLVED
 (flags 0x15). Full encrypted ESP↔Linux mesh (SAE→AMPE→ESTAB→HWMP→CCMP→ping). Follow-ups: RX PREP for
 no-static-ARP dynamic join; encrypt the unicast relay.
+
+## #18 — group-privacy-action RX exemption (no-static-ARP dynamic join)
+
+A group-addressed mesh HWMP frame (broadcast PREQ/PERR) is sent **unprotected** on-air (confirmed via
+chronium tshark: Category MESH(13) Path Request, `protected=False`). morselib's infra PMF pre-dispatch
+dropped it as an unprotected robust mgmt frame, so the HWMP handler never saw it and board0 never PREP'd →
+no Linux peer could resolve a path to board0 (and board0's own ARP→ping never completed).
+
+| New code | Linux/morse counterpart |
+| --- | --- |
+| `dot11/dot11.h`: `DOT11_ACTION_CATEGORY_MESH = 13`, `DOT11_ACTION_CATEGORY_MULTIHOP = 14` | `include/linux/ieee80211.h` `WLAN_CATEGORY_MESH_ACTION` / `WLAN_CATEGORY_MULTIHOP_ACTION` |
+| `umac/frames/action.c`: `frame_is_group_privacy_action(view)` — mgmt Action + multicast DA(addr1) + category MESH/MULTIHOP | `include/linux/ieee80211.h:4611` `_ieee80211_is_group_privacy_action` (line-for-line) |
+| `umac/frames/frames_common.h`: declare it | (header decl, next to `frame_is_robust_mgmt`) |
+| `umac/datapath/umac_datapath.c:356-385`: add `&& !frame_is_group_privacy_action(rxbufview)` to the unprotected-robust-mgmt drop guard | `net/mac80211/rx.c:2436` `ieee80211_drop_unencrypted_mgmt`: the multicast-robust/BIP drop (`rx.c:2473`) is inside `if (rx->sta && test_sta_flag(.., WLAN_STA_MFP))` (`rx.c:2454`); **mesh peers are MFP=no** (chronite `iw station dump` → `MFP: no`) so the block is skipped → `RX_CONTINUE` |
+
+`pmf_is_required` kept **true** so the *unicast* PREP stays CCMP-encrypted under the pairwise MTK (matches
+chronite, proven #17). The morselib-`pmf_is_required` vs mac80211-`WLAN_STA_MFP`+key-presence mismatch is
+tracked in task #9.
+
+**Verified (2026-06-28, clean fix build, live Linux peer):** board0↔chronite **dynamic** join, no static
+ARP — board0→chronite 46+39+11/0 replies (was 0); chronite→board0 5/5; chronite mpath to board0 `0x15`
+(ACTIVE+RESOLVED) direct 1-hop. Captured `#18PREQ tgt==me==board0` (target-match reached).
