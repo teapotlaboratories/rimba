@@ -724,3 +724,58 @@ presence (mesh peers MFP=no but still key-encrypt) — is recorded against task 
    `#18PREQ sa=3c:22:7f:37:51:38 tgt=e2:72:a1:f8:ef:a4 me=e2:72:a1:f8:ef:a4` (target == self).
 4. **functional:** bidirectional dynamic ping (board0→chronite 46+39+11/0; chronite→board0 5/5; chronite
    mpath `0x15` direct). Before the fix every one of these was 0 / `RESOLVING`.
+
+## #19 — relay-forward keyed under the next-hop pairwise MTK + broadcast HWMP sent unprotected
+
+Two related fixes for the ESP-as-intermediate-hop (multi-hop relay) path. Both verified on-bench (3-ESP
+relay-demo + board0↔chronite regression). **The end-to-end ESP↔ESP relay ping does NOT yet complete — a
+separate downstream blocker remains (board2 doesn't decrypt the forwarded unicast); see "Remaining" below.**
+
+### Fix 1 — #19: encrypt the unicast relay-forward (umac_mesh_forward_data)
+`umac_mesh_forward_data` (ESP relays a unicast frame whose mesh-DA isn't us) sent the pre-built 4-address
+data frame via `umac_datapath_tx_mgmt_frame(common_stad, …)`. For a *data* frame `frame_is_robust_mgmt` is
+false, so it went out **plaintext**, and keyed off the common stad (no per-next-hop pairwise key). Unicast
+analog of the P2c group-forward-plaintext bug. net/mac80211 re-keys a forwarded unicast with the next-hop
+PTK (`ieee80211_tx_h_select_key` tx.c:614: `tx->sta->ptk` for a unicast RA). Fix: a pairwise sibling of the
+#17 group helper.
+- `umac_datapath.c`: refactor `umac_datapath_tx_mesh_group_frame` into a shared
+  `umac_datapath_tx_mesh_keyed_frame(stad, txbuf, key_type)` core + two thin wrappers — `_group_frame`
+  (UMAC_KEY_TYPE_GROUP, unchanged behaviour) and new `_unicast_frame` (UMAC_KEY_TYPE_PAIRWISE).
+- `umac_mesh_forward_data`: look up the next-hop's per-peer stad (`umac_mesh_get_peer_stad(next_hop)`) and
+  send via `umac_datapath_tx_mesh_unicast_frame(nh_stad, …)` — encrypts under the next hop's MTK (key idx 0).
+- **Verified exercised + correctly keyed** (static-ARP relay, time-throttled probes): board0 forwards
+  board1→board2 data with `nh_stad` found and `key_type=PAIRWISE key_id=0 sec=2` — encrypted under board2's
+  pairwise MTK, ~20×/window. The #19 keying does exactly its job.
+
+### Fix 2 — broadcast HWMP sent UNPROTECTED (supersedes the #17 MGTK-encryption of broadcast HWMP)
+#17 routed broadcast HWMP (PREQ/PERR/RANN) through the MGTK group path because
+`umac_datapath_tx_mgmt_frame` DROPS a BC/MC robust-mgmt frame under PMF (umac_datapath.c:2238). That worked
+ESP↔Linux only because chronite *decrypts* the ESP's MGTK-encrypted PREQ — but in an ESP↔ESP relay the
+relay node couldn't process a peer's encrypted group-management frame, so multi-hop never resolved. #18
+established the real rule: **Linux sends group HWMP UNPROTECTED** (mesh peers are MFP=no). So the faithful
+fix is the TX mirror of the #18 RX exemption:
+- `umac_datapath_tx_mgmt_frame`: add `&& !frame_is_group_privacy_action(txbufview)` to the robust-mgmt
+  guard, so a group-addressed Mesh/Multihop action frame skips the BC/MC drop and the encryption and goes
+  out in the clear (a unicast PREP is NOT a group-privacy action → stays pairwise-CCMP-encrypted).
+- `umac_mesh_tx_hwmp`: always use `umac_datapath_tx_mgmt_frame` (the group-path special-case is removed);
+  broadcast HWMP now emits unprotected, unicast PREP stays pairwise.
+- **Verified:** ESP↔ESP, the full PREQ chain now resolves — board1 originates an unprotected PREQ →
+  **board0 receives it** (`#HWRXPREQ`) → board0 forwards it → **board2 receives it** → board2 **PREPs**
+  (`#HWTX act=1`). And **no #17/#18 regression**: board0↔chronite dynamic no-static-ARP encrypted ping
+  still works (board0→chronite 39/3, chronite→board0 5/5, chronite mpath `0x15`) — chronite accepts the
+  now-unprotected PREQ (MFP=no), exactly as predicted.
+
+### Remaining (the next task — NOT #19's keying): board2 doesn't decrypt the forwarded unicast
+With static ARPs forcing the path, the full chain is exercised: HWMP resolves, and board0 forwards board1's
+ICMP to board2 under board2's pairwise MTK (correctly keyed, confirmed above). But the relay ping is still
+0 replies because **board2 never receives the forwarded encrypted unicast at the umac layer** — a board2-RX
+probe (`#MRXD`) fired 0× despite board0 sending ~20 correctly-keyed encrypted forwards (board0's own
+`#MRXD` confirms it RX'd board1's ICMP and forwarded it). board2 *does* receive board0's unprotected
+broadcast PREQ, so it's specifically the **encrypted 4-address forwarded frame** the firmware drops before
+delivery — likely the last-hop addressing (A1==A3==board2, mesh-SA=board1≠TA=board0) confusing the firmware
+key-lookup/decrypt. This is firmware-RX territory (#9-adjacent), downstream of #19's correct forward-keying.
+
+### Bench note
+chronite's secured mesh was stopped (wlan1 down) to clear the channel for the ESP relay test, then brought
+back up for the regression check. Scoped stop/restart only ever touches the **wlan1 s1g** supplicant
+(`pkill -x wpa_supplicant_` — the truncated comm; never the wlan0 `wpa_supplicant` carrying SSH).
