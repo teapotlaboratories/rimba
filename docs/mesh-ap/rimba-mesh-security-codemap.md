@@ -251,3 +251,21 @@ tracked in task #9.
 **Verified (2026-06-28, clean fix build, live Linux peer):** board0↔chronite **dynamic** join, no static
 ARP — board0→chronite 46+39+11/0 replies (was 0); chronite→board0 5/5; chronite mpath to board0 `0x15`
 (ACTIVE+RESOLVED) direct 1-hop. Captured `#18PREQ tgt==me==board0` (target-match reached).
+
+## #19 — relay-forward pairwise keying + broadcast HWMP unprotected (multi-hop relay)
+
+Two fixes for the ESP-as-intermediate-hop path. The forward-keying is verified correct; the end-to-end
+ESP↔ESP relay ping has a separate downstream blocker (board2 doesn't decrypt the forwarded unicast).
+
+| New code | Linux/morse counterpart |
+| --- | --- |
+| `umac_datapath.c`: `umac_datapath_tx_mesh_group_frame` refactored into `umac_datapath_tx_mesh_keyed_frame(stad, txbuf, key_type)` core + `_group_frame` (GROUP) / new `_unicast_frame` (PAIRWISE) wrappers | net/mac80211 `ieee80211_tx_h_select_key` (tx.c:614): unicast RA → `tx->sta->ptk`; multicast → GTK |
+| `umac_datapath.h`: declare `umac_datapath_tx_mesh_unicast_frame` | — |
+| `umac_mesh.c` `umac_mesh_forward_data`: `umac_mesh_get_peer_stad(next_hop)` → `umac_datapath_tx_mesh_unicast_frame(nh_stad, …)` (encrypt under next-hop MTK, key idx 0) | a forwarded unicast is keyed with the next-hop PTK |
+| `umac_datapath.c` `umac_datapath_tx_mgmt_frame`: `&& !frame_is_group_privacy_action(txbufview)` on the robust-mgmt guard → group HWMP emitted unprotected (TX mirror of #18 RX) | mesh peers MFP=no → net/mac80211 sends group HWMP in the clear; supersedes #17's MGTK-encryption of broadcast HWMP |
+| `umac_mesh.c` `umac_mesh_tx_hwmp`: always `umac_datapath_tx_mgmt_frame` (group-path special case removed); broadcast unprotected, unicast PREP pairwise | — |
+
+**Verified (2026-06-28):** #19 forward correctly keyed (`key_type=PAIRWISE key_id=0`, ~20×); ESP↔ESP PREQ
+chain resolves (board1→board0→board2, board2 PREPs); **no #17/#18 regression** (board0↔chronite dynamic
+encrypted ping 39/3 + 5/5, mpath `0x15`). **Open:** board2 doesn't decrypt board0's forwarded 4-addr
+unicast (firmware RX, #9-adjacent) — the relay ping doesn't complete yet.

@@ -142,9 +142,20 @@ a path to board0 (nor ARP-reply), blocking BOTH directions. This is the RX mirro
 **Verified on-air (clean build): board0↔chronite DYNAMIC (no static ARP) — board0→chronite 0 → 46/0;
 chronite→board0 0/8 → 5/5; chronite mpath `0x15` ACTIVE/RESOLVED.** See worklog + code-map § #18.
 
-**Still open:** (a) **task #19** — encrypt the unicast mesh relay path. (b) on-air `morse0` byte-capture
-(board0 RF range). (c) hardening #14/#15 + the #13 residual. (d) **task #9** — morselib `pmf_is_required`
-vs mac80211 `WLAN_STA_MFP`+key-presence (mesh peers MFP=no but still key-encrypt robust mgmt).
+**task #19 — relay-forward keying DONE + broadcast HWMP now UNPROTECTED (2026-06-28).** Two fixes:
+(1) `umac_mesh_forward_data` encrypts the forwarded unicast under the **next-hop pairwise MTK** (per-peer
+stad; was plaintext via the mgmt path) — mirrors mac80211 `tx->sta->ptk`; verified correctly keyed
+(`key_type=PAIRWISE key_id=0`). (2) ESPs now send broadcast HWMP **unprotected** (TX mirror of the #18 RX
+exemption — `frame_is_group_privacy_action` in `umac_datapath_tx_mgmt_frame`), superseding #17's
+MGTK-encryption of broadcast HWMP (a cross-vendor relay can't decrypt group mgmt). Verified: ESP↔ESP PREQ
+chain resolves (board1→board0→board2, board2 PREPs); **no #17/#18 regression** (board0↔chronite dynamic
+encrypted ping 39/3 + 5/5, mpath `0x15`). Worklog + code-map §#19. **Relay ping not yet end-to-end** — see
+the new blocker below.
+
+**Still open:** (a) **board2 doesn't decrypt the forwarded 4-addr unicast** (firmware RX; the relay's last
+hop — `#9`-adjacent) — the #19 forward is correctly keyed but board2's umac never receives it. (b) on-air
+`morse0` byte-capture (board0 RF range). (c) hardening #14/#15 + the #13 residual. (d) **task #9** — morselib
+`pmf_is_required` vs mac80211 `WLAN_STA_MFP`+key-presence (mesh peers MFP=no but still key-encrypt robust mgmt).
 
 chronosalt/chronogen run `wpa_supplicant_s1g` (`sae_password='rimbamesh2026'`, group 19,
 `dtim_period=1`; NOT `iw mesh join`). Match group/H2E/AKM(`00-0f-ac-08`)/mesh_id/channel/password.
