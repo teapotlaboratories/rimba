@@ -829,3 +829,41 @@ CCMP + a firmware mode that delivers un-decrypted frames, which the morselib bui
 diverges from 802.11s and loses the true origin for 3+ hops. (3) **Accept single-hop-only** for HW-crypto
 deployments. **Pending definitive proof:** a *forced* Linux multi-hop relay (direct peering blocked) to show
 Linux also fails — impractical on the all-in-range bench without a peer-block mechanism.
+
+### #20 — SW-crypto feasibility verdict: FEASIBLE, substantial effort, low firmware risk
+
+Per the chosen path (SW crypto = the architecturally-correct way around the HW-crypto forwarding wall).
+
+**1. Software CCMP IS available in the tree.** `src/hostap/wlantest/ccmp.c` has `ccmp_decrypt`/`ccmp_encrypt`
+(via `aes_ccm_ad`/`aes_ccm_ae`), keyed by a caller-supplied TK — so I can decrypt a forwarded frame keyed by
+the link/TA. Not currently in the CMake, but addable exactly like `aes-siv.c`/`aes-ctr.c` were for AMPE. The
+ESP32-S3 + mbedTLS have AES HW acceleration, so SW CCMP is cheap.
+
+**2. Mechanism = `no_hwcrypt`, NOT thin-LMAC.** thin-LMAC needs a *different firmware binary*
+(`mm6108-tlm.bin`, the `-tlm` variant — `mm6108.c:mm610x_get_fw_path`), which the ESP build doesn't ship.
+`no_hwcrypt` runs on the *same* `mm6108.bin`: don't offload keys → `set_key=NULL` on Linux → the firmware
+delivers all frames raw → the host does CCMP keyed by the link/TA. The morselib equivalent: skip
+`umac_keys_install_key`'s firmware offload (the single seam is `umac_mesh_peer_secure_estab`, umac_mesh.c:1430)
+and do host CCMP.
+
+**3. Hybrid (HW direct + SW forward) is NOT possible.** The firmware drops an un-decryptable *protected*
+frame when it HAS keys (the #20 observation: board2 had the board0↔board2 key, still dropped the A4=board1
+forward). So you can't selectively SW-decrypt only forwards — it's all-or-nothing per node, and every node
+that must receive a forwarded frame moves to SW crypto → the whole secured mesh goes SW-crypto.
+
+**4. Effort — substantial (port mac80211's SW CCMP into morselib's mesh data path):**
+- TX: build CCMP header + PN, `aes_ccm_ae` the payload, send plaintext-to-firmware (drop HW_ENC).
+- RX: detect Protected, look up the link key by TA, `aes_ccm_ad`, PN/replay check, strip CCMP header.
+- Key mgmt: keep MTK/MGTK in host memory (un-offloaded), per-key TX PN + RX replay window.
+- Seams: the mesh TX helpers (`umac_datapath_tx_mesh_*` / `_tx_mgmt_frame`) + the data RX path
+  (`umac_datapath_process_rx_data_frame`). The group MGTK + pairwise MTK already live in morselib.
+
+**5. Low-risk make-or-break to confirm FIRST:** does the ESP `mm6108.bin` deliver a *protected* frame raw
+when NO key is installed (like Linux `no_hwcrypt=Y`)? Same firmware + Linux works ⇒ very likely yes. Confirm
+with a quick no-key node test (board2 skips `umac_keys_install_key`; board0 HW-encrypts a direct frame to it;
+probe board2's RX entry for the frame arriving with `prot=1 DEC=0`) before committing to the full port.
+
+**Verdict:** feasible; the only hard blocker would be (5) failing, which is unlikely. It is a real
+multi-session implementation (host-side CCMP), not a quick fix — the call is whether multi-hop forwarding is
+worth that vs the single-hop-on-HW-crypto status quo (#19 + broadcast-HWMP already give a working 1-hop
+secured mesh ESP↔Linux).
