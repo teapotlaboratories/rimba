@@ -4,7 +4,7 @@ Practical reference to the physical test bench: what's connected, how to reach e
 device, and the gotchas. Stable facts (ports, MACs, addresses) are reliable; the
 "currently running" notes are a snapshot — verify live before depending on them.
 
-Last verified: 2026-06-27.
+Last verified: 2026-06-29.
 
 ---
 
@@ -17,15 +17,15 @@ Last verified: 2026-06-27.
   `10.9.9.2`–`10.9.9.4`. (chronium *can* rejoin as `10.9.9.1` if you need a 4-node mesh instead;
   monitor and mesh can't run on one radio at the same time.)
   - **2× Raspberry Pi 5 + MM6108 HAT** — `wm6108-spi-pi5` wiring:
-    - **chronium** `192.168.7.187` — **the sniffer** (`CONFIG_MORSE_MONITOR=y`; `wlan1` in monitor
+    - **chronium** — **the sniffer** (`CONFIG_MORSE_MONITOR=y`; `wlan1` in monitor
       type on ch27 → `morse0` raw tap delivers radiotap frames; see the Monitor section). Captures
       S1G beacons + SAE auth + AMPE action + data off-air — the gold standard for the ESP port.
-    - **chronite** `192.168.7.191` (mesh `10.9.9.2`) — **testing + code-comparison** node (its
+    - **chronite** (mesh `10.9.9.2`) — **testing + code-comparison** node (its
       `~/halow` source trees are the reference for diffing against the ESP morselib).
   - **2× Raspberry Pi Zero 2 W + `fgh100mhaamd` MM6108 board** — `fgh100mhaamd-spi` wiring,
     built 2026-06-27, both power-stable (`throttled=0x0`):
-    - **chronosalt** `192.168.7.194` (mesh `10.9.9.3`) — distant node for the airtime test.
-    - **chronogen** `192.168.7.165` (mesh `10.9.9.4`) — distant node for the airtime test.
+    - **chronosalt** (mesh `10.9.9.3`) — distant node for the airtime test.
+    - **chronogen** (mesh `10.9.9.4`) — distant node for the airtime test.
 - **Dev host** — the machine these run from: holds the `rimba` repo + ESP-IDF
   toolchain; all builds/flashing happen here; SSH to the Pis over the LAN.
 
@@ -91,12 +91,17 @@ s.close()
 
 ## Linux nodes (2×) — Raspberry Pi 5 + MM6108 HAT
 
-Both use **SSH key auth** from the dev host (no password needed). chronium can also SSH
-directly to chronite (key installed for direct rsync):
+**Reach every Linux node by hostname, never by raw IP** (see `.ai/AGENTS.md` → Bench access).
+`~/.ssh/config` on the dev host maps each hostname to its node (SSH key auth, no password):
 ```sh
-ssh chronium@192.168.7.187     # monitor / sniffer node
-ssh chronite@192.168.7.191     # testing / code-comparison node
+ssh chronium      # monitor / sniffer node
+ssh chronite      # testing / code-comparison node
+ssh chronosalt    # Pi Zero twin
+ssh chronogen     # Pi Zero twin
 ```
+The names also work as `chronium.local` (mDNS). The management IPs live **only** in `~/.ssh/config`
+(one place to update if DHCP moves them — `avahi-resolve -4 -n chronium.local` re-discovers a current
+address). chronium can also SSH directly to chronite (key installed for direct rsync).
 
 **Gotchas that bite every session (prepend to remote commands):**
 - Locale is broken → `export LC_ALL=C` (otherwise noisy `setlocale` warnings).
@@ -111,7 +116,7 @@ ssh chronite@192.168.7.191     # testing / code-comparison node
 - Reloading the module (`modprobe -r morse`) **unbinds the SPI device** (bind → I/O
   error) — to load a rebuilt module, **reboot** rather than reload.
 
-### chronium — `192.168.7.187` ✅
+### chronium ✅
 - Kernel **6.12.21-v8-16k+** (Morse-patched tree at `~/halow/rpi-linux`).
 - morse device = **phy1 / wlan1** (`morse_spi`, SPI); phy0/wlan0 = the Pi's brcmfmac.
   HaLow Wi-Fi MAC `3c:22:7f:37:50:42`. Reachable on **wired `eth0`** (primary) + wlan0.
@@ -131,7 +136,7 @@ ssh chronite@192.168.7.191     # testing / code-comparison node
 - For mesh/peer *state* (when not monitoring) use the normal vif: `iw dev wlan1 station dump`
   (plink/signal), `iw dev wlan1 mpath dump`, `page_stats` (Beacon Tx).
 
-### chronite — `192.168.7.191` (the Linux TESTING / code-comparison node) ✅
+### chronite — the Linux TESTING / code-comparison node ✅
 Set up 2026-06-25 by cloning chronium's stack (faster than a from-scratch kernel build,
 since the hardware is identical). Now a full second morse node, same 1.17.8 stack.
 - Kernel **6.12.21-v8-16k+** (the same Morse-patched kernel — cloned from chronium and
@@ -160,8 +165,8 @@ since the hardware is identical). Now a full second morse node, same 1.17.8 stac
 
 ## Pi Zero 2 W nodes (2×) — `fgh100mhaamd` MM6108 board
 
-**chronosalt** `192.168.7.194` (user `chronosalt`) and **chronogen** `192.168.7.165` (user
-`chronogen`), both pass `hermanudin`, SSH key auth + **passwordless sudo**, fresh Debian 13
+**chronosalt** (user `chronosalt`) and **chronogen** (user `chronogen`), both pass `hermanudin`,
+SSH key auth + **passwordless sudo**, fresh Debian 13
 (trixie). Built 2026-06-27 as identical twins. (chronosalt replaced a retired flaky RPi-3B rig;
 chronogen was the old `rpi-linkarta-1`, reflashed.) `iw` is installed but in `/usr/sbin` — same
 PATH gotcha as the Pi 5s.

@@ -31,3 +31,6 @@ Most important rules:
   [AGENTS.md → Porting Linux code](AGENTS.md#porting-linux-code).
 - **Cite sources** when finding, researching, or comparing. See
   [AGENTS.md → Research & citations](AGENTS.md#research--citations).
+- **Connect to bench nodes by hostname, never raw IP** — `ssh chronium` (or `chronium.local`), not
+  `ssh user@192.168.x.x`; the IP lives only in `~/.ssh/config`. See
+  [AGENTS.md → Bench access](AGENTS.md#bench-access--connect-by-hostname-never-raw-ip).

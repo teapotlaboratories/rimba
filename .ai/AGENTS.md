@@ -212,6 +212,24 @@ sources** so the claim can be checked — don't report a bare conclusion.
   number) — and flag when something is unverified or unknown rather than
   guessing.
 
+## Bench access — connect by hostname, never raw IP
+
+**Reach every bench node by hostname (`chronium`, `chronite`, `chronosalt`, `chronogen`) — never a
+raw `192.168.x.x` address.** Hostnames are stable; the management IPs are DHCP and drift (chronium
+alone answers on two — `.187` wired / `.188` Wi-Fi). Hardcoding an IP in a command, script, doc, or
+code is a latent breakage.
+
+- **How it resolves.** `~/.ssh/config` on the dev host maps each name to its node (User + HostName +
+  key auth), so `ssh chronium 'cmd'` just works — no `user@ip`. The names also answer as
+  `chronium.local` (mDNS/avahi). The IP lives in exactly one place (`~/.ssh/config`); update it there
+  if a node moves (`avahi-resolve -4 -n chronium.local` re-discovers a current address).
+- **Native `.local` (optional, for non-ssh tools).** For system-wide dynamic `<name>.local`
+  resolution (ping, `getent`, any tool — not just ssh), install `libnss-mdns`
+  (`sudo apt install libnss-mdns`; its postinst adds `mdns4` to `/etc/nsswitch.conf`). Then the
+  ssh-config IPs can be dropped in favour of `HostName <name>.local`.
+- **In docs/inventory** (`docs/reference/rimba-bench-devices.md`) refer to nodes by hostname, not IP.
+  The mesh data-plane addresses (`10.9.9.x`) are functional test addresses and stay.
+
 ## Operational runbooks
 
 - [radio-silent-workflow.md](radio-silent-workflow.md) — keep the MM6108 radios
