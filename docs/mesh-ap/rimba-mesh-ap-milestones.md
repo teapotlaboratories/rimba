@@ -277,7 +277,7 @@ Full control + data plane: beacon → peer (MPM) → path (HWMP) → IP, both as
 | P5b | ESP **data-frame relay** (ESP as an intermediate hop forwarding others' traffic) | ✅ done |
 | P6a | **Group/multicast forwarding** (re-broadcast + RMC dedup) — ARP traverses a relay, no static ARP | ✅ done |
 | P6b | **PERR broken-link teardown** + **peer-inactivity link-failure detection** | ✅ done |
-| P6c | Full airtime metric, mesh security (SAE/AMPE), power save, proxy/gate | ⬜ backlog |
+| P6c | mesh **security (SAE/AMPE)** ✅ — secured mesh works single-hop **and** multi-hop relay, both ESP↔ESP **and** cross-vendor (ESP relay ↔ Linux endpoint), host SW-CCMP, on-air verified (see `docs/worklog/2026-06-27-mesh-security-*` + `rimba-mesh-security-codemap.md`); airtime metric / power save / proxy-gate still ⬜ | 🟡 partial |
 
 ### Feature comparison: Linux (`net/mac80211`) vs ESP32 (morselib)
 
@@ -400,8 +400,12 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
   Remaining is rolled into the items below (mesh + AP concurrency = A3) and **P6c**:
   - ☐ **P6c — mesh hardening.** Rate-derived **airtime metric** (currently a fixed per-hop
     cost — unverifiable on a single-path forced-line bench), **RANN/root** mode, **proxy/gate
-    (`mpp`)** so the Mesh-gate can bridge AP leaves onto the mesh, **AMPE/SAE** (encrypted
-    mesh), **mesh power save**. Derive each from `net/mac80211/mesh*.c` + `morse_driver/mesh.c`.
+    (`mpp`)** so the Mesh-gate can bridge AP leaves onto the mesh, **mesh power save**. Derive
+    each from `net/mac80211/mesh*.c` + `morse_driver/mesh.c`.
+  - ✅ **AMPE/SAE encrypted mesh** — DONE (2026-06-27/29): SAE auth + AMPE peering + CCMP data,
+    secured single-hop AND multi-hop relay, both ESP↔ESP and cross-vendor (ESP relay ↔ Linux
+    endpoint), host SW-CCMP. Tracked in `docs/worklog/2026-06-27-mesh-security-phase{1,2,3}-*.md`
+    + `rimba-mesh-security-codemap.md`; on-air verified per [[verify-onair-chronium-monitor]].
   - ✅ **Frame deltas vs live Linux fixed + re-verified on air** (Update 15): PREQ **Target-Only
     flag** on refresh, **No-Ack** QoS on group/broadcast, PREQ **lifetime in TUs** (`MSEC_TO_TU`).
     board0 (fixed) now emits `target_flags=01`, `lifetime=0x7270` (TU), group `QoS=0x20` —

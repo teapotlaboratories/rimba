@@ -918,3 +918,343 @@ encrypt produced `ct=34841c…1be1` + `mic=70175299c5e94f49` (ct_match=1, mic by
 reference ct+mic returned rc=0 (MIC verified) + recovered the plaintext (pt_match=1). So AES-CCM compiles,
 links via the mmint_ shim, runs on the ESP, and is byte-exact. (An ESP nano-printf vararg quirk garbled two
 of the KAT's %d ints, but the crypto outputs + pointer args were all correct → ABI is fine.) Next: P5b.
+
+### #21 P5b — the shared mesh CCMP core (AAD/nonce/header + encrypt/decrypt), byte-validated on the ESP
+
+New file content in **`morselib/src/umac/supplicant_shim/ccmp.c`** (alongside the existing CCMP-header
+parsers + `ccmp_is_valid`), declared in `umac_supp_shim.h`:
+- `mesh_ccmp_aad_nonce(hdr, ccmp_hdr, aad, &aad_len, nonce)` — a faithful port of hostap
+  **`wlantest/ccmp.c:ccmp_aad_nonce`** (the canonical mac80211/CCMP PV0 recipe). Builds the 30-byte AAD
+  (masked FC | A1 A2 A3 | masked Seq | A4-if-4addr | masked-QoS) and the 13-byte CCM nonce (TID | A2 |
+  PN5..PN0). The Mesh Control field is plaintext body, NOT in the AAD; the QoS mesh-ctrl-present bit is
+  masked to 0 in the AAD byte. Byte-level reads via the dot11.h FC masks (TO_DS|FROM_DS ⇒ addr4; subtype
+  bit 0x08 ⇒ QoS).
+- `mesh_ccmp_write_header(ccmp_hdr, pn, key_id)` — the 8-byte CCMP header (PN0,PN1,Rsvd,ExtIV|KeyID,PN2..5).
+- `mesh_ccmp_encrypt(tk,tk_len,hdr,ccmp_hdr,pn,key_id, body_in,body_out,body_len, mic)` and
+  `mesh_ccmp_decrypt(tk,tk_len,hdr,ccmp_hdr, ct_in,pt_out,ct_len, mic)` — wrap `mmint_aes_ccm_ae`/`_ad`
+  (M=8 for tk_len 16 / M=16 for 32). Encrypt writes the CCMP header + MIC; decrypt returns 0 on MIC OK.
+
+**Validated on hardware** via a temporary boot KAT (`mesh_ccmp_selftest`, reverted) using an **independent
+reference vector** computed offline (python: an independent re-implementation of `ccmp_aad_nonce` +
+`cryptography.AESCCM`) for a real **4-addr mesh QoS-Data** frame (FC=0x8803 ToDS+FromDS, A1/A2/A3/A4 set,
+seq#=1, QoS TID0 mesh-ctrl-present, 16-byte key, PN=0xa5, 18-byte body):
+- encrypt → CCMP header `a500002000000000`, ct `187315d5bb84036adc4cbd1899c5d8d85b5e`, MIC
+  `ea7d008eade1bf6c` — **all three byte-exact** vs the reference (`enc_ok=1`, checked immediately
+  post-encrypt). The AAD (`8843|A1A2A3|0000|A4|0000`, 30 B) and nonce (`00|A2|0000000000a5`) matched by
+  hand-derivation and are implicitly proven correct by the matching MIC.
+- decrypt of that ct+MIC → `d=0` (MIC verified) + recovered the exact plaintext (`dec_ok=1`).
+
+**Critical gotcha discovered (root-caused in `aes-ccm.c`): `aes_ccm_ae`/`aes_ccm_ad` are NOT in-place
+safe.** `aes_ccm_encr` (aes-ccm.c:92-114) does `aes_encrypt(aes, a, out)` — writing the keystream block
+into `out` — and only THEN `xor_aes_block(out, in)`. When `out == in`, the keystream write clobbers the
+plaintext before the XOR, so the XOR is keystream⊕keystream = **all zeros** (the first in-place attempt
+produced `ct=000000…`, yet a correct MIC because the CBC-MAC over the plaintext runs earlier). The recon
+note claiming "in-place safe" was wrong. Forward-overlap (dst = src+8, the natural "shift body to make room
+for the 8-byte CCMP header" move) is also unsafe — `aes_encrypt` writes a full 16-byte block to `out`,
+clobbering not-yet-read `in` bytes. **Consequence for P5c/P5d: the body transform needs a genuinely
+non-aliasing scratch buffer** (TX: encrypt mmpkt-body → scratch, then place; RX: decrypt ct → scratch, then
+shift left over the stripped CCMP header). `mesh_ccmp_encrypt`/`decrypt` take explicit separate `in`/`out`
+pointers to make this contract enforceable at the call sites. Next: P5b key-state plumbing + P5c/P5d wiring.
+
+### #21 P5b-d DONE — host CCMP wired into the mesh datapath; single-hop ESP↔Linux VERIFIED on-air
+
+A single runtime switch flips the whole node between FW HW crypto (single-hop only) and host SW crypto
+(multi-hop): **`umac_mesh_sw_crypto_enabled()`** (umac_mesh.c, `g_mesh_sw_crypto`, default **ON**). It
+gates four things together (a half-converted node is broken — TX-encrypted frames the RX can't decrypt):
+
+- **Key offload gate** (`umac_keys_mmdrv_install_key`): when SW crypto + mesh active, a PAIRWISE/GROUP key
+  is kept host-side ONLY — NOT pushed to the FW. With no FW key the MM6108 delivers protected mesh frames
+  raw to the host (the #20 no-key test), which is what lets the host decrypt a forwarded A4≠TA frame the FW
+  keys by A4 and can't. Added `umac_keys_get_tx_seq(stad, key_type)` (host-managed CCMP PN source).
+- **Two datapath helpers** (umac_datapath.c, file-static scratch — single TX/RX task):
+  `umac_datapath_sw_ccmp_encrypt(stad, view, key_type, key_id)` — encrypt the body under the active key,
+  `mmpkt_prepend(8)` + slide the MAC header forward to open the CCMP slot, write CCMP header + ciphertext,
+  `mmpkt_append(mic)`; and `umac_datapath_sw_ccmp_decrypt(stad, view, data_hdr, space)` — decrypt + verify
+  MIC, THEN replay-check the PN (forged MIC can't poison the replay window), strip CCMP header + MIC.
+- **TX — three sites** wired `if (sw_crypto) sw_ccmp_encrypt(...) else HW_ENC`: `process_tx_frame` (local
+  mesh data, key by is_multicast→GROUP/PAIRWISE), `tx_mesh_keyed_frame` (#19 forward unicast / re-bcast
+  group), `tx_mgmt_frame` (protected unicast action e.g. PREP, pairwise). PN incremented before use
+  (mac80211 order); `tx_mgmt_frame` already incremented in its key-setup so the helper just reads it.
+- **RX — two sites** (`prot=1` + NOT `MMDRV_RX_FLAG_DECRYPTED` → host decrypt, keyed by TA): the DATA path
+  (`process_rx_data_frame_after_reorder`, DEFAULT replay space) and the **robust-mgmt path**
+  (`umac_datapath_process_mgmt_frame_ccmp_header`, IND_ROBUST_MGMT space). The mgmt one was the bug found
+  on the first relay run: the encrypted **PREP** action frames go through the mgmt path, not the data path,
+  so without wiring it the relay dropped every PREP and HWMP path discovery never resolved (board1 flooded
+  127 PREQ/window on-air).
+- **Buffer reservation**: the host now owns the CCMP expansion, so both TX allocators reserve CCMP-header
+  headroom + MIC tailroom (`build_mgmt_frame`: `space_at_start=DOT11_CCMP_HEADER_LEN`,
+  `space_at_end += DOT11_CCMP_256_MIC_LEN`; `umac_datapath_alloc_mmpkt_for_qos_data_tx` likewise) — mirrors
+  mac80211 reserving crypto tailroom. Without this `build_mgmt_frame`'s exact-size alloc left no room and
+  the forward dropped.
+
+**VERIFIED on-air (chronium morse0 monitor), single-hop ESP↔Linux cross-vendor (2026-06-29):** board0 in
+MESH_LINUX_INTEROP (host SW crypto) pinging **chronite** (Linux, `no_hwcrypt=N` HW crypto, mesh 10.9.9.2 /
+`3c:22:7f:37:51:38`): **46 replies / 4 timeouts**, 13–29 ms RTT. chronium capture shows the 4-addr QoS Data
+both ways — board0→chronite `TA:ef:a4 … Data IV:65,66…` (board0 **SW**-encrypted) and chronite→board0
+`TA:51:38 … IV:58,59…` (Linux **HW**-encrypted), 12/12 symmetric, Protected, KeyID 0, incrementing PN. A
+live Linux HW-CCMP node decrypting board0's host-CCMP frames (and board0 decrypting Linux's) **is** the
+byte-level cross-vendor proof — Linux only validates the MIC if the AAD/nonce/PN are byte-identical. The
+capture also caught `RA:ef:a4 TA:f9:40 DA:51:38 SA:f9:40` = board1 forwarding to chronite **via board0** —
+a real A4≠TA frame board0 SW-decrypts then re-encrypts (the #20 case, now working). Next: force the all-in-
+RF-range bench topology so the board1→board0→board2 relay is unambiguous (HWMP currently finds direct paths,
+so the forced-topology data allowlist alone doesn't pin the route), then byte-verify the full 2-hop relay.
+
+### #21 P5e — forced-topology relay: SW crypto in the forward path works; multi-hop E2E ping blocked by a
+###       HWMP reverse-path-discovery gap on the all-in-RF-range bench (NOT a crypto problem)
+
+Three scaffolding fixes were needed to even attempt a clean board1→board0→board2 relay on a bench where all
+nodes are in direct RF range:
+1. **Allowlist set BEFORE `mmwlan_mesh_start`** (app_main.c): it was set *after* start, so a node could peer
+   with a non-allowed neighbour (board1↔board2 directly) in the gap between start and the allowlist call,
+   then keep that direct key+path. `mmwlan_mesh_set_peer_allowlist` is plain file-static state (no mesh
+   needed), so setting it first closes the race. Confirmed by a per-`mesh_peer_alloc` printf: board1 and
+   board2 each now peer with **board0 only** (`#MESHPEER alloc efa4`).
+2. **HWMP gated by the allowlist** (`umac_mesh_handle_action`, category MESH): only process PREQ/PREP/PERR
+   from an allowed immediate transmitter. Otherwise an in-range peer answers a direct PREQ, HWMP pins the
+   1-hop path, and the data-plane allowlist silently drops the data (no link NACK → no re-route) → black
+   hole. No-op when the allowlist is empty.
+
+With both, the forced **line** topology forms correctly and **one direction of HWMP path discovery works**
+(per-`mesh_path_update` printf): board1 learns `dest=board2 via=board0 hops=2`, board0 learns
+`dest=board2 via=board2 hops=1`. **But board2 learns NO path back to board1**, so it can't ARP-/ping-reply,
+board1's ARP for board2 never resolves, board1 never originates the ping, and board0 never forwards
+(`umac_mesh_forward_data` never fires). The board1→chronite interop forward already proved the SW
+forward-decrypt path; the all-ESP relay is blocked one layer earlier, in HWMP routing.
+
+**Diagnosis (the reverse path never installs at board2):** board2 only hears board1 via (a) board1's DIRECT
+PREQ — dropped by the new HWMP gate (board1 not on board2's allowlist), or (b) board0's FLOOD of board1's
+PREQ — but board1 stops PREQ-ing once it has the board2 path, so the flood window is brief; and (c) board2's
+own on-demand discovery when it tries to reply — which should PREQ board1 → board0 floods → board1 PREPs →
+board0 forwards the PREP back to board2 (all this logic is present: `mesh_path_update` reverse-route on PREQ
+RX at umac_mesh.c:2048, PREQ flood at :2070, PREP forward-toward-orig at :2113). That chain isn't completing
+on the bench. It sits at the HWMP-routing ↔ forwarded-mgmt-frame-SW-crypto boundary (the forwarded PREP is a
+re-encrypted unicast action — the management-frame analogue of #20) and needs a focused HWMP message-flow
+trace to pin (PREQ/PREP RX with orig/target + the forwarded-PREP encrypt key). **This is a mesh-routing
+follow-up, separate from the now-verified host-CCMP port.** The host-CCMP single-hop (data + robust-mgmt) is
+done and gold-standard cross-vendor verified; the temporary `printf` traces (`#MESHPEER/#MESHFWD/#MESHPATH`)
+were reverted.
+
+### #21 P5e (cont.) — RESUME 2026-06-29: session was disconnected mid-debug; picking the HWMP trace back up
+
+**Context.** The previous session was abruptly disconnected ~04:21 (2026-06-29) **mid-debug** on the P5e
+multi-hop relay (file mtimes: `umac_datapath.c` 04:21, `umac_mesh.c` 04:20 — both *after* this worklog was
+last written at 02:12). Nothing was lost or corrupted: the two most-recently-edited regions are
+syntactically complete, and a **clean esp32s3 build of the in-flight tree succeeds** (`idf.py set-target
+esp32s3 build`, 1227 targets, exit 0) — so the uncommitted host-CCMP port + the P5e instrumentation compile.
+
+**State on resume (verified, not from memory):**
+- **Host-CCMP port (P5b–d) is done + gold-standard verified** (single-hop ESP↔Linux cross-vendor, on-air).
+  Uncommitted: 8 submodule files (505 ins) + parent `app_main.c` (allowlist-before-`mesh_start`) + this worklog.
+- The tree carries the **focused HWMP message-flow instrumentation the prior entry called for** — it was
+  *re-added* after 02:12 (so the "traces were reverted" line above refers to the earlier `#MESHPEER/PATH`
+  set; the current ones are the follow-up trace): `umac_mesh.c` `#DISC` (discovery origination, :1940),
+  `hwmp_trace()` → `#HWMP PREQ/PREP` with orig/target/sa + action (:2023–2138), `#MESHFWD` (:2285);
+  `umac_datapath.c` `#DATARX swdec OK/FAIL` (:731/:735). Plus a **dead `mesh_ccmp_selftest`** (boot KAT
+  reverted from its call site; definition still in `ccmp.c:181` + decl in `umac_supp_shim.h:134` — harmless,
+  to be deleted at cleanup). **This focused trace was never actually run on the bench before the disconnect.**
+- **Bench state (re-verified live):** board0 = `ttyACM0` (efuse `e0:72:a1:f8:ef:a4`, relay), board1 =
+  `ttyACM1` (`…f9:40`, pinger). **board2 (`…f0:08`) is unpowered** — only 2 Espressif USB devices enumerate;
+  its PPK2 DUT-rail hold (`/tmp/ppk2_hold.py`) was lost in a host USB replug at 08:19, so it must be
+  re-powered (PPK2 ampere-meter, DUT ON, `ttyACM2`/Nordic if01) before it can flash/console. **chronium
+  (192.168.7.187) is already in monitor mode on ch27** (`type monitor`, `channel 112 / 5560 MHz`) — the
+  on-air sniffer is ready. chronite (`.191`) reachable.
+
+**Plan for this session (HWMP reverse-path-discovery gap, NOT crypto):** (1) re-power board2 via PPK2; (2)
+flash all three boards with the instrumented build (identify by efuse MAC, not ACM #); (3) start a chronium
+`morse0` pcap + capture all three serial consoles together; (4) run the forced-line relay (board1 pings
+board2 via board0) and read **which `#HWMP`/`#DISC`/`#MESHFWD`/`#DATARX` trace fires and which is missing**.
+**Primary hypothesis to confirm/kill first:** the reverse path *should* install at board2 the moment it RXes
+**board0's flooded PREQ** for board1's own forward discovery (`mesh_path_update(orig, frame_sa, …)` at
+umac_mesh.c:2076), so if board2 has no path to board1 the suspect is that **board0's flooded broadcast PREQ
+never reaches/clears at board2** (RF, or broadcast-HWMP SW-crypto/MGTK reception) — the `#HWMP PREQ … sa=ef..`
+trace at board2 decides this in one run. Secondary: the forwarded **PREP** (board0→board2, a re-encrypted
+unicast action — the mgmt-frame analogue of #20) failing to SW-decrypt at board2 (`#DATARX swdec FAIL` on the
+robust-mgmt path). On-air verification via the chronium monitor is mandatory before declaring the relay fixed.
+
+### #21 P5e — RESOLVED 2026-06-29: multi-hop secured relay works. Root cause was NOT HWMP routing — it was a
+###       pairwise-key mismatch on locally-originated multi-hop unicast. Fixed + on-air gold-standard verified.
+
+**The prior hypothesis (HWMP reverse-path gap) was WRONG.** When the instrumented bench was finally run (3
+ESP boards, forced line board1—board0—board2, chronium morse0 monitor on ch27), the `#HWMP`/`#DISC`/`#MESHFWD`
+traces showed **HWMP discovery completes fully**: board2 originates `#DISC for=f940`, board0 floods the PREQ,
+board1 replies `PREP(us)`, board0 forwards the PREP, and **board2 receives it → `FORME` → installs its reverse
+path to board1** (`mesh_path_update(board1, via board0)`). board2 *does* learn the path back. Yet the ping
+still timed out — so the blocker was downstream of routing.
+
+**Real root cause — board0 fails to decrypt board2's 4-address pairwise unicast forwards (MIC fail), so it
+never forwards them.** The serial+on-air evidence:
+- board0 `#DATARX swdec` on board2's frames: ~50% OK / ~50% FAIL. The OK ones are board2's 3-addr **group**
+  re-broadcasts (decryptable under board2's MGTK, which board0 holds); the FAIL ones are board2's **4-addr
+  pairwise unicast** ARP/ping-reply forwards. chronium pcap: board2 sent **69** four-addr unicast forwards
+  (board1 sent **0** — board1's ARP never resolved, so it never originated unicast), and `#MESHFWD` **never
+  fired** because every frame that would trigger forwarding failed decrypt and was dropped.
+- A key-fingerprint trace (`#SWENC` on TX / `#SWDEC` on RX, dumping `key=tk[0..3]` + PN + addrs) was decisive:
+  board2 encrypted with `key=00112233 kid=0 pn=N`; board0 decrypted with `key=877601e8 kid=0 pn=N` — **same
+  key_id, same PN, same addresses, DIFFERENT key → MIC fail (18/18 MICFAIL, 0 replay).** `00 11 22 33…` is the
+  hardcoded **`mesh_p1_mtk`** (umac_mesh.c:1317) — a vestigial Phase-1 static fallback MTK.
+
+**Why:** a locally-originated mesh unicast to a **multi-hop** destination is dequeued on the **`common_stad`**
+(`umac_datapath_tx_dequeue_frame_mesh` → `mesh_get_next_tx_stad`), which carries only that static fallback MTK
+at key_idx 0. `umac_datapath_process_tx_frame` then CCMP-keyed the body off the common_stad → `00112233`. But
+the mesh data-header builder (`umac_datapath_construct_80211_data_header_mesh:3460`) correctly set **RA = the
+HWMP next hop (board0)**, and board0 decrypts under the **real per-pair AMPE MTK** for the board0↔board2 link —
+so the MIC never matches and the forward is dropped. **Single-hop worked only because there the destination IS
+the direct peer**, so the frame is queued on the peer stad (real per-pair MTK); cross-vendor single-hop
+board0↔chronite likewise. ESP↔ESP pairwise *unicast* decrypt had simply never been exercised until this relay.
+
+**Fix (`umac_datapath_process_tx_frame`, umac_datapath.c):** key a mesh **unicast** off the **next-hop peer
+stad** resolved from RA (`umac_mesh_get_peer_stad(A1)`), not the common_stad — mirroring the #19 forward-path
+fix (`umac_mesh_forward_data` already keys under the next-hop stad). A new local `key_stad` defaults to `stad`
+and switches to the next-hop peer stad for an active-mesh unicast; it is used for the active-key-id lookup,
+key length, TX-PN increment, and the SW-CCMP encrypt. **Single-hop unicast** (dest is the peer) and **group
+TX** (own MGTK on the common_stad) resolve `key_stad` back to `stad`, so they are unchanged. The fix is
+symmetric — it also corrects board1's forward-direction ICMP-echo origination once its ARP resolves.
+
+**Verified on-air (chronium morse0 monitor, ch27, forced line board1—board0—board2):**
+- *Before:* 0 ping replies; board0 `#SWDEC` 18 MICFAIL / 0 OK; `#MESHFWD` 0×; board2 ENC key `00112233` ≠
+  board0 DEC key `877601e8`.
+- *After (instrumented run):* board1↔board2 ping **55 replies / 4 (pre-peering) timeouts**, RTT 48–76 ms;
+  board0 `#SWDEC` **78 OK / 0 fail**; `#MESHFWD` 77×; keys MATCH (board2 ENC == board0 DEC, e.g. `69cd384c`).
+  chronium: board0 relaying both ways — ~80 request-forwards (SA=board1) + ~77 reply-forwards (SA=board2),
+  all 4-addr Protected.
+- *After (clean firmware, all `#P5e/#P5b` traces + dead `mesh_ccmp_selftest` stripped, rebuilt):* ping **52
+  replies / 3 timeouts** (seq 42→96), RTT 49–67 ms; **0** debug traces + **0** CCMP/drop warnings on the
+  consoles; chronium (2941 frames) confirms board0 relaying both directions — **55** request-forwards
+  (SA=board1) + **58** reply-forwards (SA=board2), 4-addr `Protected=True` both ways. A representative relay
+  frame: `[RA=f940 TA=efa4 DA=f940 SA=f008]` = board0 forwarding board2's reply toward board1.
+
+This is the secured 802.11s **multi-hop** relay working end-to-end on the ESP firmware (host SW-CCMP), the last
+functional gap after the single-hop host-CCMP port (P5b–d). Cleanup done: every temporary `#P5e`/`#P5b` trace
+(`p5e_swtrace`, `hwmp_trace`, `#DISC`/`#MESHFWD`/`#DATARX` printfs) and the dead `mesh_ccmp_selftest` KAT were
+removed; the only surviving change is the `key_stad` fix. Bench note: board2 (`…f0:08`) is powered via the PPK2
+DUT rail (ampere-meter, DUT ON) — the `/tmp/ppk2_hold.py` holder must be re-run after any host USB replug.
+
+### #22 cross-vendor MULTI-HOP (board1 ESP → board0 ESP relay → chronite Linux) — a cross-vendor PREP-RX bug
+###      at the relay: first diagnosed (mechanism worked but didn't sustain), then RESOLVED on-air (2026-06-29).
+
+Topology: board1(ESP, allowlist {board0}, pings 10.9.9.2) → board0(ESP relay, allowlist {board1, chronite})
+→ chronite(Linux, 10.9.9.2, `wpa-interop.conf`, **`no_hwcrypt=N` i.e. HW crypto**). board2 idle. Temporary
+app_main.c `XVENDOR TEST` edits (MAC_CHRONITE in board0's allowlist + board1 pings 10.9.9.2) — NOT a keeper.
+
+**RESULT — works for a burst, then dies.** board1↔chronite ping = a contiguous burst of ~9–16 replies
+(40 ms RTT), then 0 replies indefinitely (e.g. seq 15–30 then dead; re-runs identical). board0↔chronite is
+ESTAB/authorized throughout; chronite keeps a fresh path to board1 (mpath SN climbs to 244+).
+
+**FINDING 1 — the crypto+forwarding interop WORKS (the hard part).** chronium pcap during the burst: board0
+relays BOTH directions — ~16 request-forwards (TA=board0, SA=board1, 4-addr Protected) + ~16 reply-forwards
+(TA=board0, SA=chronite) — and **chronite decrypted board0's forwarded 4-addr frames and replied**.
+
+**FINDING 2 — #20 was WRONG about Linux.** chronite is `no_hwcrypt=N` (HW crypto) yet still decrypted the
+forwarded 4-addr frames (A4=board1 ≠ its peer). So **Linux mac80211 software-decrypts a forward even in
+HW-crypto mode**; the #20 "MM6108 HW-crypto can't decrypt a forwarded A4≠TA frame" limit is **ESP-morselib
+specific** (morselib had no SW crypto — exactly what the P5 port added), NOT a universal firmware limit.
+Linux nodes can be multi-hop endpoints without `no_hwcrypt`. (Correct the #20 claim in memory/worklog.)
+
+**FINDING 3 — the sustained failure is a cross-vendor PREP-RX bug at the relay (NOT crypto).** board1 can't
+maintain a forward path to chronite. Pinned via chronium pcap + ESP traces (`#PREPFWD`/`#PREPME`/`#MGMTRX`,
+reverted):
+- chronite sends **413 PREPs** (tag 131, TTL 31, orig=board1, target_sn 2473), all RA=board0, continuously.
+- board0 forwards **0** PREPs to board1 (`#PREPFWD` count 0 across runs); board1 installs a path via PREP
+  exactly **once** (`#PREPME`=1 → the burst), then never again.
+- **Root-cause localization:** board0's host robust-mgmt decrypt (`#MGMTRX`, in
+  `umac_datapath_process_mgmt_frame_ccmp_header`, IND_ROBUST_MGMT space) fires for **board1's** robust-mgmt
+  (ta=f940 OK) but **NEVER for chronite's PREPs** (0× for ta=51:38) — even though all mgmt frames route to
+  `process_rx_other_frame`→that decrypt and the board0↔chronite link is ESTAB. So **board0 drops chronite's
+  Linux-HW-encrypted robust-mgmt PREPs upstream of the host mgmt-decrypt** (RX queue/filter/classification),
+  while ESP-origin robust-mgmt gets through. The transient burst comes from chronite-originated PREQ
+  reverse-routes (give board1 a path without a PREP), which stop → path expires (MESH_PATH_LIFETIME_MS 30 s,
+  and an equal-SN refresh doesn't extend expiry, umac_mesh.c mesh_path_update) → dead.
+- **Next focused step (clean-bench session):** trace board0's RX entry (`umac_datapath_rx_queue_frame` /
+  `rx_frame_filter` / the rx_mgmt_q-vs-rxq split / stad-resolve-by-TA) for chronite's protected 3-addr mesh
+  action frames to find exactly where they're dropped pre-decrypt; compare vs board1's robust-mgmt that
+  passes. Fix likely mirrors mac80211 rx.c mesh-action handling. This is separate from the (committed-ready)
+  P5e fix; the ESP↔ESP multi-hop relay is unaffected (board2 endpoint works 52/55).
+
+**RESOLVED 2026-06-29 — RX-entry trace (`#RXENT`) pinned it + a Linux-derived fix; cross-vendor relay now
+SUSTAINS.** The `#RXENT` trace (every frame board0's host RXes from chronite) showed board0 receives ALL
+chronite PREPs as **`type=0 sub=13 prot=0`** — chronite sends its unicast PREPs **UNPROTECTED** (Linux mesh
+peers are MFP=no). board0 then drops them at the PMF pre-dispatch (`umac_datapath_process_rx_mgmt_frame`): an
+unprotected robust-mgmt frame that's unicast (not group-privacy) + `pmf_is_required(stad)` →
+`umac_datapath_process_unprotected_robust_mgmt_frame` → dropped. The **#18 fix exempted only *group* mesh
+actions** (broadcast PREQ); the unicast PREP wasn't exempted. (ESP↔ESP never hit this because the ESP
+*protects* its unicast PREPs.) **Linux divergence:** the ESP marks mesh peers `MMWLAN_PMF_REQUIRED`
+(umac_mesh.c:554) but morse mesh peers are MFP=no, and net/mac80211 `ieee80211_drop_unencrypted_mgmt` (rx.c,
+read on chronite's `~/halow`) gates the WHOLE unprotected-robust-mgmt drop on `test_sta_flag(rx->sta,
+WLAN_STA_MFP)` (false for a mesh peer) → the unprotected unicast PREP passes (peer is ASSOC'd).
+
+**Fix (Linux-derived, low blast radius):** new `frame_is_mesh_action()` (frames/action.c + frames_common.h)
+— a Mesh(13)/Multihop(14) Action frame of ANY addressing (the unicast-inclusive sibling of
+`frame_is_group_privacy_action`); the PMF-drop gate now exempts `!frame_is_mesh_action(view)` instead of
+`!frame_is_group_privacy_action(view)`, mirroring mac80211's MFP=no acceptance of ALL mesh path-selection
+frames, not just group-addressed ones. MFP setting / RSN IE / AMPE / TX untouched, so the working
+cross-vendor peering + ESP↔ESP relay are unaffected.
+
+**VERIFIED on-air (chronium, board1 ESP → board0 ESP relay → chronite Linux):** ping **50 replies / 2
+(pre-peering) timeouts**, reply seq **14→65 SUSTAINED** (was a ~16-reply burst then dead); `#PREPFWD`=6
+(board0 now forwards chronite's PREP, nh_ok=1 nh=board1; was 0); `#PREPME`=5 (board1 installs+refreshes its
+path to chronite via board0; was a one-shot 1); chronium: board0 relaying both ways sustained — 57
+request-forwards (SA=board1) + 56 reply-forwards (SA=chronite). Side-effect: chronite now emits ~5 PREPs (was
+244+) — board1's path resolves and STAYS resolved, killing the PREQ/PREP storm. Cleanup: all `#XV` traces +
+the temporary `XVENDOR` app_main.c topology reverted; keeper = the `frame_is_mesh_action` exemption. The
+secured **cross-vendor multi-hop mesh** (ESP relay ↔ Linux endpoint) now works end-to-end, alongside the P5e
+ESP↔ESP multi-hop.
+
+### #23 dynamic join (no allowlist) — VERIFIED on-air; RF-forcing multi-hop via TX power NOT feasible on this
+###      bench. (2026-06-29; no firmware fix — a test mode + two findings.)
+
+Added a temporary `MESH_DYNAMIC_RF` app mode (app_main.c, left commented-out as an available test mode):
+NO peer allowlist (peer with anyone in RF range) + an optional `mmwlan_override_max_tx_power(MESH_TX_POWER_DBM)`
+EIRP cap. Two questions: (a) does a node dynamically JOIN a running secured mesh with no restart? (b) can
+lowering TX power force a real multi-hop RF line (vs the test-only forced allowlist)?
+
+**(a) DYNAMIC JOIN — WORKS (on-air verified).** 3 ESP boards, no allowlist, full power, board1 pings board2.
+After they dynamically peer (SAE+AMPE+keys, no restart) and ping (t≈20–25 s), board2 was **reset** (esptool
+hard-reset on ttyACM4 at t≈25 s = a device leaving the mesh) while board0/board1 kept running. board1's ping
+RECOVERED at **t≈34 s** (`reply … seq=77`) and stayed up t≈34–50 s — board2 **rebooted and re-joined the
+running secured mesh on its own** (re-SAE/AMPE, fresh keys, pingable) with no restart/reconfig of the others.
+That satisfies the "new devices dynamically connect" requirement on a secured mesh.
+
+**(b) RF-FORCED MULTI-HOP — NOT feasible on this bench.** At `MESH_TX_POWER_DBM=1`: chronium shows board1's
+46 four-addr unicast pings ALL went DIRECT to board2 (RA=f0:08), **none via board0** — board1↔board2 still
+−52 dBm (direct), ~40 dB above the ~−95 dBm sensitivity floor, so the link won't break without physical
+separation; and board0 isn't geographically between board1/board2 (it has the weaker links), so low power
+just isolates board0 (it went near-silent, 2 frames). Power alone can't force the board1—board0—board2 line
+here. The forced allowlist (`MESH_LINE_RELAY_DEMO`) remains the way to demo multi-hop on this tight bench;
+real RF-driven multi-hop would need the nodes physically spread out.
+
+**Caveat / follow-up:** the unconstrained no-allowlist full-mesh is **flappier** than the forced 2-link
+topology (slow ~20 s initial peering; intermittent drops after the burst) — likely peering / HWMP
+path-selection churn (board1↔board2 direct vs via board0). The *join* works; *sustained stability* of a
+free-forming full-mesh is a hardening follow-up (separate from the committed P5e/#22 crypto fixes). The
+`MESH_DYNAMIC_RF` mode + traces were reverted (mode left commented-out); default is `MESH_LINE_RELAY_DEMO`.
+
+### #24 cross-vendor multi-hop RE-VERIFIED with a SECOND Linux node (chronosalt, Pi Zero) — #22 generalises.
+###      (2026-06-29; switched the bench Linux node from chronite to the Pi Zero twins, per user request.)
+
+Stopped chronite's S1G mesh (it was flooding ch27 + starving the ESPs' peering after the no-allowlist dynamic
+test made them briefly peer it) — `pkill -9 -x wpa_supplicant_` (comm-exact, never the wlan0/SSH supplicant)
++ `iw wlan1 mesh leave`. **The all-ESP relay then needed a clean SIMULTANEOUS reset of the 3 boards** to escape
+the wedged peering state (sequential reboots + chronite churn had stuck it) → recovered **39 replies / 1
+timeout**, first reply t=1.0 s. Lesson: after heavy peer-churn, reset all mesh nodes together, not staggered.
+
+Brought up the Pi Zero twins on `rimba-mesh` (interop config now persisted at `chronosalt:~/wpa-interop.conf`
++ `chronogen:~/wpa-interop.conf`, IPs 10.9.9.3 / 10.9.9.4). **`MESH_XV_CHRONOSALT` app mode** (left
+commented-out): board0 relays board1 ↔ chronosalt via the forced allowlist.
+
+**RESULT — #22 confirmed with a different Linux node.** board1 → board0 → **chronosalt** (Pi Zero,
+68:24:99:44:6a:56) ping = **46 replies / 2 timeouts**, first reply t=1.0 s, sustained. chronosalt: plink to
+board0 ESTAB (board1/board2 BLOCKED — forced line), ACTIVE mpath to board1 via board0. chronium: board0
+relaying both ways — **51 request-forwards (SA=board1) + 52 reply-forwards (SA=chronosalt)**, and chronosalt
+emitted **20 unprotected PREPs** (tag 131, the #22 case) which board0 now accepts/forwards. So the
+`frame_is_mesh_action` fix is **not chronite-specific** — it works for any MFP=no Linux mesh peer.
+
+**Bench findings:** (1) the "distant" twins are STILL in RF range of all 3 ESP boards (chronosalt station dump:
+BLOCKED plinks for all three) — HaLow's range is large enough that on-site "distant" is still in range, so
+**RF-driven multi-hop can't be forced even with the twins** (confirms #23's bench limit; needs real physical
+separation). (2) **chronogen has a persistent morse-SPI fault** — its MM6108 returns `-19 (ENODEV)` on every morse cmd
+(`morse_cmd_add_if` with the interface toggle; `scan trigger` without it), and **TWO reboots did NOT clear
+it** (the chip itself is stuck, not just the driver — reboot reloads the module but the SPI/fw state persists).
+So chronogen can't be brought onto the mesh remotely; it needs a **physical power-cycle** of the Pi Zero /
+MM6108 module. Left tidy (supplicant stopped, `~/wpa-interop.conf` persisted for a future attempt). **chronosalt
+(the identical twin) is stable and is the working Linux node.** Bench note: to return to the all-ESP relay
+demo, reflash the default + stop the twins' mesh (`pkill -x wpa_supplicant_`).
