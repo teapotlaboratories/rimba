@@ -1308,3 +1308,49 @@ requires SW crypto" framing is retracted.
 
 Bench: chronite restored to its standard FW 1.17.8 (the swap was reversible; backup at
 `chronite:~/mm6108-1.17.8.bak`). All tests read-only except the reversible chronite FW swap.
+
+### #26 — #20 fix dig: findings + filed as BACKLOG (revisit in future) — A4-sensitive ESP FIRMWARE behaviour, NOT the host RX code; host SW-CCMP (P5) is the working answer (2026-06-29)
+
+Two read-only multi-agent workflows (the full boot/global FW-command diff morselib-vs-driver; the Linux
+RX-datapath + complete driver command sequence) plus an on-air ESP probe concluded the #20 fix dig and REFINE
+#25's "morselib host-stack bug" wording.
+
+**The drop is at the FIRMWARE, by a decisive logic.** morselib's entire host RX path is A4-AGNOSTIC — every
+gate is keyed by the TRANSMITTER (TA), never A4: the CCMP replay check `ccmp_is_valid` (umac_datapath.c:711),
+the BA reorder window, the stad lookup (by TA, umac_datapath.c:1818). But the #20 drop is A4-SENSITIVE: board2
+HW-decrypts a DIRECT frame from board0 (TA=board0, A4=board0) yet drops the FORWARD (TA=board0, A4=board1) —
+same TA, same key, same replay window. An A4-agnostic host gate cannot drop only the forward, so the drop is
+NOT in morselib's host code; it is at the one A4-sensitive layer, the MM6108 FIRMWARE. On-air corroboration
+(chronium monitor): board0 IS forwarding board1's foreign-A4 4-addr frames (11 frames `TA=board0 SA=board1
+Protected`) while board1's ping to board2 all-timeouts — the forward reaches board2's radio but board2 never
+delivers it. (The ESP `#P1908` RX-entry probe was **INCONCLUSIVE** — it never captured, not even board0's own
+RX positive control, likely an ESP USB-CDC console/reset-on-open issue — so it neither confirms nor denies the
+FW-vs-host split. The conclusion rests on the A4-agnostic-host logic above + this on-air + the original #20
+finding that board2's RX-entry fired 0× for the forward.)
+
+**Linux reference (verified on chronium):** the morse driver imposes NO host gate on a FW-decrypted frame —
+`mac.c:5844` sets RX_FLAG_DECRYPTED purely from the per-frame FW flag, `mac.c:6632` hands the 4-addr frame
+UNCONDITIONALLY to mac80211, which runs a SINGLE replay check keyed by the TA and decides forward-vs-deliver on
+the mesh DA (not A4) in `ieee80211_rx_h_mesh_fwding`. No A4 gate; pure per-hop CCMP.
+
+**Residual paradox (unpinned, closed-FW):** the SAME FW binary is NOT A4-sensitive on Linux (#25: it delivers
+the forward). With the host command sequences byte-identical and the host code A4-agnostic, the difference is a
+NON-COMMAND FW input neither workflow could diff — a BCF/boot-config input or an FW-build/config delta — not
+pinnable from host source. (Not cleanly isolated: same-`fgh100mhaamd`-BCF Linux/chronosalt delivers but only at
+1.17.8; a 1.17.9-same-BCF-Linux test was not run.)
+
+**Why host SW-CCMP (P5) is correct — mechanism understood end-to-end:** the FW's A4-sensitivity is a
+DECRYPT-path gate; it only bites when the FW holds the mesh key and HW-decrypts. host SW-CCMP installs NO mesh
+key in the FW, so the FW delivers the protected frame RAW (the #20 no-key test) and the host decrypts —
+bypassing the A4 gate for every forward. P5 is the correct way around a real, ESP-specific FW decrypt-gate
+behaviour, not a workaround for a phantom limit.
+
+**Status:** every host-side fix is refuted — firmware-universal-limit, A4-registration, FW version, an
+rx-filter command, a boot/global command, and the host replay gate `ccmp_is_valid`. There is NO clean morselib
+HW-crypto fix; the A4-sensitivity is firmware behaviour we cannot toggle from the host. The shipped host
+SW-CCMP (P5) stays the **working answer** — so #20 is **NOT closed**: it is **filed as a BACKLOG item**
+(Mesh-gate TODO in `rimba-mesh-ap-milestones.md`) to revisit if a HW-crypto multi-hop path is ever wanted. The
+remaining work is to **pin the exact closed-FW input** (BCF/boot/build) — low priority since P5 ships + is
+verified. (Follow-up: the now-refuted code comments asserting "the FW keys CCMP by the mesh-SA/A4 and drops
+forwarded A4!=TA frames" at `umac_mesh.c:134-135` + `umac_datapath.c:727` should be corrected in a future
+submodule touch.)

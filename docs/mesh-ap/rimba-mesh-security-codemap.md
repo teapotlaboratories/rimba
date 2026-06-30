@@ -500,4 +500,11 @@ morselib gap is most likely a host-side RX drop in the HW-crypto path (the `MMDR
 stad-by-TA lookup around `umac_datapath.c:569`), not a missed FW config. host SW-CCMP (P5) sidesteps the FW and
 is the shipped general solution; a morselib HW-crypto fix is viable (FW proven capable). The exact seam is the
 open #20 fix task. *(RETRACTS the earlier "Linux uses a mac80211 SW fallback" mechanism — ftrace shows the FW
-HW-decrypts, no SW fallback runs — and the "A4-must-be-registered" model.)* Worklog §#25.
+HW-decrypts, no SW fallback runs — and the "A4-must-be-registered" model.)* Worklog §#25. **REFINED §#26 (fix dig findings — #20 filed as BACKLOG, not closed):** the drop is NOT
+the morselib host RX code — that path is **A4-AGNOSTIC** (every gate keyed by TA: `ccmp_is_valid` :711, the BA
+reorder window, the stad lookup :1818). Since the #20 drop is **A4-SENSITIVE** (it drops the forward but passes
+a direct frame from the **same** relay/TA/key), it must be at the one A4-sensitive layer = the **MM6108
+FIRMWARE** — an ESP-specific FW decrypt-gate behaviour (a non-command/BCF/build difference; the same binary
+delivers on Linux, which imposes no host gate — `mac.c:5844`/`:6632` + `ieee80211_rx_h_mesh_fwding`). host
+SW-CCMP (P5) bypasses it: no FW key → the FW delivers the frame raw → host decrypts. So there is **no clean
+morselib HW-crypto fix** (supersedes the "HW-crypto fix is viable" line above); P5 stays the answer.
