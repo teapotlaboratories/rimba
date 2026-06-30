@@ -58,9 +58,10 @@
 /* Multi-hop relay demo (temporary): force a 3-ESP line board1 -- board0(relay) -- board2 so
  * board0 must FORWARD board1<->board2 traffic (ESP as an intermediate hop). Each node sets a
  * peer allowlist by its own MAC. Comment out MESH_LINE_RELAY_DEMO for normal operation. */
-#if !defined(MESH_LINUX_INTEROP) && !defined(MESH_DYNAMIC_RF)
-#define MESH_LINE_RELAY_DEMO 1
-#endif
+/* Default (no test mode defined) = a clean secured-mesh node: joins the mesh, gets its IP, is pingable
+ * (responder), with NO forced allowlist and NO hardcoded peers. Uncomment MESH_LINE_RELAY_DEMO (or another
+ * mode above) only for a bench-specific demo with hardcoded board MACs. */
+// #define MESH_LINE_RELAY_DEMO 1
 #if defined(MESH_LINE_RELAY_DEMO) || defined(MESH_DYNAMIC_RF)
 static const uint8_t MAC_B0[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xef, 0xa4 }; /* relay (10.9.9.136) */
 static const uint8_t MAC_B1[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xf9, 0x40 }; /* endpoint (10.9.9.100) */
