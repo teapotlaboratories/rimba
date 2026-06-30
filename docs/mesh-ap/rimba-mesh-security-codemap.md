@@ -20,12 +20,286 @@ wpa_supplicant; MPM is host-side in `umac_mesh.c`) the port reproduces *both* ha
 mesh path. Phases: **P0** live Linux ref (done) · **P1** key-install plumbing (static keys) ·
 **P2** AMPE · **P3** SAE · **P4** MFP/IGTK + integration.
 
+## Secured peering — code flow (SAE + AMPE)
+
+The handshake that brings a mesh link to ESTAB **before** any data flows — the SW-CCMP data path below
+only runs once a peer is secured. morselib has no wpa_supplicant, so the SAE Dragonfly FSM, the AMPE
+protect/process, and the MPM plink FSM are *all* host-side in `umac/mesh/umac_mesh.c`; only the Dragonfly
+crypto is delegated, reached through the `src/hostap/mesh_sae.c` shim around hostap's compiled `sae.c`.
+Three blocks below — **DISCOVERY**, **SAE**, **AMPE** — run left-to-right across the six stages; the two
+**P3c** reorder seams are boxed (★ the SAE-before-Open *defer*, ★ the `pmk_valid`/PMKID *gate*). All
+file:line are the current working tree, grep-verified 2026-06-29.
+
+```
+DISCOVERY  (S1G beacon RX → Mesh-ID/RSN match → candidate peer + SAE kick)
+──────────────────────────────────────────────────────────────────────────────────
+  FW ─► umac_datapath_process_s1g_beacon                       datapath.c:142
+          foreign-BSSID S1G beacon + umac_mesh_is_active()
+          strip S1G beacon fields (NEXT_TBTT/CSSID/ANO)        datapath.c:168-179
+          → umac_mesh_handle_peer_beacon(source_addr, ies)     datapath.c:179
+        │
+        ▼
+  umac_mesh_handle_peer_beacon                                 umac_mesh.c:1261
+     scan IEs for Mesh ID(114) == ours                         umac_mesh.c:1280
+     known peer → last_rx_ms heartbeat ; unknown → open        umac_mesh.c:1284-1291
+        │
+        ▼
+  mmwlan_mesh_peer_open                                        umac_mesh.c:1501
+     mesh_peer_allowed (forced-topology allowlist)             umac_mesh.c:1511
+     mesh_peer_alloc → struct mesh_peer{llid, PLINK_LISTEN}    umac_mesh.c:1519 (alloc :518)
+     mesh_sae_start(peer)   ← MPM Open DEFERRED until SAE accept   umac_mesh.c:1528
+
+
+SAE — Dragonfly simultaneous-open FSM   (Nothing→Committed→Confirmed→Accepted ⇒ PMK+PMKID)
+──────────────────────────────────────────────────────────────────────────────────────────
+  mesh_sae_start                                               umac_mesh.c:855
+     mesh_sae_alloc()                              (shim) mesh_sae.c:26
+     mesh_sae_build_commit()  DESTRUCTIVE, cached ONCE         umac_mesh.c:874 → mesh_sae.c:43
+     umac_mesh_tx_auth(txn=1 Commit)                           umac_mesh.c:882 (def :786)
+     peer->sae_state = COMMITTED                               umac_mesh.c:883
+        │
+        │   ── peer auth frames arrive ──
+        ▼
+  FW ─► umac_datapath_process_rx_mgmt_frame_mesh               datapath.c:3461
+          subtype AUTH → umac_mesh_handle_auth                 datapath.c:3475
+        ▼
+  umac_mesh_handle_auth                                        umac_mesh.c:1111
+     frame_authentication_parse → seq/status/body             umac_mesh.c:1115
+     alg == SAE ; mesh_peer_find(sa) (drop unknown peer)      umac_mesh.c:1119/1128
+     → mesh_sae_handle_rx(txn, status, body)                   umac_mesh.c:1141
+        ▼
+  mesh_sae_handle_rx   (≡ handle_auth_sae + sae_sm_step)       umac_mesh.c:952
+     lazy responder alloc on first Commit                      umac_mesh.c:966-977
+     ┌ txn=1 Commit ──────────────────────────────────────────────────────────────┐
+     │ COMMITTED : mesh_sae_process_commit → tx_confirm → CONFIRMED  :985-993 (shim :76)
+     │ CONFIRMED : resync — resend Commit + reprocess + Confirm      :995-1005
+     │ ACCEPTED  : genuine restart? → mesh_sae_reauth_free            :1007-1031 (:943)
+     └──────────────────────────────────────────────────────────────────────────────┘
+     ┌ txn=2 Confirm ─────────────────────────────────────────────────────────────┐
+     │ COMMITTED : body NOT validated — resend Commit (resync)        :1045-1056
+     │ CONFIRMED : mesh_sae_check_confirm → mesh_sae_get_keys     :1059-1063 (shim :119/:127)
+     │            ★ THE ACCEPT: peer->pmk(32)+pmkid(16), pmk_valid=1  :1063-1065
+     │            ┌──── SAE-accept hook (≡ mesh_mpm_auth_peer) — fires once ───┐
+     │            │ if peer->state == PLINK_LISTEN:                    :1078    │
+     │            │   mesh_derive_aek(peer)   AEK = PRF(PMK64)         :1080    │
+     │            │   umac_mesh_tx_peering(OPEN)  first PROTECTED Open :1082    │
+     │            │   peer->state = PLINK_OPN_SNT                      :1083    │
+     │            └──────────────────────────────────────────────────────────┘
+     │            sae_state=ACCEPTED ; mesh_sae_clear_temp(keep pmk)  :1088-1090 (shim :152)
+     │ ACCEPTED  : replay cached Confirm (lets a stuck peer complete)  :1093-1100
+     └──────────────────────────────────────────────────────────────────────────────┘
+  mesh_sae_tx_confirm: build_confirm + cache + tx_auth(txn=2)  umac_mesh.c:893 → mesh_sae.c:97
+
+
+AMPE — protected MPM Open/Confirm → MTK/MGTK derive → key install → ESTAB
+──────────────────────────────────────────────────────────────────────────────────
+  TX side (our Open / Confirm)
+  umac_mesh_tx_peering(action, peer)                           umac_mesh.c:750
+     build_mgmt_frame(umac_mesh_build_peering)                 umac_mesh.c:771
+  umac_mesh_build_peering                                      umac_mesh.c:627
+     cat = SELF_PROTECTED + action                             umac_mesh.c:641
+     RSN IE(48, AKM=SAE) + Mesh-Config IE                      umac_mesh.c:662/669
+     MPM IE(117): proto=AMPE + llid[+plid] + PMKID(SAE)        umac_mesh.c:678-697
+     AMPE element(139): suite=CCMP · my_nonce · peer_nonce ·
+        (Open) my_mgtk+RSC+expiry   → MIC IE(140)              umac_mesh.c:704-728
+     AAD = {TA=us, RA=peer, body[0:6]} (#16: Open body[4:5]=01 08)  umac_mesh.c:730-743
+     mmint_aes_siv_encrypt(aek) → SIV tag + ciphertext         umac_mesh.c:745
+        │
+        │   ── peer Open/Confirm arrive (subtype ACTION) ──
+        ▼
+  FW ─► …process_rx_mgmt_frame_mesh → umac_mesh_handle_action  datapath.c:3471
+  umac_mesh_handle_action                                      umac_mesh.c:2380
+     cat MESH(13)        → umac_mesh_handle_hwmp (data path)   umac_mesh.c:2394-2400
+     cat SELF_PROTECTED                                        umac_mesh.c:2403
+     mesh_parse_peering_ie → plid, llid-echo, mic_off, PMKID   umac_mesh.c:2418 (def :1545)
+     inbound-Open responder: mesh_peer_alloc + mesh_sae_start  umac_mesh.c:2434-2442
+     CLOSE: plink→LISTEN (keep SAE) | ESTAB/no-SAE → free      umac_mesh.c:2452-2474
+     ★ pmk_valid gate (drop peering pre-SAE)                   umac_mesh.c:2481
+     ★ reciprocal PMKID memcmp (drop-only, no teardown)        umac_mesh.c:2490
+     mesh_process_ampe (verify SIV MIC + learn)                umac_mesh.c:2534 (def :1614)
+        mmint_aes_siv_decrypt(aek) — MIC verify                umac_mesh.c:1645
+        learn peer_nonce(off 6) ; (Open) peer_mgtk(off 70)+RSC  umac_mesh.c:1672/1677
+        │
+        ▼  MPM plink FSM
+     LISTEN  +Open  → tx Open + Confirm   → OPN_RCVD           umac_mesh.c:2549-2560
+     OPN_SNT +Open  → tx Confirm          → OPN_RCVD           umac_mesh.c:2562-2567
+     OPN_SNT +Conf                        → CNF_RCVD           umac_mesh.c:2568-2571
+     OPN_RCVD+Conf                        → ESTAB ─┐           umac_mesh.c:2574-2583
+     CNF_RCVD+Open  → tx Confirm          → ESTAB ─┤           umac_mesh.c:2590-2601
+                                                   ▼
+  umac_mesh_link_up_once (netif up, first peer)    umac_mesh.c:2579/2596 (def :1304)
+  umac_mesh_peer_secure_estab(peer)                umac_mesh.c:2581/2598 (def :1442)
+     SET_STA_STATE AUTH→ASSOC→AUTHORIZED           umac_mesh.c:1452-1456 (mmdrv_update_sta_state :1454)
+     mesh_derive_mtk  PRF(PMK32 · min/max nonces · LIDs · MACs)   umac_mesh.c:1474 (def :1375)
+     mesh_derive_aek  PRF(PMK64)                                  umac_mesh.c:1475 (def :1412)
+     INSTALL_KEY MTK   pairwise, idx0 → umac_keys_install_key     umac_mesh.c:1479-1481
+     INSTALL_KEY peer MGTK  group-RX, idx1                        umac_mesh.c:1492-1496
+       (own MGTK TX key installed at mesh start; peer IGTK = SW BIP, not sent to FW)
+     ⇒ plink ESTAB, secured
+```
+
+*Linux mirror:* the same six stages, but split across three processes — the **kernel** (`net/mac80211`)
+only discovers the peer and installs keys, while **wpa_supplicant** (hostap) runs SAE, AMPE, and the
+authoritative MPM FSM. DISCOVERY is the *only* stage that stays in-kernel: a secured mesh punts the
+candidate up to userspace via `cfg80211_notify_new_peer_candidate` instead of running the in-kernel plink
+FSM (that FSM is the open-mesh path, bypassed when security is on). Lines below grep-verified on chronite
+`~/halow` (hostap 1.17.8 `4acb6f6f`, `rpi-linux/net/mac80211`).
+
+```
+LINUX SECURED-PEERING REFERENCE  —  net/mac80211 (kernel) discovers + installs keys;
+wpa_supplicant (hostap) runs SAE + AMPE + the MPM FSM.  Every file:line grep-confirmed on
+chronite (~/halow). Kernel = rpi-linux/net/mac80211; the rest are hostap (file shown per block).
+
+══ 1. DISCOVERY  (kernel mac80211) ══════════════════════════════════════════════════════
+  driver RX (S1G/legacy beacon or ProbeResp)
+        │
+        ▼
+  ieee80211_mesh_rx_queued_mgmt                              mesh.c:1681
+     stype BEACON|PROBE_RESP →
+  ieee80211_mesh_rx_bcn_presp                                mesh.c:1456  (dispatch :1701)
+     ieee802_11_parse_elems(beacon IEs)
+     ├─ secure/unsecure-match gate                           mesh.c:1486
+     │    (elems->rsn present XOR security==SEC_NONE) → drop on mismatch
+     └─ mesh_matches_local(sdata, elems)                     mesh.c:62
+          mesh_id + meshconf_auth(==SAE) + cfg compare       mesh.c:87
+          (peer advertised it: beacon mesh_auth_id byte :291; mesh_add_rsn_ie :374 → beacon :1108)
+        │ matches
+        ▼
+  mesh_neighbour_update                                      mesh_plink.c:630
+     mesh_sta_info_get                                       mesh_plink.c:592
+        mesh_sta_info_alloc                                  mesh_plink.c:553
+          user_mpm || SEC_AUTHED ⇒ NO in-kernel sta; punt the candidate to userspace:
+             cfg80211_notify_new_peer_candidate              mesh_plink.c:569
+          (open-mesh path = __mesh_sta_info_alloc :525 + in-kernel mesh_plink_fsm :871 /
+           mesh_plink_establish :845 — BYPASSED for a secured mesh)
+        │
+        ▼   NL80211 NEW_PEER_CANDIDATE event ───────────────►  wpa_supplicant
+
+══ 2. SAE  (Dragonfly)  —  ieee802_11.c FSM + common/sae.c crypto ════════════════════════
+  EVENT_NEW_PEER_CANDIDATE                                   events.c:7052
+     wpa_mesh_notify_peer (mesh.c:654) → wpa_mesh_new_mesh_peer  mesh_mpm.c:851  (call mesh.c:667)
+        mesh_mpm_add_peer (alloc sta_info, driver add)       mesh_mpm.c:725
+        conf->security != NONE  →
+  mesh_rsn_auth_sae_sta                                      mesh_rsn.c:371  (call mesh_mpm.c:899)
+     sta->sae = zalloc                                       mesh_rsn.c:387
+     (PMKSA-cache shortcut: wpa_auth_pmksa_get → sae_accept_sta :411, SKIP fresh SAE)
+     mesh_rsn_build_sae_commit                               mesh_rsn.c:340  (call :416)
+        sae_set_group       (sae.c:26)                       mesh_rsn.c:328
+        sae_prepare_commit  (sae.c:1348) → own scalar+elem   mesh_rsn.c:364
+     auth_sae_init_committed                                 ieee802_11.c:1679 (call :423)
+        auth_sae_send_commit (:713) → sae_write_commit       sae.c:1674
+        sae_set_state(COMMITTED)                              [FSM: NOTHING → COMMITTED]
+
+  ── RX peer Authentication frame (txn 1 = Commit, txn 2 = Confirm) ──
+  events.c:6715 → mesh_mpm_mgmt_rx (mesh_mpm.c:904) → ieee802_11_mgmt → handle_auth
+     case WLAN_AUTH_SAE                                       ieee802_11.c:3313
+        (mesh: lazy-init sta->wpa_sm)                         ieee802_11.c:3315
+     handle_auth_sae                                          ieee802_11.c:1326 (call :3329)
+        lazy responder: if !sta->sae → zalloc + state NOTHING ieee802_11.c:1372
+        sae_sm_step                                           ieee802_11.c:987
+        ┌──────────────────────────────────────────────────────────────────────────┐
+        │ case SAE_COMMITTED + Commit(txn1)                   ieee802_11.c:1069      │
+        │   sae_process_commit (:1072) → sae_derive_keys      sae.c:1662 → :1520     │
+        │        → PMK (:1637) + PMKID (:1639) computed                              │
+        │   auth_sae_send_confirm (:1075) → sae_write_confirm sae.c:2354 (ap :753)   │
+        │   sae_set_state(CONFIRMED)                          ieee802_11.c:1078      │
+        │ case SAE_CONFIRMED + Confirm(txn2)                  ieee802_11.c:1116      │
+        │   sae_check_confirm (verify peer Confirm)           sae.c:2395             │
+        │   sae_accept_sta                                    ieee802_11.c:1137→:937 │
+        │     wpa_auth_pmksa_add_sae (PMK → PMKSA cache)      ieee802_11.c:980       │
+        │     sae_set_state(ACCEPTED)                         ieee802_11.c:976       │
+        └──────────────────────────────────────────────────────────────────────────┘
+        (retransmit: auth_sae_retransmit_timer :858 / sae_set_retransmit_timer :901)
+        [FSM: COMMITTED → CONFIRMED → ACCEPTED]
+
+══ 3. MPM OPEN  (deferred until SAE ACCEPTS)  —  AEK derive + first protected Open ═══════
+  sae_accept_sta (ieee802_11.c:937) ─ wpa_auth start_ampe callback ─►
+     wpa_auth_start_ampe (wpa_auth.c:357, trigger :2318) → cb->start_ampe
+  auth_start_ampe                                            mesh_rsn.c:127 (registered :171)
+     mesh_mpm_auth_peer                                      mesh_rsn.c:141
+  mesh_mpm_auth_peer                                         mesh_mpm.c:679
+     sta->flags |= WLAN_STA_AUTH                             mesh_mpm.c:695
+     mesh_rsn_init_ampe_sta                                  mesh_rsn.c:536 (call :697)
+        random_get_bytes(my_nonce)  + zero peer_nonce        mesh_rsn.c:538
+        mesh_rsn_derive_aek (call :543)                      mesh_rsn.c:442
+           sha256_prf(sae->pmk, 64, "AEK Derivation", …)     mesh_rsn.c:468   ← AEK from PMK
+     wpa_drv_sta_add{AUTHENTICATED|AUTHORIZED}               mesh_mpm.c:707   (SET_STATION→kernel)
+     mesh_mpm_init_link (my_lid)                             mesh_mpm.c:722
+     mesh_mpm_plink_open(PLINK_OPN_SNT)                      mesh_mpm.c:716 (def :546)
+        mesh_mpm_send_plink_action(PLINK_OPEN)               mesh_mpm.c:209
+           mesh_rsn_protect_frame                            mesh_rsn.c:553 (call :433)
+              AMPE IE: CCMP suite, local_nonce=my_nonce,     mesh_rsn.c:594
+                       peer_nonce
+              OPEN only: append own MGTK ‖ Key RSC ‖ exp     mesh_rsn.c:610
+              aes_siv_encrypt(aek, ampe_ie,                  mesh_rsn.c:642
+                 aad={own,peer,category})  → MIC IE
+        wpa_mesh_set_plink_state(OPN_SNT)
+  (own group TX key was installed once at mesh start:
+     __mesh_rsn_auth_init :163 → own MGTK aid=broadcast      mesh_rsn.c:227)
+
+══ 4. AMPE  (RX peer Open/Confirm → verify SIV, learn nonce+MGTK, derive MTK) ════════════
+  events.c:5645 → mesh_mpm_action_rx                         mesh_mpm.c:1162
+     ap_get_sta(sa)                                          mesh_mpm.c:1256
+     SAE gate: sta->sae && state != SAE_ACCEPTED → return    mesh_mpm.c:1273
+     mesh_rsn_process_ampe                                   mesh_rsn.c:657 (call :1286)
+        aes_siv_decrypt(aek, …) — verify MIC                 mesh_rsn.c:724   (res=-2 → OPN_RJCT)
+        chosen_pmk == sta->sae->pmkid ?                      mesh_rsn.c:691
+        learn peer_nonce = ampe->local_nonce                 mesh_rsn.c:755
+        learn peer MGTK from GTKdata (Open only)
+     compute event:  PLINK_OPEN→OPN_ACPT (:1374) /           mesh_mpm.c:1374
+                     PLINK_CONFIRM→CNF_ACPT (:1395)          mesh_mpm.c:1395
+     mesh_mpm_fsm(event)                                     mesh_mpm.c:974 (call :1434)
+        OPN_SNT + OPN_ACPT → OPN_RCVD + send Confirm         mesh_mpm.c:1023
+        OPN_RCVD + CNF_ACPT → derive_mtk + plink_estab       mesh_mpm.c:1064 / :1065
+        CNF_RCVD + OPN_ACPT → derive_mtk + plink_estab +     mesh_mpm.c:1092 / :1093
+                              send Confirm
+        mesh_rsn_derive_mtk                                  mesh_rsn.c:474
+           sha256_prf(sae->pmk, 32, "Temporal Key Deriv",    mesh_rsn.c:529
+              min/max(nonce)‖min/max(lid)‖AKM‖min/max(MAC))  ← MTK (pairwise)
+        [FSM: OPN_SNT → OPN_RCVD/CNF_RCVD → (key install) → ESTAB]
+
+══ 5. KEY INSTALL + 6. ESTAB ════════════════════════════════════════════════════════════
+  mesh_mpm_plink_estab                                       mesh_mpm.c:916
+     wpa_drv_set_key  MTK   KEY_FLAG_PAIRWISE_RX_TX          mesh_mpm.c:928   ┐
+     wpa_drv_set_key  peer MGTK  KEY_FLAG_GROUP_RX           mesh_mpm.c:938   ├─ nl80211 .set_key
+     (wpa_drv_set_key peer IGTK  KEY_FLAG_GROUP_RX :950)     mesh_mpm.c:950   ┘  → morse_driver
+                                                                                  → INSTALL_KEY (FW HW crypto)
+     wpa_mesh_set_plink_state(PLINK_ESTAB)                   mesh_mpm.c:960
+     wpas_notify_mesh_peer_connected                         mesh_mpm.c:971
+        → plink ESTABLISHED, secured  (iw station: "mesh plink ESTAB, authorized: yes")
+```
+
+**Stage correspondence (Linux → ESP):**
+
+| Stage | net/mac80211 + hostap (reference) | morselib (this port) |
+| --- | --- | --- |
+| **Discovery** — beacon auth-id + RSN match → candidate peer | `ieee80211_mesh_rx_bcn_presp` mesh.c:1456 (RSN gate :1486) → `mesh_matches_local` mesh.c:62/:87 → `cfg80211_notify_new_peer_candidate` mesh_plink.c:569 | `umac_mesh_handle_peer_beacon` (Mesh-ID match) umac_mesh.c:1280 → `mmwlan_mesh_peer_open` :1501 → `mesh_peer_alloc` :518 |
+| **SAE Commit** — send Commit → COMMITTED | `mesh_rsn_auth_sae_sta` mesh_rsn.c:371 + `auth_sae_init_committed` ieee802_11.c:1679 (`sae_write_commit` sae.c:1674) | `mesh_sae_start` umac_mesh.c:855 (`mesh_sae_build_commit` shim mesh_sae.c:43; `umac_mesh_tx_auth` txn=1 :882) |
+| **SAE Confirm** — RX FSM → accept → PMK+PMKID, send Confirm | `handle_auth_sae` ieee802_11.c:1326 / `sae_sm_step` :987; `sae_check_confirm` sae.c:2395 → `sae_accept_sta` ieee802_11.c:937 (PMK :980); `sae_write_confirm` sae.c:2354 | `umac_mesh_handle_auth` :1111 → `mesh_sae_handle_rx` :952; `mesh_sae_check_confirm`/`get_keys` → `pmk_valid` umac_mesh.c:1063-1065; `mesh_sae_tx_confirm` :893 |
+| **AEK derive + deferred MPM Open** — fires once at SAE accept | `mesh_mpm_auth_peer` mesh_mpm.c:679 → `mesh_rsn_derive_aek` mesh_rsn.c:468 (PMK64) → `mesh_mpm_plink_open` :716 | SAE-accept hook umac_mesh.c:1078-1083 (`mesh_derive_aek` :1080, `umac_mesh_tx_peering(OPEN)` :1082) |
+| **AMPE Open** — build protected Open/Confirm + SIV | `mesh_rsn_protect_frame` mesh_rsn.c:553 (AMPE IE :594, own MGTK :610, `aes_siv_encrypt` :642) | `umac_mesh_build_peering` umac_mesh.c:627 (AMPE elem :704, own MGTK :728, `mmint_aes_siv_encrypt` :745) |
+| **AMPE process + MTK** — verify MIC, learn nonce/MGTK, derive MTK | `mesh_rsn_process_ampe` mesh_rsn.c:657 (`aes_siv_decrypt` :724, peer_nonce :755) → `mesh_rsn_derive_mtk` mesh_rsn.c:474/:529 (PMK32) | `mesh_process_ampe` umac_mesh.c:1614 (`mmint_aes_siv_decrypt` :1645, peer_nonce :1672, peer_mgtk :1677) → `mesh_derive_mtk` :1375 |
+| **Key install** — MTK pairwise + peer MGTK group | `mesh_mpm_plink_estab` `wpa_drv_set_key` MTK mesh_mpm.c:928 / peer MGTK :938 (own MGTK TX at mesh start :227) → nl80211 .set_key → INSTALL_KEY | `umac_mesh_peer_secure_estab` umac_mesh.c:1442 (SET_STA_STATE :1454; `umac_keys_install_key` MTK :1481, peer MGTK :1496; own MGTK TX at mesh start) |
+| **ESTAB** — plink established, secured | `wpa_mesh_set_plink_state(PLINK_ESTAB)` mesh_mpm.c:960 + `wpas_notify_mesh_peer_connected` :971 | `umac_mesh_handle_action` FSM edges OPN_RCVD+Conf :2574-2581 / CNF_RCVD+Open :2590-2598 ⇒ ESTAB |
+
+The reorder vs Linux is intentional and load-bearing (**P3c**): Linux peers AMPE-protected from the start,
+so it installs its own MGTK at mesh start and sends the Open immediately; morselib's Open is
+droppable-as-unprotected until the AEK exists, so the Open is **deferred** behind the SAE-accept hook
+(umac_mesh.c:1078-1083, gated `state == LISTEN` so it fires exactly once) and the own-MGTK TX-key install
+is moved out of the ESTAB seam to mesh start. Two traps fall out of the crypto: `mesh_sae_build_commit` is
+*destructive* (it runs `sae_set_group` then clears its scratch), so it is built once and the bytes are
+replayed for every retransmit/resync (umac_mesh.c:871-874); and the AEK uses **PMK64** (PMK‖32 zeros) while
+the MTK uses **PMK32** — mixing the two silently breaks key agreement (`mesh_derive_aek` :1412 /
+`mesh_derive_mtk` :1375). On HW-crypto the MTK + peer MGTK land in the FW via `INSTALL_KEY`; under **P5**
+SW-CCMP the same keys are kept host-side and the SW-CCMP data path below consumes them.
+
 ## Host SW-CCMP data path — code flow
 
-For multi-hop the MM6108 firmware keys CCMP decryption by the mesh-SA (A4), so it can't HW-decrypt a
-forwarded A4≠TA frame (#20). The fix moves ALL mesh data + robust-mgmt CCMP into the host: no FW key
-offload → the FW delivers protected frames raw → the host encrypts on TX / decrypts on RX, mirroring
-net/mac80211. Three flows below; the two fixes from this effort are boxed inline (★ **P5e** = TX key
+For multi-hop the MM6108 firmware, in HW-crypto mode, does NOT deliver a forwarded 4-addr (A4≠TA) frame to
+the host — an A4-sensitive FW *delivery* gate (#20; NOT a keys-by-A4 decrypt limit — the same FW HW-decrypts
+forwards keyed by TA on Linux, see the peering flow above + §#26 / the #20 backlog). The fix moves ALL mesh
+data + robust-mgmt CCMP into the host: no FW key offload → the FW delivers protected frames raw → the host
+encrypts on TX / decrypts on RX, mirroring net/mac80211. Three flows below; the two fixes from this effort are boxed inline (★ **P5e** = TX key
 selection, ★ **#22** = RX unprotected-mesh-action gate). All file:line are the current working tree.
 
 ### TX — encrypt (a mesh frame leaves the host already-protected)
