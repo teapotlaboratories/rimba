@@ -41,16 +41,39 @@
  * the line-relay demo; uncomment for a Linux-interop on-air A/B capture. */
 // #define MESH_LINUX_INTEROP 1
 
+/* Dynamic-join test mode (optional; uncomment to use). NO peer allowlist — peer with ANYONE in RF range
+ * (RF geometry, not policy, shapes the topology). Verified 2026-06-29: a node reset out of the mesh
+ * REBOOTS and re-joins the running secured mesh on its own (re-SAE/AMPE/keys, pingable) with no restart of
+ * the others. NOTE: RF-forcing a multi-hop LINE via low TX power did NOT work on this bench (boards too
+ * close: at 1 dBm board1<->board2 is still ~-52 dBm, ~40 dB above sensitivity — needs physical separation;
+ * board0 isn't between them so it just gets isolated). And the unconstrained full-mesh is flappier than the
+ * forced 2-link topology (peering/path-selection churn) — a stability hardening follow-up. Use
+ * MESH_LINE_RELAY_DEMO for a stable multi-hop demo. */
+// #define MESH_DYNAMIC_RF 1
+#ifdef MESH_DYNAMIC_RF
+/* TX-power cap (dBm). 0 = no cap (full power; RF-forcing didn't work, see above). */
+#define MESH_TX_POWER_DBM 0
+#endif
+
 /* Multi-hop relay demo (temporary): force a 3-ESP line board1 -- board0(relay) -- board2 so
  * board0 must FORWARD board1<->board2 traffic (ESP as an intermediate hop). Each node sets a
  * peer allowlist by its own MAC. Comment out MESH_LINE_RELAY_DEMO for normal operation. */
-#if !defined(MESH_LINUX_INTEROP)
+#if !defined(MESH_LINUX_INTEROP) && !defined(MESH_DYNAMIC_RF)
 #define MESH_LINE_RELAY_DEMO 1
 #endif
-#ifdef MESH_LINE_RELAY_DEMO
+#if defined(MESH_LINE_RELAY_DEMO) || defined(MESH_DYNAMIC_RF)
 static const uint8_t MAC_B0[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xef, 0xa4 }; /* relay (10.9.9.136) */
 static const uint8_t MAC_B1[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xf9, 0x40 }; /* endpoint (10.9.9.100) */
 static const uint8_t MAC_B2[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xf0, 0x08 }; /* endpoint (10.9.9.108) */
+#endif
+/* XV-CHRONOSALT test mode (optional; uncomment to use). board0 relays board1 <-> chronosalt (Linux Pi Zero,
+ * mesh 10.9.9.3) via the forced allowlist. VERIFIED 2026-06-29: the #22 cross-vendor multi-hop fix works
+ * with chronosalt too — 46 replies / 2 timeouts, board0 forwarding both ways, chronosalt's unprotected PREPs
+ * handled — confirming #22 is not chronite-specific (generalises to any MFP=no Linux mesh peer). Bring up
+ * chronosalt first: ssh chronosalt; the secured-mesh recipe with ~/wpa-interop.conf + `ip addr add 10.9.9.3`. */
+// #define MESH_XV_CHRONOSALT 1
+#ifdef MESH_XV_CHRONOSALT
+static const uint8_t MAC_CHRONOSALT[6] = { 0x68, 0x24, 0x99, 0x44, 0x6a, 0x56 };
 #endif
 /* Runtime ping target (NULL = don't ping: relay + responder roles). */
 static const char *g_ping_target;
@@ -223,6 +246,20 @@ void app_main(void)
     mmhalow_init(NULL);
     mmhalow_print_version_info();
 
+#ifdef MESH_DYNAMIC_RF
+    /* Optional EIRP cap (MESH_TX_POWER_DBM>0). RF-forcing multi-hop via low power didn't work here (boards
+     * too close), so default 0 = full power; the mode is for dynamic-join verification (no allowlist). */
+    if (MESH_TX_POWER_DBM > 0)
+    {
+        enum mmwlan_status pst = mmwlan_override_max_tx_power(MESH_TX_POWER_DBM);
+        ESP_LOGW(TAG, "MESH DYNAMIC_RF: TX power capped to %d dBm (st=%d)", MESH_TX_POWER_DBM, (int)pst);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "MESH DYNAMIC_RF: full TX power (no cap)");
+    }
+#endif
+
     struct mmwlan_mesh_args args = { 0 };
     memcpy(args.if_addr, g_mesh_mac, sizeof(g_mesh_mac));
     memcpy(args.mesh_id, MESH_ID, strlen(MESH_ID));
@@ -230,6 +267,61 @@ void app_main(void)
     args.s1g_chan_num = MESH_S1G_CHAN;
     args.beacon_interval_tu = 100;
     args.max_plinks = MESH_MAX_PLINKS;
+
+    /* Set the forced-topology allowlist BEFORE mmwlan_mesh_start: the allowlist is plain file-static
+     * state (no mesh needed), and setting it after start races the first beacons -> a node could peer
+     * with a non-allowed neighbour (e.g. board1<->board2 directly) in the gap and keep that direct
+     * key+path, defeating the forced topology. */
+#ifdef MESH_LINE_RELAY_DEMO
+    if (memcmp(g_mesh_mac, MAC_B0, 6) == 0)
+    {
+        uint8_t allow[12];
+        memcpy(allow, MAC_B1, 6);
+#ifdef MESH_XV_CHRONOSALT
+        memcpy(allow + 6, MAC_CHRONOSALT, 6); /* board0 relays board1 <-> chronosalt(Linux) */
+        mmwlan_mesh_set_peer_allowlist(allow, 2);
+        ESP_LOGW(TAG, "MESH role: RELAY (peers board1+chronosalt, forwards between them)");
+#else
+        memcpy(allow + 6, MAC_B2, 6);
+        mmwlan_mesh_set_peer_allowlist(allow, 2);
+        ESP_LOGW(TAG, "MESH role: RELAY (peers board1+board2, forwards between them)");
+#endif
+    }
+    else if (memcmp(g_mesh_mac, MAC_B1, 6) == 0)
+    {
+        mmwlan_mesh_set_peer_allowlist(MAC_B0, 1);
+#ifdef MESH_XV_CHRONOSALT
+        g_ping_target = "10.9.9.3"; /* chronosalt(Linux), reachable only via board0 */
+        ESP_LOGW(TAG, "MESH role: endpoint board1 -> ping chronosalt (10.9.9.3) via relay");
+#else
+        g_ping_target = "10.9.9.108"; /* board2, reachable only via board0 (ARP now relayed) */
+        ESP_LOGW(TAG, "MESH role: endpoint board1 -> ping board2 (10.9.9.108) via relay");
+#endif
+    }
+    else if (memcmp(g_mesh_mac, MAC_B2, 6) == 0)
+    {
+        mmwlan_mesh_set_peer_allowlist(MAC_B0, 1);
+        ESP_LOGW(TAG, "MESH role: endpoint board2 (responder)");
+    }
+#endif
+#ifdef MESH_DYNAMIC_RF
+    /* No allowlist -> peer with ANYONE in RF range (RF geometry, not policy, shapes the topology).
+     * board1 pings board2; if board1<->board2 is out of range, board0 must relay it (dynamic multi-hop,
+     * no restart). Path forms via HWMP from the live beacons/PREQs alone. */
+    if (memcmp(g_mesh_mac, MAC_B1, 6) == 0)
+    {
+        g_ping_target = "10.9.9.108"; /* board2 */
+        ESP_LOGW(TAG, "MESH DYNAMIC_RF: board1 -> ping board2 (10.9.9.108), NO allowlist (RF-forced line)");
+    }
+    else if (memcmp(g_mesh_mac, MAC_B2, 6) == 0)
+    {
+        ESP_LOGW(TAG, "MESH DYNAMIC_RF: board2 responder, NO allowlist");
+    }
+    else if (memcmp(g_mesh_mac, MAC_B0, 6) == 0)
+    {
+        ESP_LOGW(TAG, "MESH DYNAMIC_RF: board0 (mid) responder, NO allowlist");
+    }
+#endif
 
     ESP_LOGI(TAG, "Starting mesh (id=\"%s\" chan=%d mac=%02x:%02x:%02x:%02x:%02x:%02x)...",
              MESH_ID, MESH_S1G_CHAN, g_mesh_mac[0], g_mesh_mac[1], g_mesh_mac[2],
@@ -250,27 +342,6 @@ void app_main(void)
      * PREQ for it (-> Linux PREP) and so chronite builds a path to us (-> Linux PERR on break). */
     g_ping_target = "10.9.9.2";
     ESP_LOGW(TAG, "MESH role: Linux interop -> open peering + ping chronite (10.9.9.2)");
-#endif
-#ifdef MESH_LINE_RELAY_DEMO
-    if (memcmp(g_mesh_mac, MAC_B0, 6) == 0)
-    {
-        uint8_t allow[12];
-        memcpy(allow, MAC_B1, 6);
-        memcpy(allow + 6, MAC_B2, 6);
-        mmwlan_mesh_set_peer_allowlist(allow, 2);
-        ESP_LOGW(TAG, "MESH role: RELAY (peers board1+board2, forwards between them)");
-    }
-    else if (memcmp(g_mesh_mac, MAC_B1, 6) == 0)
-    {
-        mmwlan_mesh_set_peer_allowlist(MAC_B0, 1);
-        g_ping_target = "10.9.9.108"; /* board2, reachable only via board0 (ARP now relayed) */
-        ESP_LOGW(TAG, "MESH role: endpoint board1 -> ping board2 (10.9.9.108) via relay");
-    }
-    else if (memcmp(g_mesh_mac, MAC_B2, 6) == 0)
-    {
-        mmwlan_mesh_set_peer_allowlist(MAC_B0, 1);
-        ESP_LOGW(TAG, "MESH role: endpoint board2 (responder)");
-    }
 #endif
 
     /* P4: once a peer link is up, pin a static mesh IP and ping a neighbour. */

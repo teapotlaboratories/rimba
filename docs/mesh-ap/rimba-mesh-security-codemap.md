@@ -20,6 +20,169 @@ wpa_supplicant; MPM is host-side in `umac_mesh.c`) the port reproduces *both* ha
 mesh path. Phases: **P0** live Linux ref (done) · **P1** key-install plumbing (static keys) ·
 **P2** AMPE · **P3** SAE · **P4** MFP/IGTK + integration.
 
+## Host SW-CCMP data path — code flow
+
+For multi-hop the MM6108 firmware keys CCMP decryption by the mesh-SA (A4), so it can't HW-decrypt a
+forwarded A4≠TA frame (#20). The fix moves ALL mesh data + robust-mgmt CCMP into the host: no FW key
+offload → the FW delivers protected frames raw → the host encrypts on TX / decrypts on RX, mirroring
+net/mac80211. Three flows below; the two fixes from this effort are boxed inline (★ **P5e** = TX key
+selection, ★ **#22** = RX unprotected-mesh-action gate). All file:line are the current working tree.
+
+### TX — encrypt (a mesh frame leaves the host already-protected)
+
+```
+  lwIP netif-out  /  re-injected forwarded frame
+        │
+        ▼
+  umac_datapath_tx_dequeue_frame_mesh                     datapath.c:3385
+     mesh_get_next_tx_stad() ─► stad   (common_stad, or a per-peer stad)
+        │
+        ▼
+  umac_datapath_process_tx_frame(stad)                    datapath.c:2027
+        │
+        ├─► construct_80211_data_header_mesh              datapath.c:3421
+        │      A1/RA = umac_mesh_lookup_next_hop(dest)     ← the HWMP next hop
+        │      A2 = us   A3 = mesh-DA(final)   A4 = mesh-SA(origin)
+        │
+        │   is_multicast = is_mcast(A1)
+        │
+        │   ★ P5e fix                                      datapath.c:2105
+        │   ┌────────────────────────────────────────────────────────────┐
+        │   │ key_stad = stad;                                            │
+        │   │ if (mesh_active && !is_multicast)         // UNICAST        │
+        │   │     key_stad = umac_mesh_get_peer_stad(A1) ?: stad;         │
+        │   │  → key a unicast under the NEXT-HOP peer's MTK, not the     │
+        │   │    common_stad's vestigial fallback key (mesh_p1_mtk).      │
+        │   │    Group TX + single-hop resolve back to `stad`.            │
+        │   └────────────────────────────────────────────────────────────┘
+        │   key_id = umac_keys_get_active_key_id(key_stad, GROUP|PAIRWISE)
+        │   umac_keys_increment_tx_seq(key_stad, key_id)   // PN++ before use (mac80211 order)
+        ▼
+  umac_datapath_sw_ccmp_encrypt(key_stad, …)              datapath.c:518
+     tk = umac_keys_get_key_data(key_stad, key_id)
+     mesh_ccmp_encrypt(tk, hdr, …)                        ccmp.c:155 ─► mmint_aes_ccm_ae
+     → splice the 8-B CCMP header between hdr and body, append the MIC
+        │
+        ▼
+  FW TX   (frame already encrypted host-side; the FW holds no mesh key)
+```
+*Linux mirror:* `ieee80211_tx_h_select_key` (tx.c) keys a unicast from `tx->sta->ptk` with `tx->sta`
+resolved from the RA; `ieee80211_crypto_ccmp_encrypt`. A **relayed** unicast takes the same shape via
+`umac_mesh_forward_data` (mesh.c:2226) → `nh_stad = umac_mesh_get_peer_stad(next_hop)` (mesh.c:2243) →
+`umac_datapath_tx_mesh_unicast_frame` → the same `sw_ccmp_encrypt`, keyed under the next-hop MTK (#19).
+
+### RX — decrypt + dispatch (FW delivers protected frames raw)
+
+```
+  FW ─► umac_datapath_process_rx_frame                    datapath.c:1796
+          stad = lookup_stad_by_peer_addr(TA)
+          │
+    ┌─────┴───── frame_type ───────────────────────────────────┐
+    │ DATA                                                      │ MGMT (action)
+    ▼                                                           ▼
+  process_rx_data_frame_after_reorder              umac_datapath_process_rx_other_frame   datapath.c:1360
+    protected & !FW_DECRYPTED & sw_crypto:            │
+      sw_ccmp_decrypt(stad, …, DEFAULT)  :590         ├─► process_mgmt_frame_ccmp_header  datapath.c:1287
+        mesh_ccmp_decrypt  ccmp.c:169                 │      protected → sw_ccmp_decrypt(stad, IND_ROBUST_MGMT)
+        → mmint_aes_ccm_ad, then PN replay-check      │      unprotected → pass straight through (no decrypt)
+    │                                                 ▼
+    │  mesh-DA == us ?                          umac_datapath_process_rx_mgmt_frame        datapath.c:345
+    ├─ YES → strip → deliver up to lwIP/IP        ★ #22 fix                                 datapath.c:373
+    └─ NO  → umac_mesh_forward_data(DA,SA,…)      ┌────────────────────────────────────────────────────┐
+             datapath.c:862   (RELAY)            │ if (!protected && pmf_is_required(stad)             │
+             → re-encrypt under next-hop MTK     │      && !frame_is_mesh_action(view))    // was      │
+               (see TX/forward above)            │           frame_is_group_privacy_action            │
+                                                 │     → drop as unprotected robust mgmt              │
+                                                 │  mesh peers are MFP=no ⇒ a Linux peer's UNPROTECTED │
+                                                 │  unicast PREP now PASSES (was dropped here)         │
+                                                 └────────────────────────────────────────────────────┘
+                                                         │  ops->process_rx_mgmt_frame_mesh   datapath.c:3459
+                                                         ▼
+                                                  umac_mesh_handle_action                  mesh.c:2378
+                                                    category MESH(13) →
+                                                  umac_mesh_handle_hwmp(body, SA)          mesh.c:2022 (call :2396)
+                                                    gate: mesh_peer_allowed(SA)
+                                                    PREQ → mesh_path_update(reverse) + (tgt==us? PREP : flood)
+                                                    PREP → mesh_path_update(forward) + (orig==us? install : forward)
+                                                    PERR → path teardown
+```
+*Linux mirror:* `ieee80211_rx_h_decrypt` (rx.c) keys a protected unicast from `rx->sta->ptk`
+(`ieee80211_crypto_ccmp_decrypt`); the unprotected-robust-mgmt drop is `ieee80211_drop_unencrypted_mgmt`,
+whose entire drop block is gated on `test_sta_flag(rx->sta, WLAN_STA_MFP)` — **false for a mesh peer**, so
+the unprotected unicast mesh action passes (which `frame_is_mesh_action` reproduces).
+
+### End-to-end — secured multi-hop relay (the two flows above, composed per hop)
+
+```
+  board1 (ESP, endpoint)         board0 (ESP, RELAY)              board2 / chronite (endpoint)
+  ──────────────────────         ───────────────────              ────────────────────────────
+  DATA  (each leg CCMP under that leg's pairwise MTK):
+    originate ICMP ──[MTK b1·b0]──► sw_ccmp_decrypt(DEFAULT) ──► forward ──[MTK b0·X]──► sw_ccmp_decrypt
+    key_stad = b0  (★P5e)          mesh-DA ≠ us → relay           umac_mesh_forward_data        → up to IP
+                                                                  nh_stad MTK (#19)
+
+  HWMP  (board1 resolves a path to X via board0):
+    PREQ(target=X) ──► flood ──► X: PREP(orig=b1) ──► forward PREP ──► install path
+    start_discovery    handle_hwmp   (target==me)      lookup_next_hop(b1)   mesh_path_update
+
+  Cross-vendor twist (X = chronite, Linux, MFP=no):
+    chronite's PREP is UNPROTECTED → board0 RX would drop it pre-#22;
+    the ★#22 frame_is_mesh_action exemption lets it reach handle_hwmp → board0 forwards it → board1 installs
+    its path and keeps it refreshed (so the relay SUSTAINS instead of dying after a burst).
+```
+
+### The same flow in net/mac80211 (the reference the ESP side is ported from)
+
+morselib collapses mac80211's per-handler `CALL_RXH`/`CALL_TXH` pipelines into straight-line functions, but
+the *stages* line up 1:1. Lines below are grep-verified in chronite's `~/halow/rpi-linux/net/mac80211`.
+
+```
+LINUX TX                                                    LINUX RX
+────────                                                    ────────
+ieee80211_subif_start_xmit                  tx.c            driver RX → ieee80211_rx_handlers      rx.c:4186
+   mesh_nexthop_resolve(skb)        tx.c:2054 →                (the CALL_RXH pipeline)
+      mesh_nexthop_lookup        pathtbl.c:1239               │
+      → set RA = next hop; kick PREQ if no path              ├─ ieee80211_rx_h_decrypt           rx.c:4189
+   ieee80211_build_hdr             tx.c:2596                  │     unicast protected:
+      4-addr: A1=next-hop A2=us A3=DA A4=SA                   │       rx->key = rx->sta->ptk  (sta from TA)
+   │                                                          │       → ieee80211_crypto_ccmp_decrypt  wpa.c:515
+   ▼ __ieee80211_tx → CALL_TXH pipeline      tx.c:1816        │     unprotected / HW-decrypted: pass
+   ├─ ieee80211_tx_h_select_key             tx.c:1820   ┌─────┴──────── class ───────────────────────────┐
+   │     unicast: tx->key = tx->sta->ptk                │ DATA                         │ MGMT (action)
+   │              (sta resolved from the RA)            ▼                              ▼
+   │     multicast: tx->key = GTK              ieee80211_rx_h_data        rx.c:4194   ieee80211_rx_h_action   rx.c:4202
+   ├─ … h_sequence / h_fragment …                → ieee80211_rx_mesh_data rx.c:2827     ieee80211_drop_unencrypted_mgmt
+   ▼                                                 DA==us? deliver to IP                              rx.c:3443
+   ieee80211_tx_h_encrypt          tx.c:1861         else: build fwd_skb (:2940)         └─ gated on test_sta_flag(
+      → ieee80211_crypto_ccmp_encrypt wpa.c:498            → re-xmit  (RELAY)               sta, WLAN_STA_MFP) — FALSE
+   │                                                                                       for a mesh peer ⇒ unprot
+   ▼ driver xmit (HW or SW crypto per key flags)                                           action PASSES
+                                                                                       case WLAN_CATEGORY_MESH_ACTION
+                                                                                                          rx.c:3766
+                                                                                         → mesh_rx_path_sel_frame
+                                                                                                   mesh_hwmp.c:1013
+                                                                                            ├─ hwmp_preq_frame_process :660
+                                                                                            ├─ hwmp_prep_frame_process :796
+                                                                                            └─ hwmp_perr_frame_process :858
+```
+
+**Stage correspondence (Linux → ESP):**
+
+| net/mac80211 (reference) | morselib (this port) |
+| --- | --- |
+| `mesh_nexthop_resolve` / `mesh_nexthop_lookup` + `ieee80211_build_hdr` (set RA=next-hop, 4-addr) | `umac_datapath_construct_80211_data_header_mesh` (`umac_mesh_lookup_next_hop`) datapath.c:3421 |
+| `ieee80211_tx_h_select_key`: unicast `tx->key = tx->sta->ptk` (sta from RA) | ★ **P5e** `key_stad = umac_mesh_get_peer_stad(A1)` datapath.c:2105 |
+| `ieee80211_tx_h_encrypt` → `ieee80211_crypto_ccmp_encrypt` (wpa.c:498) | `umac_datapath_sw_ccmp_encrypt` → `mesh_ccmp_encrypt` (ccmp.c:155) |
+| `ieee80211_rx_h_decrypt`: `rx->key = rx->sta->ptk` → `ieee80211_crypto_ccmp_decrypt` (wpa.c:515) | `…_sw_ccmp_decrypt` → `mesh_ccmp_decrypt` (ccmp.c:169) — DEFAULT / IND_ROBUST_MGMT space |
+| `ieee80211_rx_mesh_data` → `fwd_skb` re-xmit (rx.c:2827) | `umac_mesh_forward_data` (mesh.c:2226) → next-hop MTK |
+| `ieee80211_drop_unencrypted_mgmt`, gated on `test_sta_flag(sta, WLAN_STA_MFP)` (rx.c:3443) | ★ **#22** `!frame_is_mesh_action(view)` in `umac_datapath_process_rx_mgmt_frame` datapath.c:373 |
+| `mesh_rx_path_sel_frame` + `hwmp_{preq,prep,perr}_frame_process` (mesh_hwmp.c:1013/660/796/858) | `umac_mesh_handle_hwmp` (PREQ/PREP/PERR branches) mesh.c:2022 |
+
+The two divergences that needed fixing this effort are exactly the two ★ rows: morselib hand-wired the key
+stad per call site (so the originate path picked the wrong stad — P5e), and it gated the unprotected-mgmt
+drop on a policy flag + frame-type list instead of the peer's MFP state (so a Linux MFP=no peer's unicast
+PREP was dropped — #22).
+
 ## The −116 question — RESOLVED (mesh uses the AP path)
 
 A MESH_POINT vif runs the **identical** `.set_key`/`.sta_state` code as AP, and a mesh peer gets a
@@ -272,3 +435,65 @@ PREQ = Action `protected=False`; board0→board2 forward = 4-addr QoS Data `prot
 TA=board0 A3=board2 A4=board1(origin)`, incrementing PNs — the relayed unicast is on-air CCMP-encrypted for
 the next hop. **Open:** board2 doesn't decrypt board0's forwarded 4-addr unicast (firmware RX, #9-adjacent;
 board0's TX is on-air-correct) — the relay ping doesn't complete yet → task #20.
+
+## #21 P5e — originated multi-hop unicast keyed off the next-hop peer stad (completes the SW-CCMP relay)
+
+The #20 firmware-HW-crypto limit was resolved by the host-CCMP port (#21 P5a–d, single-hop verified). P5e
+closed the multi-hop gap. Root cause was NOT HWMP routing (discovery completes: board2 `#DISC`→board0 floods
+→board1 `PREP(us)`→board0 forwards PREP→board2 `FORME`); it was that a **locally-originated** mesh unicast to
+a multi-hop dest is dequeued on the **`common_stad`** (which carries only the vestigial static fallback
+`mesh_p1_mtk` at key_idx 0), so `process_tx_frame` CCMP-keyed it off that fallback while the header's RA is the
+HWMP next hop, which decrypts under the real per-pair MTK → MIC fail → forward dropped. This is the originate-
+side analogue of the #19 forward fix.
+
+| New code | Linux/morse counterpart |
+| --- | --- |
+| `umac_datapath.c` `umac_datapath_process_tx_frame`: new local `key_stad` = `stad`, but for an active-mesh **unicast** switch to `umac_mesh_get_peer_stad(ra)` (RA = the HWMP next hop set by `umac_datapath_construct_80211_data_header_mesh`); use `key_stad` for the active-key-id lookup, key length, TX-PN increment, and `umac_datapath_sw_ccmp_encrypt` | net/mac80211 `ieee80211_tx_h_select_key` (tx.c:614): a unicast frame is keyed from `tx->sta->ptk`, and `tx->sta` is resolved from the RA (next hop) — same as the #19 forward path, applied to the originate path |
+
+Single-hop unicast (dest is the direct peer) and group TX (own MGTK on the common_stad) resolve `key_stad`
+back to `stad`, so they are unchanged; the fix also corrects the reverse-direction ICMP-echo origination.
+
+**Verified on-air (2026-06-29, chronium morse0 monitor, forced line board1—board0—board2):** before fix =
+0 ping replies, board0 SW-decrypt **18/18 MICFAIL** (board2 encrypt `key=00112233` fallback ≠ board0 decrypt
+`key=877601e8` per-pair MTK, same kid/PN), `#MESHFWD` 0×. After fix (clean trace-free firmware) = board1↔board2
+ping **52 replies / 3 pre-peering timeouts** (RTT 49–67ms), board0 SW-decrypt all-OK with matching key
+fingerprints, `#MESHFWD` fires; chronium (2941 frames) shows board0 relaying **both** directions — 55
+request-forwards (`TA=board0 SA=board1`) + 58 reply-forwards (`TA=board0 SA=board2`), 4-addr `Protected=True`.
+This completes the secured 802.11s multi-hop relay on host SW-CCMP.
+
+## #22 — accept an MFP=no peer's unprotected unicast mesh action (cross-vendor multi-hop with a Linux endpoint)
+
+Cross-vendor multi-hop (board1 ESP → board0 ESP relay → chronite Linux) worked only in a burst then died:
+chronite sends its unicast PREPs **UNPROTECTED** (Linux mesh peers are MFP=no), and board0 dropped them at the
+PMF pre-dispatch, so board1's PREQ→PREP path discovery to chronite never completed (the burst came from
+transient chronite-PREQ reverse-routes). The ESP marks mesh peers `MMWLAN_PMF_REQUIRED` but morse mesh is
+MFP=no; the #18 fix exempted only *group* mesh actions from the unprotected-robust-mgmt drop, not the unicast
+PREP.
+
+| New code | Linux/morse counterpart |
+| --- | --- |
+| `frames/action.c` + `frames_common.h`: new `frame_is_mesh_action(view)` — a Mesh(13)/Multihop(14) Action frame of ANY addressing (group OR unicast); the unicast-inclusive sibling of `frame_is_group_privacy_action` (no group-DA requirement) | net/mac80211: a mesh path-selection frame is a robust mgmt action; whether to drop it when unprotected is decided solely by the peer's MFP state, not its addressing |
+| `umac_datapath.c` `umac_datapath_process_rx_mgmt_frame`: the unprotected-robust-mgmt drop gate exempts `!frame_is_mesh_action(rxbufview)` (was `!frame_is_group_privacy_action`) — so an unprotected unicast PREP from a mesh peer is no longer dropped | net/mac80211 `ieee80211_drop_unencrypted_mgmt` (rx.c): the entire unprotected-robust-mgmt drop block is inside `if (rx->sta && test_sta_flag(rx->sta, WLAN_STA_MFP))` — **false for a mesh peer (MFP=no)** → the block is skipped and the unprotected unicast mesh action passes (ASSOC'd) |
+
+The MFP setting / RSN IE / AMPE / TX are untouched (so the working AMPE peering + ESP↔ESP relay are
+unaffected); this mirrors mac80211's *behaviour* (accept the MFP=no peer's unprotected mesh actions) via the
+established morse frame-type-exemption pattern.
+
+**Verified on-air (2026-06-29, chronium):** board1↔chronite via board0 ping **50 replies / 2 pre-peering
+timeouts, sustained** (seq 14→65; was a ~16-reply burst then dead). board0 now forwards chronite's PREP
+(`#PREPFWD` nh_ok=1 → board1; was 0), board1 installs+refreshes its path (`#PREPME` ×5; was a one-shot 1),
+chronite's PREP storm collapses 244+→~5. chronium: board0 relaying both ways sustained (57 req-fwd + 56
+reply-fwd). Cross-vendor multi-hop (ESP relay ↔ Linux endpoint) now works end-to-end.
+
+**#20 correction (recorded here for the code-map; morse_driver-verified):** chronite runs HW crypto
+(`no_hwcrypt=N`) yet — **on-air verified** — decrypts board0's forwarded 4-addr A4≠TA frames and replies, so a
+Linux node CAN be a multi-hop endpoint with HW crypto. The #20 "forwarded A4≠TA can't be decrypted" limit is
+**ESP-morselib-specific** (the host RX path *dropped* a protected frame it couldn't HW-decrypt — see the
+`MMLOG_WRN("Received frame without HW Decryption")` drop in `process_rx_data_frame`; P5 closed it by moving
+CCMP host-side), **NOT a universal MM6108 firmware limit.** Mechanism, verified in the actual driver:
+`morse_driver/mac.c:5844` sets `RX_FLAG_DECRYPTED` *from the FW's per-frame flag* and delivers the frame
+either way → any protected frame the FW didn't decrypt reaches mac80211 with the flag clear, and
+`ieee80211_rx_h_decrypt` (rx.c) SW-decrypts it under `rx->sta->ptk` (keyed by **TA**, not A4). So Linux has an
+RX SW-crypto fallback the ESP morselib lacked. *(Not pinned: whether chronite's FW HW-decrypted these specific
+forwards by TA, or used the mac80211 SW fallback — would need to instrument chronite's mac80211; both are
+valid Linux paths and either way the endpoint works.)*
