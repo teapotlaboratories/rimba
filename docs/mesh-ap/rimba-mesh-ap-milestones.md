@@ -406,6 +406,17 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
     secured single-hop AND multi-hop relay, both ESP↔ESP and cross-vendor (ESP relay ↔ Linux
     endpoint), host SW-CCMP. Tracked in `docs/worklog/2026-06-27-mesh-security-phase{1,2,3}-*.md`
     + `rimba-mesh-security-codemap.md`; on-air verified per [[verify-onair-chronium-monitor]].
+  - ☐ **#20 — HW-crypto multi-hop forward (FW A4-sensitivity) — BACKLOG, low priority.** In HW-crypto
+    mode the MM6108 FW drops a foreign-A4 (A4≠TA) 4-addr mesh forward; the secured mesh ships on **host
+    SW-CCMP (P5)** which sidesteps it (no FW key → FW delivers raw → host decrypts), so this is **not a
+    blocker**. Findings (worklog §#20/#25/#26 + codemap #20): the drop is **A4-sensitive ESP firmware
+    behaviour, not the host RX code** — morselib's RX path is A4-agnostic (every gate keyed by TA), so
+    only the FW can gate on A4; and the **same FW binary delivers the forward on Linux** (which imposes
+    no host gate — `mac.c:5844`/`6632` + `ieee80211_rx_h_mesh_fwding`), so the cause is a
+    **non-command / BCF / boot / build FW-config difference not yet pinned** (closed-FW). Refuted: a
+    universal firmware limit, A4-registration coverage, FW version, an rx-filter command, a boot/global
+    command, the host replay gate. **Revisit only if a HW-crypto multi-hop path is ever wanted** — pin
+    the closed-FW input via a 1.17.9-same-BCF-Linux A/B + an instrumented on-air FW-delivery capture.
   - ✅ **Frame deltas vs live Linux fixed + re-verified on air** (Update 15): PREQ **Target-Only
     flag** on refresh, **No-Ack** QoS on group/broadcast, PREQ **lifetime in TUs** (`MSEC_TO_TU`).
     board0 (fixed) now emits `target_flags=01`, `lifetime=0x7270` (TU), group `QoS=0x20` —
