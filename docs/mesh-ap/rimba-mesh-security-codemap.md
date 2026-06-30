@@ -485,15 +485,19 @@ timeouts, sustained** (seq 14→65; was a ~16-reply burst then dead). board0 now
 chronite's PREP storm collapses 244+→~5. chronium: board0 relaying both ways sustained (57 req-fwd + 56
 reply-fwd). Cross-vendor multi-hop (ESP relay ↔ Linux endpoint) now works end-to-end.
 
-**#20 correction (recorded here for the code-map; morse_driver-verified):** chronite runs HW crypto
-(`no_hwcrypt=N`) yet — **on-air verified** — decrypts board0's forwarded 4-addr A4≠TA frames and replies, so a
-Linux node CAN be a multi-hop endpoint with HW crypto. The #20 "forwarded A4≠TA can't be decrypted" limit is
-**ESP-morselib-specific** (the host RX path *dropped* a protected frame it couldn't HW-decrypt — see the
-`MMLOG_WRN("Received frame without HW Decryption")` drop in `process_rx_data_frame`; P5 closed it by moving
-CCMP host-side), **NOT a universal MM6108 firmware limit.** Mechanism, verified in the actual driver:
-`morse_driver/mac.c:5844` sets `RX_FLAG_DECRYPTED` *from the FW's per-frame flag* and delivers the frame
-either way → any protected frame the FW didn't decrypt reaches mac80211 with the flag clear, and
-`ieee80211_rx_h_decrypt` (rx.c) SW-decrypts it under `rx->sta->ptk` (keyed by **TA**, not A4). So Linux has an
-RX SW-crypto fallback the ESP morselib lacked. *(Not pinned: whether chronite's FW HW-decrypted these specific
-forwards by TA, or used the mac80211 SW fallback — would need to instrument chronite's mac80211; both are
-valid Linux paths and either way the endpoint works.)*
+**#20 correction (DEFINITIVE — on-air measured 2026-06-29; supersedes ALL earlier #20 verdicts):** the MM6108
+firmware **HW-decrypts + delivers** a forwarded 4-addr A4≠TA mesh frame, keyed by the **TA-link** (NOT by A4).
+Proven on chronite three independent ways: (1) **ftrace** — `ieee80211_crypto_ccmp_decrypt` for a confirmed
+foreign-A4 forward calls ONLY `ieee80211_hdrlen`+`skb_pull` (~2 µs), never `crypto_aead_decrypt`/AES (all
+ftrace-able), i.e. the FW delivered it already-decrypted (`RX_FLAG_DECRYPTED` set) and mac80211 did NO SW
+decrypt; (2) **removing the originator from chronite's FW STA table** (`sta_tx_count_table`) changes nothing —
+still HW-decrypted + delivered (A4-in-table is irrelevant); (3) **loading the ESP's exact 1.17.9 firmware onto
+chronite** still delivers (not a FW-version difference; ESP=1.17.9 from the build, Linux=1.17.8; same
+`fgh100mhaamd` BCF on chronosalt also delivers). **So #20 is a morselib HOST-STACK bug — NOT a firmware limit,
+NOT the FW version, NOT an A4-registration gap.** The FW-command sequence is byte-identical to the morse driver
+(workflow + live kprobe: ADD_INTERFACE/BSS_CONFIG/MESH_CONFIG + SET_STA_STATE/INSTALL_KEY all match), so the
+morselib gap is most likely a host-side RX drop in the HW-crypto path (the `MMDRV_RX_FLAG_DECRYPTED` gate /
+stad-by-TA lookup around `umac_datapath.c:569`), not a missed FW config. host SW-CCMP (P5) sidesteps the FW and
+is the shipped general solution; a morselib HW-crypto fix is viable (FW proven capable). The exact seam is the
+open #20 fix task. *(RETRACTS the earlier "Linux uses a mac80211 SW fallback" mechanism — ftrace shows the FW
+HW-decrypts, no SW fallback runs — and the "A4-must-be-registered" model.)* Worklog §#25.
