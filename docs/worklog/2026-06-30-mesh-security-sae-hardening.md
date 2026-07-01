@@ -120,12 +120,29 @@ live 4-node secured mesh (rimba-mesh / SAE / ch27).
   ported `mesh_sae_validate_commit` gate is exactly what prevents it (hardened holds), and the effect is specific
   to the attacked peer (control untouched). Board0 restored to clean hardened firmware after; tree left clean.
 
-**#14 (Confirm-replay → no-resend) and #15 (unsolicited-Open → drop) — still pending, injector ready to extend.**
-#14 = hook `sae_write_confirm` (`sae.c:2366-2369`: skip the send-confirm `++` to replay a stale `sc`); #15 = hook
-`mesh_mpm_send_plink_action` (`mesh_mpm.c:222`: force `ampe=0` → plaintext Open, no PMKID). Both lower severity
-than GAP-C (amplification / spurious-SAE, not a remote link-flap) and already source-level adversarially-verified
-above (`gapIsReal=true`). The `MESH_ATTACK` command + these two hook points are mapped; extending is one
-build/flash + A/B cycle each.
+**#14 (Confirm-replay → no-resend) — VALIDATED (2026-07-01).** `MESH_ATTACK confirm-replay <MAC>`. The first
+implementation (rebuild the Confirm via `auth_sae_send_confirm`) **segfaulted the injector** — `sae_accept_sta`
+NULLs `sae->peer_commit_scalar` at ESTAB, so `sae_write_confirm`'s hash (`sae_cn_confirm_ecc`) derefs freed data
+(a `tmp!=NULL` guard doesn't help — the NULLed field is top-level, not in `tmp`). This independently confirms the
+firmware's own note (`umac_mesh.c:1151`, "tmp is gone, so replay the cached bytes"). Re-implemented as
+**cache-and-replay**: cache the first Confirm's serialized bytes on the normal peering path, resend verbatim
+(original `sc=1`, ≤ the victim's Rc) — no `sae_write_confirm` on the attack path; no crash. A/B on board0,
+observed at the injector (board0's Confirms coming back): **HARDENED = 5 replays → 0 resends** (the `sae_rc`
+anti-replay gate at `umac_mesh.c:1143` ignores the stale-sc Confirm); **BASELINE** (gate → `if(0)`) **= 5 replays
+→ 4 resends** (the amplification vuln).
+
+**#15 (unsolicited-Open → drop) — injector built; clean empirical A/B NOT achievable on this bench.**
+`MESH_ATTACK unsolicited-open <MAC>` emits a plaintext (`ampe=0`, no-PMKID) Open with no crash. But the #15
+defense (`umac_mesh.c:2503-2528`: an Open from an **untracked** peer, `peer==NULL`, is dropped in a secured
+build) only fires when the sender isn't already a tracked peer — and this live-beaconing mesh **auto-peers any
+beaconing node** (board0 SAE-completes with the injector before any Open arrives, so the Open is never "unknown").
+Every attempt to present an unknown-MAC Open failed: a fresh MAC gets SAE'd (`no_auto_peer` only stops the
+*injector* initiating, not the victim); disabling board0's beacon-peer-open in **both** the app cb AND morselib
+(`umac_mesh.c:1352`, verified compiled via a clean rebuild) STILL left board0 peering chronosalt/chronogen via a
+peer-creation path not isolable without on-device tracing. A clean test needs src-spoofed raw injection
+(research-grade) or victim-side peering suppression that resisted the disable. **#15 stays source-verified**
+(adversarial recon `gapIsReal=true`; the defense is a simple untracked-peer drop). The `unsolicited-open` mode is
+in the committed injector patch for a future focused attempt.
 
 ### Raw evidence + reproduction
 

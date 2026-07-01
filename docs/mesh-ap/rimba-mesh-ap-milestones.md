@@ -418,8 +418,8 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
     universal firmware limit, A4-registration coverage, FW version, an rx-filter command, a boot/global
     command, the host replay gate. **Revisit only if a HW-crypto multi-hop path is ever wanted** — pin
     the closed-FW input via a 1.17.9-same-BCF-Linux A/B + an instrumented on-air FW-delivery capture.
-  - ◑ **SAE hardening (GAP-C / #14 / #15) — implemented 2026-06-30; GAP-C defense empirically validated
-    2026-07-01 (injector A/B); #14/#15 tests + rate-limit pending.** Three hostap-parity fixes on the SAE state machine (codemap §"SAE hardening —
+  - ◑ **SAE hardening (GAP-C / #14 / #15) — implemented 2026-06-30; GAP-C + #14 empirically validated
+    2026-07-01 (injector A/B); #15 A/B not achievable on this auto-peering bench (source-verified); rate-limit pending.** Three hostap-parity fixes on the SAE state machine (codemap §"SAE hardening —
     GAP-C / #14 / #15"; worklog `2026-06-30-mesh-security-sae-hardening.md`): **GAP-C** run `sae_parse_commit`
     (scalar-range + on-curve, on a throwaway SAE) before the ACCEPTED-state reauth free so a *malformed* Commit
     can't flap a live link; **#14** Sc/Rc + big_sync anti-replay on the ACCEPTED+Confirm resend; **#15** drop an
@@ -429,8 +429,11 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
     (`MESH_ATTACK malformed-commit`, on chronium `~/halow/hostap`) drove a definitive A/B on board0 — HARDENED
     keeps the attacker plink (`estab 1→1` through 5 malformed Commits), BASELINE (validate gate neutralised)
     tears it down (`1→0`, `mesh_sae_reauth_free`), control peer untouched; hostap (chronite) rejects the same
-    Commit (`Invalid peer scalar`, 0 teardowns). See worklog §"Injector attack tests". **Still pending:**
-    (a) #14 Confirm-replay + #15 unsolicited-Open A/Bs (injector ready to extend; lower severity); (b) ☐
+    Commit (`Invalid peer scalar`, 0 teardowns). **#14 Confirm-replay A/B DONE (2026-07-01):** cache-and-replay
+    injector — HARDENED 5 replays → 0 resends (`sae_rc` gate at `umac_mesh.c:1143`), BASELINE (gate off) → 4
+    resends. See worklog §"Injector attack tests". **Still pending:** (a) #15 unsolicited-Open A/B not achievable
+    on this live auto-peering bench (board0 SAE-completes any beaconing node → an Open never arrives untracked;
+    needs raw src-spoofed injection) — source-verified; (b) ☐
     **well-formed-forged-Commit reauth DoS residual** — a *valid* forged Commit still tears a live link down
     (hostap itself reaches `ap_free_sta` for any such frame), so closing it fully needs a **non-hostap
     rate-limit on ACCEPTED-state reauth** (deliberate divergence from the line-by-line port, deferred).

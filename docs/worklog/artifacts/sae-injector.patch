@@ -1,8 +1,70 @@
+diff --git a/src/ap/ieee802_11.c b/src/ap/ieee802_11.c
+index a54cde877..3d0ad4242 100644
+--- a/src/ap/ieee802_11.c
++++ b/src/ap/ieee802_11.c
+@@ -770,6 +770,32 @@ static int auth_sae_send_confirm(struct hostapd_data *hapd,
+ 	return reply_res;
+ }
+ 
++
++#ifdef CONFIG_TESTING_OPTIONS
++/* GAP-#14 confirm-replay: TX a previously cached SAE Confirm body verbatim as
++ * an Authentication frame (SAE, auth_transaction=2). Uses the exact primitive
++ * auth_sae_send_confirm() uses (send_auth_reply) but does NOT rebuild via
++ * sae_write_confirm() -- safe post-ESTAB when the commit bignums are gone. */
++int auth_sae_send_confirm_replay(struct hostapd_data *hapd,
++				 struct sta_info *sta)
++{
++	if (!sta->sae || !sta->sae->cached_confirm) {
++		wpa_printf(MSG_INFO,
++			   "SAE-ATTACK: no cached Confirm to replay for " MACSTR,
++			   MAC2STR(sta->addr));
++		return -1;
++	}
++
++	wpa_printf(MSG_INFO,
++		   "SAE-ATTACK: replaying cached Confirm (%zu bytes) to " MACSTR,
++		   sta->sae->cached_confirm_len, MAC2STR(sta->addr));
++
++	return send_auth_reply(hapd, sta, sta->addr, WLAN_AUTH_SAE, 2,
++			       WLAN_STATUS_SUCCESS, sta->sae->cached_confirm,
++			       sta->sae->cached_confirm_len, "sae-replay");
++}
++#endif /* CONFIG_TESTING_OPTIONS */
++
+ #endif /* CONFIG_SAE */
+ 
+ 
+diff --git a/src/ap/ieee802_11.h b/src/ap/ieee802_11.h
+index a13cec475..3c55ced57 100644
+--- a/src/ap/ieee802_11.h
++++ b/src/ap/ieee802_11.h
+@@ -152,6 +152,10 @@ u8 * hostapd_eid_bss_max_idle_period(struct hostapd_data *hapd, u8 *eid,
+ 				     u16 value);
+ 
+ int auth_sae_init_committed(struct hostapd_data *hapd, struct sta_info *sta);
++#ifdef CONFIG_TESTING_OPTIONS
++int auth_sae_send_confirm_replay(struct hostapd_data *hapd,
++				 struct sta_info *sta);
++#endif /* CONFIG_TESTING_OPTIONS */
+ #ifdef CONFIG_SAE
+ void sae_clear_retransmit_timer(struct hostapd_data *hapd,
+ 				struct sta_info *sta);
 diff --git a/src/common/sae.c b/src/common/sae.c
-index 358485588..65db3a2ec 100644
+index 358485588..84de0759d 100644
 --- a/src/common/sae.c
 +++ b/src/common/sae.c
-@@ -1691,6 +1691,15 @@ int sae_write_commit(struct sae_data *sae, struct wpabuf *buf,
+@@ -126,6 +126,9 @@ void sae_clear_data(struct sae_data *sae)
+ 	sae_clear_temp_data(sae);
+ 	crypto_bignum_deinit(sae->peer_commit_scalar, 0);
+ 	crypto_bignum_deinit(sae->peer_commit_scalar_accepted, 0);
++#ifdef CONFIG_TESTING_OPTIONS
++	os_free(sae->cached_confirm);
++#endif /* CONFIG_TESTING_OPTIONS */
+ 	os_memset(sae, 0, sizeof(*sae));
+ }
+ 
+@@ -1691,6 +1694,15 @@ int sae_write_commit(struct sae_data *sae, struct wpabuf *buf,
  		return -1;
  	wpa_hexdump(MSG_DEBUG, "SAE: own commit-scalar",
  		    pos, sae->tmp->prime_len);
@@ -18,7 +80,7 @@ index 358485588..65db3a2ec 100644
  	if (sae->tmp->ec) {
  		pos = wpabuf_put(buf, 2 * sae->tmp->prime_len);
  		if (crypto_ec_point_to_bin(sae->tmp->ec,
-@@ -1701,6 +1710,12 @@ int sae_write_commit(struct sae_data *sae, struct wpabuf *buf,
+@@ -1701,6 +1713,12 @@ int sae_write_commit(struct sae_data *sae, struct wpabuf *buf,
  			    pos, sae->tmp->prime_len);
  		wpa_hexdump(MSG_DEBUG, "SAE: own commit-element(y)",
  			    pos + sae->tmp->prime_len, sae->tmp->prime_len);
@@ -31,8 +93,53 @@ index 358485588..65db3a2ec 100644
  	} else {
  		pos = wpabuf_put(buf, sae->tmp->prime_len);
  		if (crypto_bignum_to_bin(sae->tmp->own_commit_element_ffc, pos,
+@@ -2356,6 +2374,9 @@ int sae_write_confirm(struct sae_data *sae, struct wpabuf *buf)
+ 	const u8 *sc;
+ 	size_t hash_len;
+ 	int res;
++#ifdef CONFIG_TESTING_OPTIONS
++	size_t confirm_offset;
++#endif /* CONFIG_TESTING_OPTIONS */
+ 
+ 	if (sae->tmp == NULL)
+ 		return -1;
+@@ -2365,6 +2386,9 @@ int sae_write_confirm(struct sae_data *sae, struct wpabuf *buf)
+ 	/* Send-Confirm */
+ 	if (sae->send_confirm < 0xffff)
+ 		sae->send_confirm++;
++#ifdef CONFIG_TESTING_OPTIONS
++	confirm_offset = wpabuf_len(buf);
++#endif /* CONFIG_TESTING_OPTIONS */
+ 	sc = wpabuf_put(buf, 0);
+ 	wpabuf_put_le16(buf, sae->send_confirm);
+ 
+@@ -2388,6 +2412,24 @@ int sae_write_confirm(struct sae_data *sae, struct wpabuf *buf)
+ 		return -1;
+ #endif /* CONFIG_SAE_PK */
+ 
++#ifdef CONFIG_TESTING_OPTIONS
++	/* GAP-#14 confirm-replay: cache the first Confirm's full body while tmp
++	 * and the commit bignums are still valid. Post-ESTAB, sae_accept_sta()
++	 * sets sae->peer_commit_scalar = NULL, so rebuilding a Confirm here
++	 * would dereference NULL and crash; the attack replays these cached
++	 * bytes verbatim instead. The cached send-confirm counter is the
++	 * original one (== the Rc the victim accepted), so the replay satisfies
++	 * sc <= Rc and trips the peer's anti-replay check. */
++	if (!sae->cached_confirm && wpabuf_len(buf) > confirm_offset) {
++		size_t clen = wpabuf_len(buf) - confirm_offset;
++
++		sae->cached_confirm = os_memdup(
++			(const u8 *) wpabuf_head(buf) + confirm_offset, clen);
++		if (sae->cached_confirm)
++			sae->cached_confirm_len = clen;
++	}
++#endif /* CONFIG_TESTING_OPTIONS */
++
+ 	return 0;
+ }
+ 
 diff --git a/src/common/sae.h b/src/common/sae.h
-index c3ca4d41b..2ce428817 100644
+index c3ca4d41b..0ce54f128 100644
 --- a/src/common/sae.h
 +++ b/src/common/sae.h
 @@ -104,6 +104,15 @@ enum sae_state {
@@ -51,18 +158,21 @@ index c3ca4d41b..2ce428817 100644
  struct sae_data {
  	enum sae_state state;
  	u16 send_confirm;
-@@ -120,6 +129,9 @@ struct sae_data {
+@@ -120,6 +129,12 @@ struct sae_data {
  	u16 rc; /* protocol instance variable: Rc (received send-confirm) */
  	unsigned int h2e:1;
  	unsigned int pk:1;
 +#ifdef CONFIG_TESTING_OPTIONS
 +	unsigned int test_corrupt_commit:2;
++	/* GAP-#14 confirm-replay: cached copy of the first Confirm body */
++	u8 *cached_confirm;
++	size_t cached_confirm_len;
 +#endif /* CONFIG_TESTING_OPTIONS */
  	struct sae_temporary_data *tmp;
  };
  
 diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
-index 01d596819..af7c02df3 100644
+index 01d596819..f05f1d261 100644
 --- a/wpa_supplicant/ctrl_iface.c
 +++ b/wpa_supplicant/ctrl_iface.c
 @@ -20,6 +20,7 @@
@@ -73,15 +183,16 @@ index 01d596819..af7c02df3 100644
  #ifdef CONFIG_DPP
  #include "common/dpp.h"
  #endif /* CONFIG_DPP */
-@@ -58,6 +59,7 @@
+@@ -58,6 +59,8 @@
  #include "offchannel.h"
  #include "drivers/driver.h"
  #include "mesh.h"
 +#include "mesh_rsn.h"
++#include "mesh_mpm.h"
  #include "dpp_supplicant.h"
  #include "sme.h"
  #include "nan_usd.h"
-@@ -12903,6 +12905,19 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
+@@ -12903,6 +12906,29 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
  	} else if (os_strncmp(buf, "MESH_LINK_PROBE ", 16) == 0) {
  		if (wpa_supplicant_ctrl_iface_mesh_link_probe(wpa_s, buf + 16))
  			reply_len = -1;
@@ -97,15 +208,109 @@ index 01d596819..af7c02df3 100644
 +		if (hwaddr_aton(_p, _mac) ||
 +		    mesh_attack_send_commit(wpa_s, _mac, _mode))
 +			reply_len = -1;
++	} else if (os_strncmp(buf, "MESH_ATTACK confirm-replay ", 27) == 0) {
++		u8 _mac[ETH_ALEN];
++		if (hwaddr_aton(buf + 27, _mac) ||
++		    mesh_attack_send_confirm(wpa_s, _mac))
++			reply_len = -1;
++	} else if (os_strncmp(buf, "MESH_ATTACK unsolicited-open ", 29) == 0) {
++		u8 _mac[ETH_ALEN];
++		if (hwaddr_aton(buf + 29, _mac) ||
++		    mesh_attack_send_open(wpa_s, _mac))
++			reply_len = -1;
 +#endif /* CONFIG_TESTING_OPTIONS */
  #endif /* CONFIG_MESH */
  #ifdef CONFIG_P2P
  	} else if (os_strncmp(buf, "P2P_FIND ", 9) == 0) {
+diff --git a/wpa_supplicant/mesh_mpm.c b/wpa_supplicant/mesh_mpm.c
+index 86120db7d..b072e3f40 100644
+--- a/wpa_supplicant/mesh_mpm.c
++++ b/wpa_supplicant/mesh_mpm.c
+@@ -183,6 +183,14 @@ static bool llid_in_use(struct wpa_supplicant *wpa_s, u16 llid)
+ }
+ 
+ 
++#ifdef CONFIG_TESTING_OPTIONS
++/* GAP-#15 unsolicited-open: when set, mesh_mpm_send_plink_action() forces
++ * ampe=0 so a peering Open is emitted with no AMPE IE / no PMKID -- and thus
++ * needs no prior SAE/PMKSA with the target. Set/cleared synchronously around
++ * the single send call in mesh_attack_send_open() (single-threaded eloop). */
++static int mesh_attack_force_no_ampe;
++#endif /* CONFIG_TESTING_OPTIONS */
++
+ /* generate an llid for a link and set to initial state */
+ static void mesh_mpm_init_link(struct wpa_supplicant *wpa_s,
+ 			       struct sta_info *sta)
+@@ -225,6 +233,11 @@ static void mesh_mpm_send_plink_action(struct wpa_supplicant *wpa_s,
+ 	if (!sta)
+ 		return;
+ 
++#ifdef CONFIG_TESTING_OPTIONS
++	if (mesh_attack_force_no_ampe)
++		ampe = 0;
++#endif /* CONFIG_TESTING_OPTIONS */
++
+ 	buf_len = 2 +      /* Category and Action */
+ 		  2 +      /* capability info */
+ 		  2 +      /* AID */
+@@ -451,6 +464,38 @@ fail:
+ }
+ 
+ 
++#ifdef CONFIG_TESTING_OPTIONS
++int mesh_attack_send_open(struct wpa_supplicant *wpa_s, const u8 *addr)
++{
++	struct hostapd_data *data = wpa_s->ifmsh ? wpa_s->ifmsh->bss[0] : NULL;
++	struct sta_info *sta;
++
++	if (!data)
++		return -1;
++	sta = ap_get_sta(data, addr);
++	if (!sta) {
++		/* Fresh peer we have NOT run SAE with: no PMKSA exists. */
++		sta = ap_sta_add(data, addr);
++		if (!sta)
++			return -1;
++		sta->flags |= WLAN_STA_WMM;
++	}
++	if (!sta->my_lid)
++		mesh_mpm_init_link(wpa_s, sta);
++
++	/* Force ampe=0 so the Open carries no AMPE IE / no PMKID and needs no
++	 * prior SAE/PMKSA with the target -- an unsolicited Open. */
++	mesh_attack_force_no_ampe = 1;
++	wpa_printf(MSG_INFO,
++		   "MESH-ATTACK: sending unsolicited Open (ampe=0, no PMKSA) to "
++		   MACSTR, MAC2STR(addr));
++	mesh_mpm_send_plink_action(wpa_s, sta, PLINK_OPEN, 0);
++	mesh_attack_force_no_ampe = 0;
++	return 0;
++}
++#endif /* CONFIG_TESTING_OPTIONS */
++
++
+ /* configure peering state in ours and driver's station entry */
+ void wpa_mesh_set_plink_state(struct wpa_supplicant *wpa_s,
+ 			      struct sta_info *sta,
+diff --git a/wpa_supplicant/mesh_mpm.h b/wpa_supplicant/mesh_mpm.h
+index e4c244b74..23220b3c3 100644
+--- a/wpa_supplicant/mesh_mpm.h
++++ b/wpa_supplicant/mesh_mpm.h
+@@ -22,6 +22,9 @@ void wpa_mesh_set_plink_state(struct wpa_supplicant *wpa_s,
+ int mesh_mpm_close_peer(struct wpa_supplicant *wpa_s, const u8 *addr);
+ int mesh_mpm_connect_peer(struct wpa_supplicant *wpa_s, const u8 *addr,
+ 			  int duration);
++#ifdef CONFIG_TESTING_OPTIONS
++int mesh_attack_send_open(struct wpa_supplicant *wpa_s, const u8 *addr);
++#endif /* CONFIG_TESTING_OPTIONS */
+ 
+ #ifdef CONFIG_MESH
+ 
 diff --git a/wpa_supplicant/mesh_rsn.c b/wpa_supplicant/mesh_rsn.c
-index 5c7a6c49b..2813a25ec 100644
+index 5c7a6c49b..1498b6836 100644
 --- a/wpa_supplicant/mesh_rsn.c
 +++ b/wpa_supplicant/mesh_rsn.c
-@@ -431,6 +431,32 @@ int mesh_rsn_auth_sae_sta(struct wpa_supplicant *wpa_s,
+@@ -431,6 +431,61 @@ int mesh_rsn_auth_sae_sta(struct wpa_supplicant *wpa_s,
  	return 0;
  }
  
@@ -133,22 +338,52 @@ index 5c7a6c49b..2813a25ec 100644
 +	auth_sae_init_committed(hapd, sta);
 +	return 0;
 +}
++
++int mesh_attack_send_confirm(struct wpa_supplicant *wpa_s, const u8 *addr)
++{
++	struct hostapd_data *hapd = wpa_s->ifmsh ? wpa_s->ifmsh->bss[0] : NULL;
++	struct sta_info *sta;
++
++	if (!hapd)
++		return -1;
++	sta = ap_get_sta(hapd, addr);
++	if (!sta || !sta->sae) {
++		wpa_printf(MSG_INFO, "SAE-ATTACK: no SAE peer " MACSTR,
++			   MAC2STR(addr));
++		return -1;
++	}
++	if (!sta->sae->cached_confirm) {
++		wpa_printf(MSG_INFO,
++			   "SAE-ATTACK: no cached Confirm for " MACSTR
++			   " (peer never completed an SAE Confirm)",
++			   MAC2STR(addr));
++		return -1;
++	}
++	/* Cache-and-replay: re-send the peer's original SAE Confirm bytes
++	 * (auth txn=2) verbatim. Their send-confirm counter is stale (== the Rc
++	 * the peer already accepted), so the peer's anti-replay defense must
++	 * drop it. We do NOT rebuild via sae_write_confirm(): post-ESTAB
++	 * sae_accept_sta() has NULLed peer_commit_scalar and that path would
++	 * crash. */
++	return auth_sae_send_confirm_replay(hapd, sta);
++}
 +#endif /* CONFIG_TESTING_OPTIONS */
 +
  
  void mesh_rsn_get_pmkid(struct mesh_rsn *rsn, struct sta_info *sta, u8 *pmkid)
  {
 diff --git a/wpa_supplicant/mesh_rsn.h b/wpa_supplicant/mesh_rsn.h
-index 8775cedc3..49679fdf0 100644
+index 8775cedc3..bb823d98f 100644
 --- a/wpa_supplicant/mesh_rsn.h
 +++ b/wpa_supplicant/mesh_rsn.h
-@@ -42,4 +42,9 @@ int mesh_rsn_process_ampe(struct wpa_supplicant *wpa_s, struct sta_info *sta,
+@@ -42,4 +42,10 @@ int mesh_rsn_process_ampe(struct wpa_supplicant *wpa_s, struct sta_info *sta,
  			  const u8 *start, size_t elems_len);
  void mesh_auth_timer(void *eloop_ctx, void *user_data);
  
 +#ifdef CONFIG_TESTING_OPTIONS
 +int mesh_attack_send_commit(struct wpa_supplicant *wpa_s, const u8 *addr,
 +			    int mode);
++int mesh_attack_send_confirm(struct wpa_supplicant *wpa_s, const u8 *addr);
 +#endif /* CONFIG_TESTING_OPTIONS */
 +
  #endif /* MESH_RSN_H */
