@@ -372,7 +372,15 @@ void app_main(void)
         vTaskDelay(pdMS_TO_TICKS(1000));
         if (++s % 5 == 0)
         {
-            ESP_LOGI(TAG, "mesh alive, uptime=%" PRIu32 "s", s);
+            uint8_t peer_macs[UMAC_MESH_MAX_PEERS][6] = {{0}};
+            uint8_t n_peers = mmwlan_mesh_peer_count(peer_macs);
+            ESP_LOGI(TAG, "mesh alive, uptime=%" PRIu32 "s  estab_peers=%u", s, (unsigned)n_peers);
+            for (uint8_t pi = 0; pi < n_peers; pi++)
+            {
+                ESP_LOGI(TAG, "  peer[%u]=%02x:%02x:%02x:%02x:%02x:%02x", pi,
+                         peer_macs[pi][0], peer_macs[pi][1], peer_macs[pi][2],
+                         peer_macs[pi][3], peer_macs[pi][4], peer_macs[pi][5]);
+            }
         }
     }
 }
