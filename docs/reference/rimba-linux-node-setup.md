@@ -434,3 +434,30 @@ sudo morse_cli -i wlan1 hw_version                        # HW Version: MM6108A1
 **Prebuilt bundle:** chronium `~/halow/pi02w-bundle*` (kernel, the fixed `morse.ko`/`dot11ah.ko`,
 overlay, firmware, userspace binaries) + `pi02w-install.sh` — re-imaging a Zero 2 W is a
 copy-and-boot, no rebuild.
+
+---
+
+## TX power — low-power operation (`tx_max_power_mbm`)
+
+The radio's max TX power is a **global `morse` module parameter**, `tx_max_power_mbm`
+(`mac.c:256`, mode 0644), in **milli-dBm (mbm)** — default **2200 = 22 dBm** (the US 900 MHz
+regulatory ceiling is 30 dBm). `mbm / 100 = dBm`, so `1000` = 10 dBm, `0` = 0 dBm. Set it in
+`/etc/modprobe.d/morse.conf` so it applies at every driver load, node-wide:
+```sh
+# lowest practical — 0 dBm (1 mW)
+echo 'options morse bcf=bcf_fgh100mhaamd.bin country=US spi_clock_speed=20000000 enable_ps=0 tx_max_power_mbm=0' \
+     | sudo tee /etc/modprobe.d/morse.conf
+sudo ip link set wlan1 down; sudo rmmod morse; sudo modprobe morse   # or reboot, to apply
+cat /sys/module/morse/parameters/tx_max_power_mbm                     # confirm (0644 = runtime-writable too)
+```
+Applied on **chronosalt + chronogen (2026-06-30)** = `0` (0 dBm), down from the 22 dBm default.
+
+**Caveats:**
+- **`iw`/`nl80211` do NOT report the applied S1G txpower** — the field stays blank; the cap is a
+  driver→firmware setting. The only real proof of reduced radiated power is **on-air RSSI**:
+  capture each node's beacon on chronium's `morse0` monitor and compare dBm across settings.
+- **`0` is the lowest *practical* value, not the hardware floor.** The param accepts negative
+  (e.g. `-3000`) and the chip clamps to its own minimum, but the mesh may then fail to link. On a
+  close bench 0 dBm still associates (even 1 dBm gave ~−52 dBm peer RSSI); if a link won't form,
+  raise it (`tx_max_power_mbm=1000`, etc.). Useful for RF-forcing a multi-hop topology, subject to
+  the "bench boards too close" limit (see `docs/mesh-ap/rimba-mesh-ap-milestones.md`).
