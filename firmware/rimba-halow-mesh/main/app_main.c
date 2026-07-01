@@ -62,6 +62,10 @@
  * (responder), with NO forced allowlist and NO hardcoded peers. Uncomment MESH_LINE_RELAY_DEMO (or another
  * mode above) only for a bench-specific demo with hardcoded board MACs. */
 // #define MESH_LINE_RELAY_DEMO 1
+/* Leaf-node bench test (use WITH MESH_LINE_RELAY_DEMO): board0 calls mmwlan_mesh_set_multihop(false)
+ * after start -> pure single-hop leaf, stops relaying board1<->board2. Uncomment to flash board0 as a
+ * leaf (Test B); commented = board0 relays (Test A baseline). On-air A/B verified on chronium 2026-06-30. */
+// #define MESH_LEAF_NODE 1
 #if defined(MESH_LINE_RELAY_DEMO) || defined(MESH_DYNAMIC_RF)
 static const uint8_t MAC_B0[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xef, 0xa4 }; /* relay (10.9.9.136) */
 static const uint8_t MAC_B1[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xf9, 0x40 }; /* endpoint (10.9.9.100) */
@@ -334,6 +338,17 @@ void app_main(void)
         return;
     }
     ESP_LOGI(TAG, "==> mesh vif up; firmware beaconing periodically on chan %d.", MESH_S1G_CHAN);
+
+#if defined(MESH_LEAF_NODE) && defined(MESH_LINE_RELAY_DEMO)
+    /* Bench test (Variant A): make board0 a pure single-hop leaf. It still peers directly with
+     * board1 and board2 but stops relaying their traffic and emits no HWMP -- so board1->board2
+     * (forced through board0 by the allowlist) must now fail. Runtime-settable; here right after start. */
+    if (memcmp(g_mesh_mac, MAC_B0, 6) == 0)
+    {
+        mmwlan_mesh_set_multihop(false);
+        ESP_LOGW(TAG, "MESH role: board0 LEAF -- multi-hop/forwarding DISABLED (will not relay)");
+    }
+#endif
 
     /* Log any peer mesh beacons we hear on the channel. */
     mmwlan_register_rx_frame_cb(MMWLAN_FRAME_BEACON, peer_beacon_cb, NULL);
