@@ -118,6 +118,14 @@ reproducible on a 3-board bench", or "no current meter on the bench, so the µA
 floor is not measured"). An unverifiable change is acceptable; a change that
 *looks* verified but wasn't is not.
 
+**Leave the bench radio-silent when a test ends.** After *every* hardware test,
+return **all** devices to a no-radio idle state before moving on — flash the
+radio-free `rimba-hello` to every ESP board, and take any Linux sniffer/peer radio
+down (`sudo ip link set wlan1 down`). Nothing should be left beaconing, associating,
+peering, or monitoring on the air between tests. Confirm silence (the board's console
+shows the `rimba_hello` banner and zero `mmwlan`/HaLow lines). See
+[radio-silent-workflow.md](radio-silent-workflow.md).
+
 ### On-air frame verification (always)
 
 **For every frame the ESP transmits — mesh, IBSS, AP, TWT, beacons, action,

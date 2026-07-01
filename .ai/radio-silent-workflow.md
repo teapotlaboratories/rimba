@@ -16,6 +16,16 @@ make flash APP=rimba-hello PORT=/dev/ttyACM0
 make flash APP=rimba-hello PORT=/dev/ttyACM1
 ```
 
+**Also silence any Linux bench node** used as a sniffer or mesh peer — take its
+HaLow radio down so it stops monitoring/beaconing:
+
+```bash
+ssh chronium 'sudo ip link set wlan1 down'   # sniffer/monitor radio off
+```
+
+Do this after **every** test, not just at end of day: the bench's default resting
+state is no-radio on **all** devices (ESP boards *and* Linux nodes).
+
 ## Run the ping test (radio ON)
 
 ```bash
