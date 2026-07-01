@@ -1,4 +1,4 @@
-# Rimba Linux HaLow node — Raspberry Pi 5 + MM6108 setup guide
+# Rimba Linux HaLow node — Raspberry Pi (5 / Zero 2 W) + MM6108 setup guide
 
 Reproducible build/setup for the **Linux MM6108 reference/interop node** (`chronium`)
 used by the open-IBSS test plan (P0.5). This is the canonical, from-scratch recipe;
@@ -12,6 +12,10 @@ the day-by-day narrative is in
 ---
 
 ## 0. Hardware
+
+> **Pi Zero 2 W nodes (chronosalt / chronogen):** §0–§12 below are the Pi 5 recipe; the
+> Zero-2-W deltas (kernel/DTB/overlay + a **critical `morse_driver` caveat**) are in the
+> [Raspberry Pi Zero 2 W variant](#raspberry-pi-zero-2-w-variant-chronosalt--chronogen) section at the end.
 
 - **Host:** Raspberry Pi 5 Model B (8 GB), Debian 13 (trixie), aarch64.
 - **Radio:** Seeed **Wio-WM6108** (Quectel **FGH100M-H** / Morse Micro **MM6108**) in
@@ -317,3 +321,116 @@ mode isn't compiled into this build).
    — `iw phy` shows the radio as 5 GHz channels; this is the freq for an `iw` IBSS join.
 10. **`iw` lives in `/usr/sbin`** (not in a non-login SSH PATH); `morse_cli`/`hostapd_s1g`
     are in `/usr/local/bin`.
+
+---
+
+## Raspberry Pi Zero 2 W variant (chronosalt / chronogen)
+
+The two Pi Zero 2 W nodes run the SAME MM6108 **1.17.8** stack, but as a **Pi Zero 2 W
+(BCM2837), not a Pi 5** — so the kernel, DTB, and SPI overlay differ. Validated **2026-06-30**:
+chronosalt + chronogen both bring up `wlan1` / MM6108A1 clean on boot. References: the Morse
+community thread [Raspberry Pi Zero 2W with FGH100M](https://community.morsemicro.com/t/raspberry-pi-zero-2w-with-fgh100m/938)
+(Aldwin's solution) + the [chip-reset discussion](https://community.morsemicro.com/t/how-to-use-both-the-mm6108-and-the-built-in-wi-fi-on-the-raspberry-pi-zero-2w/485).
+
+**Radio:** FGH100M-H over SPI (Seeed XIAO HaLow module); BUSY/WAKE not bridged (module powered
+continuously). Wiring, matching the overlay below: reset=GPIO5, power=GPIO3 + GPIO7,
+spi-irq=GPIO25, CS0=GPIO8. `wlan0` = onboard CYW43455 (brcmfmac — keeps SSH alive under 6.12).
+
+### Z1. Kernel — a Pi Zero 2 W (BCM2837) Morse kernel, cross-built on a Pi 5
+Build the Morse `mm/rpi-6.12.21/1.17.x` tree with the **arm64 multi-platform / `bcm2711` config**
+(covers Pi 2/3/Zero 2 W) — NOT `bcm2712_defconfig` (Pi 5). Kernel release is **`6.12.21-v8+`**
+(the Pi 5 build is `-v8-16k+`). **512 MB RAM + one A53 die cannot build a kernel natively (OOMs)
+— always cross-build on a Pi 5** (chronium/chronite, 8 GB) and copy the artifacts. On chronium
+this is pre-built at `~/halow/rpi-linux-pi3/` (`Image.gz`, `bcm2710-rpi-zero-2-w.dtb`,
+`pi3-modules.tar.gz`).
+
+### Z2. morse_driver — DO **NOT** apply the forum's `spi.c` chip-reset on 1.17.8 ⚠️
+The forum's "chip reset changes" are two edits: `hw.c` (`morse_hw_reset` delays 20→100 ms + a
+1000 ms settle) and `spi.c` (a `morse_spi_reset()` call in `morse_spi_probe`). **On the 1.17.8
+driver the `spi.c` reset is HARMFUL — it is the classic "chip won't respond" trap.** In 1.17.8
+the detect step (which sets the func-address-base + reads `chip ID`) runs *before* `morse_of_probe`,
+so a `morse_spi_reset()` added after `morse_of_probe` fires *after* detection and wipes the
+address-base — the next register read (OTP `0x4120`) fails with `find_token failed` /
+`cmd53 … ret:-71` / `OTP check failed`, and probe aborts (`-5`). It *looks* like a dead/silent
+chip, but `insmod morse.ko … debug_mask=0xffffffff` proves the chip answered fine
+(`Morse Micro SPI device found, chip ID=0x0306`) — the reset broke it. **Build with the stock
+1.17.8 `spi.c` (no added reset).** The `hw.c` delay bump is inert (no reset runs in probe) so it's
+harmless either way. If a unit genuinely needs a reset before detection, place it *before*
+`morse_chip_cfg_detect_and_init`, never after `morse_of_probe`.
+
+```sh
+cd ~/halow/morse_driver          # stock 1.17.8 spi.c (no morse_spi_reset in probe)
+make KERNEL_SRC=~/halow/rpi-linux-pi3 \
+     CONFIG_WLAN_VENDOR_MORSE=m CONFIG_MORSE_SPI=y \
+     CONFIG_MORSE_USER_ACCESS=y CONFIG_MORSE_VENDOR_COMMAND=y
+modinfo -F vermagic morse.ko     # MUST read 6.12.21-v8+  (not -v8-16k+)
+```
+
+### Z3. Device-tree SPI overlay — MUST disable spidev on CE0 **and** CE1
+MM6108 on `&spi0` CE0 (GPIO8). **CE1 = GPIO7, which the MM6108 uses as a power-gpio**, so a live
+spidev on CE1 holds that pin (symptoms: `chipselect 0 already in use`, `/dev/spidev0.1`). The
+overlay disables both spidev nodes. `wm6108-spi-pi02w.dts`:
+```dts
+/dts-v1/;
+/plugin/;
+/ {
+	compatible = "brcm,bcm2835", "brcm,bcm2836", "brcm,bcm2708", "brcm,bcm2709", "brcm,bcm2711";
+	fragment@0 {
+		target = <&spi0>;
+		__overlay__ {
+			pinctrl-0 = <&spi0_pins &spi0_cs_pins>;
+			cs-gpios = <&gpio 8 1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+			mm6108@0 {
+				compatible = "morse,mm610x-spi";
+				reg = <0>;                        /* CE0 */
+				reset-gpios = <&gpio 5 0>;
+				power-gpios = <&gpio 3 0>, <&gpio 7 0>;
+				spi-irq-gpios = <&gpio 25 0>;
+				spi-max-frequency = <50000000>;
+				status = "okay";
+			};
+		};
+	};
+	fragment@1 { target = <&spidev0>; __overlay__ { status = "disabled"; }; };
+	fragment@2 { target = <&spidev1>; __overlay__ { status = "disabled"; }; };
+};
+```
+```sh
+dtc -@ -I dts -O dtb -o wm6108-spi-pi02w.dtbo wm6108-spi-pi02w.dts
+```
+
+### Z4. Firmware / BCF / modprobe
+Same blobs as the Pi 5: `mm6108.bin` (1.17.8) + `bcf_fgh100mhaamd.bin` (the `-H` variant, md5
+`4e128ad5…`). **SPI clock 20 MHz** (`spi_clock_speed=20000000`; 50 MHz fails per the forum):
+```sh
+echo 'options morse bcf=bcf_fgh100mhaamd.bin country=US spi_clock_speed=20000000 enable_ps=0' \
+     | sudo tee /etc/modprobe.d/morse.conf
+```
+
+### Z5. Boot config (tryboot-safe) — NO `dtparam=spi=on`
+The overlay enables `&spi0` itself, so `dtparam=spi=on` is redundant AND re-adds the conflicting
+spidev — **leave it out.** Install the Zero-2-W kernel as `kernel-morse.img`, the Zero-2-W DTB
+(under a distinct name), and the overlay; `config.txt` stays stock (auto-rollback fallback) while
+`tryboot.txt` carries:
+```
+[all]
+device_tree=bcm2710-rpi-zero-2-w-morse.dtb
+dtoverlay=wm6108-spi-pi02w
+kernel=kernel-morse.img
+```
+`sudo reboot '0 tryboot'` → verify → `sudo cp tryboot.txt config.txt` to promote.
+
+### Z6. Verify
+```sh
+uname -r                                                  # 6.12.21-v8+
+dmesg | grep -iE 'Loaded firmware|Loaded BCF|chip ID'     # fw + bcf, chip ID=0x0306, NO find_token/OTP errors
+ip -br link | grep 68:24:99                               # wlan1 up
+sudo morse_cli -i wlan1 hw_version                        # HW Version: MM6108A1
+```
+
+**Prebuilt bundle:** chronium `~/halow/pi02w-bundle*` (kernel, the fixed `morse.ko`/`dot11ah.ko`,
+overlay, firmware, userspace binaries) + `pi02w-install.sh` — re-imaging a Zero 2 W is a
+copy-and-boot, no rebuild.
