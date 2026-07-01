@@ -816,7 +816,8 @@ deliberate divergence deferred to a later phase.
 
 **Verification:** build clean (mmhostap + morselib link). On-air (chronite live-Linux peer, hardened firmware):
 secured peering reaches **ESTAB** (no regression to SAE+AMPE) + **genuine-restart recovery** — both boards
-re-ESTAB after a chronite restart, so the validate gate does not deadlock. Pending — injector attack tests on
-chronium `morse0` (crafted-Commit keep-link, Confirm-replay no-resend, unsolicited-Open drop): blocked on bench
-injection tooling (no scapy / morse0 is a sniffer); defense correctness rests on the source-verified
-`sae_parse_commit` chain. Worklog `2026-06-30-mesh-security-sae-hardening.md`.
+re-ESTAB after a chronite restart, so the validate gate does not deadlock. **GAP-C injector A/B — DONE
+(2026-07-01):** a `wpa_supplicant_s1g` "malicious peer" (`MESH_ATTACK malformed-commit`) proved it on board0 —
+HARDENED holds the attacker plink through 5 malformed Commits, BASELINE (validate gate off) tears it down
+(`mesh_sae_reauth_free`), control peer untouched; hostap rejects the same Commit (`Invalid peer scalar`). #14/#15
+A/Bs pending (injector ready to extend). Worklog `2026-06-30-mesh-security-sae-hardening.md` §"Injector attack tests".

@@ -418,17 +418,22 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
     universal firmware limit, A4-registration coverage, FW version, an rx-filter command, a boot/global
     command, the host replay gate. **Revisit only if a HW-crypto multi-hop path is ever wanted** — pin
     the closed-FW input via a 1.17.9-same-BCF-Linux A/B + an instrumented on-air FW-delivery capture.
-  - ☐ **SAE hardening (GAP-C / #14 / #15) — implemented 2026-06-30, on-air no-regression verified; defense
-    tests + rate-limit pending.** Three hostap-parity fixes on the SAE state machine (codemap §"SAE hardening —
+  - ◑ **SAE hardening (GAP-C / #14 / #15) — implemented 2026-06-30; GAP-C defense empirically validated
+    2026-07-01 (injector A/B); #14/#15 tests + rate-limit pending.** Three hostap-parity fixes on the SAE state machine (codemap §"SAE hardening —
     GAP-C / #14 / #15"; worklog `2026-06-30-mesh-security-sae-hardening.md`): **GAP-C** run `sae_parse_commit`
     (scalar-range + on-curve, on a throwaway SAE) before the ACCEPTED-state reauth free so a *malformed* Commit
     can't flap a live link; **#14** Sc/Rc + big_sync anti-replay on the ACCEPTED+Confirm resend; **#15** drop an
     unsolicited MPM Open in a secured build (await beacon). Verified on air (chronite peer): board0+board1 reach
-    ESTAB (no regression) and **re-ESTAB after a chronite restart** (validate gate does not deadlock). **Pending:**
-    (a) injector attack tests on chronium `morse0` — crafted-Commit keep-link, Confirm-replay no-resend,
-    unsolicited-Open drop; (b) ☐ **well-formed-forged-Commit reauth DoS residual** — a *valid* forged Commit still
-    tears a live link down (hostap itself reaches `ap_free_sta` for any such frame), so closing it fully needs a
-    **non-hostap rate-limit on ACCEPTED-state reauth** (deliberate divergence from the line-by-line port, deferred).
+    ESTAB (no regression) and **re-ESTAB after a chronite restart** (validate gate does not deadlock).
+    **GAP-C defense-efficacy test DONE (2026-07-01):** a `wpa_supplicant_s1g` "malicious peer" injector
+    (`MESH_ATTACK malformed-commit`, on chronium `~/halow/hostap`) drove a definitive A/B on board0 — HARDENED
+    keeps the attacker plink (`estab 1→1` through 5 malformed Commits), BASELINE (validate gate neutralised)
+    tears it down (`1→0`, `mesh_sae_reauth_free`), control peer untouched; hostap (chronite) rejects the same
+    Commit (`Invalid peer scalar`, 0 teardowns). See worklog §"Injector attack tests". **Still pending:**
+    (a) #14 Confirm-replay + #15 unsolicited-Open A/Bs (injector ready to extend; lower severity); (b) ☐
+    **well-formed-forged-Commit reauth DoS residual** — a *valid* forged Commit still tears a live link down
+    (hostap itself reaches `ap_free_sta` for any such frame), so closing it fully needs a **non-hostap
+    rate-limit on ACCEPTED-state reauth** (deliberate divergence from the line-by-line port, deferred).
   - ☐ **ESP↔ESP-direct peering needs a Linux mesh anchor — INVESTIGATE (peer issue).** Two ESP nodes alone (same
     Mesh ID, chan 27, clean default) **both beacon but never peer** — no SAE/discovery fires either way (observed
     2026-06-30: board0 `e2:72:a1:f8:ef:a4` + board1 `…f9:40`, neither logs any peer/SAE activity over minutes).

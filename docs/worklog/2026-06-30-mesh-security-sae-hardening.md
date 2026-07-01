@@ -85,16 +85,47 @@ The validate shim's key assumption — that a fresh scratch `sae_data` + `sae_se
 - **Edits exonerated for the two peer issues below** — the pre-edit **baseline** firmware shows identical
   ESP↔ESP behaviour, and the data path is untouched by GAP-C/#14/#15.
 
-### Pending: injector attack tests (defense-efficacy half)
+### Injector attack tests — GAP-C validated end-to-end (2026-07-01)
 
-The active-defense tests — crafted-Commit keep-link (GAP-C), Confirm-replay no-resend (#14), unsolicited-Open
-drop (#15) — need a scapy S1G frame injector on chronium `morse0`. **Not completable on this bench as-is:**
-chronium `wlan1` is in managed mode (morse0 only delivers in monitor type), scapy is not installed, and morse
-`morse0` is a sniffer interface (S1G TX-injection is research-grade). Deferred to a focused session with the
-injector set up. The defense **correctness** meanwhile rests on: (1) `sae.c` rejects off-curve/bad-scalar
-Commits (read in source); (2) the shim calls `sae_parse_commit` with the proven args (code-verified); (3) it is
-wired as a required reauth term; (4) peering+recovery work on-air, so `sae_parse_commit` runs correctly on real
-Commits.
+The active-defense tests were **completable** by building the injector as a **malicious mesh peer** (a patched
+`wpa_supplicant_s1g`) instead of the originally-planned scapy `morse0` monitor injection (research-grade — a
+monitor vif is RX-only). Key realization: **none of the 3 attacks need src-MAC spoofing** — a misbehaving peer
+emits them from its own MAC — so the normal nl80211 mgmt-tx path suffices.
+
+**Injector** — chronium `~/halow/hostap` (Morse hostap fork, git `1.17.8`), 5 edits under `CONFIG_TESTING_OPTIONS`
+(already `=y`): a `MESH_ATTACK malformed-commit <MAC> [--scalar-zero|--scalar-ge-r|--elem-offcurve]` ctrl-iface
+command (`ctrl_iface.c`). Handler `mesh_attack_send_commit` (`mesh_rsn.c`) rebuilds a fresh commit
+(`mesh_rsn_build_sae_commit`) then re-inits SAE (`auth_sae_init_committed`) with a `sae->test_corrupt_commit`
+flag set, so `sae_write_commit` (`sae.c:1688-1699`) corrupts the scalar (`0xff..` ≥ r) or element (off-curve) —
+structurally valid, crypto-invalid. The flag is **persistent** (retransmits stay corrupt → no valid retransmit
+to confound the test). Reached via a small python `wpa_ctrl` DGRAM client (`wpa_cli` rejects commands not in its
+builtin table). Rebuild: `cd ~/halow/hostap/wpa_supplicant && make wpa_supplicant_s1g` (native aarch64).
+Harness: injector = **chronogen**, victim = **board0** (hardened ESP) / **chronite** (hostap reference), in the
+live 4-node secured mesh (rimba-mesh / SAE / ch27).
+
+**GAP-C — crafted-Commit keep-link — PASS (definitive A/B).**
+- **Reference (chronite, hostap):** 5 malformed Commits (scalar ≥ r) → all logged `SAE: Invalid peer scalar` +
+  replied `resp=1`, **0** `remove the STA ... reauthentication`, plink stayed ESTAB. hostap rejects the
+  crypto-invalid Commit without freeing the link — the exact behaviour the ESP port mirrors.
+- **ESP port A/B (board0):** instrumented the mesh heartbeat with an ESTAB-peer probe (temporary public
+  `mmwlan_mesh_peer_is_estab()` wrapper over the internal `mesh_peer_find` — `umac_*` symbols aren't exported to
+  the app; reverted after). Same attack, only the fix toggled:
+
+  | firmware | `chronogen_estab` (attacked) | `chronite_estab` (control) | verdict |
+  |---|---|---|---|
+  | **HARDENED** | 1 → 1 (held through 5 Commits) | 1 → 1 | defense holds ✅ |
+  | **BASELINE** (`umac_mesh.c:1064` validate term neutralised → `0`) | **1 → 0** (`mesh_sae_reauth_free`) | 1 → 1 | vulnerable |
+
+  → the malformed Commit **is** a real, remotely-triggerable teardown (baseline drops the attacker's plink), the
+  ported `mesh_sae_validate_commit` gate is exactly what prevents it (hardened holds), and the effect is specific
+  to the attacked peer (control untouched). Board0 restored to clean hardened firmware after; tree left clean.
+
+**#14 (Confirm-replay → no-resend) and #15 (unsolicited-Open → drop) — still pending, injector ready to extend.**
+#14 = hook `sae_write_confirm` (`sae.c:2366-2369`: skip the send-confirm `++` to replay a stale `sc`); #15 = hook
+`mesh_mpm_send_plink_action` (`mesh_mpm.c:222`: force `ampe=0` → plaintext Open, no PMKID). Both lower severity
+than GAP-C (amplification / spurious-SAE, not a remote link-flap) and already source-level adversarially-verified
+above (`gapIsReal=true`). The `MESH_ATTACK` command + these two hook points are mapped; extending is one
+build/flash + A/B cycle each.
 
 ## Findings filed as TODOs (separate from these edits — see `rimba-mesh-ap-milestones.md`)
 
