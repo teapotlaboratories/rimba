@@ -127,6 +127,29 @@ than GAP-C (amplification / spurious-SAE, not a remote link-flap) and already so
 above (`gapIsReal=true`). The `MESH_ATTACK` command + these two hook points are mapped; extending is one
 build/flash + A/B cycle each.
 
+### Raw evidence + reproduction
+
+**Injector patch:** [`artifacts/sae-injector.patch`](artifacts/sae-injector.patch) — the exact 5-file / +73-line
+diff on the Morse hostap 1.17.8 fork (not committable to this repo — it's an external tree). Reproduce:
+`git apply` onto a clean `hostap` 1.17.8 → `cd wpa_supplicant && make wpa_supplicant_s1g` → install on an
+injector node → join the mesh → fire `MESH_ATTACK malformed-commit <victim-MAC>` over the wpa_ctrl socket
+(python DGRAM client — `wpa_cli` refuses commands not in its builtin table).
+
+**ESP A/B — raw board0 heartbeat** (attacker = chronogen; `estab` = attacker-plink state, `ctl` = chronite control):
+```
+HARDENED (defends)                     BASELINE (validate gate disabled -> vulnerable)
+uptime=105s estab=1 ctl=1              uptime=55s estab=1 ctl=1     (before attack)
+uptime=110s estab=1 ctl=1              uptime=60s estab=1 ctl=1     (before attack)
+uptime=115s estab=1 ctl=1              uptime=65s estab=0 ctl=1     <- malformed Commit -> plink TORN DOWN
+uptime=120s estab=1 ctl=1              uptime=70s estab=0 ctl=1
+uptime=125s estab=1 ctl=1              uptime=75s estab=0 ctl=1
+uptime=130s estab=1 ctl=1              uptime=85s estab=0 ctl=1
+  5 Commits sent, plink HELD             attacker plink stays down; control unaffected
+```
+
+**hostap reference (chronite):** the same 5 malformed Commits → 5× `SAE: Invalid peer scalar` + `resp=1` reply,
+**0×** `remove the STA ... reauthentication`, plink ESTAB throughout — the behaviour the ESP port mirrors.
+
 ## Findings filed as TODOs (separate from these edits — see `rimba-mesh-ap-milestones.md`)
 
 - **ESP↔ESP-direct peering needs a Linux mesh anchor.** Two ESP nodes alone both beacon but never peer (no
