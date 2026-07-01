@@ -278,6 +278,7 @@ Full control + data plane: beacon → peer (MPM) → path (HWMP) → IP, both as
 | P6a | **Group/multicast forwarding** (re-broadcast + RMC dedup) — ARP traverses a relay, no static ARP | ✅ done |
 | P6b | **PERR broken-link teardown** + **peer-inactivity link-failure detection** | ✅ done |
 | P6c | mesh **security (SAE/AMPE)** ✅ — secured mesh works single-hop **and** multi-hop relay, both ESP↔ESP **and** cross-vendor (ESP relay ↔ Linux endpoint), host SW-CCMP, on-air verified (see `docs/worklog/2026-06-27-mesh-security-*` + `rimba-mesh-security-codemap.md`); airtime metric / power save / proxy-gate still ⬜ | 🟡 partial |
+| P6d | **Single-hop / leaf toggle** (`mmwlan_mesh_set_multihop`) — runtime opt-out of relay + HWMP: node keeps direct 1-hop peering but never relays and is HWMP-invisible (no black hole); default-on no-op. On-air A/B verified on chronium (board0 forward 37→0, PREQ→0; board1→board2 ping 0%→100% loss) | ✅ done (see `docs/worklog/2026-06-30-mesh-leaf-single-hop-toggle.md`) |
 
 ### Feature comparison: Linux (`net/mac80211`) vs ESP32 (morselib)
 
