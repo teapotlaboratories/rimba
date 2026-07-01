@@ -418,6 +418,50 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
     universal firmware limit, A4-registration coverage, FW version, an rx-filter command, a boot/global
     command, the host replay gate. **Revisit only if a HW-crypto multi-hop path is ever wanted** — pin
     the closed-FW input via a 1.17.9-same-BCF-Linux A/B + an instrumented on-air FW-delivery capture.
+  - ☐ **SAE hardening (GAP-C / #14 / #15) — implemented 2026-06-30, on-air no-regression verified; defense
+    tests + rate-limit pending.** Three hostap-parity fixes on the SAE state machine (codemap §"SAE hardening —
+    GAP-C / #14 / #15"; worklog `2026-06-30-mesh-security-sae-hardening.md`): **GAP-C** run `sae_parse_commit`
+    (scalar-range + on-curve, on a throwaway SAE) before the ACCEPTED-state reauth free so a *malformed* Commit
+    can't flap a live link; **#14** Sc/Rc + big_sync anti-replay on the ACCEPTED+Confirm resend; **#15** drop an
+    unsolicited MPM Open in a secured build (await beacon). Verified on air (chronite peer): board0+board1 reach
+    ESTAB (no regression) and **re-ESTAB after a chronite restart** (validate gate does not deadlock). **Pending:**
+    (a) injector attack tests on chronium `morse0` — crafted-Commit keep-link, Confirm-replay no-resend,
+    unsolicited-Open drop; (b) ☐ **well-formed-forged-Commit reauth DoS residual** — a *valid* forged Commit still
+    tears a live link down (hostap itself reaches `ap_free_sta` for any such frame), so closing it fully needs a
+    **non-hostap rate-limit on ACCEPTED-state reauth** (deliberate divergence from the line-by-line port, deferred).
+  - ☐ **ESP↔ESP-direct peering needs a Linux mesh anchor — INVESTIGATE (peer issue).** Two ESP nodes alone (same
+    Mesh ID, chan 27, clean default) **both beacon but never peer** — no SAE/discovery fires either way (observed
+    2026-06-30: board0 `e2:72:a1:f8:ef:a4` + board1 `…f9:40`, neither logs any peer/SAE activity over minutes).
+    **Not a regression** — the pre-edit baseline firmware shows the identical behaviour. Once a Linux node
+    (chronite) anchors the mesh, **both ESPs peer fine** (ESTAB). Hypothesis: independently-started ESP mesh BSSs
+    don't converge (TSF/beacon-sync, or discovery on a peer S1G beacon without an established-mesh anchor). Derive
+    the fix from `net/mac80211/mesh_sync.c` + the morse driver beacon/TBTT path. **Acceptance:** two ESP boards,
+    no Linux node present, reach ESTAB (+ ping once the data-path item below is fixed).
+  - ✅ **Secured mesh data path — VERIFIED (the earlier "bench-wide failure" was a missing source-node IP, not a
+    forwarding bug).** 2026-06-30: the apparent "no mpath / 100% ping loss everywhere" was a **test artifact** —
+    repeated `wpa_supplicant_s1g` restarts during debugging cleared chronite's manually-assigned mesh IP
+    (`10.9.9.2`), so pings *from* chronite had no source address → nothing sent → no HWMP path demand → empty
+    mpath. With the IP restored, the **full secured SAE+AMPE+CCMP data path works on the Phase-2 firmware**:
+    chronite→chronogen (Linux↔Linux) **0% loss + 3 mpaths**, chronite→board0 (ESP) **0% loss**, and chronite→board1
+    **via board0** (mpath `f9:40 via ef:a4`) — **multi-hop relay** (host SW-CCMP) confirmed. (`morse_cli mesh_config
+    -2` is benign — mac80211 does the forwarding.) **Bench gotcha:** the per-node mesh IPs are NOT persistent
+    across a wpa restart/reboot — re-assign `sudo ip addr add 10.9.9.X/24 dev wlan1` after restarting the mesh.
+  - ☐ **Stress test (5/6 nodes) + secured-vs-open — PARTIAL (2026-06-30).** 5-node secured mesh (3 ESP
+    board0/1/2 + chronite + chronogen; **chronosalt down** — abrupt power-cut, SD likely corrupt) with chronium
+    monitoring. **Results:** mesh forms + holds under concurrent load (all plinks ESTAB, no drops); real multi-hop
+    topology (ESPs relay Linux↔Linux); direct paths 0% loss; **multi-hop relay saturates under concurrent load**
+    (board1 88% loss when its relay ESP also carries its own traffic) — the host SW-CCMP relay bottleneck (→ #20).
+    **Throughput (iperf, ESP `rimba-halow-mesh-perf` app):** secured multi-hop relay **0.23 Mbit/s UDP** (TCP
+    collapses to 0 through the saturating relay); flood-ping direct ESP ~112–136 kbps. **chronium on-air:**
+    captured the secured line — beacons + broadcast DATA confirmed **CCMP-encrypted** on the wire. **Macro
+    toggle:** `MMWLAN_MESH_SEC_PHASE1` now compiles + links at both 0 (open) and 1 (secured) — fix in submodule
+    `4bc732f7`. **Open-vs-secured comparison — DONE (relay parity fixed, submodule `e15870d0`):** the open-mesh multi-hop
+    relay now forwards (root cause: per-peer stads were allocated only in the secured build, so the relay had no
+    per-peer key/queue context — now allocated in both, open = plaintext). **iperf UDP, ESP line
+    board1→board0(relay)→board2:** open-plaintext relay **~0.14 Mbit/s** (was 0.01 broken) vs secured-CCMP relay
+    **~0.23 Mbit/s** — same order of magnitude (high 1 MHz variance), so **SW-CCMP crypto is NOT the dominant
+    relay cost** — per-hop forwarding + airtime dominate; security is cheap in throughput terms. ☐ Remaining:
+    recover chronosalt (6th node) for a full 6-node run; a tighter multi-sample secured-vs-open table.
   - ✅ **Frame deltas vs live Linux fixed + re-verified on air** (Update 15): PREQ **Target-Only
     flag** on refresh, **No-Ack** QoS on group/broadcast, PREQ **lifetime in TUs** (`MSEC_TO_TU`).
     board0 (fixed) now emits `target_flags=01`, `lifetime=0x7270` (TU), group `QoS=0x20` —
