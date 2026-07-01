@@ -782,3 +782,41 @@ FIRMWARE** — an ESP-specific FW decrypt-gate behaviour (a non-command/BCF/buil
 delivers on Linux, which imposes no host gate — `mac.c:5844`/`:6632` + `ieee80211_rx_h_mesh_fwding`). host
 SW-CCMP (P5) bypasses it: no FW key → the FW delivers the frame raw → host decrypts. So there is **no clean
 morselib HW-crypto fix** (supersedes the "HW-crypto fix is viable" line above); P5 stays the answer.
+
+## SAE hardening — GAP-C / #14 / #15 (crafted-Commit teardown, Confirm anti-replay, unsolicited-Open SAE)
+
+Three hostap-parity hardening fixes on the SAE state machine, derived line-by-line from `src/ap/ieee802_11.c`
++ `src/common/sae.c` + `wpa_supplicant/mesh_mpm.c`. Every edit is txn-disjoint from the #13 genuine-restart
+recovery (the txn==1 Commit teardown + beacon re-discovery), which stays byte-for-byte intact. Verified on the
+live `sae.c`: `sae_parse_commit` calls `sae_group_allowed`→`sae_set_group` internally (allocs `tmp`+curve) and
+its reflection branch is gated on `state==SAE_ACCEPTED`, so a fresh scratch validates scalar-range + on-curve
+with no PWE and no `own_commit_scalar` deref.
+
+| New code | hostap counterpart |
+| --- | --- |
+| `mesh_sae.c mesh_sae_validate_commit()` — scratch `sae_set_group(19)` + `sae_parse_commit` (no PWE), returns 0 iff crypto-valid | `ieee802_11.c:1502` `sae_parse_commit` before `sae_sm_step` + `sae.c:1921-1926` scalar∈[1,r-1] + `sae.c:1959-1981` element coords<p / on-curve |
+| `umac_mesh.c:1027` txn==1 ACCEPTED gate added term `mesh_sae_validate_commit(body,len)!=0 → break` (GAP-C) | `ieee802_11.c:1538` `if (resp != WLAN_STATUS_SUCCESS) goto reply` (`sae_sm_step`/`ap_free_sta` skipped) + `:1660` parse-failed Commit keeps the MPM peer (`added_unassoc=false`) |
+| `umac_mesh.c:1030` `mesh_sae_reauth_free` (unchanged, now reachable only post-validation) | `ieee802_11.c:1140-1148` `sae_sm_step` SAE_ACCEPTED + txn1 + mesh → `ap_free_sta` |
+| `umac_mesh.c:452` `struct mesh_peer.sae_rc` (uint16_t) | `src/common/sae.h:120` `u16 rc` |
+| `umac_mesh.c` txn==2 CONFIRMED `peer->sae_rc = LE16(body)` after `mesh_sae_check_confirm` OK (#14) | `ieee802_11.c:1607-1613` `sae_check_confirm` then `sae->rc = peer_send_confirm` |
+| `umac_mesh.c` txn==2 ACCEPTED Sc/Rc gate `if (psc<=sae_rc \|\| psc==0xffff) break` (#14) | `ieee802_11.c:1596-1605` silent-ignore unexpected Confirm |
+| `umac_mesh.c` txn==2 ACCEPTED `if (mesh_sae_check_big_sync) break; sae_sync++` then cached-Confirm resend (#14) | `ieee802_11.c:1160-1167` SAE_ACCEPTED else-branch (`sae_check_big_sync`; `sync++`; `auth_sae_send_confirm`) |
+| `umac_mesh.c:2434` `#if MMWLAN_MESH_SEC_PHASE1` drop unsolicited peering / await beacon (#15) | `wpa_supplicant/mesh_mpm.c:1262-1268` secure mesh adds a peer from an Open only with a cached PMKSA, else `return` |
+| `umac_mesh.c:1528` `mmwlan_mesh_peer_open → mesh_sae_start` (beacon-path SAE initiator, unchanged) | `mesh_mpm.c:895-899` `wpa_mesh_new_mesh_peer → mesh_rsn_auth_sae_sta` |
+
+**Deliberate divergence (GAP-15):** ESP keeps no PMKSA cache, so hostap's `(!(security & SEC_AMPE) ||
+wpa_auth_pmksa_get(...))` reduces to "don't add" — the secured build drops ALL unknown-peer peering frames
+(Open and stray Confirm) and relies on the beacon path; both points beacon continuously, so the beacon always
+creates the peer.
+
+**Residual (filed as backlog):** GAP-C reaches hostap parity — it closes the *malformed*-Commit teardown, but a
+*well-formed forged* Commit (valid scalar + on-curve) still tears the link down, because hostap itself reaches
+`ap_free_sta` for any such frame. Fully closing it needs a non-hostap rate-limit on ACCEPTED-state reauth — a
+deliberate divergence deferred to a later phase.
+
+**Verification:** build clean (mmhostap + morselib link). On-air (chronite live-Linux peer, hardened firmware):
+secured peering reaches **ESTAB** (no regression to SAE+AMPE) + **genuine-restart recovery** — both boards
+re-ESTAB after a chronite restart, so the validate gate does not deadlock. Pending — injector attack tests on
+chronium `morse0` (crafted-Commit keep-link, Confirm-replay no-resend, unsolicited-Open drop): blocked on bench
+injection tooling (no scapy / morse0 is a sniffer); defense correctness rests on the source-verified
+`sae_parse_commit` chain. Worklog `2026-06-30-mesh-security-sae-hardening.md`.
