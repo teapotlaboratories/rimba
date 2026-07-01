@@ -429,8 +429,7 @@ The single backlog for the Mesh-gate L2. (Resolved milestones are above.)
     (`MESH_ATTACK malformed-commit`, on chronium `~/halow/hostap`) drove a definitive A/B on board0 — HARDENED
     keeps the attacker plink (`estab 1→1` through 5 malformed Commits), BASELINE (validate gate neutralised)
     tears it down (`1→0`, `mesh_sae_reauth_free`), control peer untouched; hostap (chronite) rejects the same
-    Commit (`Invalid peer scalar`, 0 teardowns). See worklog §"Injector attack tests" (raw A/B captures +
-    reproduction) + the injector diff [`artifacts/sae-injector.patch`](artifacts/sae-injector.patch). **Still pending:**
+    Commit (`Invalid peer scalar`, 0 teardowns). See worklog §"Injector attack tests". **Still pending:**
     (a) #14 Confirm-replay + #15 unsolicited-Open A/Bs (injector ready to extend; lower severity); (b) ☐
     **well-formed-forged-Commit reauth DoS residual** — a *valid* forged Commit still tears a live link down
     (hostap itself reaches `ap_free_sta` for any such frame), so closing it fully needs a **non-hostap

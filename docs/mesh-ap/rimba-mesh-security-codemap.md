@@ -820,5 +820,4 @@ re-ESTAB after a chronite restart, so the validate gate does not deadlock. **GAP
 (2026-07-01):** a `wpa_supplicant_s1g` "malicious peer" (`MESH_ATTACK malformed-commit`) proved it on board0 —
 HARDENED holds the attacker plink through 5 malformed Commits, BASELINE (validate gate off) tears it down
 (`mesh_sae_reauth_free`), control peer untouched; hostap rejects the same Commit (`Invalid peer scalar`). #14/#15
-A/Bs pending (injector ready to extend). Worklog `2026-06-30-mesh-security-sae-hardening.md` §"Injector attack tests"
-(raw A/B + reproduction) + injector diff `artifacts/sae-injector.patch`.
+A/Bs pending (injector ready to extend). Worklog `2026-06-30-mesh-security-sae-hardening.md` §"Injector attack tests".
