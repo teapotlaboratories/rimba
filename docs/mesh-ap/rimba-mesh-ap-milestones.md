@@ -534,10 +534,18 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   (the 1.17.9 firmware was already in the build then; no peering-path code changed since). Now guarded by an
   `estab_peers` + peer-MAC line in the app heartbeat (`mmwlan_mesh_peer_count`). Same shape as the earlier
   monitor-build RX misdiagnosis.
-- ☐ **Full multi-node stress + tighter secured-vs-open table.** The 5-node secured mesh (3 ESP + chronite
-  + chronogen) forms + holds under load, real multi-hop, direct paths 0% loss, relay saturates under
-  concurrent load. Extend to a full run now that **chronosalt is recovered** (rebuilt as a Pi Zero 2 W)
-  + a multi-sample secured-vs-open goodput table.
+- ◑ **Multi-node stress + tighter secured-vs-open table.** *Tighter table DONE (2026-07-01)* via a forced
+  3-ESP line (board1→board0(relay)→board2, `MESH_LINE_RELAY_DEMO`, `-perf` app driven over the iperf console),
+  on-air S1G ch27. **Multi-hop UDP goodput: secured (SAE+AMPE+CCMP) ~0.26 Mbit/s (0.24–0.27, 4 samples) vs open
+  plaintext ~0.16 Mbit/s (0.16–0.17, 3 samples)** — reproducibly the same order, secured even slightly *faster*
+  (matches the prior 0.23/0.14), so **CCMP is not the relay bottleneck** (per-hop forwarding + 1 MHz airtime
+  dominate). **TCP collapses to 0** through the relay (both builds — congestion collapse under saturation).
+  Separately, the **3-Linux secured mesh (chronite/chronosalt/chronogen, chronosalt recovered) forms + holds**
+  stably. Bench notes: board2 is PPK2-powered → restore with **`tools/ppk2_hold.py`** (enumerates as `ttyACM4`,
+  cf. `docs/reference/rimba-bench-devices.md`); the `-perf` iperf console resets the ESP if the serial helper
+  toggles DTR/RTS — leave them alone. ☐ **Still open:** an *unconstrained* full ESP+Linux mesh under load — the
+  all-in-range full-mesh settles into a stable *partial* topology (flappy-full-mesh), so a clean N-node stress
+  needs a forced topology or full-mesh stability work.
 
 **Cleanup (before merge)**
 - ☐ **Revert forced-topology scaffolding** — `MESH_LINE_RELAY_DEMO` / `MESH_MULTIHOP_DEMO` (peer
