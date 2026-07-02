@@ -48,6 +48,9 @@ both trees (ESP working tree + the chronite reference checkout).*
 | `umac_mesh_handle_hwmp` PERR branch | `hwmp_perr_frame_process` `mesh_hwmp.c:858` | tear down path if via the PERR TA, flood on |
 | `umac_mesh_build_perr` `M:944` / `umac_mesh_tx_perr` `M:968` / `umac_mesh_invalidate_paths_via` `M:984` | `mesh_path_error_tx` `mesh_hwmp.c:238` (+ `mesh_plink_broken`) | one dest per PERR; `++sn` before announce |
 | `mesh_path_update` fresh-info rule `M:768` | `hwmp_route_info_get` `mesh_hwmp.c:426` | take if inactive / newer SN / equal SN + better metric |
+| `umac_mesh_lookup_next_hop` **preemptive refresh** `M:1885` (added 2026-07-01) — active path within `MESH_PATH_REFRESH_MS` (6 s) of expiry → `umac_mesh_start_discovery`, path **not** invalidated | `mesh_path_refresh` `mesh_hwmp.c:1335` (from `mesh_nexthop_lookup`; trigger `now > exp_time − path_refresh_time` `:1338`, path RESOLVED; `mesh_queue_preq PREQ_Q_F_REFRESH` `:1345`) | keeps an actively-used path alive so it never expires mid-transfer then re-resolves reactively (the stall); the returning PREP renews `expiry_ms` via `mesh_path_update`. Deliberately omits Linux's separate extend-on-use (`dot11MeshHWMPactivePathTimeout` `:1350`) — the refresh PREQ keeps the path both fresh **and** topology-adaptive |
+
+_Note: the 2026-07-01 preemptive-refresh row is grep-verified against the current tree **and on-air A/B verified** — a 75-ping multi-hop run (board1→board0→board2) timed out at ping seq **32 + 62** (the 30 s / 60 s path expiry) on the baseline (no refresh) but ran clean through both boundaries on the hardened build (73/75 replies, median ~48 ms, both builds; only the two expiry-boundary stalls differ). The older `M:` line refs elsewhere in this doc predate the SAE/AMPE growth (`umac_mesh.c` ~doubled) and need a refresh pass._
 
 ## Path table (`mesh_pathtbl.c`)
 
