@@ -567,7 +567,7 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
 - ✅ **Mesh peer-table growth 2026-07-02.** `UMAC_MESH_MAX_PEERS` 4 → 8 — headroom for >4 direct
   neighbours. Option A (raise the count); the SAE bodies stay per-peer (read in the ESTAB reauth/resync
   steady state, `umac_mesh.c:1073-1077/1179-1181`, can't be pooled). nm: `mesh_peers` 2544 → 5088 B
-  (+2.6 KB). Build + nm verified; >4-peer bench check piggybacks on the real-RC run. Worklog
+  (+2.6 KB). Build + nm verified; **>4-peer bench check done** in the real-RC run (board0 held 5 peers). Worklog
   `docs/worklog/2026-07-02-mesh-peer-table-growth.md`.
 - ✅ **Mesh table caps pushed 2026-07-02.** After the SRAM analysis (mesh tables were ~2% of DRAM), raised
   the ceilings: **paths 64 → 256**, **peers 8 → 16** (+ `MESH_MAX_PLINKS`/`MESH_ALLOWLIST_MAX` → 16 to
@@ -575,6 +575,16 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   ~21 KB (peers 10176 + paths 10240 + buckets 512 + allowlist 96) ≈ 6% of the ESP32-S3 DRAM. Host-tested
   at 256 (chaining/evict/no-cycles), build + nm verified. Peers is RAM-comfortable at 16 but RF/airtime-
   bound in practice; 256 routes covers a large mesh.
+- ✅ **Real per-peer RC feeding the airtime metric 2026-07-02.** mmrc now runs per mesh peer and feeds the
+  metric — mmrc's **learned** best-throughput rate + **real success probability** replace P6c's RSSI-seed
+  (removes divergences #1/#2). Edit 1 start/stop mmrc at ESTAB/teardown; Edit 2 per-AID mesh stad lookup so
+  tx-status feedback lands (+ relay rate-table so relays learn); Edit 3 a learned-metric accessor +
+  `prob`-parametrized ETT (`prob=100` ⇒ identical to today). Feasibility: NOT blocked like A-MPDU
+  (tx-status reaches mesh ungated). Hardware-verified: board0's RC for chronite converged to MCS7 with
+  `prob=93` → metric 2934 (tracks the real ~7% loss vs the old fixed 2731). **On-air confirmed** (chronium
+  `morse0`): the HWMP PREQ metric field carries RC-learned **non-tier** values (`3035`/`8441`) the RSSI-seed
+  can't emit. Worklog
+  `docs/worklog/2026-07-02-mesh-real-rc-airtime-metric.md`.
 - ✅ **ESP↔ESP-direct peering — RESOLVED / was a visibility misdiagnosis (verified 2026-07-01).** Two ESP
   secured-mesh nodes bootstrap a mesh between themselves with **no Linux anchor**: cold-reset both (chronite
   down), each reaches full secured **ESTAB** within ~5 s (SAE+AMPE, both directions, ~10 beacons/s mutual
