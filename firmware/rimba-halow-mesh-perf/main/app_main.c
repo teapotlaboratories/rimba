@@ -33,7 +33,7 @@
 /* Keep in sync with the other rimba apps' link params. */
 #define MESH_ID         "rimba-mesh"
 #define MESH_S1G_CHAN   27   /* US 915.5 MHz, 1 MHz BW (global op-class 68) */
-#define MESH_MAX_PLINKS 10
+#define MESH_MAX_PLINKS 16
 
 /* Linux-interop capture (temporary): bring this ESP up as an OPEN mesh peer (no allowlist) that
  * pings the Linux node (chronite, 10.9.9.2). Used to capture the Linux PREP/PERR on-air and to

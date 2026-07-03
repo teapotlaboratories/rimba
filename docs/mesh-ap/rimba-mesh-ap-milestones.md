@@ -569,6 +569,12 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   steady state, `umac_mesh.c:1073-1077/1179-1181`, can't be pooled). nm: `mesh_peers` 2544 → 5088 B
   (+2.6 KB). Build + nm verified; >4-peer bench check piggybacks on the real-RC run. Worklog
   `docs/worklog/2026-07-02-mesh-peer-table-growth.md`.
+- ✅ **Mesh table caps pushed 2026-07-02.** After the SRAM analysis (mesh tables were ~2% of DRAM), raised
+  the ceilings: **paths 64 → 256**, **peers 8 → 16** (+ `MESH_MAX_PLINKS`/`MESH_ALLOWLIST_MAX` → 16 to
+  match the advertised capability); **hops stay 31** (Linux `dot11MeshTTL` interop). nm: mesh tables now
+  ~21 KB (peers 10176 + paths 10240 + buckets 512 + allowlist 96) ≈ 6% of the ESP32-S3 DRAM. Host-tested
+  at 256 (chaining/evict/no-cycles), build + nm verified. Peers is RAM-comfortable at 16 but RF/airtime-
+  bound in practice; 256 routes covers a large mesh.
 - ✅ **ESP↔ESP-direct peering — RESOLVED / was a visibility misdiagnosis (verified 2026-07-01).** Two ESP
   secured-mesh nodes bootstrap a mesh between themselves with **no Linux anchor**: cold-reset both (chronite
   down), each reaches full secured **ESTAB** within ~5 s (SAE+AMPE, both directions, ~10 beacons/s mutual
