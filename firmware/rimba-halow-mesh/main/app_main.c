@@ -31,7 +31,7 @@
 /* Keep in sync with the other rimba apps' link params. */
 #define MESH_ID         "rimba-mesh"
 #define MESH_S1G_CHAN   27   /* US 915.5 MHz, 1 MHz BW (global op-class 68) */
-#define MESH_MAX_PLINKS 10
+#define MESH_MAX_PLINKS 16
 
 /* 802.11 element IDs + beacon IE offset (24-byte PV0 header + ts/bcn-int/cap = 12). */
 #define DOT11_IE_MESH_ID        (114)
