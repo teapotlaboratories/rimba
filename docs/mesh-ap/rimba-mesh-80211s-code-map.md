@@ -49,8 +49,15 @@ both trees (ESP working tree + the chronite reference checkout).*
 | `umac_mesh_build_perr` `M:944` / `umac_mesh_tx_perr` `M:968` / `umac_mesh_invalidate_paths_via` `M:984` | `mesh_path_error_tx` `mesh_hwmp.c:238` (+ `mesh_plink_broken`) | one dest per PERR; `++sn` before announce |
 | `mesh_path_update` fresh-info rule `M:768` | `hwmp_route_info_get` `mesh_hwmp.c:426` | take if inactive / newer SN / equal SN + better metric |
 | `umac_mesh_lookup_next_hop` **preemptive refresh** `M:1885` (added 2026-07-01) — active path within `MESH_PATH_REFRESH_MS` (6 s) of expiry → `umac_mesh_start_discovery`, path **not** invalidated | `mesh_path_refresh` `mesh_hwmp.c:1335` (from `mesh_nexthop_lookup`; trigger `now > exp_time − path_refresh_time` `:1338`, path RESOLVED; `mesh_queue_preq PREQ_Q_F_REFRESH` `:1345`) | keeps an actively-used path alive so it never expires mid-transfer then re-resolves reactively (the stall); the returning PREP renews `expiry_ms` via `mesh_path_update`. Deliberately omits Linux's separate extend-on-use (`dot11MeshHWMPactivePathTimeout` `:1350`) — the refresh PREQ keeps the path both fresh **and** topology-adaptive |
+| **airtime metric (P6c, 2026-07-02)** `mesh_airtime_from_thr_kbps` `M:2153` + `mesh_thr_kbps_from_rssi` `M:2170` + `mesh_last_hop_metric` `M:2187` | `airtime_link_metric_get` `mesh_hwmp.c:338-381` (constants `:14-16`) | fixed-point ETT ported byte-exact (unit-verified {27307,6827,2731}); rate input approximated — mesh runs no RC, so it is RSSI-seeded via mmrc's cold-start tiers (`mmrc_init_rates` `mmrc.c:1287`) → `mmrc_calculate_theoretical_throughput` `mmrc.c:482`. Per-hop 2731/6827/27307 (MCS7/3/0 @1 MHz/LGI/SS1) |
+| metric accum + overflow clamp `M:2232` (PREQ) / `M:2289` (PREP): `new_metric = metric + mesh_last_hop_metric(frame_sa)`, `if (new_metric < metric) = MESH_METRIC_MAX` | `hwmp_route_info_get` `mesh_hwmp.c:451` / `:479-481` | clamp newly added (the fixed +100 couldn't overflow) |
+| per-peer `last_rssi_dbm` `M:447` + record in `umac_mesh_handle_action` `M:2588` (from the PREQ/PREP RX metadata) | `ieee80211s_update_metric` `mesh_hwmp.c:299-336` (TX-status EWMA `sta_info.h:368-369`) | **divergence**: RX-RSSI sample, not a TX-status EWMA — no per-peer tx-status in morselib mesh |
+| **HWMP multi-path dedup/SN fix (2026-07-02)** `mesh_path_update` → `bool fresh` `M:1877` (mac80211 fresh test) | `hwmp_route_info_get` `mesh_hwmp.c:499-509`; `return process ? new_metric : 0` `:657` | void→bool; the discarded fresh bool becomes the reply/forward gate |
+| PREQ **and PREP** freshness gate `if (!fresh) return;` (both branches) | caller gates BOTH `hwmp_preq_frame_process` + `hwmp_prep_frame_process` on non-zero `hwmp_route_info_get` `mesh_hwmp.c:1043-1047` | the only duplicate suppressor: a stale/dup PREQ or PREP → no reply/forward, no re-flood |
+| stable time-gated target SN `M:2295-2303` (adopt higher req `MESH_SN_GT`; bump ≤ once per `MESH_HWMP_NET_TRAVERSAL_MS=500` `M:382`, ts `mesh_hwmp_last_sn_update_ms` `M:1798`); PREP `.target_sn = mesh_hwmp_sn` `M:2312` | `if(SN_GT)ifmsh->sn=target_sn` + time-gated `++ifmsh->sn` + `target_sn=ifmsh->sn` `mesh_hwmp.c:692-701` | ms clock; `since<0` ≡ `time_before` wrap. **Fixes the multi-path flap** |
+| 10/9 hysteresis `mesh_metric_mul_10_9` (applied to **any not-older SN** via a different next hop, not just equal-SN) | `mult_frac(new_metric, 10, 9)` vs `mpath->metric`, `next_hop != sta` — OR'd independently of the SN test `mesh_hwmp.c:502-504` | anti-flap margin; a newer-SN worse different-hop copy cannot steal the path |
 
-_Note: the 2026-07-01 preemptive-refresh row is grep-verified against the current tree **and on-air A/B verified** — a 75-ping multi-hop run (board1→board0→board2) timed out at ping seq **32 + 62** (the 30 s / 60 s path expiry) on the baseline (no refresh) but ran clean through both boundaries on the hardened build (73/75 replies, median ~48 ms, both builds; only the two expiry-boundary stalls differ). The older `M:` line refs elsewhere in this doc predate the SAE/AMPE growth (`umac_mesh.c` ~doubled) and need a refresh pass._
+_Note: the HWMP dedup/SN-fix rows + the P6c airtime rows (2026-07-02) + the 2026-07-01 preemptive-refresh row are grep-verified against the current tree **and on-air A/B verified** — a 75-ping multi-hop run (board1→board0→board2) timed out at ping seq **32 + 62** (the 30 s / 60 s path expiry) on the baseline (no refresh) but ran clean through both boundaries on the hardened build (73/75 replies, median ~48 ms, both builds; only the two expiry-boundary stalls differ). The older `M:` line refs elsewhere in this doc predate the SAE/AMPE growth (`umac_mesh.c` ~doubled) and need a refresh pass._
 
 ## Path table (`mesh_pathtbl.c`)
 
@@ -91,7 +98,11 @@ _Note: the 2026-07-01 preemptive-refresh row is grep-verified against the curren
 - **Firmware-served beaconing / timing.** TBTT, MBCA, and beacon TX are handled by the morse
   firmware (`mmdrv_cfg_mesh`); mac80211 owns this in software (TSF). The host only builds the
   beacon contents.
-- **Fixed metric (not airtime).** `MESH_PATH_LINK_METRIC` is a fixed per-hop cost; mac80211 uses
-  `airtime_link_metric_get`. Accumulates correctly but isn't rate-derived (P6c).
+- **Airtime metric — RSSI-approximated (P6c, 2026-07-02).** The per-hop cost is now a byte-exact port of
+  `airtime_link_metric_get`, but its rate input is seeded from the peer's RX RSSI (mmrc's cold-start
+  tiers) instead of a learned rate — morselib runs no rate control for mesh peers. So it is a true airtime
+  metric on the same scale as Linux nodes, with a 3-tier RSSI-derived rate and no fail-ratio term.
+  Hardware-verified on a 3-board line (metric 5462 real-RSSI / 30038 with a forced-weak hop). See worklog
+  `2026-07-02-mesh-p6c-airtime-metric.md`.
 - **No proxy/gate, RANN/root, AMPE/SAE, mesh-PS.** Open mesh only; those `mesh_hwmp.c` /
   `mesh_ps.c` / proxy paths are not ported (P6c backlog).
