@@ -519,12 +519,41 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   on ACCEPTED-state reauth** (a deliberate divergence from the line-by-line port, deferred); plus the
   **#15 unsolicited-Open A/B**, which needs raw src-spoofed injection (see
   [§Mesh security](#mesh-security--sae--ampe--ccmp-p6c)).
-- ☐ **#20 — HW-crypto multi-hop forward (FW A4-sensitivity)** — backlog, low priority. In HW-crypto mode
-  the MM6108 FW drops a foreign-A4 (A4≠TA) 4-addr mesh forward; the secured mesh ships on **host SW-CCMP
-  (P5)** which sidesteps it, so it's **not a blocker**. The drop is A4-sensitive *firmware* behaviour
-  (morselib's RX path is A4-agnostic) and the same FW delivers the forward on Linux, so the cause is an
-  unpinned closed-FW config difference. Revisit only if a HW-crypto multi-hop path is ever wanted (worklog
-  §#20/#25/#26 + codemap #20).
+- ☐ **#20 — HW-crypto multi-hop forward (A4≠TA)** — backlog, low priority; **re-verified + re-scoped
+  2026-07-02** (worklog `2026-07-02-mesh-20-hwcrypto-reverify.md`). In HW-crypto mode the MM6108 FW
+  withholds a foreign-A4 (A4≠TA) 4-addr mesh forward from the host; the secured mesh ships on **host
+  SW-CCMP (P5)** which sidesteps it, so it's **not a blocker**. The 2026-07-02 re-run (reliable RX-entry
+  probe — §#26's was broken — plus a deterministic synth-forward, on-air) confirms the withhold is real
+  AND corrects §#25/§#26: it is the **host stack (morselib)**, *not* the FW version (1.17.8 on the ESP
+  still withholds) and *not* the BCF (ESP runs `bcf_fgh100mhaamd`, the same BCF chronosalt delivers on) —
+  **but it is NOT a driver→FW command difference** (morse_driver-vs-morselib command streams diff
+  byte-equivalent). The remaining cause is a host-side interaction *outside* the `morse_cmd_tx` command
+  interface. Revisit only if a HW-crypto multi-hop path is ever wanted.
+- ✅ **P6c — mesh airtime link metric (rate-derived HWMP cost)** — DONE + hardware-verified 2026-07-02. Replaces the
+  fixed per-hop `MESH_PATH_LINK_METRIC` (100) with a port of net/mac80211 `airtime_link_metric_get`
+  (`mesh_hwmp.c:338-381`, formula + constants `TEST_FRAME_LEN=8192`/`ARITH_SHIFT=8`/`MAX_METRIC` clamp
+  re-verified on chronite): the exact fixed-point ETT, fed a per-link rate. **Deliberate approximation:**
+  mesh has no per-peer rate control (mmrc never starts for mesh stads), so the rate is seeded from the
+  peer's per-frame RSSI via mmrc's own cold-start tiers (≥−70→MCS7, ≥−85→MCS3, else MCS0 → 3000/1200/300
+  Kbps at 1 MHz/LGI/SS1 through `mmrc_calculate_theoretical_throughput`) — the *same scale* as Linux
+  nodes' airtime (interop-preserving). Per-hop costs 2731/6827/27307 (strictly positive → monotonic).
+  Integration = the two accumulation sites (`umac_mesh.c:2164` PREQ, `:2219` PREP) + overflow clamp + a
+  new per-peer `last_rssi_dbm` recorded from the PREQ/PREP RX. **Verified:** formula unit-test
+  {27307,6827,2731} + build + a 3-board line (board1→board0→board2) where the resolved metric read **5462**
+  (real strong RSSI, not the old 200) and **30038** with a forced-weak board0↔board2 hop — proving the
+  airtime metric + real-RSSI sampling on hardware, no RF arrangement needed. Worklog:
+  `docs/worklog/2026-07-02-mesh-p6c-airtime-metric.md`.
+- ✅ **HWMP multi-path reply-dedup / per-reply SN — FIXED + hardware-verified 2026-07-02** (found by the
+  P6c routing-decision test). Bug: in a multi-path topology (a dest reachable both directly *and* via a
+  relay), morselib re-replied to every PREQ copy stamping `target_sn = ++mesh_hwmp_sn` (per-reply
+  increment), so the originator selected by newer-SN not metric → the installed path **flapped**. Fix
+  (following net/mac80211 `hwmp_preq_frame_process` / `hwmp_route_info_get`): `mesh_path_update` now
+  returns `fresh` and the PREQ handler gates its PREP reply + re-flood on it (mac80211's only duplicate
+  suppressor); the target SN is our OWN `mesh_hwmp_sn`, bumped at most once per net-traversal window
+  (`MESH_HWMP_NET_TRAVERSAL_MS=500`) so every copy of one discovery shares a stable `target_sn`; plus the
+  10/9 hysteresis on same-SN different-next-hop. **Verified:** re-ran the triangle — board1→board2 now
+  SETTLES on the relay (via board0, 5462) each discovery and holds ~20 s between refreshes with no
+  flapping (was ~every 7 s, direct-dominant). Worklog `docs/worklog/2026-07-02-mesh-hwmp-multipath-dedup-sn.md`.
 - ✅ **ESP↔ESP-direct peering — RESOLVED / was a visibility misdiagnosis (verified 2026-07-01).** Two ESP
   secured-mesh nodes bootstrap a mesh between themselves with **no Linux anchor**: cold-reset both (chronite
   down), each reaches full secured **ESTAB** within ~5 s (SAE+AMPE, both directions, ~10 beacons/s mutual
