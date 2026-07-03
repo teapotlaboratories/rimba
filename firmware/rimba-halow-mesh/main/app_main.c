@@ -21,6 +21,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_system.h" /* esp_get_free_heap_size / esp_get_minimum_free_heap_size */
 #include "nvs_flash.h"
 #include "esp_netif.h"
 
@@ -178,6 +179,8 @@ void app_main(void)
             uint8_t peer_macs[UMAC_MESH_MAX_PEERS][6] = {{0}};
             uint8_t n_peers = mmwlan_mesh_peer_count(peer_macs);
             ESP_LOGI(TAG, "mesh alive, uptime=%" PRIu32 "s  estab_peers=%u", s, (unsigned)n_peers);
+            ESP_LOGI(TAG, "  heap free=%" PRIu32 " min_ever=%" PRIu32,
+                     esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
             for (uint8_t pi = 0; pi < n_peers; pi++)
             {
                 ESP_LOGI(TAG, "  peer[%u]=%02x:%02x:%02x:%02x:%02x:%02x", pi,

@@ -564,6 +564,11 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   past 8 (was: 9th dest evicted a live path). Peer table (neighbour-bounded, ~630 B/entry SAE) + RMC left.
   Host-tested (insert/chain/evict past 8, no cycles), built, bench-verified (peer + 0% datapath). Worklog
   `docs/worklog/2026-07-02-mesh-dynamic-path-table.md`.
+- ✅ **Mesh peer-table growth 2026-07-02.** `UMAC_MESH_MAX_PEERS` 4 → 8 — headroom for >4 direct
+  neighbours. Option A (raise the count); the SAE bodies stay per-peer (read in the ESTAB reauth/resync
+  steady state, `umac_mesh.c:1073-1077/1179-1181`, can't be pooled). nm: `mesh_peers` 2544 → 5088 B
+  (+2.6 KB). Build + nm verified; >4-peer bench check piggybacks on the real-RC run. Worklog
+  `docs/worklog/2026-07-02-mesh-peer-table-growth.md`.
 - ✅ **ESP↔ESP-direct peering — RESOLVED / was a visibility misdiagnosis (verified 2026-07-01).** Two ESP
   secured-mesh nodes bootstrap a mesh between themselves with **no Linux anchor**: cold-reset both (chronite
   down), each reaches full secured **ESTAB** within ~5 s (SAE+AMPE, both directions, ~10 beacons/s mutual
