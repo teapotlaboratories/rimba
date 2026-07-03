@@ -554,6 +554,11 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   10/9 hysteresis on same-SN different-next-hop. **Verified:** re-ran the triangle — board1→board2 now
   SETTLES on the relay (via board0, 5462) each discovery and holds ~20 s between refreshes with no
   flapping (was ~every 7 s, direct-dominant). Worklog `docs/worklog/2026-07-02-mesh-hwmp-multipath-dedup-sn.md`.
+- ✅ **P6c + HWMP fix — validated at scale + on-air 2026-07-02.** Full **6-node secured ESP+Linux mesh**
+  (3 ESP + chronite/chronosalt/chronogen): all 5-peer, 0% single-flow loss, stable under concurrent load.
+  **Forced-topology diamond** (board0 → {board1, board2} → chronite, board2 = weak relay): airtime routes
+  the multi-hop path **via board1**, confirmed both in the path table and **on-air** on chronium's `morse0`
+  (board0 DATA frames RA=board1 ×25 / board2 ×0). Worklog `docs/worklog/2026-07-02-mesh-multinode-onair-validation.md`.
 - ✅ **ESP↔ESP-direct peering — RESOLVED / was a visibility misdiagnosis (verified 2026-07-01).** Two ESP
   secured-mesh nodes bootstrap a mesh between themselves with **no Linux anchor**: cold-reset both (chronite
   down), each reaches full secured **ESTAB** within ~5 s (SAE+AMPE, both directions, ~10 beacons/s mutual
