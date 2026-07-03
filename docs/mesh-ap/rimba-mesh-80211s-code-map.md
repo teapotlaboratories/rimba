@@ -59,14 +59,20 @@ both trees (ESP working tree + the chronite reference checkout).*
 
 _Note: the HWMP dedup/SN-fix rows + the P6c airtime rows (2026-07-02) + the 2026-07-01 preemptive-refresh row are grep-verified against the current tree **and on-air A/B verified** — a 75-ping multi-hop run (board1→board0→board2) timed out at ping seq **32 + 62** (the 30 s / 60 s path expiry) on the baseline (no refresh) but ran clean through both boundaries on the hardened build (73/75 replies, median ~48 ms, both builds; only the two expiry-boundary stalls differ). The older `M:` line refs elsewhere in this doc predate the SAE/AMPE growth (`umac_mesh.c` ~doubled) and need a refresh pass._
 
-## Path table (`mesh_pathtbl.c`)
+## Path table (`mesh_pathtbl.c`) — fixed pool + dest-MAC hash index
+
+A fixed entry pool + an `int16_t`-chained hash index (O(1) lookup) — the embedded stand-in for mac80211's
+`rhashtable` (no RCU/resize: single umac event loop, no concurrent access). Worklog
+`2026-07-02-mesh-dynamic-path-table.md`.
 
 | ESP (morselib) | Linux equivalent | Notes |
 |---|---|---|
-| `mesh_path_find` `M:724` | `mesh_path_lookup` `mesh_pathtbl.c:268` | fixed array vs rhashtable (divergence below) |
-| `mesh_path_get_or_add` `M:736` | `mesh_path_add` `mesh_pathtbl.c:680` | |
-| `mesh_path_update` next-hop assign `M:768` | `mesh_path_assign_nexthop` `mesh_pathtbl.c:115` | |
-| `umac_mesh_lookup_next_hop` `M:792` | mpath `next_hop` deref + active/expiry check | |
+| `struct mesh_path_entry`+`hnext` `M:1803`; pool `mesh_paths[MESH_MAX_PATHS=64]`+`mesh_path_bucket[64]` `M:1818`; cap `M:367` | `struct mesh_path` `mesh.h:105`; `struct mesh_table` `ieee80211_i.h:700`; `MESH_MAX_MPATHS=1024` `mesh.h:229` | fixed pool + index buckets vs resizable rhashtable; cap 64 (embedded RAM) vs 1024 |
+| `mesh_path_hash` (FNV-1a/6B) `M:1824`; `_hash_insert`/`_remove` `M:1835/1842`; `_tbl_reset` `M:1859` | `mesh_table_hash` (jhash_1word+seed) `mesh_pathtbl.c:22-34` | FNV over all 6 bytes, no seed; reset NILs buckets (a bare memset → cycles) |
+| `mesh_path_find` (hashed bucket walk) `M:1877` | `mesh_path_lookup` `mesh_pathtbl.c:268` | index-chain walk vs `rhashtable_lookup` |
+| `mesh_path_get_or_add` (hashed find + soonest-expiry evict + unlink/index) `M:1889` | `mesh_path_add` `mesh_pathtbl.c:680` (+`atomic_add_unless(MESH_MAX_MPATHS)` `:693`) | pool evict-oldest vs 1024 admission cap + `kzalloc` |
+| `mesh_path_update` next-hop assign (P6c/HWMP fresh-info + 10/9 hysteresis, **untouched**) `M:1940` | `mesh_path_assign_nexthop` `mesh_pathtbl.c:115` | |
+| `umac_mesh_lookup_next_hop` (**untouched**) `M:1983` | mpath `next_hop` deref + active/expiry check | preemptive refresh |
 
 ## Forwarding & data path (`mesh.c`, `umac_datapath.c`)
 
