@@ -559,6 +559,11 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   **Forced-topology diamond** (board0 → {board1, board2} → chronite, board2 = weak relay): airtime routes
   the multi-hop path **via board1**, confirmed both in the path table and **on-air** on chronium's `morse0`
   (board0 DATA frames RA=board1 ×25 / board2 ×0). Worklog `docs/worklog/2026-07-02-mesh-multinode-onair-validation.md`.
+- ✅ **Mesh dynamic path table 2026-07-02.** Replaced the fixed 8-entry linear path table with a 64-entry
+  pool + a dest-MAC hash index (O(1) lookup, `int16_t`-chained) — lifts the reachable-destination ceiling
+  past 8 (was: 9th dest evicted a live path). Peer table (neighbour-bounded, ~630 B/entry SAE) + RMC left.
+  Host-tested (insert/chain/evict past 8, no cycles), built, bench-verified (peer + 0% datapath). Worklog
+  `docs/worklog/2026-07-02-mesh-dynamic-path-table.md`.
 - ✅ **ESP↔ESP-direct peering — RESOLVED / was a visibility misdiagnosis (verified 2026-07-01).** Two ESP
   secured-mesh nodes bootstrap a mesh between themselves with **no Linux anchor**: cold-reset both (chronite
   down), each reaches full secured **ESTAB** within ~5 s (SAE+AMPE, both directions, ~10 beacons/s mutual
