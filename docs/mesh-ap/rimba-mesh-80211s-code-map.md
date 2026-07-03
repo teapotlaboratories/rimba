@@ -49,7 +49,7 @@ both trees (ESP working tree + the chronite reference checkout).*
 | `umac_mesh_build_perr` `M:944` / `umac_mesh_tx_perr` `M:968` / `umac_mesh_invalidate_paths_via` `M:984` | `mesh_path_error_tx` `mesh_hwmp.c:238` (+ `mesh_plink_broken`) | one dest per PERR; `++sn` before announce |
 | `mesh_path_update` fresh-info rule `M:768` | `hwmp_route_info_get` `mesh_hwmp.c:426` | take if inactive / newer SN / equal SN + better metric |
 | `umac_mesh_lookup_next_hop` **preemptive refresh** `M:1885` (added 2026-07-01) — active path within `MESH_PATH_REFRESH_MS` (6 s) of expiry → `umac_mesh_start_discovery`, path **not** invalidated | `mesh_path_refresh` `mesh_hwmp.c:1335` (from `mesh_nexthop_lookup`; trigger `now > exp_time − path_refresh_time` `:1338`, path RESOLVED; `mesh_queue_preq PREQ_Q_F_REFRESH` `:1345`) | keeps an actively-used path alive so it never expires mid-transfer then re-resolves reactively (the stall); the returning PREP renews `expiry_ms` via `mesh_path_update`. Deliberately omits Linux's separate extend-on-use (`dot11MeshHWMPactivePathTimeout` `:1350`) — the refresh PREQ keeps the path both fresh **and** topology-adaptive |
-| **airtime metric (P6c, 2026-07-02)** `mesh_airtime_from_thr_kbps` `M:2153` + `mesh_thr_kbps_from_rssi` `M:2170` + `mesh_last_hop_metric` `M:2187` | `airtime_link_metric_get` `mesh_hwmp.c:338-381` (constants `:14-16`) | fixed-point ETT ported byte-exact (unit-verified {27307,6827,2731}); rate input is now mmrc's **learned** best-throughput rate + **real** success probability (2026-07-02 real-RC: `umac_rc_start` per peer at ESTAB; per-AID datapath lookup routes tx-status feedback; `umac_rc_get_learned_metric` reads `mmrc_sta_get_best_rate` + `table[].prob` → real `err`). RSSI-seed (mmrc cold-start tiers `mmrc.c:1287`) is the fallback only until a peer converges (`evidence>0`, `prob=100`=cold). Cold per-hop 2731/6827/27307 (MCS7/3/0 @1 MHz/LGI/SS1) |
+| **airtime metric (P6c, 2026-07-02)** `mesh_airtime_from_thr_kbps` `M:2265` + `mesh_thr_kbps_from_rssi` `M:2290` + `mesh_last_hop_metric` `M:2307` | `airtime_link_metric_get` `mesh_hwmp.c:338-381` (constants `:14-16`) | fixed-point ETT ported byte-exact (unit-verified {27307,6827,2731}); rate input is now mmrc's **learned** best-throughput rate + **real** success probability (2026-07-02 real-RC: `umac_rc_start` per peer at ESTAB; per-AID datapath lookup routes tx-status feedback; `umac_rc_get_learned_metric` reads `mmrc_sta_get_best_rate` + `table[].prob` → real `err`). RSSI-seed (mmrc cold-start tiers `mmrc.c:1287`) is the fallback only until a peer converges (`evidence>0`, `prob=100`=cold). Cold per-hop 2731/6827/27307 (MCS7/3/0 @1 MHz/LGI/SS1) |
 | real-RC wiring (2026-07-02): `umac_mesh_peer_rc_start`/`umac_rc_stop` (Edit 1); `umac_datapath_lookup_stad_by_aid_mesh` in `datapath_ops_mesh` + relay data rate-table (Edit 2/2b); `umac_rc_get_learned_metric` (Edit 3) | `sta_get_expected_throughput`→`morse_get_expected_throughput` + `fail_avg` (`mesh_hwmp.c:361-372`) | removes P6c divergences #1 (RSSI-seed) + #2 (err=0); hw-verified prob=93→metric 2934 |
 | metric accum + overflow clamp `M:2232` (PREQ) / `M:2289` (PREP): `new_metric = metric + mesh_last_hop_metric(frame_sa)`, `if (new_metric < metric) = MESH_METRIC_MAX` | `hwmp_route_info_get` `mesh_hwmp.c:451` / `:479-481` | clamp newly added (the fixed +100 couldn't overflow) |
 | per-peer `last_rssi_dbm` `M:447` + record in `umac_mesh_handle_action` `M:2588` (from the PREQ/PREP RX metadata) | `ieee80211s_update_metric` `mesh_hwmp.c:299-336` (TX-status EWMA `sta_info.h:368-369`) | **divergence**: RX-RSSI sample, not a TX-status EWMA — no per-peer tx-status in morselib mesh |
@@ -68,12 +68,12 @@ A fixed entry pool + an `int16_t`-chained hash index (O(1) lookup) — the embed
 
 | ESP (morselib) | Linux equivalent | Notes |
 |---|---|---|
-| `struct mesh_path_entry`+`hnext` `M:1803`; pool `mesh_paths[MESH_MAX_PATHS=64]`+`mesh_path_bucket[64]` `M:1818`; cap `M:367` | `struct mesh_path` `mesh.h:105`; `struct mesh_table` `ieee80211_i.h:700`; `MESH_MAX_MPATHS=1024` `mesh.h:229` | fixed pool + index buckets vs resizable rhashtable; cap 64 (embedded RAM) vs 1024 |
-| `mesh_path_hash` (FNV-1a/6B) `M:1824`; `_hash_insert`/`_remove` `M:1835/1842`; `_tbl_reset` `M:1859` | `mesh_table_hash` (jhash_1word+seed) `mesh_pathtbl.c:22-34` | FNV over all 6 bytes, no seed; reset NILs buckets (a bare memset → cycles) |
-| `mesh_path_find` (hashed bucket walk) `M:1877` | `mesh_path_lookup` `mesh_pathtbl.c:268` | index-chain walk vs `rhashtable_lookup` |
-| `mesh_path_get_or_add` (hashed find + soonest-expiry evict + unlink/index) `M:1889` | `mesh_path_add` `mesh_pathtbl.c:680` (+`atomic_add_unless(MESH_MAX_MPATHS)` `:693`) | pool evict-oldest vs 1024 admission cap + `kzalloc` |
-| `mesh_path_update` next-hop assign (P6c/HWMP fresh-info + 10/9 hysteresis, **untouched**) `M:1940` | `mesh_path_assign_nexthop` `mesh_pathtbl.c:115` | |
-| `umac_mesh_lookup_next_hop` (**untouched**) `M:1983` | mpath `next_hop` deref + active/expiry check | preemptive refresh |
+| `struct mesh_path_entry`+`hnext` `M:1815`; pool `mesh_paths[MESH_MAX_PATHS=256]`+`mesh_path_bucket[256]` `M:1829`; cap `M:367` | `struct mesh_path` `mesh.h:105`; `struct mesh_table` `ieee80211_i.h:700`; `MESH_MAX_MPATHS=1024` `mesh.h:229` | fixed pool + index buckets vs resizable rhashtable; cap 256 (embedded RAM) vs 1024 |
+| `mesh_path_hash` (FNV-1a/6B) `M:1836`; `_hash_insert`/`_remove` `M:1847/1854`; `_tbl_reset` `M:1871` | `mesh_table_hash` (jhash_1word+seed) `mesh_pathtbl.c:22-34` | FNV over all 6 bytes, no seed; reset NILs buckets (a bare memset → cycles) |
+| `mesh_path_find` (hashed bucket walk) `M:1889` | `mesh_path_lookup` `mesh_pathtbl.c:268` | index-chain walk vs `rhashtable_lookup` |
+| `mesh_path_get_or_add` (hashed find + soonest-expiry evict + unlink/index) `M:1901` | `mesh_path_add` `mesh_pathtbl.c:680` (+`atomic_add_unless(MESH_MAX_MPATHS)` `:693`) | pool evict-oldest vs 1024 admission cap + `kzalloc` |
+| `mesh_path_update` next-hop assign (P6c/HWMP fresh-info + 10/9 hysteresis, **untouched**) `M:1952` | `mesh_path_assign_nexthop` `mesh_pathtbl.c:115` | |
+| `umac_mesh_lookup_next_hop` (**untouched**) `M:1995` | mpath `next_hop` deref + active/expiry check | preemptive refresh |
 
 ## Forwarding & data path (`mesh.c`, `umac_datapath.c`)
 
@@ -96,7 +96,7 @@ A fixed entry pool + an `int16_t`-chained hash index (O(1) lookup) — the embed
 
 ## Deliberate divergences (platform/embedded, not ports)
 
-- **No rhashtable / RCU.** The path table (`mesh_paths[8]`), peer table, and RMC (`mesh_rmc[16]`)
+- **No rhashtable / RCU.** The path table (`mesh_paths[256]`), peer table, and RMC (`mesh_rmc[16]`)
   are small fixed arrays under the single umac event-loop, not mac80211's RCU rhashtables. Sized
   for a small bench mesh; a real deployment would grow/replace these.
 - **Host-timer scaffolding.** umac has no per-object timers; one periodic `umac_mesh_plink_tick`

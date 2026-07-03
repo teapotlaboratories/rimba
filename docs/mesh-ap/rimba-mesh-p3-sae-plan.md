@@ -187,7 +187,7 @@ exposure of `sae_*`/`wpabuf_*` (P3a.5). The full recon output is in the workflow
   interop of the encrypted DATA/forward path (distinct from P3d's SAE-frame interop — byte-diff ESP
   forwarded/originated frames vs a live Linux relay) and (B) dynamic device join at runtime** (new
   beacon → SAE → ESTAB → keyed → routable, no restart). Known limits to check: per-peer stad pool fixed
-  `UMAC_MESH_MAX_PEERS=4`; the relay-demo allowlist is test-only; multi-hop reachability of a new node
+  `UMAC_MESH_MAX_PEERS=16` (was 4; grown 2026-07-02); the relay-demo allowlist is test-only; multi-hop reachability of a new node
   needs BOTH this relay-forward fix AND TX-side PREQ origination ("we don't originate PREQs yet").
   Deliverable: a verified map of every place morselib's hand-wired key/route selection could diverge from
   mac80211 under interop + dynamic-join, with the concrete fixes.
