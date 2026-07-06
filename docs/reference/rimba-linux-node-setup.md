@@ -25,27 +25,89 @@ the day-by-day narrative is in
 - `wlan0` = onboard Broadcom CYW43455 (brcmfmac) — keep it for SSH/remote; the HaLow
   radio enumerates separately as **`wlan1`** (MAC OUI `3c:22:7f`, Morse Micro).
 
-## 1. Component versions — ALL 1.17.8 (must match)
+## 1. Component versions — standard is now 1.17.9 (must match)
 
-> **Hard rule: driver, firmware, `morse_cli`, and hostap must be the SAME release.**
+> **Standard raised to 1.17.9 on 2026-07-05** (was 1.17.8) so the Linux nodes match the ESP32
+> boards, which run 1.17.9 chip fw (via `vendor/morse-firmware`). See the `[[morse-fw-same-version]]`
+> rule: **all Morse fw across the bench at the same version.**
+>
+> **Current node state (2026-07-05): ALL components at 1.17.9 on all four nodes** (chronium, chronite,
+> chronosalt, chronogen) — driver + MM6108 firmware + dot11ah + **`morse_cli` + `hostapd_s1g` +
+> `wpa_supplicant_s1g`** all `rel_1_17_9_2026_Apr_20`; **BCF unchanged** (byte-identical 1.17.8→1.17.9).
+> Userspace binaries were built once on chronite and copied to the others (all Debian trixie aarch64,
+> glibc 2.41). The SAE-injector `wpa_supplicant_s1g` variant on chronium was backed up to
+> `~/userspace_backup_1178/wpa_supplicant_s1g.INJECTOR_1178` (its source patch is still in chronium's
+> `~/halow/hostap` working tree); rebuild it at 1.17.9 if attack testing is needed.
+
+> **Hard rule: driver, firmware, `morse_cli`, and hostap should be the SAME release.**
 > A mismatch silently breaks things (we burned hours on a `morse_cli`/driver/firmware
 > version chase — see Gotchas). The public repos are **misaligned**, so pin exactly:
 
-| Component | Repo (github.com/MorseMicro/…) | Ref | Commit |
-|---|---|---|---|
-| Kernel | `rpi-linux.git` | branch `mm/rpi-6.12.21/1.17.x` | `372414fd42cdd4d8bfcf888cac62db9da947fdb6` |
-| morse_driver | `morse_driver.git` | tag `1.17.8` | `3eef5a0a43645808e501ff4b83f29d675588bd9b` |
-| MM6108 firmware | `morse-firmware.git` | branch `1.17` → **commit** | `fd41e1cffa7ab3cda88503f37e1cb05a3098be31` |
-| morse_cli | `morse_cli.git` | tag `1.17.8` | `8f06222bee104327b5f09a9339f24bac1ef3420d` |
-| hostap | `hostap.git` | tag `1.17.8` | `4acb6f6f46380d3c9fe50da77aa15a6ba565c49d` |
+| Component | Repo (github.com/MorseMicro/…) | Ref | Commit | State |
+|---|---|---|---|---|
+| Kernel | `rpi-linux.git` | branch `mm/rpi-6.12.21/1.17.x` | `372414fd42cdd4d8bfcf888cac62db9da947fdb6` | unchanged (6.12.21) |
+| morse_driver | `morse_driver.git` | tag **`1.17.9`** | `7a636e4` (pkg release 1.17.9) | ✅ deployed (**pure stock**, srcver `65FDC1A3…`) |
+| MM6108 firmware | `morse-firmware.git` | **`main`** (rolling) | `ea18605` ("Release 1.17.9") | ✅ deployed |
+| morse_cli | `morse_cli.git` | tag **`1.17.9`** | — | ✅ deployed |
+| hostap | `hostap.git` | tag **`1.17.9`** | `beed5f8c8` (release 1.17.9) | ✅ deployed |
 
-Resulting versions on the box: kernel `6.12.21-v8-16k+`; driver/cli/hostapd/fw all
-`rel_1_17_8_2026_Mar_24`; libnl-3 `3.7.0`; iw `6.9`.
+Resulting versions on the boxes: kernels `6.12.21-v8-16k+` (Pi 5: chronium/chronite) and
+`6.12.21-v8+` (Pi Zero 2 W: chronosalt/chronogen); **driver + fw + dot11ah + morse_cli + hostapd_s1g +
+wpa_supplicant_s1g all `rel_1_17_9_2026_Apr_20`** (fw crc32 `0xa4993663`, size 481040; hostap base
+`v2.12-morse_micro`); libnl-3 `3.7.0`; iw `6.9`.
 
-> **Firmware gotcha:** `morse-firmware` is a rolling repo — `main` only has the latest
-> (1.17.9) and there are **no version tags**. The 1.17.8 `mm6108.bin` lives in the
-> **`1.17` branch history** at commit `fd41e1c` ("Morse Micro 1.17.8 firmware (MM6108)").
-> A shallow clone hides this. (1.17.6 — the ESP32's version — is also in that branch.)
+> **✅ NO custom modifications — everything is pure stock upstream 1.17.9** (as of 2026-07-05).
+> Verified: `morse_driver` deployed `.ko` srcversion = **`65FDC1A3A73287FD44CE6E2`** on all four nodes
+> = a freshly-built stock 1.17.9 (differs from the old patched build's `CDF36EE0…`); hostap + morse_cli
+> `git diff` vs their 1.17.9 tags = **NONE**; fw/dot11ah/BCF are unmodified upstream binaries.
+>
+> **History:** the 1.17.8 build carried one 3-line `hw.c` `morse_hw_reset()` reset-timing patch
+> (`mdelay(20)→100` + a `mdelay(1000)` settle). On 2026-07-05 it was found **dormant** — `morse_hw_reset`
+> isn't invoked on these boards' normal SPI probe (no "Resetting Morse Chip" line / no ~1.1 s reset gap
+> in any node's dmesg; likely no reset-GPIO wired) — so it was **dropped**. Confirmed the chip probes
+> reliably stock on all four (cold-boot, no `Failed to access HW`). If a future board *does* need it,
+> re-apply the 3 lines and rebuild.
+
+> **Userspace build deps (trixie):** building morse_cli + hostap needs `libnl-3-dev libnl-genl-3-dev
+> libnl-route-3-dev libssl-dev libusb-1.0-0-dev build-essential`. morse_cli's `make all` compiles the
+> USB transport (needs libusb) even for `CONFIG_MORSE_TRANS_NL80211=1`; hostapd links `-lnl-route-3`.
+> The DPP/OpenSSL-3 concern in older notes did NOT recur on OpenSSL 3.5.6 — hostapd + wpa_supplicant
+> both build clean with `CONFIG_DPP=y`.
+
+> **Firmware note:** `morse-firmware` is a rolling repo — 1.17.9 is now on **`main`** (commit
+> `ea18605`), which is what the ESP32 `vendor/morse-firmware` submodule also tracks (so ESP + Linux
+> load byte-identical fw). Older 1.17.8 `mm6108.bin` is in the `1.17` branch at `fd41e1c`.
+
+### Deploying a new driver/fw version — the hard-won recipe (2026-07-05)
+
+**Build host = chronium** (Pi 5, aarch64). It holds BOTH kernel-source trees — `~/halow/rpi-linux`
+(6.12.21-**v8-16k+**, Pi 5) and `~/halow/rpi-linux-pi3` (6.12.21-**v8+**, Pi Zero 2 W) — so it natively
+builds modules for both. chronite/chronosalt/chronogen have **no local kernel source** (their `build`
+symlink points at chronium's path), so their `.ko` is built on chronium and copied over.
+
+1. `cd ~/halow/morse_driver && git checkout 1.17.9` — **pure stock, no patches** (as of 2026-07-05;
+   the old `hw.c` reset patch was dropped as dormant — see Custom modifications above). `git status`
+   should be clean bar untracked build artifacts.
+2. Build per target kernel (stock Makefile needs the flags passed):
+   `make -j4 KERNEL_SRC=~/halow/rpi-linux[-pi3] CONFIG_WLAN_VENDOR_MORSE=m CONFIG_MORSE_SPI=y
+   CONFIG_MORSE_VENDOR_COMMAND=y CONFIG_MORSE_USER_ACCESS=y CONFIG_MORSE_DEBUGFS=y CONFIG_MORSE_MONITOR=y`
+   → produces `morse.ko` + `dot11ah/dot11ah.ko`. (Missing `CONFIG_WLAN_VENDOR_MORSE=m` → only MODPOST
+   runs, no .ko; missing `VENDOR_COMMAND` → `morse_vendor_*` undefined.) `aarch64-linux-gnu-strip
+   --strip-debug` shrinks the 25 MB (-g) module to ~780 KB for a faster copy to the Pi Zeros.
+3. **⛔ DO NOT hot-reload (`rmmod`/`modprobe`) — it WEDGES the MM6108 over SPI**
+   (`morse_chip_cfg_detect_and_init: Failed to access HW`), and once wedged even the old driver can't
+   reach it → only a **reboot** power-cycles it back. Instead: install to disk, then **reboot**.
+   **⚠️ The `.ko` install path DIFFERS by node** — don't hardcode it, resolve it:
+   `MP=$(modinfo morse | awk '/^filename/{print $2}')` (Pi 5 chronium/chronite →
+   `…/kernel/drivers/net/wireless/morse/morse.ko`; **Pi Zero chronosalt/chronogen →
+   `/lib/modules/$KR/extra/morse.ko`**). `cp` both `.ko` to their resolved paths, `cp` 1.17.9
+   `mm6108.bin` — size **481040**, not the 1.17.8 480664 — to `/lib/firmware/morse/`, `depmod -a`.
+   **Verify on-disk `.ko` srcversion + fw are what you expect BEFORE rebooting** (`/tmp` is tmpfs and
+   wipes on reboot — and a rebooting build host wipes its staged files too; stage into `/lib` / home
+   first, and DON'T reboot the build host until everything is pulled off it). Strip modules with
+   `aarch64-linux-gnu-strip --strip-debug` (NOT plain `strip`, which can break a `.ko`) — 25 MB→~780 KB.
+   Back up the working `.ko`+fw to `~/fw_backup_1178/` first; rollback = restore + reboot. SSH rides
+   `wlan0`/`eth0` (NOT morse), so the node stays reachable across the reboot.
 
 ## 2. Build prerequisites
 
