@@ -10,8 +10,14 @@ Last verified: 2026-06-29.
 
 ## At a glance
 
-- **3× ESP32 HaLow nodes** (XIAO ESP32-S3 + FGH100M / MM6108) on the dev host's USB.
-- **4× Linux HaLow nodes** on the LAN, **all 1.17.8 morse stack**. Steady-state roles:
+- **3× ESP32 HaLow nodes** (XIAO ESP32-S3 + FGH100M / MM6108) on the dev host's USB — chip fw **1.17.9**
+  (from `vendor/morse-firmware`; the "1.17.6" in older notes was the unused SDK mbin).
+- **4× Linux HaLow nodes** on the LAN — **ALL Morse components at 1.17.9** as of 2026-07-05 (driver, fw,
+  dot11ah, morse_cli, hostapd_s1g, wpa_supplicant_s1g; BCF unchanged). **Pure stock upstream 1.17.9 —
+  no patches** (driver srcver `65FDC1A3…`; the old `hw.c` reset patch was dropped 2026-07-05 as dormant —
+  details in `rimba-linux-node-setup.md §1`). Whole bench (ESP + Linux) matches at **1.17.9** — see
+  `rimba-linux-node-setup.md §1` for the deploy recipe (driver: build on chronium, install + **reboot**,
+  never hot-reload — it wedges the chip; userspace: build on chronite, copy the binaries). Steady-state roles:
   **chronium = dedicated on-air monitor/sniffer**; the **other 3 form a live SAE+AMPE-encrypted
   802.11s mesh** (`rimba-smesh`, ch27/915.5) — plink ESTAB, encrypted ping 0% loss, mesh IPs
   `10.9.9.2`–`10.9.9.4`. (chronium *can* rejoin as `10.9.9.1` if you need a 4-node mesh instead;
