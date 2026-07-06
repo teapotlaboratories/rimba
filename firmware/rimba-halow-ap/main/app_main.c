@@ -35,6 +35,11 @@
 #define LINK_S1G_CHAN  27             /* US 915.5 MHz, 1 MHz BW (global op-class 68) */
 #define LINK_OP_CLASS  68
 #define LINK_MAX_STAS  4              /* allow multiple leaves (multi-STA TWT test) */
+/* 1 = ping each authorized STA at 1 Hz (downlink/TWT test aid); 0 = quiet AP (idle power tests). */
+#ifndef RIMBA_AP_PING_STAS
+#define RIMBA_AP_PING_STAS 0
+#endif
+
 #define AP_IP          "192.168.12.1"
 #define STA_IP         "192.168.12.2"   /* the STA — our ping target */
 #define NETMASK        "255.255.255.0"
@@ -79,7 +84,14 @@ static void sta_monitor_task(void *arg)
         for (int i = 0; i < n; i++) {
             ESP_LOGI(TAG, "    sta[%d] " MACSTR, i, MAC2STR(s_sta_macs[i]));
             uint8_t octet = s_sta_macs[i][5];   /* STA IP = 192.168.12.<mac[5]> */
+            /* NOTE: this continuous 1 Hz ping is a downlink/TWT *test* aid. It keeps a power-saving
+             * STA's radio busier (broadcast ARP + ICMP), so disable it for genuine low-power leaf
+             * measurements. It is NOT what gates the STA doze — that is the STA enabling PS. */
+#if RIMBA_AP_PING_STAS
             if (!s_pinged[octet]) { s_pinged[octet] = true; start_ping_octet(octet); }
+#else
+            (void)octet;   /* pinger off: idle power measurements need a quiet AP */
+#endif
         }
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
