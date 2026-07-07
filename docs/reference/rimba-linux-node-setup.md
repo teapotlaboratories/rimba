@@ -61,12 +61,20 @@ wpa_supplicant_s1g all `rel_1_17_9_2026_Apr_20`** (fw crc32 `0xa4993663`, size 4
 > = a freshly-built stock 1.17.9 (differs from the old patched build's `CDF36EE0…`); hostap + morse_cli
 > `git diff` vs their 1.17.9 tags = **NONE**; fw/dot11ah/BCF are unmodified upstream binaries.
 >
-> **History:** the 1.17.8 build carried one 3-line `hw.c` `morse_hw_reset()` reset-timing patch
-> (`mdelay(20)→100` + a `mdelay(1000)` settle). On 2026-07-05 it was found **dormant** — `morse_hw_reset`
-> isn't invoked on these boards' normal SPI probe (no "Resetting Morse Chip" line / no ~1.1 s reset gap
-> in any node's dmesg; likely no reset-GPIO wired) — so it was **dropped**. Confirmed the chip probes
-> reliably stock on all four (cold-boot, no `Failed to access HW`). If a future board *does* need it,
-> re-apply the 3 lines and rebuild.
+> **Reset patch (REQUIRED on the Pi 5 — supersedes the old "reset-timing" patch).** Carry
+> `docs/reference/patches/morse-driver-pi5-reset-gpiod.patch` forward on every version bump. It rewrites
+> `hw.c` `morse_hw_reset()` to use the modern **gpiod** API + a **drive-high** reset release.
+> **Why it's needed:** `morse_hw_reset()` *is* invoked — on driver **remove/reload** (not on a cold-boot
+> probe, where the chip gets a power-on-reset from its rail; that's why a cold boot always works stock and
+> an earlier note wrongly called the reset "dormant / no reset-GPIO wired"). The reset line **is** wired
+> (Pi 5 = **GPIO17** on the RP1 controller; Pi Zero = **GPIO5** on the SoC). But stock `morse_hw_reset()`
+> (a) uses the **legacy integer-GPIO API** (`gpio_request`), which fails on the Pi 5's RP1 controller, and
+> (b) **floats** the pin to release the reset, which doesn't de-assert on the Pi 5 Wio HAT (`RESET_N` has no
+> pull-up). So on the Pi 5 the chip is never actually reset on a warm reload → `morse_chip_cfg_detect_and_init
+> failed: -5`, `wlan1` vanishes, and only a **reboot** recovered it. The patch (gpiod + drive-high) makes the
+> Pi 5 reset itself, so `modprobe -r morse; modprobe morse` / `unbind`+`bind` recover a wedged chip in ~6 s,
+> no reboot. Verified on-bench 2026-07-05 (A/B: float release → -5, drive-high → clean fw reload). Harmless
+> on the Pi Zeros (their stock legacy-GPIO reset already worked). Full root-cause: the patch's README.
 
 > **Userspace build deps (trixie):** building morse_cli + hostap needs `libnl-3-dev libnl-genl-3-dev
 > libnl-route-3-dev libssl-dev libusb-1.0-0-dev build-essential`. morse_cli's `make all` compiles the
@@ -85,18 +93,25 @@ wpa_supplicant_s1g all `rel_1_17_9_2026_Apr_20`** (fw crc32 `0xa4993663`, size 4
 builds modules for both. chronite/chronosalt/chronogen have **no local kernel source** (their `build`
 symlink points at chronium's path), so their `.ko` is built on chronium and copied over.
 
-1. `cd ~/halow/morse_driver && git checkout 1.17.9` — **pure stock, no patches** (as of 2026-07-05;
-   the old `hw.c` reset patch was dropped as dormant — see Custom modifications above). `git status`
-   should be clean bar untracked build artifacts.
+1. `cd ~/halow/morse_driver && git checkout <tag>`, then **apply the one carry-forward patch**:
+   `git apply <repo>/docs/reference/patches/morse-driver-pi5-reset-gpiod.patch` (the Pi 5 gpiod reset fix —
+   see Custom modifications above; required so the Pi 5 chip resets on a warm reload). `git status` should
+   then show only `hw.c` modified + untracked build artifacts.
 2. Build per target kernel (stock Makefile needs the flags passed):
    `make -j4 KERNEL_SRC=~/halow/rpi-linux[-pi3] CONFIG_WLAN_VENDOR_MORSE=m CONFIG_MORSE_SPI=y
    CONFIG_MORSE_VENDOR_COMMAND=y CONFIG_MORSE_USER_ACCESS=y CONFIG_MORSE_DEBUGFS=y CONFIG_MORSE_MONITOR=y`
    → produces `morse.ko` + `dot11ah/dot11ah.ko`. (Missing `CONFIG_WLAN_VENDOR_MORSE=m` → only MODPOST
    runs, no .ko; missing `VENDOR_COMMAND` → `morse_vendor_*` undefined.) `aarch64-linux-gnu-strip
    --strip-debug` shrinks the 25 MB (-g) module to ~780 KB for a faster copy to the Pi Zeros.
-3. **⛔ DO NOT hot-reload (`rmmod`/`modprobe`) — it WEDGES the MM6108 over SPI**
-   (`morse_chip_cfg_detect_and_init: Failed to access HW`), and once wedged even the old driver can't
-   reach it → only a **reboot** power-cycles it back. Instead: install to disk, then **reboot**.
+3. **Loading the new `.ko`** (behaviour depends on the reset patch above):
+   - **Once the PATCHED driver is running, hot-reload works** — `modprobe -r morse; modprobe morse` (or
+     `unbind`/`bind`) resets the chip on remove and re-probes cleanly (~6 s, no reboot) on **both** board
+     types. This is the fast path for iterating.
+   - **First-time swap from a STOCK-loaded driver** still needs help on the Pi 5: a plain `rmmod`/`modprobe`
+     wedges it (`morse_chip_cfg_detect_and_init: Failed to access HW` — stock `morse_hw_reset` can't reset
+     the RP1-wired chip). Either **reboot** (clean cold-boot load), or pulse GPIO17 by hand during the swap:
+     `sudo modprobe -r morse; sudo pinctrl set 17 op dl; sleep 0.3; sudo pinctrl set 17 op dh; sudo modprobe morse`.
+     (Pi Zeros swap cleanly with a plain reload — their stock reset already works.)
    **⚠️ The `.ko` install path DIFFERS by node** — don't hardcode it, resolve it:
    `MP=$(modinfo morse | awk '/^filename/{print $2}')` (Pi 5 chronium/chronite →
    `…/kernel/drivers/net/wireless/morse/morse.ko`; **Pi Zero chronosalt/chronogen →
@@ -152,6 +167,7 @@ sudo make modules_install
 
 ```sh
 cd ~/halow/morse_driver
+git apply <repo>/docs/reference/patches/morse-driver-pi5-reset-gpiod.patch   # Pi 5 gpiod reset fix (see §1)
 make KERNEL_SRC=~/halow/rpi-linux \
      CONFIG_WLAN_VENDOR_MORSE=m CONFIG_MORSE_SPI=y \
      CONFIG_MORSE_USER_ACCESS=y CONFIG_MORSE_VENDOR_COMMAND=y

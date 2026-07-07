@@ -1,0 +1,59 @@
+diff --git a/hw.c b/hw.c
+index 291675f..4e7e004 100644
+--- a/hw.c
++++ b/hw.c
+@@ -7,6 +7,7 @@
+ 
+ #include <linux/types.h>
+ #include <linux/gpio.h>
++#include <linux/gpio/consumer.h>
+ #include "morse.h"
+ #include "debug.h"
+ #include "hw.h"
+@@ -197,23 +198,35 @@ int morse_hw_toggle_aon_latch(struct morse *mors)
+ 
+ int morse_hw_reset(int reset_pin)
+ {
+-	int ret = gpio_request(reset_pin, "morse-reset-ctrl");
++	struct gpio_desc *reset_gpiod = gpio_to_desc(reset_pin);
+ 
+-	if (ret < 0) {
+-		MORSE_PR_ERR(FEATURE_ID_DEFAULT, "Failed to acquire reset gpio. Skipping reset.\n");
+-		return ret;
++	if (!reset_gpiod) {
++		MORSE_PR_ERR(FEATURE_ID_DEFAULT, "Failed to get reset gpio desc. Skipping reset.\n");
++		return -EINVAL;
+ 	}
+ 
+ 	pr_info("Resetting Morse Chip\n");
+-	gpio_direction_output(reset_pin, 0);
+-	mdelay(20);
+-	/* setting gpio as float to avoid forcing 3.3V High */
+-	gpio_direction_input(reset_pin);
++	/*
++	 * Use the gpiod (descriptor) API rather than the legacy integer gpio_request() /
++	 * gpio_direction_*(): the legacy path fails silently on the Pi 5 RP1 gpio controller
++	 * (PCIe-attached), so the reset was skipped and a warm driver re-probe could not detect
++	 * the chip (morse_chip_cfg_detect_and_init -5). _raw() drives the physical level directly
++	 * (the DT reset-gpios polarity flag is unreliable on this HAT); 0 = reset asserted.
++	 */
++	gpiod_direction_output_raw(reset_gpiod, 0);
++	mdelay(100);
++	/*
++	 * Release by DRIVING HIGH, not floating: on the Pi 5 Wio HAT RESET_N has no usable
++	 * pull-up, so gpiod_direction_input() leaves it low and the chip stays in reset (warm
++	 * re-probe then fails -5). Driving high positively de-asserts. Verified on-bench: float
++	 * release -> -5, drive-high release -> clean fw reload. (The chip's rail already holds
++	 * this line high at boot, so leaving it output-high matches the power-on state.)
++	 */
++	gpiod_direction_output_raw(reset_gpiod, 1);
++	mdelay(100);
+ 	pr_info("Done\n");
+ 
+-	gpio_free(reset_pin);
+-
+-	return ret;
++	return 0;
+ }
+ 
+ int morse_hw_clock_now(const struct morse *mors, u64 *now)

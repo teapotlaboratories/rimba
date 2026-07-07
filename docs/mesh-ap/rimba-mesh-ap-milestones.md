@@ -59,7 +59,7 @@ on hardware and comparing, rather than betting early.
 | Leaf power-save | **None usable** — no TWT/ATIM/AP buffering; only sub-µA path is an RTC cold-boot each wake (≈1.39 s rejoin tax, measured) | **TWT** — scheduled wake with the **AP buffering downlink**; leaf dozes *and* keeps traffic |
 | Coordinator | None needed (provisioned BSSID) | Relays must be in range + always-on |
 | Departure from current base | It *is* the current Phase-1 foundation | Larger departure; adds AP/mesh + association |
-| Status | **RESOLVED + hardened + soaked** (RISK-01) | **AP + TWT + STA-scaling proven**; mesh built + secured (P0–P6d); mesh+AP concurrency proven on Linux, not yet on ESP32 |
+| Status | **RESOLVED + hardened + soaked** (RISK-01) | **AP + TWT + STA-scaling proven**; mesh built + secured (P0–P6d); mesh+AP concurrency **proven on Linux end-to-end w/ traffic routing** (§A3 recipe), not yet on ESP32 |
 
 The signal so far: IBSS's dead-end is **leaf power-save** — the morse firmware has
 no IBSS radio power-save ([`design-specification/rimba-mm6108-powersave-analysis.md`](../design-specification/rimba-mm6108-powersave-analysis.md)).
@@ -100,7 +100,7 @@ Concise index; each entry points to its detail section below.
 |---|---|---|
 | **A1** | SoftAP bring-up (SAE) — SSID `rimba-ping`, WPA3-SAE, S1G ch27; host-built beacon (bundled hostapd) | ✅ |
 | **A2** | AP ↔ STA association + bidirectional IP (SAE 4-way, DHCP, ping) — [worklog](../worklog/2026-06-18-halow-ap-sta-ping.md) | ✅ |
-| **A3** | [Mesh + AP concurrency on one radio](#a3--mesh--ap-concurrency-on-one-radio) — proven on Linux, pending on ESP32 | ◑ |
+| **A3** | [Mesh + AP concurrency on one radio](#a3--mesh--ap-concurrency-on-one-radio) — **Linux gateway PROVEN end-to-end** (STA routes through the gate, 8/8; recipe in §A3); ESP32 side pending | ◑ |
 | **T1–T3** | [AP-side TWT responder](#ap-twt-responder-port--detail-t1t3) — port, leaf actually sleeps, multi-STA | ✅ |
 | **S1** | [STA-count scaling 63 → 127 → 255](#ap-sta-count-scaling-63--127--255--multi-block-s1g-tim-port-s1) — multi-block S1G TIM | ✅ |
 | **V1** | Multi-node validation — 1 ESP AP + 2 ESP STA + 1 chronium Linux STA (3 STAs, all SAE), TWT active, no regression across 127/255 builds — [worklog](../worklog/2026-06-23-ap-multinode-twt-hwtest.md) | ✅ |
@@ -444,16 +444,91 @@ Updates 13–15.
 
 ## A3 — Mesh + AP concurrency on one radio
 
-**The one remaining structural gap for a full all-ESP32 Mesh-gate.** On chronium one MM6108 ran AP
-(`hostapd_s1g`) + open 802.11s mesh-point (`iw … mesh join`) **co-channel** (ch27) + a TWT'ing ESP32
-STA, all at once — recipe + gotchas (`type mp` needs explicit `iw set type`; distinct
-locally-administered MAC; bare `freq` not `HT20`) in
-[`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md) §12.
+**Linux side: PROVEN end-to-end with real traffic (2026-07-05, stock 1.17.8).** One MM6108 (chronite) runs
+an 802.11s **mesh point** and a **SoftAP** co-channel (ch27), and an ESP32 STA under the AP **routes through
+the mesh** to a second mesh node: `board1 → chronite AP → ip_forward → HaLow mesh → chronosalt`, **8/8
+pings**. This section is the **source-of-truth bring-up recipe** — the Linux gateway is the reference
+oracle for the all-ESP32 A3 port. The ESP32 side (mesh vif + SoftAP vif co-channel on one MM6108) is still
+pending. ([`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md))
 
-The earlier blocker — **no 802.11s in morselib** — is resolved: the ESP32 mesh point is built + secured
-(P0–P6d). What's left for A3 is bringing up an ESP32 **mesh vif and a SoftAP vif co-channel on the same
-MM6108** (the firmware allows one channel; the host must run both MLME paths at once) and re-running the
-concurrency + TWT test all-ESP32. ([`worklog/2026-06-22-mesh-ap-twt.md`](../worklog/2026-06-22-mesh-ap-twt.md))
+### Working recipe — Linux Mesh+AP gateway (copy-paste; verified)
+
+Config files persist on each node (`chronite:~/wpa-mesh.conf`, `~/hostapd-rimba.conf`,
+`chronosalt:~/wpa-mesh.conf`); full templates + the mesh config fields are in
+[`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md) (§802.11s mesh + AP
+sections). This recipe was **verified on stock 1.17.8**. (An earlier session reported a "1.17.9 broke
+concurrency" regression, but that debugging was confounded by the chip-wedge + mesh-IP artifacts below, so
+the version claim is **suspect and unverified** — re-test cleanly on 1.17.9 before trusting it. The recipe
+itself is version-agnostic.) Connect to nodes by hostname (`ssh chronite`), never raw IP.
+
+Roles: **mesh on the PRIMARY vif (`wlan1`), AP on a SECONDARY vif (`ap0`)** — this ordering is the one that
+works. (Mesh on a *secondary* vif stays `INACTIVE`/won't join; AP on the primary + mesh on secondary leaves
+the mesh dead. Primary=mesh, secondary=AP.)
+
+**0. Fresh chip — do NOT churn.** Rapid `wpa_supplicant_s1g` restarts **wedge the MM6108** (mesh gets stuck
+`SCANNING`/won't peer). Bring each daemon up *once* and leave it. This single rule prevents ~all of the
+"mesh won't peer / concurrency flaky" ghosts. **To un-wedge — the fast way beats a reboot on the Pi Zeros:**
+- **Pi Zero (chronosalt/chronogen)** — the reset-GPIO (BCM **GPIO5**) is wired, so a **driver re-probe
+  resets the chip** in ~6 s (reloads fw, no reboot, no `/tmp` wipe):
+  `echo spi0.0 | sudo tee /sys/bus/spi/drivers/morse_spi/unbind; echo spi0.0 | sudo tee /sys/bus/spi/drivers/morse_spi/bind`
+  (or `sudo modprobe -r morse; sudo modprobe morse`). Verify `dmesg | grep "mm6108.bin, size"` reloaded.
+- **Pi 5 (chronium/chronite)** — **with the driver patch** (`reference/patches/morse-driver-pi5-reset-gpiod.patch`,
+  applied to the current bench build), the Pi 5 driver reload/re-probe resets the chip automatically, same
+  as the Pi Zero: `unbind/bind` or `modprobe -r morse; modprobe morse` → `Resetting Morse Chip` → fw reloads,
+  no reboot. On a **stock (unpatched)** driver the Pi 5's reset silently no-ops (`morse_chip_cfg_detect_and_init
+  failed: -5`) because stock `morse_hw_reset()` uses the legacy integer-GPIO API (fails on the RP1 controller)
+  and floats the pin to release (the HAT's `RESET_N` has no pull-up); recover it by pulsing GPIO17 by hand
+  between unbind and bind — `sudo pinctrl set 17 op dl; sleep 0.3; sudo pinctrl set 17 op dh` (BCM numbering
+  via `pinctrl`, NOT `gpiofind`/`gpioset`) — or reboot. The patch removes the need for either. See the patch
+  README for the full root-cause.
+
+**1. Gateway (chronite) — mesh on `wlan1` (primary):**
+```sh
+sudo wpa_supplicant_s1g -B -D nl80211 -i wlan1 -c wpa-mesh.conf   # mode=5, user_mpm=1, op_class=68 ch27 dtim_period=1
+sudo ip addr add 10.9.9.3/24 dev wlan1        # ← MANDATORY (see gotcha #2). Verify: wpa_state=COMPLETED
+```
+
+**2. Gateway — AP on `ap0` (secondary):**
+```sh
+WMAC=$(cat /sys/class/net/wlan1/address); AMAC=$(echo $WMAC | sed 's/^../3a/')   # distinct locally-admin MAC
+sudo iw phy phy1 interface add ap0 type __ap addr $AMAC
+sed 's/^interface=.*/interface=ap0/' hostapd-rimba.conf > /tmp/hap0.conf         # SSID rimba-ping, SAE, ch27
+sudo hostapd_s1g -B /tmp/hap0.conf            # ← FIRST start often "nl80211 driver initialization failed"
+# if it failed: sudo pkill -x hostapd_s1g; sleep 2; sudo hostapd_s1g -B /tmp/hap0.conf   → AP-ENABLED (gotcha #3)
+sudo ip addr add 192.168.12.1/24 dev ap0; sudo ip link set ap0 up
+sudo sysctl -w net.ipv4.ip_forward=1
+```
+
+**3. Second mesh node (chronosalt) — mesh + return route:**
+```sh
+sudo wpa_supplicant_s1g -B -D nl80211 -i wlan1 -c wpa-mesh.conf
+sudo ip addr add 10.9.9.4/24 dev wlan1
+sudo ip route replace 192.168.12.0/24 via 10.9.9.3 dev wlan1   # so mesh→AP-subnet return traffic routes
+```
+
+**4. Verify** (each MUST pass before blaming anything):
+```sh
+sudo wpa_cli -p /var/run/wpa_supplicant_s1g -i wlan1 status | grep wpa_state   # COMPLETED (both nodes)
+pidof hostapd_s1g && ping -c4 10.9.9.4                                         # AP up + mesh forwards 0% loss
+```
+STA leaf (`rimba-halow-sta`, static IP `192.168.12.2`, gw `192.168.12.1`) joins `rimba-ping` and pings a
+mesh host (`10.9.9.4`) → traverses the gate.
+
+### Gotchas that WILL waste your day (all cost real debugging time 2026-07-05)
+
+1. **Chip-wedge from churn** — see step 0. "Mesh stuck `SCANNING`, won't peer" is almost always this, not RF
+   or a driver bug. Reboot; bring up once.
+2. **Mesh IP is mandatory + not persistent.** With no `10.9.9.x/24` on the mesh vif, `ip route get <peer>`
+   resolves the peer out the **management interface (`wlan0`) via the default route** → the ping never hits
+   the radio → **empty mpath + 100% loss that looks exactly like a mesh-forwarding/HWMP bug but is NOT**. A
+   `wpa_supplicant` restart or reboot **wipes** the manual IP — re-add it. **ALWAYS run `ip route get
+   <peer>` and `ip -4 addr show <mesh-vif>` before concluding a forwarding bug.** (See [§Mesh security P6c]
+   note; same trap bit two separate debugging sessions.)
+3. **hostapd's first start on `ap0` often fails `nl80211 driver initialization failed`** — just `pkill` it
+   and start again (one retry, not churn) → `AP-ENABLED`.
+4. **Reading an ESP console: capture to a FILE, not a grep-in-a-pipe.** `cat /dev/ttyACMx > /tmp/log`, then
+   grep the file. A `grep | head` pipe on the live tty swallows/rethrows output and reads as a *dead board* —
+   the board is fine. (This mis-read invented a whole fake "AP secondary vif can't route" limitation.)
 
 ---
 
