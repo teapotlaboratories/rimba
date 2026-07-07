@@ -174,6 +174,18 @@ only the AP swapped. Each row is the avg over its ~18–36 s aligned window.
 > 2026-07-04 ladder measured **WNM + chip-powerdown + host-light-sleep ≈ 3.7 mA**, deep-sleep ≈ 2.9 mA —
 > but host light sleep **"backfires" at `dtim_period=1`** for dynamic PS / TWT (host wakes every ~102 ms).
 > The ~3 mA is the **board hardware floor**, not the CPU.
+>
+> **⚠️ CORRECTION (2026-07-05): the WNM+powerdown rows (5.0 / 4.0 mA) are MISLABELED — they are NOT
+> host-awake.** Proof by physics + measurement: with the host **awake** (CPU 160 MHz, `CONFIG_PM_ENABLE`
+> off) the ESP32 idle draw alone is **~15 mA** — dyn-PS (radio dozing) reads ~14.5–16 mA here *and* in the
+> original run. WNM+powerdown turns the radio *off*, but the host still idles at ~15 mA, so host-awake WNM
+> can't be **below** dyn-PS — it measures **~16 mA** (verified this session across every AP: mesh, plain,
+> primary/secondary vif, ESP 1.17.9, Linux 1.17.8). A figure of **4–6 mA is below the ~15 mA host-awake CPU
+> floor → impossible with the host awake**, so those numbers were taken with **host light sleep** (they
+> belong with §3c's 3.7 mA). Confirmed directly: a one-run A/B measured WNM+powerdown host-awake ~16 mA vs
+> **host `esp_light_sleep` = ~3 mA floor**. **So: host-awake WNM+powerdown ≈ 16 mA; the ~4 mA deep tier
+> REQUIRES host light sleep.** (No-PS ~66, dyn-PS ~15 reproduce fine; only the WNM rows' "host awake" label
+> was wrong.)
 
 **vs ESP32 AP (board0, morselib SoftAP):**
 
@@ -192,6 +204,73 @@ only the AP swapped. Each row is the avg over its ~18–36 s aligned window.
 | Dynamic PS | **14.5 mA** | **73 mW** | wakes every DTIM (floor 9) |
 | TWT, 10 s SP | **14.7 mA** | **73 mW** | **≈ dynamic PS** — mid-session TWT not engaged (STA stays dyn-PS; no SP-cadence doze) |
 | WNM sleep | **4.0 mA** | **20 mW** | deepest (floor 4) |
+
+### 3a′. Same STA vs a Linux **Mesh+AP gateway** (2026-07-05)
+
+Same STA app, same PPK2 rig, but the AP is now a **Mesh-gate**: chronite runs an 802.11s mesh point
+(`wlan1`) **and** a SoftAP (`ap0`) co-channel on one MM6108, with a second mesh node (chronosalt) behind it
+and board2's traffic routing through the mesh (8/8). Worklog:
+[`2026-07-05-board2-ps-vs-linux-mesh-ap.md`](../worklog/2026-07-05-board2-ps-vs-linux-mesh-ap.md).
+
+> **Two confounds vs the plain-AP tables above — read before comparing:** (1) the mesh-gate needs the
+> **1.17.8** driver, so the Linux side here is 1.17.8, not the matched 1.17.9 (minor); (2) board2 sits right
+> against the gateway, so at full ESP TX its uplink **overloads** chronite's receiver (−8 dBm) and the STA
+> can't hold No-PS — it was measured with **board2 TX capped to 1 dBm** (`mmwlan_override_max_tx_power(1)`,
+> RX then −28 dBm, healthy). The TX cap lowers PA current, so **No-PS is NOT directly comparable** to the
+> full-TX plain-AP rows. **⚠️ And the doze tiers are ALSO confounded** (secondary-vif AP `ap0` + 1.17.8) —
+> **do NOT read them as a mesh cost.** The same-gateway mesh-on/off A/B (RETRACTED note below) shows the
+> mesh changes nothing; these rows are "board2 vs this Mesh-gate *setup*," not "the price of meshing."
+
+| Mode | Current | Power | Notes |
+|---|---|---|---|
+| No PS | **~56 mA** | **~280 mW** | radio always on; TX-capped (~9 mA below full-TX No-PS — cap artifact, not the mesh) |
+| Dynamic PS | **20.4 mA** | **102 mW** | **+6 mA vs plain Linux AP** — co-channel mesh beacons (100 ms) + peering keepalives raise the doze floor |
+| TWT, 10 s SP | **20.4 mA** | **102 mW** | ≈ dyn-PS (mid-session TWT not engaged, same as plain `hostapd_s1g`) |
+| WNM + powerdown | **16.3 mA** | **82 mW** | **+12 mA (≈4×) vs plain AP's 4.0 mA** — the deepest sleep can't reach the plain-AP floor; mesh traffic keeps waking the radio |
+| Deep sleep | ~2.9 mA | ~15 mW | AP-independent (radio + CPU off) — same board hardware floor as any AP; loses the link |
+
+**❌ RETRACTED — "a Mesh+AP raises the STA's doze floors" is WRONG (disproved by A/B 2026-07-05).** I first
+claimed the higher doze tiers here (esp. WNM 16 vs 4 mA) were the mesh's airtime tax. A same-gateway A/B
+disproves it: measuring board2's ladder against the SAME AP (`ap0`) with the mesh vif **ON vs OFF** (only
+the mesh toggled) gives **no difference** — No-PS 66/68, Dyn-PS ~31/36, **WNM+powerdown 15.9 / 16.9 mA**
+(enter ret=0, WNM-first so not the after-TWT hang). So the mesh has **no measurable effect** on any PS
+tier. The elevated numbers vs the plain-AP tables are a **confounded comparison** (this run: TX-capped +
+1.17.8 + **AP on the secondary vif `ap0`**; the plain-AP tables: full-TX + 1.17.9 + AP on the primary vif).
+**And the cause is fully isolated (2026-07-05):** board2's WNM+powerdown reads ~16 mA against **every** AP —
+mesh-gate, plain Linux AP on the *primary* vif, at TX cap 1 *and* 10 dBm, and even the **ESP32 AP on 1.17.9**
+(WNM 15.9 / 15.8 / 15.7 / 16.5 mA respectively). So it is **NOT the mesh, NOT the secondary vif, NOT the TX
+cap, NOT the AP version** — it is a **board2-side / measurement issue**: this session's board2 does not reach
+the ~4 mA WNM+powerdown floor the earlier run recorded, against *any* AP. **✅ RESOLVED — it's the ESP32
+host power state, and the earlier ~4 mA "host-awake" figure was mislabeled.** With the host awake (CPU
+160 MHz, PM off) the ESP32 alone idles at ~15 mA (dyn-PS reads ~15 mA here and originally), so WNM+powerdown
+— radio off but host awake — is **~16 mA** and *cannot* be below dyn-PS. The ~4 mA needs **host light
+sleep**: a one-run A/B measured host-awake WNM ~16 mA vs host-`esp_light_sleep` = **~3 mA floor** (radio does
+power down). So the §3a WNM rows' "host awake" label was wrong (fixed there); ~16 mA is the true host-awake
+WNM. Nothing to do with the AP or mesh. The one solid Mesh-gate PS fact remains the **R3** result below
+(downlink to a dozing leaf works through the mesh).
+
+**R3 downlink-while-dozing THROUGH the mesh-gate — VERIFIED (2026-07-05).** A mesh peer (chronosalt) pinged
+the dozing leaf at 1 Hz across the **full path** `chronosalt → HaLow mesh → chronite(gateway) → ip_forward →
+AP(ap0) → dozing board2`:
+
+| Phase | Delivery | RTT | STA power |
+|---|---|---|---|
+| Dynamic PS + 1 Hz downlink | **28/28, 0% loss** | 31 / **87** / 261 ms | ~30 mA |
+| TWT (5 s SP) + 1 Hz downlink | **28/28, 0% loss** | 31 / 86 / 232 ms | ~30 mA |
+
+So the gateway's AP correctly **buffers downlink for the dozing leaf and flushes it at DTIM**, even when the
+traffic originates on the far side of the mesh — no drops. RTT is elevated (~87 ms avg, 261 ms max) = the
+AP's DTIM buffering + the mesh hop. Power is ~30 mA in both phases (dyn-PS level + the per-wake cost of the
+1 Hz traffic); the TWT phase shows **no deep-doze/burst pattern** because the Linux `hostapd_s1g` doesn't
+engage mid-session TWT (same as idle §3a′ / the plain Linux AP) — so board2 stays dyn-PS-like.
+
+**Host light sleep against the Mesh+AP — reasoned, not re-measured** (the plain-AP §3c run is itself
+"indicative" and needs a sleep-robust harness). Expected to **backfire harder than against a plain AP**: the
+co-channel mesh beacons (100 ms) + peering keepalives generate *more* radio IRQs, so the host light-sleeps
+even less on the per-DTIM tiers (no-PS / dyn-PS / Linux-TWT → ≥ the plain-AP ~32 mA). The one tier that
+still wins is **WNM + chip-powerdown ≈ 3.7 mA** — with the radio fully off there are no mesh IRQs to wake
+the host, so it's AP-independent (as is **deep sleep ~2.9 mA**). A clean host-light-sleep measurement vs the
+Mesh+AP is deferred to the sleep-robust harness noted in §3c.
 
 ### 3b. Downlink-while-dozing (AP pings the STA at 1 Hz) — *earlier skewed pass (ESP 1.17.9 / Linux 1.17.8); not re-run at matched fw*
 
@@ -264,6 +343,35 @@ AP-implementation difference: the ESP AP's mid-session TWT responder installs th
 deep-dozes (on-air `SETUP ACCEPT` confirmed both passes); chronite's `hostapd_s1g` does not engage the
 mid-session responder (`enable_twt` = unknown config item; `ht_vht_twt_responder=1` accepted-but-inert),
 so the STA falls back to dynamic PS.
+
+**Mesh+AP gateway (§3a′).** Board2 against a Linux **Mesh-gate** (mesh + AP co-channel on one radio) reads
+higher doze tiers (Dyn-PS ~20–35, WNM+powerdown ~16 mA), **but a same-gateway mesh-on/off A/B proved the
+mesh is NOT the cause** — toggling only the mesh changes nothing (WNM 15.9 vs 16.9 mA). The elevated tiers
+are a **setup artifact** (AP on the secondary vif `ap0` + 1.17.8 + TX-cap), not a "cost of meshing." The
+earlier "raises the doze floors / airtime tax" claim is **retracted** (see §3a′). What the Mesh-gate *does*
+prove: **it delivers downlink to a dozing leaf** (R3, §3a′ — 0% loss through the full mesh path). Deep sleep
+is AP-independent (~2.9 mA, radio off).
+
+### Consolidated — all three AP configs (idle radio PS, mA @ 5 V)
+
+| Mode | ESP32 AP | Plain Linux AP | Mesh-gate setup † |
+|---|---|---|---|
+| No-PS | 66.0 | 65.4 | ~66 |
+| Dynamic PS | 16.3 | 14.5 | ~20–35 † |
+| TWT (10 s SP) | **6.8** ✅ engages | 14.7 (not engaged) | ~20 (not engaged) |
+| WNM + powerdown, host awake | ~16 | ~16 | ~16 |
+| WNM + powerdown + host light sleep | ~3.7 | ~3.7 | ~3 |
+| Deep sleep | 2.9 | 2.9 | 2.9 |
+| R3: downlink to a dozing STA | ✅ delivers (TWT burst) | ✅ delivers at DTIM | ✅ 0% loss through the mesh |
+
+**Read this correctly:** the **ESP32-AP and plain-Linux-AP columns are the clean comparison** (matched
+1.17.9, full TX) — and the only real difference there is **mid-session TWT** (ESP AP engages it → 6.8 mA;
+both Linux APs don't). WNM+powerdown is **uniform ~16 mA host-awake** across all three (and ~3–4 mA once the
+host light-sleeps) — AP-independent. † The Mesh-gate column's only outlier is **Dyn-PS (~20–35 vs 14.5)**,
+which is **board2 session-to-session variance, NOT a mesh cost** — the same-gateway mesh-on/off A/B (§3a′)
+read dyn-PS ~31 vs ~36 mA (mesh *off* slightly higher), i.e. the mesh has zero PS effect. So there is **no
+"mesh power penalty"**; the Mesh-gate functionally matches a plain AP for a leaf (associates, routes,
+delivers downlink while it dozes).
 
 ### Battery perspective (ideal 2000 mAh)
 
