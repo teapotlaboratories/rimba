@@ -131,6 +131,8 @@ never runs the app; if **LOW (default) → it runs normally**. So to recover a b
 guaranteed flashable idle, no fresh-boot-window race, no physical BOOT. `D5 HIGH` is the *special* hold
 state; the pull-down keeps the default = run. (Flip to pull-up if you want boot-into-hold as the safe
 default.) Pairs with `reflash_hello.py`: assert D5 HIGH → power-cycle → clean flash every time.
+**Verified on hardware 2026-07-07** via the C6 harness: D5 HIGH→FLASH-HOLD, LOW→run, and a C6 trigger pulse →
+the full P1–P4 ladder, back to idle.
 
 ---
 
@@ -158,14 +160,14 @@ board2 reads) is proven end-to-end.
   actual current capture, **tri-state** it (set the C6 pin to input) so it injects nothing.
 - **Common GND mandatory**; both sides 3.3 V (no level shifting); the C6 supplies **no power** to board2.
 
-**Build / flash the C6** (standalone IDF — the repo `make` is S3-only):
+**Build / flash the C6** — the project lives at **`firmware/c6-harness/`** (standalone IDF; the repo `make`
+is S3-only). Its `MODE` selects **TRIGGER** / **HOLD_HIGH** (force board2 flash-hold) / **HOLD_LOW** /
+**TOGGLE** (link test):
 ```sh
+cd firmware/c6-harness
 export IDF_PATH=<repo>/vendor/esp-idf && source $IDF_PATH/export.sh
-idf.py -C <proj> set-target esp32c6 build
-idf.py -C <proj> -p /dev/ttyUSB0 flash
+idf.py set-target esp32c6 build && idf.py -p /dev/ttyUSB0 flash monitor   # C6 = CP210x on ttyUSB0
 ```
-Link-test apps used 2026-07-07: the C6 GPIO toggler is in the session scratchpad `c6gpio/`; board2's matching
-monitor was `rimba-hello` with a temp D5 edge-logger (reverted after).
 
 **board2 free XIAO pads** (not used by the FGH100M): **D5/GPIO6** (the harness pin — RTC-capable, so it can
 be latched through sleep), **D6/GPIO43** + **D7/GPIO44** (UART0 TX/RX — free because the console is on the
