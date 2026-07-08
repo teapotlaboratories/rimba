@@ -75,7 +75,13 @@ current and logging a 1 s average, epoch-stamped:
 ```
 
 Power below is computed as **P = 5.00 V × I** (whole-board: ESP32 + radio + regulator losses).
-Board hardware floor (deep sleep, everything off) is ~2.9–3 mA ≈ 15 mW — the practical minimum.
+
+> **⚠️ CORRECTION (2026-07-07): the "~2.9 mA deep-sleep floor" throughout this doc is NOT the true floor.**
+> Those figures used `mmwlan_shutdown()`, which resets but never power-gates the MM6108. **Holding the MM6108
+> in hardware reset (RESET_N/GPIO1 LOW) + ESP32 deep sleep reaches ~0.60 mA** (~5× lower) — see
+> `rimba-bench-devices.md` → "board2 lowest-power floor" (`firmware/rimba-sleep-test`). So read every "~2.9 mA
+> floor / practical minimum" below as "the `mmwlan_shutdown` deep-sleep number"; the real board floor is
+> ~0.6 mA, and *that* residual (regulator/module quiescent, not the USB-JTAG) is the hardware minimum.
 
 Board2 quirks that matter for reproduction:
 - Native USB-JTAG serial does **not** auto-reset on open — reset via

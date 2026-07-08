@@ -134,6 +134,21 @@ default.) Pairs with `reflash_hello.py`: assert D5 HIGH → power-cycle → clea
 **Verified on hardware 2026-07-07** via the C6 harness: D5 HIGH→FLASH-HOLD, LOW→run, and a C6 trigger pulse →
 the full P1–P4 ladder, back to idle.
 
+### board2 lowest-power floor — `rimba-sleep-test` (~0.6 mA)
+
+board2's measured deep-sleep floor is **~0.60 mA @ 5 V** (≈ 3 mW), via **`firmware/rimba-sleep-test`**:
+**hold the MM6108 in reset (RESET_N / GPIO1 driven LOW) + ESP32 deep sleep.** **This corrects the old
+~2.9 mA "board hardware floor"** — that figure used `mmwlan_shutdown()`, which *resets but never power-gates*
+the radio; asserting RESET_N low directly powers the FGH100M down and the floor drops **~5× to 0.6 mA**
+(verified 2026-07-07, rock-steady 0.60 mA over 30 s).
+
+- The residual 0.6 mA is **board hardware** (XIAO + FGH100M regulator quiescent, maybe the LED), **not** the
+  USB-JTAG — deep sleep already powers the USJ off (board2's port disappears in sleep), and explicitly
+  disabling the USJ pad changed the floor by nothing. Going below 0.6 mA needs a hardware change.
+- **Recovery (not a trap):** D5/GPIO6 is both the flash-hold guard *and* the deep-sleep **wake** source, so
+  **driving D5 HIGH (C6 `HOLD_HIGH`) wakes board2 into a flashable FLASH-HOLD idle** (verified). The fw also
+  holds a **10 s host-awake window at boot**, so a fresh-boot reflash catches it without the C6 too.
+
 ---
 
 ## Measurement harness — ESP32-C6-DevKitC-1 (board2 trigger / phase companion)
