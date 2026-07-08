@@ -12,12 +12,17 @@ Last verified: 2026-06-29.
 
 - **3× ESP32 HaLow nodes** (XIAO ESP32-S3 + FGH100M / MM6108) on the dev host's USB — chip fw **1.17.9**
   (from `vendor/morse-firmware`; the "1.17.6" in older notes was the unused SDK mbin).
-- **4× Linux HaLow nodes** on the LAN — **ALL Morse components at 1.17.9** as of 2026-07-05 (driver, fw,
-  dot11ah, morse_cli, hostapd_s1g, wpa_supplicant_s1g; BCF unchanged). **Pure stock upstream 1.17.9 —
-  no patches** (driver srcver `65FDC1A3…`; the old `hw.c` reset patch was dropped 2026-07-05 as dormant —
-  details in `rimba-linux-node-setup.md §1`). Whole bench (ESP + Linux) matches at **1.17.9** — see
-  `rimba-linux-node-setup.md §1` for the deploy recipe (driver: build on chronium, install + **reboot**,
-  never hot-reload — it wedges the chip; userspace: build on chronite, copy the binaries). Steady-state roles:
+- **4× Linux HaLow nodes** on the LAN — **ALL Morse components at 1.17.9** (driver
+  `rel_1_17_9_2026_Apr_20`, fw `mm6108.bin` 481040, dot11ah + `morse_cli`/`hostapd_s1g`/`wpa_supplicant_s1g`;
+  BCF unchanged). **Re-deployed 2026-07-07** — the nodes had been downgraded to 1.17.8 for the mesh-gate test.
+  **The Pi 5 nodes (chronium, chronite) carry the `hw.c` gpiod reset patch**
+  (`docs/reference/patches/morse-driver-pi5-reset-gpiod.patch`) — it is **NEEDED, not dormant**: stock
+  `morse_hw_reset` fails on the Pi 5 RP1 controller, so a driver reload wedges the chip; the patch makes
+  `modprobe -r morse; modprobe morse` reset + re-probe cleanly with **no reboot** (the Pi Zeros reset fine on
+  stock GPIO5, so they run unpatched 1.17.9). Whole bench (ESP + Linux) matches at **1.17.9** — see
+  `rimba-linux-node-setup.md §1` for the per-arch build/deploy recipe (build on chronium; Pi 5 native
+  `v8-16k+`, Pi Zero cross-built vs `rpi-linux-pi3` `v8+`; `CONFIG_WLAN_VENDOR_MORSE=m` +
+  `CONFIG_MORSE_SPI/VENDOR_COMMAND/USER_ACCESS/MONITOR`). Steady-state roles:
   **chronium = dedicated on-air monitor/sniffer**; the **other 3 form a live SAE+AMPE-encrypted
   802.11s mesh** (`rimba-smesh`, ch27/915.5) — plink ESTAB, encrypted ping 0% loss, mesh IPs
   `10.9.9.2`–`10.9.9.4`. (chronium *can* rejoin as `10.9.9.1` if you need a 4-node mesh instead;
@@ -34,6 +39,9 @@ Last verified: 2026-06-29.
     - **chronogen** (mesh `10.9.9.4`) — distant node for the airtime test.
 - **Dev host** — the machine these run from: holds the `rimba` repo + ESP-IDF
   toolchain; all builds/flashing happen here; SSH to the Pis over the LAN.
+- **1× ESP32-C6-DevKitC-1** — measurement-harness companion for board2 (`/dev/ttyUSB0`, target `esp32c6`):
+  drives the trigger pin / reads phase markers over a single wire, **GPIO20 → board2 D5 + GND** (link
+  verified 2026-07-07). See the **Measurement harness** section below.
 
 ---
 
@@ -92,6 +100,68 @@ s.close()
 ```
 `make flash` sometimes fails on a busy port — just retry. A reset helper:
 `python vendor/esp-idf/components/esptool_py/esptool/esptool.py --port <p> --after hard_reset --no-stub chip_id`.
+
+### board2 won't flash ("No serial data received") — un-wedge it
+
+A **sleep/deep-sleep app** on board2 (e.g. a host-light-sleep or deep-sleep PS ladder) powers the
+ESP32-S3 **native USB down and re-enumerates it constantly**, so esptool's reset can never land it in
+download mode — every flash attempt fails **`No serial data received`**, on any port, and a plain
+monitor-kill "power-cycle" does **not** fix it. This blocked the whole bench for a session; the recovery:
+
+**Run `python ~/pwr_test/reflash_hello.py`** (IDF python env). It does a **genuine PPK2 power-cycle**
+(`toggle_DUT_power("OFF")` for 2.5 s → `ON`), which cold-boots board2 with a **clean USB**; esptool's reset
+then works in the fresh-boot window. It **auto-detects board2's re-enumerated port** (the `303a` device that
+appears when power comes on), flashes rimba-hello, and leaves board2 powered + silent. **Verified 2026-07-07:
+recovered a fully-wedged board2 remotely — no physical BOOT button needed.**
+
+Two gotchas the script encodes (and you must respect if doing it by hand):
+- **Killing the PPK2 monitor does NOT cut board2's power** — the DUT rail latches ON. Only
+  `ppk2.toggle_DUT_power("OFF")` (via `ppk2-api`) truly de-powers it. A real OFF→(2.5 s)→ON is the whole trick.
+- **Never hardcode board2's `ttyACM`** — it re-enumerates on every power cycle; detect the ESP32-S3
+  (VID `303a`) that appears *after* you power it on.
+
+**Prevention:** measurement firmware should **never auto-run into sleep**. Boot into a host-AWAKE idle and
+start the ladder only on a **trigger** (GPIO6 / pad D5), ending host-awake — a fresh boot then keeps the USB
+enumerated and board2 stays reflashable. That's what `rimba-halow-sta`'s triggered ladder does.
+
+---
+
+## Measurement harness — ESP32-C6-DevKitC-1 (board2 trigger / phase companion)
+
+An **ESP32-C6-DevKitC-1** on the dev host's USB (**`/dev/ttyUSB0`**, its CP210x bridge; build target
+**`esp32c6`**) is the digital companion for board2's PPK2 power measurements. The PPK2 measures current but
+its 8 logic pins are **input-only**; the C6 can **drive** a pin, so it supplies the *trigger* that starts
+board2's ladder (and can timestamp the *phase markers* board2 pulses back). The PPK2 still does the power
+measurement — the C6 is the control/digital side, in parallel on the same DUT.
+
+**Wiring — one signal pin + ground, nothing else** (board2 is powered by the PPK2, NOT the C6):
+
+| C6 | board2 | note |
+|---|---|---|
+| **GPIO20** | **D5 / GPIO6** | the single free XIAO pad — MM6108 uses D0–D4 + D8–D10 |
+| **GND** | **GND** | common with the PPK2 ground — mandatory, or logic levels are meaningless |
+
+No UART, no reset/BOOT wires, no power line. **Link verified 2026-07-07:** C6 toggling GPIO20 at 1 Hz →
+board2 (monitoring D5) tracked it 1:1, **11 clean edges in 10 s**. So the trigger direction (C6 drives →
+board2 reads) is proven end-to-end.
+
+**Measurement-integrity rules** (board2's rail is PPK2-measured — don't inject current into it):
+- Drive GPIO20 only to **trigger** (a brief low pulse) *before/between* measurement windows; during the
+  actual current capture, **tri-state** it (set the C6 pin to input) so it injects nothing.
+- **Common GND mandatory**; both sides 3.3 V (no level shifting); the C6 supplies **no power** to board2.
+
+**Build / flash the C6** (standalone IDF — the repo `make` is S3-only):
+```sh
+export IDF_PATH=<repo>/vendor/esp-idf && source $IDF_PATH/export.sh
+idf.py -C <proj> set-target esp32c6 build
+idf.py -C <proj> -p /dev/ttyUSB0 flash
+```
+Link-test apps used 2026-07-07: the C6 GPIO toggler is in the session scratchpad `c6gpio/`; board2's matching
+monitor was `rimba-hello` with a temp D5 edge-logger (reverted after).
+
+**board2 free XIAO pads** (not used by the FGH100M): **D5/GPIO6** (the harness pin — RTC-capable, so it can
+be latched through sleep), **D6/GPIO43** + **D7/GPIO44** (UART0 TX/RX — free because the console is on the
+native USB; usable for an external-UART flash path if ever needed).
 
 ---
 

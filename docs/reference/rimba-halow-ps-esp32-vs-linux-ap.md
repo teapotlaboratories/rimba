@@ -3,9 +3,11 @@
 **Date:** 2026-07-05 — **re-run at matched firmware** (supersedes the earlier version-skewed pass).
 **Firmware (both sides, verified): stock `rel_1_17_9_2026_Apr_20`.** The ESP32 boards run 1.17.9 chip fw
 (from `vendor/morse-firmware`); the Linux nodes run 1.17.9 **driver + fw + dot11ah + hostapd_s1g +
-wpa_supplicant_s1g + morse_cli**, all **pure stock, no patches** (driver srcver `65FDC1A3…`). So this is
-a clean, matched-version comparison — no firmware-skew confound. (The earlier pass had the Linux side on
-1.17.8; those figures are superseded.)
+wpa_supplicant_s1g + morse_cli**, matched **1.17.9** (for these numbers the Linux side was the 2026-07-05
+stock deploy, driver srcver `65FDC1A3…`). So this is a clean, matched-version comparison — no firmware-skew
+confound. (The earlier pass had the Linux side on 1.17.8; those figures are superseded. Note the current
+bench runs 1.17.9 with the **Pi 5 gpiod reset patch** — RF-neutral, it only changes chip reset, so it does
+not affect any PS numbers here; see `rimba-bench-devices.md`.)
 
 **Question answered:** does a HaLow STA save the same power against the all-ESP32 morselib SoftAP as
 against a Linux `hostapd_s1g` AP?
@@ -264,13 +266,18 @@ AP's DTIM buffering + the mesh hop. Power is ~30 mA in both phases (dyn-PS level
 1 Hz traffic); the TWT phase shows **no deep-doze/burst pattern** because the Linux `hostapd_s1g` doesn't
 engage mid-session TWT (same as idle §3a′ / the plain Linux AP) — so board2 stays dyn-PS-like.
 
-**Host light sleep against the Mesh+AP — reasoned, not re-measured** (the plain-AP §3c run is itself
-"indicative" and needs a sleep-robust harness). Expected to **backfire harder than against a plain AP**: the
-co-channel mesh beacons (100 ms) + peering keepalives generate *more* radio IRQs, so the host light-sleeps
-even less on the per-DTIM tiers (no-PS / dyn-PS / Linux-TWT → ≥ the plain-AP ~32 mA). The one tier that
-still wins is **WNM + chip-powerdown ≈ 3.7 mA** — with the radio fully off there are no mesh IRQs to wake
-the host, so it's AP-independent (as is **deep sleep ~2.9 mA**). A clean host-light-sleep measurement vs the
-Mesh+AP is deferred to the sleep-robust harness noted in §3c.
+**Host light sleep + deep sleep against the Mesh+AP — ATTEMPTED 2026-07-05, only PARTIAL (blocked by the
+sleep-robust-harness gap).** An explicit-`esp_light_sleep` ladder was run against the Mesh+AP, but hit the
+exact §3c fragility: `ppk2_mon2.py` **stalls dead (`NO_SAMPLES`) on the <5 mA tiers** and board2's USB
+powers down in sleep (it got stuck deep-sleep-cycling; reflash window missed repeatedly). **Partial capture
+before the stall:** a **~33 mA backfire tier** (a per-DTIM mode + host light sleep) and a **~4 mA deep
+tier** (WNM+LS / deep sleep) — **both consistent with the plain-AP §3c values** (backfire ~32, WNM+LS ~3.7,
+deep ~2.9 mA). Combined with the proven zero mesh PS effect, the Mesh+AP light-sleep tiers = the plain-AP
+values, but this is **partial capture, not a clean per-tier measurement.** Expected shape holds: host light
+sleep **backfires** on the per-DTIM tiers (No-PS / Dyn-PS / Linux-TWT → ~32 mA, worse under the extra mesh
+IRQs) and only **wins** on WNM+chip-powerdown (~3.7 mA) and deep sleep (~2.9 mA), which are radio-off →
+AP-independent. **A clean full measurement needs the sleep-robust harness §3c calls for** (a GPIO phase-marker
+pin + a PPK2 sampler that doesn't stall below 5 mA) — not yet built.
 
 ### 3b. Downlink-while-dozing (AP pings the STA at 1 Hz) — *earlier skewed pass (ESP 1.17.9 / Linux 1.17.8); not re-run at matched fw*
 

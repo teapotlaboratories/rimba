@@ -46,7 +46,7 @@ the day-by-day narrative is in
 | Component | Repo (github.com/MorseMicro/…) | Ref | Commit | State |
 |---|---|---|---|---|
 | Kernel | `rpi-linux.git` | branch `mm/rpi-6.12.21/1.17.x` | `372414fd42cdd4d8bfcf888cac62db9da947fdb6` | unchanged (6.12.21) |
-| morse_driver | `morse_driver.git` | tag **`1.17.9`** | `7a636e4` (pkg release 1.17.9) | ✅ deployed (**pure stock**, srcver `65FDC1A3…`) |
+| morse_driver | `morse_driver.git` | tag **`1.17.9`** | `7a636e4` (pkg release 1.17.9) | ✅ deployed — **Pi 5 PATCHED** (reset patch, srcver `CB428258…`), **Pi Zero stock** (`65FDC1A3…`) |
 | MM6108 firmware | `morse-firmware.git` | **`main`** (rolling) | `ea18605` ("Release 1.17.9") | ✅ deployed |
 | morse_cli | `morse_cli.git` | tag **`1.17.9`** | — | ✅ deployed |
 | hostap | `hostap.git` | tag **`1.17.9`** | `beed5f8c8` (release 1.17.9) | ✅ deployed |
@@ -56,9 +56,10 @@ Resulting versions on the boxes: kernels `6.12.21-v8-16k+` (Pi 5: chronium/chron
 wpa_supplicant_s1g all `rel_1_17_9_2026_Apr_20`** (fw crc32 `0xa4993663`, size 481040; hostap base
 `v2.12-morse_micro`); libnl-3 `3.7.0`; iw `6.9`.
 
-> **✅ NO custom modifications — everything is pure stock upstream 1.17.9** (as of 2026-07-05).
-> Verified: `morse_driver` deployed `.ko` srcversion = **`65FDC1A3A73287FD44CE6E2`** on all four nodes
-> = a freshly-built stock 1.17.9 (differs from the old patched build's `CDF36EE0…`); hostap + morse_cli
+> **✅ All 1.17.9, re-deployed 2026-07-07** (the nodes had been downgraded to 1.17.8 for the mesh-gate test).
+> The **Pi 5 nodes carry the gpiod reset patch** — REQUIRED, see below; the Pi Zeros run stock. Verified
+> deployed `.ko` srcversions: **Pi 5 (chronium/chronite) = `CB42825862EC81AF5EBEFE9`** (patched, `v8-16k+`);
+> **Pi Zero (chronosalt/chronogen) = `65FDC1A3A73287FD44CE6E2`** (stock, `v8+`). hostap + morse_cli
 > `git diff` vs their 1.17.9 tags = **NONE**; fw/dot11ah/BCF are unmodified upstream binaries.
 >
 > **Reset patch (REQUIRED on the Pi 5 — supersedes the old "reset-timing" patch).** Carry
