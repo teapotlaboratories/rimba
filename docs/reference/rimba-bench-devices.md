@@ -124,6 +124,14 @@ Two gotchas the script encodes (and you must respect if doing it by hand):
 start the ladder only on a **trigger** (GPIO6 / pad D5), ending host-awake — a fresh boot then keeps the USB
 enumerated and board2 stays reflashable. That's what `rimba-halow-sta`'s triggered ladder does.
 
+**Flash-hold guard (the deterministic escape hatch, in `rimba-halow-sta`).** The fw reads **D5/GPIO6 at boot
+(pull-DOWN)** *before any radio/NVS init*: if **D5 is HIGH → it sits in an infinite host-awake idle** and
+never runs the app; if **LOW (default) → it runs normally**. So to recover a board2 stuck in *any* bad fw,
+**drive D5 HIGH (from the C6 GPIO20, or a jumper D5→3V3) and power-cycle** — it boots straight into a
+guaranteed flashable idle, no fresh-boot-window race, no physical BOOT. `D5 HIGH` is the *special* hold
+state; the pull-down keeps the default = run. (Flip to pull-up if you want boot-into-hold as the safe
+default.) Pairs with `reflash_hello.py`: assert D5 HIGH → power-cycle → clean flash every time.
+
 ---
 
 ## Measurement harness — ESP32-C6-DevKitC-1 (board2 trigger / phase companion)
