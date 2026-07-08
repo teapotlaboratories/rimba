@@ -36,7 +36,8 @@
 #define TRIG_PERIOD_S  30
 
 static const char *TAG = "c6-harness";
-static void hiz(void)      { gpio_set_direction(PIN, GPIO_MODE_INPUT); }
+static void hiz(void)      { gpio_set_direction(PIN, GPIO_MODE_INPUT);
+                             gpio_set_pull_mode(PIN, GPIO_FLOATING); }  /* true Hi-Z: no pull onto board2's D5 */
 static void drive(int lvl) { gpio_set_direction(PIN, GPIO_MODE_OUTPUT); gpio_set_level(PIN, lvl); }
 
 void app_main(void)

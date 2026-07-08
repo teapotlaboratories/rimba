@@ -146,7 +146,11 @@ void app_main(void)
     conf.sta.security_type = MMWLAN_SAE;
     ESP_ERROR_CHECK(mmhalow_set_config(WIFI_IF_STA, &conf));
 
-    ESP_LOGI(TAG, "Connecting...");
+    /* Close-bench RX-overload workaround: cap TX so the AP's receiver isn't saturated (applies on the
+       channel switch during connect). Earlier this dropped chronite's RX to a healthy ~-28 dBm and let
+       board2 hold a stable ladder. Remove for a real deployment. */
+    mmwlan_override_max_tx_power(1);
+    ESP_LOGI(TAG, "Connecting (TX capped to 1 dBm for the close bench)...");
     mmhalow_connect(sta_status_cb);
     int waited = 0;
     while (!s_connected && waited < 60000) { vTaskDelay(pdMS_TO_TICKS(500)); waited += 500; }
