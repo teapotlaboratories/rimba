@@ -25,42 +25,46 @@ the day-by-day narrative is in
 - `wlan0` = onboard Broadcom CYW43455 (brcmfmac) — keep it for SSH/remote; the HaLow
   radio enumerates separately as **`wlan1`** (MAC OUI `3c:22:7f`, Morse Micro).
 
-## 1. Component versions — standard is now 1.17.9 (must match)
+## 1. Component versions — standard is 1.17.8 (must match)
 
-> **Standard raised to 1.17.9 on 2026-07-05** (was 1.17.8) so the Linux nodes match the ESP32
-> boards, which run 1.17.9 chip fw (via `vendor/morse-firmware`). See the `[[morse-fw-same-version]]`
-> rule: **all Morse fw across the bench at the same version.**
+> **Standard is 1.17.8 (reverted 2026-07-08).** The bench ran 1.17.9 briefly (2026-07-05 → 08), but 1.17.9
+> was found to **regress STA power-save ~2×** (Dyn-PS 20 vs 9 mA, WNM 17.5 vs 5, light-sleep backfires; see
+> `rimba-halow-ps-esp32-vs-linux-ap.md`), so the whole bench — Linux nodes **and** ESP boards — was reverted
+> to matched **1.17.8**. Per the `[[morse-fw-same-version]]` rule: all Morse fw across the bench at the same
+> version.
 >
-> **Current node state (2026-07-05): ALL components at 1.17.9 on all four nodes** (chronium, chronite,
-> chronosalt, chronogen) — driver + MM6108 firmware + dot11ah + **`morse_cli` + `hostapd_s1g` +
-> `wpa_supplicant_s1g`** all `rel_1_17_9_2026_Apr_20`; **BCF unchanged** (byte-identical 1.17.8→1.17.9).
-> Userspace binaries were built once on chronite and copied to the others (all Debian trixie aarch64,
-> glibc 2.41). The SAE-injector `wpa_supplicant_s1g` variant on chronium was backed up to
-> `~/userspace_backup_1178/wpa_supplicant_s1g.INJECTOR_1178` (its source patch is still in chronium's
-> `~/halow/hostap` working tree); rebuild it at 1.17.9 if attack testing is needed.
+> **Current node state: ALL components at 1.17.8 on all four nodes** (chronium, chronite, chronosalt,
+> chronogen) — driver + MM6108 firmware + dot11ah + `morse_cli` + `hostapd_s1g` + `wpa_supplicant_s1g` all
+> `rel_1_17_8`; **BCF unchanged**. Verified 2026-07-08. Re-upgrading to 1.17.9 is a one-command restore from
+> `/root/rollback_1179/` on each node (the 1.17.9 `.ko` + fw + userspace were backed up there before the revert).
+>
+> Userspace binaries build once on chronium (Pi 5) and copy to the others (all Debian trixie aarch64,
+> glibc 2.41 — identical ABI, one build serves all four). The SAE-injector `wpa_supplicant_s1g` variant is
+> backed up to `~/userspace_backup_1178/wpa_supplicant_s1g.INJECTOR_1178`; its source patch is saved as
+> `~/hostap_sae_injector_1178.patch` on chronium (built on the 1.17.8 base — re-apply for attack testing).
 
 > **Hard rule: driver, firmware, `morse_cli`, and hostap should be the SAME release.**
 > A mismatch silently breaks things (we burned hours on a `morse_cli`/driver/firmware
 > version chase — see Gotchas). The public repos are **misaligned**, so pin exactly:
 
-| Component | Repo (github.com/MorseMicro/…) | Ref | Commit | State |
+| Component | Repo (github.com/MorseMicro/…) | Ref | Commit (SHA) | State |
 |---|---|---|---|---|
 | Kernel | `rpi-linux.git` | branch `mm/rpi-6.12.21/1.17.x` | `372414fd42cdd4d8bfcf888cac62db9da947fdb6` | unchanged (6.12.21) |
-| morse_driver | `morse_driver.git` | tag **`1.17.9`** | `7a636e4` (pkg release 1.17.9) | ✅ deployed — **Pi 5 PATCHED** (reset patch, srcver `CB428258…`), **Pi Zero stock** (`65FDC1A3…`) |
-| MM6108 firmware | `morse-firmware.git` | **`main`** (rolling) | `ea18605` ("Release 1.17.9") | ✅ deployed |
-| morse_cli | `morse_cli.git` | tag **`1.17.9`** | — | ✅ deployed |
-| hostap | `hostap.git` | tag **`1.17.9`** | `beed5f8c8` (release 1.17.9) | ✅ deployed |
+| morse_driver (`morse.ko`+`dot11ah.ko`) | `morse_driver.git` | tag **`1.17.8`** | `f2f14e6` | ✅ deployed — **Pi 5 + gpiod reset patch** (srcver `BF1E2755…`), **Pi Zero stock** (`405F9B14…`) |
+| MM6108 firmware (`mm6108.bin`) | `morse-firmware.git` | commit "1.17.8 firmware (MM6108)" | `fd41e1c` | ✅ deployed — 480664 B, md5 `cfe56db2` (same binary on Linux + ESP) |
+| morse_cli | `morse_cli.git` | tag **`1.17.8`** | `8e9a860` | ✅ deployed (`rel_1_17_8`) |
+| hostap (`hostapd_s1g`+`wpa_supplicant_s1g`) | `hostap.git` | tag **`1.17.8`** | `10fc5684a` | ✅ deployed (`rel_1_17_8`) |
 
 Resulting versions on the boxes: kernels `6.12.21-v8-16k+` (Pi 5: chronium/chronite) and
 `6.12.21-v8+` (Pi Zero 2 W: chronosalt/chronogen); **driver + fw + dot11ah + morse_cli + hostapd_s1g +
-wpa_supplicant_s1g all `rel_1_17_9_2026_Apr_20`** (fw crc32 `0xa4993663`, size 481040; hostap base
-`v2.12-morse_micro`); libnl-3 `3.7.0`; iw `6.9`.
+wpa_supplicant_s1g all `rel_1_17_8`** (fw size 480664, md5 `cfe56db2`; hostap base `v2.12-morse_micro`);
+libnl-3 `3.7.0`; iw `6.9`.
 
-> **✅ All 1.17.9, re-deployed 2026-07-07** (the nodes had been downgraded to 1.17.8 for the mesh-gate test).
-> The **Pi 5 nodes carry the gpiod reset patch** — REQUIRED, see below; the Pi Zeros run stock. Verified
-> deployed `.ko` srcversions: **Pi 5 (chronium/chronite) = `CB42825862EC81AF5EBEFE9`** (patched, `v8-16k+`);
-> **Pi Zero (chronosalt/chronogen) = `65FDC1A3A73287FD44CE6E2`** (stock, `v8+`). hostap + morse_cli
-> `git diff` vs their 1.17.9 tags = **NONE**; fw/dot11ah/BCF are unmodified upstream binaries.
+> **✅ All 1.17.8, reverted 2026-07-08** (1.17.9 regressed STA power-save ~2× — see the §1 header). The
+> **Pi 5 nodes carry the gpiod reset patch** — REQUIRED, see below; the Pi Zeros run stock. Verified deployed
+> `.ko` srcversions: **Pi 5 (chronium/chronite) = `BF1E275566B824AA47A47BF`** (1.17.8 + reset patch, `v8-16k+`);
+> **Pi Zero (chronosalt/chronogen) = `405F9B141F0F4AD2DB83F8F`** (stock 1.17.8, `v8+`). hostap + morse_cli
+> deployed = `rel_1_17_8`; fw `mm6108.bin` 480664 B / md5 `cfe56db2`; dot11ah/BCF unmodified upstream binaries.
 >
 > **Reset patch (REQUIRED on the Pi 5 — supersedes the old "reset-timing" patch).** Carry
 > `docs/reference/patches/morse-driver-pi5-reset-gpiod.patch` forward on every version bump. It rewrites

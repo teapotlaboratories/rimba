@@ -6,8 +6,9 @@ Most important rules:
 - **Every feature starts as a documented TODO** (in its area backlog, indexed from
   `docs/rimba-todo.md`) before you build it. See
   [AGENTS.md → Plan first](AGENTS.md#plan-first--every-feature-starts-as-a-documented-todo).
-- **Do not commit or push automatically** — only when explicitly asked. See
-  [AGENTS.md → Committing](AGENTS.md#committing).
+- **Do not commit or push automatically** — only when explicitly asked, and
+  **never during weekday work hours (Mon–Fri 9 AM–5 PM local); no back-dating to
+  dodge it.** See [AGENTS.md → Committing](AGENTS.md#committing).
 - **No AI attribution anywhere** — not in code comments, docs, commit messages, or
   GitHub PR/issue text. Everything reads as the human owner's work; commits use the
   repo's git identity only. See
