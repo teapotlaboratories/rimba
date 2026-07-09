@@ -202,6 +202,12 @@ void app_main(void)
 
     ESP_ERROR_CHECK(mmhalow_set_config(WIFI_IF_AP, &cfg));
 
+    /* Close-bench RX-overload workaround: cap AP TX so a very close board2's receiver isn't saturated.
+       board2 already caps its own TX (→ AP RX healthy); without capping the AP too, board2's RX overloads
+       (RSSI ~ -3 dBm) and the TWT handshake/teardown wedges ("Transmit blocked"). Reduce-only; the STA does
+       the mirror of this before connect. Remove for a real deployment. */
+    mmwlan_override_max_tx_power(1);
+
     ESP_LOGI(TAG, "Starting SoftAP...");
     mmhalow_wifi_start();
 

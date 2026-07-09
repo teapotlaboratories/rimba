@@ -23,6 +23,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
+#include "esp_pm.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
 #include "mmhalow.h"
@@ -32,6 +33,7 @@
 #define LINK_PSK   "rimbahalow"
 #define PHASE_PIN  GPIO_NUM_6          /* XIAO pad D5 — the single free pin shared with the C6 */
 #define PHASE_S    18                  /* seconds per tier */
+#define HOST_LIGHT_SLEEP 0            /* 0 = host AWAKE (§3a); 1 = ESP32 host light sleep (§3c) */
 
 static const char *TAG = "rimba-ladder";
 static volatile bool s_connected = false;
@@ -156,7 +158,17 @@ void app_main(void)
     while (!s_connected && waited < 60000) { vTaskDelay(pdMS_TO_TICKS(500)); waited += 500; }
     if (!s_connected) { ESP_LOGW(TAG, "link-up timeout (idle anyway; retry on next trigger)"); }
 
-    /* Host-AWAKE forever: idle -> triggered run -> idle. Never self-sleeps -> never wedges its USB. */
+#if HOST_LIGHT_SLEEP
+    /* §3c: enable ESP32-S3 host light sleep between radio wakes (PM_ENABLE + tickless idle already on in
+     * sdkconfig). This backfires on per-DTIM PS (constant light-sleep exits) but is the multiplier that
+     * unlocks the deep leaf when wakes are RARE (TWT against the ESP AP, WNM+powerdown). USB console flaps
+     * here — rely on the PPK2 plateau LEVELS (~3 mA win vs ~32 mA backfire) + deterministic 18 s phases. */
+    esp_pm_config_t pm = { .max_freq_mhz = 160, .min_freq_mhz = 40, .light_sleep_enable = true };
+    esp_pm_configure(&pm);
+    ESP_LOGW(TAG, "=== HOST LIGHT SLEEP enabled (160/40 MHz) ===");
+#endif
+
+    /* idle -> triggered run -> idle. Host-awake unless HOST_LIGHT_SLEEP. */
     while (1) {
         wait_for_trigger();
         run_ladder();
