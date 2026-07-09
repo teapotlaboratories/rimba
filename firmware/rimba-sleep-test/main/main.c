@@ -25,6 +25,11 @@ static const char *TAG = "sleep-test";
 #define D5        GPIO_NUM_6      /* flash-hold guard + deep-sleep wake (wired to C6 GPIO20) */
 #define MM_RESET  GPIO_NUM_1      /* MM6108 RESET_N — drive LOW to hold the radio off */
 
+/* 0 = A: radio OFF + host DEEP SLEEP  -> the ~0.35 mA floor (default).
+ * 1 = C: radio OFF (RESET_N low) + host AWAKE (WFI idle, no esp_pm) -> the "radio-off, host-awake"
+ *        baseline used to DIFFERENCE the associated PS tiers and isolate the radio's own draw. */
+#define AWAKE_HOLD 0
+
 void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(200));   /* console attach */
@@ -54,6 +59,21 @@ void app_main(void)
     /* 10 s host-awake window so a fresh-boot-window reflash can always catch board2 before it sleeps
      * (test-rig convenience; the floor is measured AFTER this window — remove for a real deployment). */
     for (int i = 0; i < 10; i++) { vTaskDelay(pdMS_TO_TICKS(1000)); }
+
+#if AWAKE_HOLD
+    /* === C: radio OFF (RESET_N low) + host AWAKE — the baseline for isolating the radio ===
+     * Regular GPIO (no rtc hold needed since we never sleep); host stays awake in a WFI-idle loop, the
+     * SAME idle state as the associated PS ladder, so (ladder tier) - (this) = the radio's own draw. */
+    gpio_reset_pin(MM_RESET);
+    gpio_set_direction(MM_RESET, GPIO_MODE_OUTPUT);
+    gpio_set_level(MM_RESET, 0);
+    ESP_LOGW(TAG, "=== AWAKE-HOLD (C): radio OFF (RESET_N low) + host AWAKE — measuring the host-awake floor ===");
+    uint32_t sec = 0;
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        ESP_LOGW(TAG, "awake-hold %us — radio off, host awake (read the PPK2 plateau)", (unsigned)(5 * ++sec));
+    }
+#endif
 
     /* === 2. Power off the radio: hold MM6108 RESET_N (GPIO1) LOW through deep sleep === */
     rtc_gpio_init(MM_RESET);
