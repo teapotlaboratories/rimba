@@ -4,25 +4,36 @@ Practical reference to the physical test bench: what's connected, how to reach e
 device, and the gotchas. Stable facts (ports, MACs, addresses) are reliable; the
 "currently running" notes are a snapshot — verify live before depending on them.
 
-Last verified: 2026-06-29.
+Last verified: 2026-06-29 (inventory); **all component versions re-verified 2026-07-08 = matched 1.17.8** (table below).
 
 ---
 
 ## At a glance
 
-- **3× ESP32 HaLow nodes** (XIAO ESP32-S3 + FGH100M / MM6108) on the dev host's USB — chip fw **1.17.9**
-  (from `vendor/morse-firmware`; the "1.17.6" in older notes was the unused SDK mbin).
-- **4× Linux HaLow nodes** on the LAN — **ALL Morse components at 1.17.9** (driver
-  `rel_1_17_9_2026_Apr_20`, fw `mm6108.bin` 481040, dot11ah + `morse_cli`/`hostapd_s1g`/`wpa_supplicant_s1g`;
-  BCF unchanged). **Re-deployed 2026-07-07** — the nodes had been downgraded to 1.17.8 for the mesh-gate test.
-  **The Pi 5 nodes (chronium, chronite) carry the `hw.c` gpiod reset patch**
-  (`docs/reference/patches/morse-driver-pi5-reset-gpiod.patch`) — it is **NEEDED, not dormant**: stock
-  `morse_hw_reset` fails on the Pi 5 RP1 controller, so a driver reload wedges the chip; the patch makes
-  `modprobe -r morse; modprobe morse` reset + re-probe cleanly with **no reboot** (the Pi Zeros reset fine on
-  stock GPIO5, so they run unpatched 1.17.9). Whole bench (ESP + Linux) matches at **1.17.9** — see
-  `rimba-linux-node-setup.md §1` for the per-arch build/deploy recipe (build on chronium; Pi 5 native
-  `v8-16k+`, Pi Zero cross-built vs `rpi-linux-pi3` `v8+`; `CONFIG_WLAN_VENDOR_MORSE=m` +
-  `CONFIG_MORSE_SPI/VENDOR_COMMAND/USER_ACCESS/MONITOR`). Steady-state roles:
+- **3× ESP32 HaLow nodes** (XIAO ESP32-S3 + FGH100M / MM6108) on the dev host's USB — chip fw **1.17.8**
+  (bundled from `vendor/morse-firmware` per HaLow app; currently on `rimba-hello` = radio-silent).
+- **4× Linux HaLow nodes** on the LAN — **ALL Morse components at 1.17.8** (driver + fw + dot11ah +
+  `morse_cli`/`hostapd_s1g`/`wpa_supplicant_s1g` all `rel_1_17_8`; BCF unchanged). **Reverted to 1.17.8 on
+  2026-07-08** — 1.17.9 was found to REGRESS STA power-save ~2× (see `rimba-halow-ps-esp32-vs-linux-ap.md`),
+  so the whole bench (ESP + Linux) is now matched at **1.17.8**.
+
+### Component versions — matched 1.17.8 (all devices verified 2026-07-08)
+
+| Component | Repo (github.com/MorseMicro/…) | Ref | SHA | Deployed |
+|---|---|---|---|---|
+| Kernel | `rpi-linux.git` | branch `mm/rpi-6.12.21/1.17.x` | `372414fd` | `6.12.21-v8-16k+` (Pi 5) / `v8+` (Pi Zero) — unchanged |
+| morse_driver (`morse.ko`+`dot11ah.ko`) | `morse_driver.git` | tag **`1.17.8`** | `f2f14e6` | Pi 5: **+ gpiod reset patch** (srcver `BF1E2755…`); Pi Zero: stock (`405F9B14…`) |
+| MM6108 firmware (`mm6108.bin`) | `morse-firmware.git` | "1.17.8 firmware (MM6108)" | `fd41e1c` | 480664 B, md5 `cfe56db2` — **same binary on Linux (`/lib/firmware/morse`) + ESP (`vendor/morse-firmware`)** |
+| hostap (`hostapd_s1g`+`wpa_supplicant_s1g`) | `hostap.git` | tag **`1.17.8`** | `10fc5684a` | `rel_1_17_8`, all 4 nodes |
+| morse_cli | `morse_cli.git` | tag **`1.17.8`** | `8e9a860` | `rel_1_17_8` |
+
+**Pi 5 reset patch (REQUIRED, not dormant):** chronium + chronite carry
+`docs/reference/patches/morse-driver-pi5-reset-gpiod.patch` on top of the 1.17.8 driver — stock
+`morse_hw_reset` fails on the Pi 5 RP1 controller, so a driver reload wedges the chip; the patch makes
+`modprobe -r morse; modprobe morse` reset + re-probe cleanly with **no reboot**. Pi Zeros reset fine on stock
+GPIO5 → they run the **stock** 1.17.8 driver. Reverse (re-upgrade to 1.17.9) is a one-command restore from
+`/root/rollback_1179/` on each node. See `rimba-linux-node-setup.md §1` for the per-arch build/deploy recipe.
+Steady-state roles:
   **chronium = dedicated on-air monitor/sniffer**; the **other 3 form a live SAE+AMPE-encrypted
   802.11s mesh** (`rimba-smesh`, ch27/915.5) — plink ESTAB, encrypted ping 0% loss, mesh IPs
   `10.9.9.2`–`10.9.9.4`. (chronium *can* rejoin as `10.9.9.1` if you need a 4-node mesh instead;
@@ -42,6 +53,62 @@ Last verified: 2026-06-29.
 - **1× ESP32-C6-DevKitC-1** — measurement-harness companion for board2 (`/dev/ttyUSB0`, target `esp32c6`):
   drives the trigger pin / reads phase markers over a single wire, **GPIO20 → board2 D5 + GND** (link
   verified 2026-07-07). See the **Measurement harness** section below.
+
+---
+
+## Bench setup diagram
+
+**Control plane** (wired, from the dev host):
+
+```
+                              +--------------------------+
+                              |         DEV HOST         |
+                              |  (rimba repo + ESP-IDF)  |
+                              +--------------------------+
+                                            |
+                   +------------------------+------------------------+
+                   |                                                 |
+                  USB                                             LAN/SSH
+                   |                                                 |
+     +--------+----+---+----------+                +----------+------+----+------------+
+     |        |        |          |                |          |           |            |
+   board0   board1   board2   C6-harness        chronium   chronite   chronosalt   chronogen
+```
+
+- **USB** (ESP32-S3 + FGH100M): board0 = ESP SoftAP · board1 = spare · board2 = STA/DUT (PPK2 + C6 rig)
+- **LAN** (SSH): chronium = monitor · chronite = AP / Mesh+AP gateway · chronosalt + chronogen = mesh peers
+
+**Radio plane** (HaLow S1G, ch27 / 5560 MHz — all 7 radios share the air):
+
+```
+   +----------+                        +---------------+                    +-------------+
+   |   PPK2   | == 5.00 V + mA@1s ==>  |    board2     | <== GPIO20->D5 ==  | C6-harness  |
+   | (powers  |                        |  STA / DUT    |   (trigger /       |  (ESP32-C6) |
+   |  + meas) |                        | TX-cap 1 dBm  |    guard / wake)   +-------------+
+   +----------+                        +-------+-------+
+                                               |  S1G ch27 -- board2 associates to ONE AP:
+                       +-----------------------+-----------------------+
+                       |                                               |
+                 +-----------+                              +--------------------+
+                 |  board0   |  ESP32 SoftAP                |     chronite        |  Pi 5
+                 +-----------+                              | AP (hostapd_s1g)    |
+                                                            | -or- Mesh+AP gateway|
+                                                            +---------+-----------+
+                                                                      |  wlan1 mesh (gateway mode)
+                                                          +-----------+-----------+
+                                                          v                       v
+                                                   +-------------+       +-------------+
+                                                   | chronosalt  | ===== |  chronogen  |
+                                                   | 10.9.9.4    | mesh  |  10.9.9.5   |
+                                                   +-------------+       +-------------+
+
+   +------------+
+   |  chronium  |  Pi 5 -- on-air MONITOR / sniffer (passive; wlan1->monitor, morse0 tap)
+   +------------+   (board1 = spare ESP32, not shown)
+```
+
+Versions — matched **1.17.8**: `morse_driver` `f2f14e6` (Pi 5 +reset-patch / Pi Zero stock) · `mm6108.bin`
+`fd41e1c` (identical on Linux + ESP) · `hostap` `10fc5684a` · `morse_cli` `8e9a860`. (Table above.)
 
 ---
 

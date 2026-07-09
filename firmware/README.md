@@ -11,26 +11,36 @@ bring-up log.
 Makefile               # (repo root) convenience wrapper around idf.py (build/flash/monitor)
 build/<APP>/<BOARD>/   # (repo root) out-of-source build output, per app+board (gitignored)
 boards/
-  proto1/              # board config (Seeed XIAO ESP32-S3 Plus + HaLow add-on)
-    sdkconfig.defaults
-    sdkconfig.defaults.esp32s3
+  proto1/              # Seeed XIAO ESP32-S3 Plus + HaLow add-on
+  proto1-fgh100m/      # Seeed XIAO ESP32-S3 + FGH100M (MM6108) — the current HaLow/PS bench board
 components/            # vendored Morse Micro components (git submodules), shared by apps
-  halow/               #   morsemicro/halow  — morselib driver  (repo: mm-esp32-halow)
-  firmware/            #   morsemicro/firmware — MM6108 blobs    (repo: mm-esp32-firmware)
+  halow/               #   morsemicro/halow    — morselib driver  (repo: mm-esp32-halow)
 firmware/
-  rimba-hello/         # Phase-1 sanity example (toolchain + PSRAM/SRAM validation, no radio)
-    main/rimba_hello.c
+  # --- bring-up / sanity ---
+  rimba-hello/         # Phase-1 sanity: toolchain + PSRAM/SRAM validation, no radio. Also the radio-silence image.
   rimba-halow-scan/    # MM6108 bring-up: boots the HaLow radio and scans for APs
-    main/app_main.c
-    CMakeLists.txt     # adds ../../components via EXTRA_COMPONENT_DIRS
-  rimba-halow-ap/      # 2-board ping test: HaLow SoftAP node
-  rimba-halow-sta/     # 2-board ping test: HaLow station node
-  rimba-halow-ibss/    # IBSS / ad-hoc mesh (RISK-01): N-node addressing, peer discovery, ping
+  # --- AP <-> STA link + throughput ---
+  rimba-halow-ap/      # HaLow SoftAP (2-board ping AP; also the ESP32-AP-under-test in the PS study)
+  rimba-halow-sta/     # TRIGGERED power-save ladder — the PS DUT app (netif-free, C6-triggered)
+  rimba-halow-ap-perf/ # iperf throughput — SoftAP side
+  rimba-halow-sta-perf/# iperf throughput / 2-board ping — STA side
+  # --- mesh ---
+  rimba-halow-mesh/    # 802.11s secured mesh node (SAE + AMPE + host SW-CCMP)
+  rimba-halow-mesh-perf/# iperf throughput — mesh
+  rimba-halow-ibss/    # 802.11ah IBSS / ad-hoc mesh (RISK-01): N-node addressing, peer discovery, ping
+  # --- power-save & sleep characterization (see the PS reference doc) ---
+  rimba-twt-assoc/     # TWT via the assoc-embedded path (engages on both Linux + ESP APs)
+  rimba-doze-hold/     # keep the STA associated while the radio dozes (TWT then WNM+powerdown)
+  rimba-standby-test/  # MMWLAN_STANDBY feasibility (deprecated — loses to WNM)
+  rimba-deepsleep-cycle/# deep-sleep as a duty-cycled leaf (RESET_N-low + re-associate on wake)
+  rimba-downlink-test/ # downlink-while-dozing: a pingable dozing STA (§3b)
+  rimba-sleep-test/    # board2 lowest-power floor (radio in hardware reset + ESP32 deep sleep)
+  # --- measurement harness ---
+  c6-harness/          # ESP32-C6 companion that drives board2's D5 trigger (own README)
   README.md
 vendor/
   esp-idf            # ESP-IDF toolchain (pinned submodule, v5.4.2) — the build uses this
-  mm-iot-sdk         # Morse Micro SDK (pinned submodule) — reference only; the
-                     # build uses the vendored components/, not this tree
+  morse-firmware     # MM6108 firmware blobs (pinned submodule) — mm6108.bin is ELF->.mbin at build time
 ```
 
 Builds are kept **out-of-source**: `make build APP=foo BOARD=bar` writes to
@@ -46,123 +56,125 @@ reuses a stale config.
   ```bash
   git submodule update --init vendor/esp-idf          # if not cloned --recurse-submodules
   git -C vendor/esp-idf submodule update --init --recursive
-  ./vendor/esp-idf/install.sh esp32s3
+  ./vendor/esp-idf/install.sh esp32s3 esp32c6         # esp32c6 target only needed for c6-harness
   # cmake/ninja are not bundled on Linux; pin cmake to 3.x (cmake 4 breaks IDF):
   ~/.espressif/python_env/idf5.4_py*_env/bin/pip install "cmake==3.30.5" ninja
   ```
   The Makefile's default `IDF_PATH` points at `vendor/esp-idf`, so you don't need
   to set it (override `IDF_PATH=...` to use a different install).
-- The MM6108 components (`morsemicro/halow` + `morsemicro/firmware`) are
-  **vendored as git submodules** under `components/` — not downloaded from the
-  registry. Get them when cloning:
+- The MM6108 components (`morsemicro/halow` + `morse-firmware`) are **vendored as
+  git submodules** — not downloaded from the registry. Get them when cloning:
   ```bash
   git clone --recurse-submodules <repo>          # or, in an existing clone:
   git submodule update --init components/halow vendor/morse-firmware
   ```
-  The `rimba-halow-scan` project adds `components/` to the build via
-  `EXTRA_COMPONENT_DIRS`. The firmware image is generated at build time from
-  `vendor/morse-firmware` (ELF → `.mbin`, see `cmake/mm-fw-gen/`).
+  The firmware image is generated at build time from `vendor/morse-firmware`
+  (ELF → `.mbin`, see `cmake/mm-fw-gen/`). **Chip firmware version is set by that
+  submodule** — the bench standard is **1.17.8** (`mm6108.bin` = `fd41e1c`); keep
+  it matched to the Linux nodes (see
+  [`../docs/reference/rimba-bench-devices.md`](../docs/reference/rimba-bench-devices.md)).
 
 ## Build / flash / monitor
 
-The board (Seeed XIAO ESP32-S3 Plus) enumerates over its **native USB-Serial-JTAG**
-as `/dev/ttyACM0`; that is used for both flashing and the console.
-
-Run from the **repo root**. `APP` selects the example (default `rimba-halow-scan`)
-and `BOARD` selects the board config under `boards/` (default `proto1`):
+The board enumerates over its **native USB-Serial-JTAG** as `/dev/ttyACM*`; that is
+used for both flashing and the console. Run from the **repo root**. `APP` selects
+the example and `BOARD` selects the board config under `boards/`:
 
 ```bash
-make build                           # rimba-halow-scan on board proto1 (defaults)
-make flash                           # flash to /dev/ttyACM0
-make monitor                         # serial console (Ctrl-] to quit)
-make flash-monitor
-make build APP=rimba-hello           # the radio-free sanity example
-make build BOARD=proto2              # a different board (boards/proto2/)
+make build APP=rimba-halow-scan BOARD=proto1-fgh100m       # build
+make flash APP=rimba-halow-scan BOARD=proto1-fgh100m PORT=/dev/ttyACM0
+make monitor APP=rimba-halow-scan PORT=/dev/ttyACM0        # serial console (Ctrl-] to quit)
+make build APP=rimba-hello                                 # the radio-free sanity example
 ```
 
+`BOARD=proto1-fgh100m` is the current HaLow bench board (XIAO ESP32-S3 + FGH100M).
 Override `APP`, `BOARD`, `TARGET`, `PORT`, or `IDF_PATH` on the command line,
 e.g. `make flash PORT=/dev/ttyACM1`. Run `make help` for the full list.
 
-## The examples
+## The apps
 
-### `rimba-hello`
-Radio-free sanity check: chip info, an 8 MB PSRAM read/write test (RISK-04),
-SRAM headroom, heartbeat. Use it to confirm the toolchain + flash pipeline.
+### Bring-up / sanity
 
-### `rimba-halow-scan`
-Boots the MM6108 over SPI (loads firmware + BCF), prints version/chip info, and
-scans for HaLow APs. Built on the vendored `halow` component (`components/halow`).
+- **`rimba-hello`** — radio-free sanity check: chip info, an 8 MB PSRAM read/write
+  test (RISK-04), SRAM headroom, heartbeat. Confirms the toolchain + flash pipeline,
+  and is the **radio-silence image** flashed to the ESPs after every bench test.
+- **`rimba-halow-scan`** — boots the MM6108 over SPI (loads firmware + BCF), prints
+  version/chip info, and scans for HaLow APs. Board-specific SPI pins, BCF/firmware,
+  and country code live under [`boards/<BOARD>/`](../boards/); **`CONFIG_HALOW_COUNTRY_CODE`
+  is required** (defaults to `"??"`, which fails the scan — valid: `AU CA EU GB IN JP KR NZ US`).
 
-Board-specific config lives under [`boards/<BOARD>/`](../boards/) — for the
-default `proto1` board, [`boards/proto1/sdkconfig.defaults`](../boards/proto1/sdkconfig.defaults):
+### AP ↔ STA link + throughput
 
-- **XIAO HaLow SPI/control pins** — the component's own defaults are a different
-  board, so these overrides are required:
-  `RESET_N=1 WAKE=2 BUSY=5 IRQ=3 CS=4 SCK=7 MISO=8 MOSI=9`.
-- **BCF/firmware:** `CONFIG_MM_BCF_FILE="bcf_mf16858.mbin"` (the chip reports
-  `mm6108-mf16858`), `CONFIG_MM_FW_FILE="mm6108.mbin"`.
-- **Country:** `CONFIG_HALOW_COUNTRY_CODE="US"` — **required**; it defaults to
-  `"??"` and without a valid code the radio won't set a channel list and scan
-  fails. Valid: `AU CA EU GB IN JP KR NZ US`.
-
-### `rimba-halow-ap` + `rimba-halow-sta` (2-board ping test)
-
-A bidirectional ICMP ping over an 802.11ah AP↔STA link — the proven two-node
-path (the MM6108 has no public IBSS in morselib). Flash one board as the SoftAP
-and the other as the station, on separate ports:
+A bidirectional ICMP ping / iperf over an 802.11ah AP↔STA link — the proven
+two-node path. Flash one board as the SoftAP and the other as a station:
 
 ```bash
-make flash APP=rimba-halow-ap  PORT=/dev/ttyACM0    # SoftAP, static 192.168.12.1
-make flash APP=rimba-halow-sta PORT=/dev/ttyACM1    # STA,    static 192.168.12.2
-make monitor APP=rimba-halow-sta PORT=/dev/ttyACM1  # watch "reply from … time=N ms"
+make flash APP=rimba-halow-ap  BOARD=proto1-fgh100m PORT=/dev/ttyACM0   # SoftAP, static 192.168.12.1
+make flash APP=rimba-halow-sta-perf BOARD=proto1-fgh100m PORT=/dev/ttyACM1   # STA + iperf
 ```
 
-Both nodes ping each other (~12 ms RTT, US 915.5 MHz / 1 MHz BW). Two
-non-obvious details, both handled in the apps:
+Two non-obvious details, both handled in the apps:
+- **Static IPs, no DHCP.** `mmhalow` gives even the AP a DHCP-*client* netif and runs
+  no DHCP server, so each side pins a static IP.
+- **The AP must bring its netif up.** In AP mode `mmhalow` never fires a link-up event,
+  so `rimba-halow-ap` calls `esp_netif_action_connected` explicitly — that one line is
+  what makes the AP reachable over IP.
 
-- **Static IPs, no DHCP.** `mmhalow` gives even the AP a DHCP-*client* netif and
-  runs no DHCP server, so each side pins a static IP rather than leasing one.
-- **The AP must bring its netif up.** In AP mode `mmhalow` never fires a link-up
-  event, so it never calls `esp_netif_action_connected` — the AP netif stays
-  down and lwIP silently drops ICMP. `rimba-halow-ap` calls it explicitly; that
-  one line is what makes the AP reachable over IP.
+`rimba-halow-ap` carries `CONFIG_HALOW_AP_MODE=y`; STA apps need none (STA is the
+default). The **`-perf`** variants (`rimba-halow-ap-perf`, `rimba-halow-sta-perf`,
+`rimba-halow-mesh-perf`) add an **iperf** server/client for throughput measurement.
 
-`rimba-halow-ap` carries one app-level override
-([`firmware/rimba-halow-ap/sdkconfig.defaults`](rimba-halow-ap/sdkconfig.defaults)):
-`CONFIG_HALOW_AP_MODE=y`. `rimba-halow-sta` needs none (STA is the default mode).
+> Note: `rimba-halow-sta` itself is **not** a ping STA — it is the power-save ladder
+> (below). Use `rimba-halow-sta-perf` for the plain link/throughput test.
 
-### `rimba-halow-ibss` (the IBSS / ad-hoc mesh)
+### Mesh
 
-The RISK-01 result: an **802.11ah IBSS** (peer-to-peer, no AP). The MM6108 has no
-public IBSS API in morselib, so the IBSS support is added in the vendored
-`components/halow` (adopted from `momentary-systems/esp-halow-ibss`; bring-up,
-peer table + age-out, datapath). **One binary runs on every node** — the
-create/join role is a MAC heuristic (bench), and each node derives its IP from its
-MAC (`192.168.13.<mac[5]>`) and pings every discovered peer, so the same image
-scales to N boards.
+- **`rimba-halow-mesh`** — an **802.11s secured-mesh** node: brings up a mesh vif
+  (Mesh ID + Mesh Config IEs, following `morse_driver`'s mesh BSS flow), joins the
+  secured mesh (**SAE + AMPE**, host software-CCMP), pins a static mesh IP, and
+  forwards (HWMP + group-addressed). Single- and multi-hop relay are on-air verified.
+  Background + the line-by-line Linux code-map are in
+  [`../docs/mesh-ap/rimba-mesh-ap-milestones.md`](../docs/mesh-ap/rimba-mesh-ap-milestones.md).
+- **`rimba-halow-ibss`** — the RISK-01 **802.11ah IBSS** (peer-to-peer, no AP). IBSS
+  support is added in the vendored `components/halow` (adopted from
+  `momentary-systems/esp-halow-ibss`). **One binary runs on every node** — the
+  create/join role is a MAC heuristic and each node derives its IP from its MAC
+  (`192.168.13.<mac[5]>`), so the same image scales to N boards. Validated: 2- and
+  3-board full mesh, peer age-out + rejoin, and interop with a Linux `morse_driver`
+  IBSS node. Peer discovery is **data-driven** (learned from data-frame source
+  addresses), not beacon-based. See
+  [`../docs/ibss/rimba-ibss-milestones.md`](../docs/ibss/rimba-ibss-milestones.md).
 
-```bash
-make flash APP=rimba-halow-ibss BOARD=proto1-fgh100m PORT=/dev/ttyACM0   # node 1
-make flash APP=rimba-halow-ibss BOARD=proto1-fgh100m PORT=/dev/ttyACM1   # node 2  (… ACM2 = node 3)
-make monitor APP=rimba-halow-ibss PORT=/dev/ttyACM0                      # "reply from 192.168.13.N … IBSS DATA OK"
-```
+### Power-save & sleep characterization
 
-Validated on hardware: 2- and 3-board **full mesh**, peer age-out + drop/rejoin
-resilience, and **interop with a Linux `morse_driver` IBSS node** on the same
-silicon. Background, the Linux-equivalence map, and the on-air debugging (the #17
-beacon phantom-flood; #16 data-driven discovery) are in
-[`../docs/ibss/rimba-ibss-milestones.md`](../docs/ibss/rimba-ibss-milestones.md),
-[`../docs/ibss/rimba-ibss-test-plan.md`](../docs/ibss/rimba-ibss-test-plan.md), and
-[`../docs/worklog/2026-06-20-ibss-adoption-interop-phantom.md`](../docs/worklog/2026-06-20-ibss-adoption-interop-phantom.md).
+The apps behind the STA power-save study — full method, numbers, and topology in
+[`../docs/reference/rimba-halow-ps-esp32-vs-linux-ap.md`](../docs/reference/rimba-halow-ps-esp32-vs-linux-ap.md).
+board2 (the DUT) is powered + metered by a Nordic PPK2 and triggered over one wire
+by the `c6-harness`. **STA pitfall shared by all of these:** `mmhalow_init()`
+force-disables power-save (`mmhalow.c:200`) — every app re-enables it with
+`mmwlan_set_power_save_mode(MMWLAN_PS_ENABLED)` after connect.
 
-Key discovery detail worth knowing: peer discovery is **data-driven** (learned from
-data-frame source addresses), *not* beacon-based — the current MM6108 firmware
-(1.17.6) doesn't surface same-cell peer beacons to the host, and `morse_driver`
-beacons carry `SA=BSSID`. This is firmware-dependent (see the milestones doc).
+| App | What it measures |
+|---|---|
+| `rimba-halow-sta` | the **triggered PS ladder** — No-PS → Dynamic PS → TWT → WNM+powerdown, fixed 18 s phases, C6-triggered; `HOST_LIGHT_SLEEP` flag toggles §3a (awake) vs §3c (host light-sleep) |
+| `rimba-twt-assoc` | **TWT via the assoc-embedded path** (`mmwlan_twt_add_configuration` before connect) — engages on the Linux AP too, unlike the mid-session action |
+| `rimba-doze-hold` | "deep-sleep without powering off the radio" — hold the STA **associated** while it dozes (TWT, then WNM + chip-powerdown) |
+| `rimba-standby-test` | `MMWLAN_STANDBY` feasibility (**deprecated** — chip stays active, loses to WNM+powerdown) |
+| `rimba-deepsleep-cycle` | deep-sleep as a **duty-cycled leaf**: hold the radio in `RESET_N`-low + ESP32 deep sleep, wake on the C6 trigger, **re-associate** (~5.1 s) |
+| `rimba-downlink-test` | **downlink-while-dozing** (§3b): board2 becomes a pingable STA (`192.168.12.51`), dozes in Dynamic PS while the AP pings at 1 Hz |
+| `rimba-sleep-test` | board2's **lowest-power floor** (`RESET_N`-low + ESP32 deep sleep ≈ 0.35–0.6 mA) |
+
+### Measurement harness
+
+- **`c6-harness`** — an **ESP32-C6** companion (not the S3): drives board2's D5 pin
+  to trigger the PS ladder and time the phase markers over a single wire. Built for
+  the `esp32c6` target; has its own [`c6-harness/README.md`](c6-harness/README.md).
 
 ## Hardware notes
 
-- **MCU:** ESP32-S3R8 — 16 MB QIO flash, 8 MB **octal (OPI)** PSRAM (mandatory,
-  RISK-04).
-- **Radio:** Seeed Wi-Fi HaLow (MM6108, module `mm6108-mf16858`) over SPI.
-  Confirmed booting — firmware v1.17.6, chip ID 0x0306.
+- **MCU:** ESP32-S3R8 — 16 MB QIO flash, 8 MB **octal (OPI)** PSRAM (mandatory, RISK-04).
+- **Radio:** Morse Micro MM6108 over SPI (`proto1-fgh100m` = XIAO ESP32-S3 + FGH100M;
+  `proto1` = XIAO + Seeed HaLow add-on `mm6108-mf16858`), chip ID `0x0306`.
+- **Chip firmware:** bench standard **1.17.8** (`mm6108.bin` = `fd41e1c`), bundled from
+  `vendor/morse-firmware` and kept matched to the Linux nodes — see
+  [`../docs/reference/rimba-bench-devices.md`](../docs/reference/rimba-bench-devices.md).
