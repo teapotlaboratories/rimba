@@ -14,9 +14,11 @@ joins a Linux HaLow 802.11s mesh and pings it, **originates** multi-hop traffic,
 others' traffic, does **group/multicast forwarding**, **PERR** teardown, a runtime **leaf
 toggle**, and a **secured (SAE+AMPE+CCMP) mesh** single- and multi-hop — phases **P0–P6b, P6d ✅**,
 **P6c (security ✅; airtime-metric/power-save/proxy-gate ⬜) 🟡** ([§802.11s mesh point](#80211s-mesh-point-morselib)).
-The one remaining structural gap for a full all-ESP32 Mesh-gate is **mesh + AP concurrency on one
-ESP32 radio** ([§A3](#a3--mesh--ap-concurrency-on-one-radio)) — both halves work individually on the
-ESP32; running them co-channel together is proven on Linux but not yet on the ESP32.
+The last structural gap for a full all-ESP32 Mesh-gate — **mesh + AP concurrency on one ESP32 radio**
+([§A3](#a3--mesh--ap-concurrency-on-one-radio)) — is now **PROVEN end-to-end on the ESP32 (2026-07-10)**:
+concurrent co-channel mesh+AP beaconing, plus a STA under the AP routing to a 2nd mesh node and back
+(ping 10/10 + iperf both ways). Remaining work is hardening (de-hardcode the return gw, broadcast
+forwarding, wider coverage) + the deferred per-stad/per-vif ops dispatch for untested mixed-flow cases.
 
 **Governing requirement (memory `proper-fix-follow-linux`, same as IBSS):** the
 implementation is **derived from the Linux side** — MorseMicro's `morse_driver`
@@ -100,7 +102,7 @@ Concise index; each entry points to its detail section below.
 |---|---|---|
 | **A1** | SoftAP bring-up (SAE) — SSID `rimba-ping`, WPA3-SAE, S1G ch27; host-built beacon (bundled hostapd) | ✅ |
 | **A2** | AP ↔ STA association + bidirectional IP (SAE 4-way, DHCP, ping) — [worklog](../worklog/2026-06-18-halow-ap-sta-ping.md) | ✅ |
-| **A3** | [Mesh + AP concurrency on one radio](#a3--mesh--ap-concurrency-on-one-radio) — **Linux gateway PROVEN end-to-end** (STA routes through the gate, 8/8; recipe in §A3); ESP32 side pending | ◑ |
+| **A3** | [Mesh + AP concurrency on one radio](#a3--mesh--ap-concurrency-on-one-radio) — **PROVEN end-to-end on ESP32 (2026-07-10)**: co-channel mesh+AP + STA routes through the gate to a 2nd mesh node & back (ping 10/10 + iperf both ways). Linux gateway also proven (8/8). Hardening + deferred per-stad ops dispatch remain | ✅ |
 | **T1–T3** | [AP-side TWT responder](#ap-twt-responder-port--detail-t1t3) — port, leaf actually sleeps, multi-STA | ✅ |
 | **S1** | [STA-count scaling 63 → 127 → 255](#ap-sta-count-scaling-63--127--255--multi-block-s1g-tim-port-s1) — multi-block S1G TIM | ✅ |
 | **V1** | Multi-node validation — 1 ESP AP + 2 ESP STA + 1 chronium Linux STA (3 STAs, all SAE), TWT active, no regression across 127/255 builds — [worklog](../worklog/2026-06-23-ap-multinode-twt-hwtest.md) | ✅ |
@@ -529,6 +531,144 @@ mesh host (`10.9.9.4`) → traverses the gate.
 4. **Reading an ESP console: capture to a FILE, not a grep-in-a-pipe.** `cat /dev/ttyACMx > /tmp/log`, then
    grep the file. A `grep | head` pipe on the live tty swallows/rethrows output and reads as a *dead board* —
    the board is fine. (This mis-read invented a whole fake "AP secondary vif can't route" limitation.)
+
+### ESP32 port plan — mesh + AP co-channel on one MM6108 (derived from morse_driver; recon 2026-07-08)
+
+**Feasibility (recon).** The MM6108 **firmware command layer is already multi-vif**: `MORSE_CMD_ID_ADD_INTERFACE`
+returns a FW-assigned `vif_id`, the fw interface-type enum has `MESH=5`, per-frame vif tagging
+(`MORSE_TX/RX_..._FLAGS_VIF_ID`) and per-vif beacon IRQs exist, and the repo already carries probe helpers
+(`mmprobe_add_iface_raw` / `mmprobe_iface_type_supported`, `src/driver/driver.c`) to test a 2nd concurrent vif.
+The blocker is morselib's **single-vif umac abstraction**: one `struct umac_interface_data.vif_id`; STA/AP/MESH
+**swap** on it (`umac_interface_add` does `rm_if`→`add_if`); `umac_interface_type_is_compatible_with_active()`
+rejects the {AP, MESH} pair; and `mmwlan_mesh_start` calls `umac_mesh_tear_down_active_interfaces()`. Scope
+**(b)**: widen the abstraction — FW very likely supports it, but gate it empirically first.
+
+- ✅ **Stage 0 — feasibility gate: GO (2026-07-08).** Probed the FW via `mmint_mmprobe_iface_type_supported`
+  (the mangled-but-exported morselib helper), invoked from `rimba-halow-ap` with the AP vif up: the FW
+  **grants a 2nd concurrent vif of type MESH** (`ret=0, fw_status=0`) on the pinned 1.17.8 fw — also AP and STA
+  as a 2nd vif. So **the firmware is NOT the blocker; scope (b) is confirmed.** (Caveat: the probe adds +
+  auto-removes the vif — this proves FW *allocation* of a concurrent vif, not yet co-channel beacon/traffic,
+  which is Stage 3's on-air check on chronium's `morse0`.)
+  - **Build note (an earlier "mangle bug" was misdiagnosed — retracted).** The
+    `undefined reference to umac_ap_enable_ap` was simply the throwaway probe app **missing
+    `CONFIG_HALOW_AP_MODE=y`**: `umac_ap.c` (which defines it) is compiled into libmorse only under that
+    config (morselib `CMakeLists.txt` `if(CONFIG_HALOW_AP_MODE)`), and the probe called the AP path without
+    it. No build-system bug, no fresh-mangle race. **Implication:** a mesh+AP app just needs
+    `CONFIG_HALOW_AP_MODE=y` in its `sdkconfig.defaults` — `umac_mesh.c` is always compiled, so one AP-mode
+    build carries **both** the AP and mesh code. **Stage 1 is not blocked.**
+- ✅ **Stage 1 — concurrent vifs in umac: IMPLEMENTED + builds (2026-07-08).** Primary+secondary
+  vif model landed on `components/halow` branch `feat/mesh-ap-concurrency`; function-level
+  new-code↔reference map in [`rimba-mesh-ap-esp32-stage1-codemap.md`](rimba-mesh-ap-esp32-stage1-codemap.md).
+  `ap_vif_id`/`ap_mac_addr` slot added; `{AP,MESH}` allowed (mesh-first enforced); a concurrent
+  AP allocs a 2nd FW vif (distinct locally-admin MAC) instead of the rm→add swap; getters +
+  `umac_interface_remove` + mesh tear-down route AP→secondary. Compiles clean with
+  `CONFIG_HALOW_AP_MODE=y` (`rimba-halow-mesh`, board `proto1-fgh100m`). **On-air = Stage 3, not
+  yet done.** Design (unchanged) below. `umac_interface_data`
+  holds a SINGLE `vif_id`/`mac_addr` today (STA/AP/MESH **swap** on it via `mmdrv_rm_if`→`mmdrv_add_if`);
+  `active_interface_types` is *already* a bitmask. **Blast radius: 90 direct `data->vif_id` uses across 9 files**
+  (connection 29, offload 21, interface 21, ap 8, twt 4, mesh 2, ibss 2, skbq 2, datapath 1) → a full N-vif array
+  is the multi-day cost. **Tractable design — primary + secondary vif, mirroring the Linux recipe (mesh on
+  primary `wlan1`, AP on secondary `ap0`):**
+  - Keep `data->vif_id` as the **PRIMARY** (mesh in the Mesh-gate) → mesh/STA code untouched (the 29+21
+    STA-side uses aren't on a gateway anyway).
+  - Add a **SECONDARY** slot to `umac_interface_data` (`ap_vif_id` + `ap_mac_addr`) for the concurrent AP.
+  - `umac_interface_type_is_compatible_with_active()` (`umac_interface.c:152`): allow the **AP+MESH** pair —
+    relax the MESH-exclusive check at `:181-189` (mirror Linux `iface_combination {AP,MESH} #chan≤1`).
+  - `umac_interface_add()` (`:194`): when AP is added alongside MESH, `mmdrv_add_if` a **2nd** vif with a
+    distinct locally-administered MAC → store in `ap_vif_id` (NOT the swap at `:280-306`).
+  - Getters `umac_interface_get_vif_id(type_mask)` (`:413`) / `_get_vif_type_mask` (`:426`): resolve
+    AP→`ap_vif_id`, else→`vif_id` — fixes the 11 getter-callers for free.
+  - AP-subsystem routing: `umac_ap.c` (only **8** `data->vif_id` uses) must use `ap_vif_id` when AP is
+    secondary — the main per-vif edit.
+  - `mmwlan_mesh_start` (`umac_mesh.c`): relax `umac_mesh_tear_down_active_interfaces()` so the AP vif survives.
+- ◑ **Stage 2 — per-vif beacon: IMPLEMENTED + builds (2026-07-08); `mmwlan_ap_disable` DEFERRED.**
+  `driver_data.beacon` is now per-vif (`enabled_vif_mask` + atomic `pending_vif_mask`); the beacon
+  ISR latches which vif fired, the work handler drains all pending vifs, and
+  `mmdrv_host_get_beacon(vif_id)` dispatches mesh vs AP by the firing vif's type (was a global
+  `is_active` check). Details/anchors in the [code-map](rimba-mesh-ap-esp32-stage1-codemap.md#stage-2--per-vif-beacon).
+  `mmwlan_ap_disable` stays a stub — not on the bring-up path, and its supplicant-teardown ordering
+  needs on-air validation first (see code-map §Deferred). **On-air = Stage 3, not yet done.**
+- ◑ **Stage 3 — concurrent beaconing PROVEN ON AIR (2026-07-08); STA-routing follow-up pending.** New app
+  [`firmware/rimba-halow-mesh-ap`](../../firmware/rimba-halow-mesh-ap/main/app_main.c) brings up the
+  all-ESP Mesh-gate: `mmhalow_init → mmwlan_mesh_start` (mesh, primary vif) `→ mmwlan_ap_enable`
+  (SoftAP, secondary vif), co-channel on chan 27; AP BSSID auto-derived (mesh_mac ^ 0x02).
+  - **Bring-up PASS (board1, `proto1-fgh100m`):** boot log shows `MESH vif up (primary)` +
+    `AP vif up (secondary) BSSID=e0:72:a1:f8:f9:40 — CONCURRENT`, no crash, heap stable 20 s. Proves
+    Stage 1 (`mmwlan_ap_enable` allocates the 2nd vif while mesh is active).
+  - **On-air PASS (chronium `morse0` monitor, ch27):** 14 s raw capture saw **136 mesh-MAC beacons**
+    (SA `e2:72:a1:f8:f9:40`, Mesh ID `rimba-mesh`, 149 B) **+ 135 AP-MAC beacons** (BSSID
+    `e0:72:a1:f8:f9:40`, SSID `rimba-ping`, 183 B), ~9.7/s each (100 TU), 0 frames carrying both —
+    i.e. **both vifs beacon concurrently from one MM6108**. Proves Stage 2 per-vif beacon on air.
+    (Radio-silenced after: board1→`rimba-hello`, chronium `wlan1`/`morse0` down. Byte-count/payload
+    check done; a full byte-for-byte IE diff vs a live Linux gateway is the remaining polish under
+    [[verify-onair-chronium-monitor]].)
+  - ✅ **End-to-end routing — DONE (2026-07-10,
+    [worklog](../worklog/2026-07-10-esp32-mesh-gate-returnleg-fixed-forward-rootcaused.md)).** All-ESP rig:
+    board0 gateway (`rimba-halow-mesh-ap`, 2nd AP netif + `ip_forward`) / board1 2nd mesh node
+    (`rimba-halow-mesh`) / board2 STA (`rimba-halow-sta-perf`; `rimba-halow-sta` is netif-free, can't
+    ping). **STA↔2nd-mesh-node ping = 10/10, 0% loss, ttl=63, repeatable; iperf UDP ~0.3 Mbit/s and TCP
+    both traverse the gate in both directions** (throughput radio-limited, matches the perf table below;
+    heap-stable, no leak/crash under a 300-frame flood). Two root-caused fixes closed it (the 2026-07-09
+    session had narrowed the break to the reply return-leg and exonerated the gateway 4-addr TX build,
+    lwIP `ip_forward`-*decision*, ARP, and the entire CCMP crypto/decrypt path):
+    - **Return leg** — `rimba-halow-mesh` `mesh_net_task` hard-coded the mesh netif default gw to the
+      phantom `10.9.9.1`; an off-subnet echo-reply (to the STA on `192.168.12.x`) routes only via that gw,
+      so board1 ARPed a nonexistent host and dropped the reply before `halow_transmit`. Fix: gw =
+      `10.9.9.136` (the gate's mesh IP). *(Bench-pinned value — see Stage-3 TODO: de-hardcode via DHCP /
+      gate-announcement.)*
+    - **Forward leg** — lwIP `ip4_forward` forwards every frame (`ip.fw=10`), but the esp_netif zero-copy
+      RX pbuf is a non-contiguous `PBUF_REF`, and `pbuf_add_header` refuses to prepend an L2 header onto a
+      non-contiguous pbuf (`pbuf.c:511-518`, headroom-independent) → `ethernet_output` can't add the mesh
+      L2 header → the forward is dropped before `halow_transmit`. Fix (`rimba-halow-mesh-ap`
+      `gw_rx_deliver`): copy RX into a contiguous `PBUF_LINK`/`PBUF_RAM` and inject via `netif->input`
+      (one edit fixes both directions; ownership: we own the mmpkt, free it once, never hand it to
+      esp_netif). This **reframes** the earlier "ip_forward works (exonerated)" note — it *decides* to
+      forward but the zero-copy pbuf can't be re-transmitted.
+    Also confirmed: the `umac_keys.c` AP-downlink fix is **mesh-non-regressive** (board0↔board1 mesh ping
+    5/5). NB the ESP mesh is **SAE**, so chronite's open mesh can't be the 2nd node.
+  - **TODO (still open):** (a) **de-hardcode the mesh-node return gateway** — `rimba-halow-mesh` pins gw
+    `10.9.9.136` (this board0's mesh IP); generalize via DHCP on the gateway AP + a gate-announcement so
+    nodes learn the gate dynamically; (b) **broadcast/multicast across the gate** — lwIP `ip4_forward`
+    drops LL bcast/mcast (`ip4_canforward`), so mDNS/discovery won't traverse (unicast works); (c)
+    coverage: multiple STAs, multi-hop (STA→gate→relay→node), soak, power-save-behind-gate; (d)
+    `mmwlan_ap_disable` (Stage 2 deferral) + the 2% app-partition headroom; (e) byte-for-byte on-air IE
+    diff vs a live Linux gateway ([[verify-onair-chronium-monitor]]).
+- ◑ **Stage 4 — DATA-plane routing: designed + RX-demux landed; TX refactor pending (2026-07-08).**
+  Full staged design (gaps A–E, anchored edit sites, risks, verify matrix) in
+  [`rimba-mesh-ap-esp32-stage4-datapath-design.md`](rimba-mesh-ap-esp32-stage4-datapath-design.md). The
+  cheap **RX demux is IMPLEMENTED** (`umac_datapath.c:887`: mesh-vs-AP by `mesh_ctrl_present` when both
+  active → VIF_STA/VIF_AP; builds; backward-compatible), and **Gaps A+B are IMPLEMENTED**: Gap A —
+  AP-client + group stads carry `ap_vif_id` via `umac_sta_data_set_vif_id` (`umac_ap.c`, mirroring mesh +
+  Linux `sta->sdata->vif`); Gap B — `process_tx_frame` now frames per the stad's egress vif TYPE
+  (`…_mesh` vs `…_ap`) + stamps `tx_metadata->vif_id`, with every per-frame mesh branch (Mesh Control
+  header/QoS bit, next-hop keying, SW-CCMP) re-gated on the frame's vif — guarded to be byte-identical
+  off the gateway path. Both build clean. **UPDATE 2026-07-10: Gap C (gateway lookup/dequeue over BOTH
+  stad sets) + Gap E (app 2-netif + `ip_forward`) LANDED and traffic routes END-TO-END** — STA↔mesh-node
+  ping 10/10 + iperf both ways (see Stage 3). The gateway *happy path* (AP downlink + mesh uplink) frames
+  correctly per-vif, so Gap B is effective for it. **The deeper global-`ops` last-writer-wins caution
+  below still holds for UNTESTED mixed-flow cases** (simultaneous AP+mesh flows, edge framing, multiple
+  STAs/hops) — full per-stad/per-vif ops dispatch remains the deferred hard 20% if those surface a
+  failure. Findings (grep-verified; Linux reference on chronite `~/halow`):
+  - **RX is not per-vif:** `umac_datapath.c:887-903` picks the host RX vif from *which interface type is
+    active globally*, not the frame's vif — comment "MESH reuse the AP per-vif slot", so mesh + AP data
+    both surface as `MMWLAN_VIF_AP`. Fixable with a `mesh_ctrl_present`-based demux (~15 lines) so two
+    esp_netifs can be fed. **Moderate.**
+  - **TX framing is single-mode (the real blocker):** `umac_datapath_data.ops` is ONE global pointer
+    (`umac_datapath_data.h:82`) set by `configure_{sta,ap,mesh,ibss}_mode` — **last writer wins**, so in the
+    gateway `mesh_start`→mesh ops then `ap_start`→AP ops leaves `ops = datapath_ops_ap`. And
+    `umac_datapath_process_tx_frame` (`:2084`) prepends the mesh header + frames per **global**
+    `umac_mesh_is_active()`, applied to *every* stad. So an AP-client downlink would get mesh 4-addr framing
+    and a mesh-peer uplink would get AP framing — both wrong. The ops (`lookup_stad`, `enqueue`/`dequeue`,
+    `construct_80211_data_header`) differ mesh-vs-AP (`:3147/3287/3410` dequeue variants), so making them
+    coexist means dispatching ops **per-stad/per-vif** through the whole TX (and RX) datapath. **Multi-day,
+    high-risk core refactor** — the deferred hard 20%, akin to [[mesh-no-ampdu-aggregation]] /
+    [[mesh-real-rc-feasible-design]]. TX vif routing itself is otherwise destination/stad-driven
+    (`umac_datapath_tx_frame` looks up stad by DA/RA), and `metadata->vif` is only an active-check — so
+    per-stad ops dispatch is the crux, not vif tagging at the API.
+
+**Governing rules:** derive each change from the Linux side ([[proper-fix-follow-linux]]); ship a
+new-code↔Linux code-map ([[porting-ships-verified-codemap]]); on-air byte-diff every frame vs a live Linux
+device ([[verify-onair-chronium-monitor]]). Recon detail: the interface-model findings above.
 
 ---
 
