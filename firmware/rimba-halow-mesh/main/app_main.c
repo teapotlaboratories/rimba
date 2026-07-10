@@ -121,10 +121,14 @@ static void mesh_net_task(void *arg)
     snprintf(ipbuf, sizeof(ipbuf), "10.9.9.%u", host);
     esp_netif_ip_info_t ip = { 0 };
     ip.ip.addr = esp_ip4addr_aton(ipbuf);
-    ip.gw.addr = esp_ip4addr_aton("10.9.9.1");
+    /* Default gateway = the all-ESP Mesh-gate's mesh IP (10.9.9.136), so a reply to an OFF-SUBNET
+     * host (e.g. a STA behind the gate on 192.168.12.0/24) routes back through the gate instead of
+     * dying in lwIP. Was 10.9.9.1 (a phantom address) — with no such next-hop, off-subnet echo
+     * replies got stuck in ARP and were never transmitted (task #17 return-leg fix, hw-confirmed). */
+    ip.gw.addr = esp_ip4addr_aton("10.9.9.136");
     ip.netmask.addr = esp_ip4addr_aton("255.255.255.0");
     ESP_ERROR_CHECK(esp_netif_set_ip_info(n, &ip));
-    ESP_LOGI(TAG, "mesh static IP %s (netif up=%d) — responder", ipbuf, (int)esp_netif_is_netif_up(n));
+    ESP_LOGI(TAG, "mesh static IP %s gw 10.9.9.136 (netif up=%d) — responder", ipbuf, (int)esp_netif_is_netif_up(n));
     vTaskDelete(NULL);
 }
 
