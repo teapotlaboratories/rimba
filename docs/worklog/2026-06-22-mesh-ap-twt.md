@@ -18,8 +18,8 @@ Self-contained record. Hardware: chronium = Raspberry Pi 5 + Seeed Wio-WM6180 (M
 The IBSS power-save analysis ([`../design-specification/rimba-mm6108-powersave-analysis.md`](../design-specification/rimba-mm6108-powersave-analysis.md))
 showed IBSS leaves have **no good chip power-save**: no TWT, no ATIM, no AP to buffer
 downlink — so the only sub-µA path was an **RTC cold-boot** every wake (≈1.39 s rejoin tax,
-measured — see [`2026-06-21-i4-beacon-source-addr-firmware-wall.md`](2026-06-21-i4-beacon-source-addr-firmware-wall.md)
-neighbourhood / dev-plan RISK-02).
+measured — see [`2026-06-21-phase1-validation-complete.md`](2026-06-21-phase1-validation-complete.md) /
+dev-plan RISK-02).
 
 This session shows that dead-end **dissolves if leaves are STAs under a relay-AP**: TWT
 gives scheduled wake with the **AP buffering downlink**, so the leaf dozes *and* doesn't

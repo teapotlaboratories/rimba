@@ -748,9 +748,14 @@ barely matters** — channel airtime dominates, not Linux-vs-ESP.
 
 **Secured-vs-open relay (iperf UDP, ESP line board1→board0(relay)→board2).** open-plaintext relay
 **~0.14 Mbps** vs secured-CCMP relay **~0.23 Mbps** — same order of magnitude (high 1 MHz variance), so
-**SW-CCMP crypto is NOT the dominant relay cost** — per-hop forwarding + airtime dominate; security is
-cheap in throughput terms. A concurrent-load run showed the multi-hop relay saturates (board1 88% loss
-when its relay ESP also carries its own traffic) — the host SW-CCMP relay bottleneck (→ [#20](#backlog)).
+**SW-CCMP crypto is NOT the dominant *single-flow* relay cost** — per-hop forwarding + airtime dominate;
+security is cheap in single-flow throughput terms. A concurrent-load run showed the multi-hop relay saturates
+(board1 88% loss when its relay ESP also carries its own traffic) — a host SW-CCMP relay **CPU** bottleneck
+(distinct from #20, which is the HW-crypto A4≠TA *withhold*). **(2026-07-11:** that per-frame SW-CCMP CPU cost
+was ~14-28× reduced by a **bulk-DMA AES-CCM** rewrite — see the ✅ backlog item + worklog
+[`2026-07-11-esp32-mesh-swccmp-bulk-aes.md`](../worklog/2026-07-11-esp32-mesh-swccmp-bulk-aes.md). It cuts the
+concurrent-load relay CPU/latency but does **not** raise single-flow throughput — confirming the ceiling is
+**airtime / no A-MPDU**, now the top mesh backlog item.)**
 
 **Linux↔Linux baseline** (signal −21 dBm, PHY 72 Mbit/s VHT-MCS7): mesh (open, `10.9.9.x`) = TCP
 **203 Kbit/s** / UDP **582 Kbit/s** @0% loss; AP↔STA (WPA3-SAE/CCMP, `192.168.12.x`) = TCP **786 Kbit/s**
@@ -792,7 +797,29 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   still withholds) and *not* the BCF (ESP runs `bcf_fgh100mhaamd`, the same BCF chronosalt delivers on) —
   **but it is NOT a driver→FW command difference** (morse_driver-vs-morselib command streams diff
   byte-equivalent). The remaining cause is a host-side interaction *outside* the `morse_cmd_tx` command
-  interface. Revisit only if a HW-crypto multi-hop path is ever wanted.
+  interface. Revisit only if a HW-crypto multi-hop path is ever wanted. **(2026-07-11: re-scoped again —
+  bench-proven that Linux `morse_driver` withholds the A4≠TA forward too, so #20 is a UNIVERSAL MM6108
+  firmware limitation, NOT a morselib bug; morselib correctly follows Linux, and SW-CCMP is the permanent
+  universal answer. Worklog `2026-07-11-mesh-20-linux-also-withholds-fw-limitation.md`. Close unless Morse
+  ships an FW fix.)**
+- ☐ **Mesh A-MPDU aggregation — the dominant remaining relay-throughput limiter (NEXT).** Mesh sends single
+  MPDUs (memory `mesh-no-ampdu-aggregation`); per-frame preamble/IFS/backoff/ACK caps relay goodput
+  (~0.04 Mbit/s 2-hop) independent of CPU. Now that SW-CCMP crypto is cheap (below), **this is the ceiling.**
+  Multi-day core-RX + host-goodput feature (previously spiked/deprioritized); gate is `aggr_check`'s
+  `MMWLAN_STA_CONNECTED` check. Smaller optional win first: **in-place mesh forward** (rewrite headers on the
+  RX mmpkt vs `build_mgmt_frame` alloc+copy in `umac_mesh_forward_data`).
+- ✅ **Mesh SW-CCMP bulk-DMA AES-CCM — DONE 2026-07-11** (worklog `2026-07-11-esp32-mesh-swccmp-bulk-aes.md`).
+  Root-caused the host SW-CCMP relay crypto cost: the CCM ran AES **one 16-byte ECB block at a time**
+  (~187 single-block HW-AES ops per 1442 B frame, each paying the full `esp_aes`
+  acquire/DMA-setup/lock/release wrapper ⇒ **~384 `AES_LOCK` acquire/release per RELAYED frame**). Replaced
+  with a **bulk-DMA CCM** — 1 `mbedtls_aes_crypt_cbc` (CBC-MAC) + 1 `mbedtls_aes_crypt_ctr` + 1 ECB (~3 HW ops,
+  ~6 lock acquires), self-contained in `ccmp.c`, **byte-exact vs RFC-3610 + `mbedtls_ccm`** (so MICs still
+  interop with Linux). Per-frame crypto: **enc avg 7038→197 µs (~36×), dec 4401→285 µs (~15×)**; min→avg gap
+  21×→1.6× (contention gone). + CPU 160→240 MHz (perf/relay sdkconfig only) + in-place crypto (−3.2 KB RAM).
+  **Scope: does NOT raise single-flow throughput (airtime-bound — the open-vs-secured A/B in §Performance
+  already showed CCMP isn't the single-flow limiter); it cuts relay CPU/latency/contention (the concurrent-load
+  "SW-CCMP relay bottleneck") and is the prerequisite for A-MPDU to pay off.** Handshake/TLS keep the per-block
+  path. Uncommitted on bench.
 - ✅ **P6c — mesh airtime link metric (rate-derived HWMP cost)** — DONE + hardware-verified 2026-07-02. Replaces the
   fixed per-hop `MESH_PATH_LINK_METRIC` (100) with a port of net/mac80211 `airtime_link_metric_get`
   (`mesh_hwmp.c:338-381`, formula + constants `TEST_FRAME_LEN=8192`/`ARITH_SHIFT=8`/`MAX_METRIC` clamp
