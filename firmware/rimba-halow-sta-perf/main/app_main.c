@@ -105,24 +105,22 @@ static void net_task(void *arg)
         vTaskDelete(NULL);
     }
 
-    /* mmhalow auto-starts a DHCP client on link-up; stop it and go static. */
-    esp_netif_dhcpc_stop(n);
-
-    /* Derive a distinct static IP from this node's MAC (192.168.12.<mac[5]>) so several
-     * STAs on one AP don't all land on .2. The AP derives the same address from the MAC
-     * it tracks and pings each of us. */
-    uint8_t mac[6] = { 0 };
-    esp_netif_get_mac(n, mac);
-    char ipbuf[20];
-    snprintf(ipbuf, sizeof(ipbuf), "192.168.12.%u", (unsigned)mac[5]);
+    /* Zero-config: DHCP from the gateway AP (IP + router). mmhalow starts a dhcpc on link-up; make sure
+     * it's running and wait for the lease instead of pinning a static IP (task #5 de-hardcode). */
+    esp_err_t de = esp_netif_dhcpc_start(n);
+    if (de != ESP_OK && de != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED)
+        ESP_LOGW(TAG, "dhcpc_start: %s", esp_err_to_name(de));
 
     esp_netif_ip_info_t ip = { 0 };
-    ip.ip.addr = esp_ip4addr_aton(ipbuf);
-    ip.gw.addr = esp_ip4addr_aton(AP_IP);
-    ip.netmask.addr = esp_ip4addr_aton(NETMASK);
-    ESP_ERROR_CHECK(esp_netif_set_ip_info(n, &ip));
-    ESP_LOGI(TAG, "static IP %s (mac[5]=%u), gw " IPSTR " (up=%d)",
-             ipbuf, (unsigned)mac[5], IP2STR(&ip.gw), (int)esp_netif_is_netif_up(n));
+    for (int i = 0; i < 40 && ip.ip.addr == 0; i++) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_netif_get_ip_info(n, &ip);
+    }
+    if (ip.ip.addr == 0)
+        ESP_LOGE(TAG, "DHCP: no lease after 20s");
+    else
+        ESP_LOGI(TAG, "DHCP lease " IPSTR " gw " IPSTR " mask " IPSTR " (up=%d)",
+                 IP2STR(&ip.ip), IP2STR(&ip.gw), IP2STR(&ip.netmask), (int)esp_netif_is_netif_up(n));
 
 #ifndef IPERF
     start_ping(ip.gw);

@@ -33,6 +33,12 @@
 #define MESH_S1G_CHAN   27   /* US 915.5 MHz, 1 MHz BW (global op-class 68) */
 #define MESH_MAX_PLINKS 16
 
+/* Default gateway for off-subnet replies = the all-ESP Mesh-gate's mesh IP. This is a DEPLOYMENT
+ * PARAMETER (the bench gate = board0, whose mesh IP is 10.9.9.136); a mesh node is infrastructure, so
+ * configuring its gate here is legitimate. The PROPER dynamic gate discovery is the planned 802.11s
+ * mesh-gate port (RANN + IS_GATE + MPP); until then this is the single-source config. */
+#define MESH_GATE_IP    "10.9.9.136"
+
 /* 802.11 element IDs + beacon IE offset (24-byte PV0 header + ts/bcn-int/cap = 12). */
 #define DOT11_IE_MESH_ID        (114)
 #define BEACON_IE_OFFSET        (24 + 12)
@@ -121,14 +127,14 @@ static void mesh_net_task(void *arg)
     snprintf(ipbuf, sizeof(ipbuf), "10.9.9.%u", host);
     esp_netif_ip_info_t ip = { 0 };
     ip.ip.addr = esp_ip4addr_aton(ipbuf);
-    /* Default gateway = the all-ESP Mesh-gate's mesh IP (10.9.9.136), so a reply to an OFF-SUBNET
-     * host (e.g. a STA behind the gate on 192.168.12.0/24) routes back through the gate instead of
-     * dying in lwIP. Was 10.9.9.1 (a phantom address) — with no such next-hop, off-subnet echo
-     * replies got stuck in ARP and were never transmitted (task #17 return-leg fix, hw-confirmed). */
-    ip.gw.addr = esp_ip4addr_aton("10.9.9.136");
+    /* Route off-subnet replies (e.g. to a STA behind the gate on 192.168.12.0/24) via the Mesh-gate,
+     * else they die in lwIP ARP. (Was the phantom 10.9.9.1 — off-subnet echo replies got stuck in ARP,
+     * never transmitted; task #17 return-leg fix, hw-confirmed.) */
+    ip.gw.addr = esp_ip4addr_aton(MESH_GATE_IP);
     ip.netmask.addr = esp_ip4addr_aton("255.255.255.0");
     ESP_ERROR_CHECK(esp_netif_set_ip_info(n, &ip));
-    ESP_LOGI(TAG, "mesh static IP %s gw 10.9.9.136 (netif up=%d) — responder", ipbuf, (int)esp_netif_is_netif_up(n));
+    ESP_LOGI(TAG, "mesh static IP %s gw %s (netif up=%d) — responder", ipbuf, MESH_GATE_IP,
+             (int)esp_netif_is_netif_up(n));
     vTaskDelete(NULL);
 }
 
