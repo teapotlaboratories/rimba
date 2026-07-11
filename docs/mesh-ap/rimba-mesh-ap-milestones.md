@@ -627,12 +627,61 @@ rejects the {AP, MESH} pair; and `mmwlan_mesh_start` calls `umac_mesh_tear_down_
     Also confirmed: the `umac_keys.c` AP-downlink fix is **mesh-non-regressive** (board0↔board1 mesh ping
     5/5). NB the ESP mesh is **SAE**, so chronite's open mesh can't be the 2nd node.
   - **TODO (still open):** (a) **de-hardcode the mesh-node return gateway** — `rimba-halow-mesh` pins gw
-    `10.9.9.136` (this board0's mesh IP); generalize via DHCP on the gateway AP + a gate-announcement so
-    nodes learn the gate dynamically; (b) **broadcast/multicast across the gate** — lwIP `ip4_forward`
-    drops LL bcast/mcast (`ip4_canforward`), so mDNS/discovery won't traverse (unicast works); (c)
-    coverage: multiple STAs, multi-hop (STA→gate→relay→node), soak, power-save-behind-gate; (d)
-    `mmwlan_ap_disable` (Stage 2 deferral) + the 2% app-partition headroom; (e) byte-for-byte on-air IE
-    diff vs a live Linux gateway ([[verify-onair-chronium-monitor]]).
+    `10.9.9.136`. **PLANNED (next big task): a proper 802.11s mesh-gate port** — RANN + `IS_GATE` + learned
+    MPP proxy + L2-bridge single subnet (NOT literal GANN/PXU; follow-Linux). Full design + code-map:
+    [`rimba-mesh-ap-mesh-gate-discovery-design.md`](rimba-mesh-ap-mesh-gate-discovery-design.md); ~12-19
+    session-days (S1-S6). Pragmatic interim = DHCP — **STA zero-config DONE + hardware-verified
+    2026-07-10** (task #5): the gateway AP runs a DHCP server (IP+gw in the inherent netif config), the
+    STA is a DHCP client (`DHCP lease 192.168.12.2 gw 192.168.12.1`), end-to-end ping 10/10 ttl=63 on a
+    cold boot; keeps L3. Worklog: [`2026-07-10-dhcp-de-hardcode-wip.md`](../worklog/2026-07-10-dhcp-de-hardcode-wip.md).
+    The mesh **node's** gw stays a `#define MESH_GATE_IP` (deployment param) — its dynamic de-hardcode is
+    deferred to the 802.11s port above (DHCP-over-mesh would mean editing shared `mmhalow`).
+    (b) **broadcast/multicast across the gate — SUBSUMED by the L2-bridge (#1); no standalone fix.**
+    lwIP `ip4_forward`→`ip4_canforward` (ip4.c:251-257) hard-drops LL broadcast (`PBUF_FLAG_LLBCAST`)
+    and multicast (`PBUF_FLAG_LLMCAST`/`IP_MULTICAST`), so mDNS (224.0.0.251)/SSDP/NetBIOS won't
+    traverse (unicast does). An L3 `LWIP_HOOK_IP4_CANFORWARD` hook would be needed, but `ip4_forward`
+    routes to a single next-hop netif and can't replicate → fragile *and* throwaway once #1 lands. The
+    proper fix is the L2 bridge (esp_netif `bridgeif` is in-tree — `CONFIG_LWIP_BRIDGEIF_MAX_PORTS=7`,
+    `CONFIG_ESP_NETIF_BRIDGE_EN` off), which floods bcast/mcast natively; but bridging the 802.11s mesh
+    to the AP BSS at L2 still needs the AP-client-MAC-into-mesh proxy (6-addr AE = the learned-MPP
+    stage), i.e. it *is* the #1 port. Verdict (2026-07-10): don't build a standalone L3 hack; fold into #1.
+    (c) **coverage of the L3 gate (task #3) — test matrix + status** (worklog
+    [`2026-07-10-mesh-gate-coverage-soak-multista.md`](../worklog/2026-07-10-mesh-gate-coverage-soak-multista.md)):
+      1. *Soak* — **DONE ✅ 2026-07-10:** 450-ping (~7.5 min) end-to-end soak, **449/450 (0% loss, 1 warmup
+         miss), all ttl=63, no crash/reboot, mesh_peers & ap_stas stable, gateway heap drift +32 B (no leak)**.
+      2. *Power-save behind the gate* — **PASS (TWT doze) 2026-07-10.** The gate's AP buffers + delivers a
+         mesh-originated downlink to a **dozing** STA behind it: chronite(mesh) → board2(ESP STA in TWT doze,
+         1 s wake, stays associated) = **20/20, 0% loss**, RTT elevated ~40→260 ms (avg) = the PS-buffering
+         signature. Deeper **WNM+powerdown** keeps the STA associated but too deep for timely unicast
+         (0/20 within 3 s) — expected deep-sleep tradeoff, not a gate defect. (An earlier "mesh→AP-client
+         forwarding gap" was a MISDIAGNOSIS off a flaky/dozing *Linux* STA — the gate forwards correctly to
+         a fresh ESP client, 12/12 with the full `RX_MESH→AP_TX→RX_AP` chain logged; no gate code change.)
+      2b. *Foundation (enables #2/#4)* — **DONE ✅ 2026-07-10:** a Linux node joins the gate's SECURED
+         `rimba-mesh` (SAE password `rimbamesh2026` = morselib `umac_mesh.c:81`, cross-vendor). chronite
+         (Pi5) peered with gate+board1 in 1 s, mesh-ping 4/4. `scratchpad/wpa-rimba-mesh.conf`.
+      3. *Multi-STA* — **DONE ✅ 2026-07-10:** two concurrent STAs behind the gate — **chronite (Linux
+         S1G STA, SAE H2E via `sae_pwe=2`) leased .2 + board2 (ESP STA) leased .3** (distinct pool leases,
+         `ap_stas=2`), both pinged 10.9.9.100 concurrently = **30/30, 0% loss, ttl=63**. Proves the
+         (previously unproven) Linux-S1G-infra-STA→morselib-SoftAP SAE path + `dhcpcd` interop with the
+         #5 DHCP server. (The AP requires H2E; a hunt-and-peck commit is rejected `status_code=1`.)
+      4. *Multi-hop (STA→gate→relay→node)* — **DONE ✅ 2026-07-10 (after a morselib fix):** forced a 2-hop
+         line gate→board1(relay)→chronite (allowlist = board1). board2 (STA behind gate) → chronite (2 hops
+         via board1) = **11/12, ttl=63**; **A/B-proven** (relay board1 down → 0/8). Required fixing the
+         forced-topology RX drop in morselib `umac_datapath.c`: it was guarded by `umac_mesh_is_active()`
+         (always true on a mesh+AP node) so it dropped ALL non-allowlisted RX data incl. the gate AP's
+         client EAPOL → STA couldn't associate. Fix = gate on `mesh_ctrl_present` (802.11s Mesh Control bit)
+         instead, so the allowlist filters ONLY mesh frames, never AP-client frames. (Submodule, branch
+         `feat/mesh-ap-concurrency`.) A Linux far mesh-node needs a return route `192.168.12.0/24 via
+         10.9.9.136` (same as board1's gw, task #17).
+    (d) `mmwlan_ap_disable` (Stage 2 deferral) + the 2% app-partition headroom; (e) byte-for-byte on-air
+    IE diff vs a live Linux gateway ([[verify-onair-chronium-monitor]]).
+    (f) **Whole-network stress test — DONE ✅ 2026-07-10** (worklog
+    [`2026-07-10-mesh-gate-stress-permutation-matrix.md`](../worklog/2026-07-10-mesh-gate-stress-permutation-matrix.md)):
+    every source→destination permutation (5-node mesh + board2 AP-STA, both subnets through the gate)
+    **connects**; ≈**0% loss** under moderate concurrent load (1/600); under **flood** it degrades gracefully
+    to **80.8% delivery, no crashes** — the **gate is the throughput bottleneck** (single radio doing
+    mesh RX + AP TX + forward: cross-gate paths lose 30–62%, mesh-to-mesh only 3–13%). NB chronosalt (Pi Zero)
+    is power-marginal (reboots on radio bring-up).
 - ◑ **Stage 4 — DATA-plane routing: designed + RX-demux landed; TX refactor pending (2026-07-08).**
   Full staged design (gaps A–E, anchored edit sites, risks, verify matrix) in
   [`rimba-mesh-ap-esp32-stage4-datapath-design.md`](rimba-mesh-ap-esp32-stage4-datapath-design.md). The
