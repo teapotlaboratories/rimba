@@ -57,7 +57,7 @@ Roadmap + tiers in [`design-specification/rimba-hardening-plan.md`](design-speci
 
 ## Housekeeping
 
-- ☐ Fix the pre-existing broken worklog link: `worklog/2026-06-22-mesh-ap-twt.md` → `2026-06-21-i4-beacon-source-addr-firmware-wall.md` (target never created — find the intended file or drop the link).
+- ✅ Fixed the pre-existing broken worklog link in `worklog/2026-06-22-mesh-ap-twt.md` (the never-created `2026-06-21-i4-beacon-source-addr-firmware-wall.md` → redirected to `2026-06-21-phase1-validation-complete.md` + dev-plan RISK-02). The `ibss/rimba-ibss-milestones.md:349` mention is honest prose ("referenced but never created"), not a link — left as-is.
 
 ---
 
