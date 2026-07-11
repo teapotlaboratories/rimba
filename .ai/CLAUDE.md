@@ -18,6 +18,11 @@ Most important rules:
 - **Merge PRs with rebase + merge by default** (`gh pr merge --rebase`); keep
   `main` linear. Mind the submodule-SHA caveat. See
   [AGENTS.md → Merging pull requests](AGENTS.md#merging-pull-requests).
+- **No mis-linking `#N` in PR/commit text** — a bare `#N` auto-links to a
+  *same-repo* issue/PR, so cross-repo refs must be qualified as `owner/repo#N` and
+  internal IDs (task/backlog/bug numbers) backticked in Markdown (`` `#20` ``; in
+  commit messages drop the `#`). Scan before pushing. See
+  [AGENTS.md → Cross-references in PR and commit text](AGENTS.md#cross-references-in-pr-and-commit-text).
 - **Verify every change** with a hardware or unit test; if you can't, document
   why. See [AGENTS.md → Verifying changes](AGENTS.md#verifying-changes).
 - **Always on-air-verify radio frames** — capture every frame the ESP transmits on

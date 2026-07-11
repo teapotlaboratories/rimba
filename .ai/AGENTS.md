@@ -76,6 +76,35 @@ this over a merge commit or squash unless there is a concrete reason not to.
   merging the superproject PR — otherwise the gitlink dangles off a commit that
   isn't on the submodule's `main`.
 
+### Cross-references in PR and commit text
+
+On GitHub a bare `#N` in a PR description, issue, review comment, **or commit
+message** auto-links to issue/PR **#N in the same repo**. This project reuses `#N`
+as *internal* identifiers throughout its docs (task numbers, backlog items, bug IDs,
+`GAP-C/#14/#15`, RFC `Packet-Vector-#1`, …) and spans two repos — the superproject
+`teapotlaboratories/rimba` and the submodule `teapotlaboratories/mm-esp32-halow`.
+Pasted verbatim, those `#N` silently link to the **wrong** PR. Classify every `#N`
+before you land PR/issue text or a commit message:
+
+- **A real PR/issue in *this* repo** → leave the bare `#N` (the link is correct).
+- **A PR/issue in the *other* repo** → fully qualify it as `owner/repo#N` (e.g.
+  `teapotlaboratories/mm-esp32-halow#22`). A bare `repo#N` **without the owner**
+  does not link at all — always include the owner.
+- **An internal identifier that is not a GitHub issue** (task / backlog / bug / GAP /
+  divergence number, RFC vector, …) → **kill the auto-link.** In Markdown (PR and
+  issue bodies, review comments) wrap the token in backticks — `` `#20` ``. In
+  **commit messages** backticks do *not* help (they aren't Markdown-rendered), so
+  drop the `#` or reword: write `bug 20`, `Packet-Vector-1`, not `#20`.
+
+**Check before pushing.** Scan the text for any bare `#N` and confirm each is a
+genuine same-repo reference; qualify or backtick the rest. A "bare `#`" here is one
+not preceded by a backtick, a `/`, or a word character:
+
+    (?<![`/A-Za-z0-9])#[0-9]+
+
+The same rule applies when editing an existing PR or commit — don't reintroduce a
+mis-link while fixing something else.
+
 ## Attribution — no AI self-reference, anywhere
 
 **Nothing an agent produces or edits may attribute, credit, or refer to the AI/agent
