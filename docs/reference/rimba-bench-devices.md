@@ -5,6 +5,11 @@ device, and the gotchas. Stable facts (ports, MACs, addresses) are reliable; the
 "currently running" notes are a snapshot — verify live before depending on them.
 
 Last verified: 2026-06-29 (inventory); **all component versions re-verified 2026-07-08 = matched 1.17.8** (table below).
+**Re-confirmed 2026-07-10** (post power-cycle, all 4 Linux nodes): kernel `6.12.21-v8-16k+` (Pi 5) / `v8+`
+(Pi Zero); loaded `morse` srcver `BF1E275566B824AA47A47BF` (Pi 5) / `405F9B141F0F4AD2DB83F8F` (Pi Zero),
+`dot11ah` `3758BE40F4C0734ED6FBF05` (all); `mm6108.bin` 480664 B / md5 `cfe56db2`; `wpa_supplicant_s1g` +
+`morse_cli` `rel_1_17_8_2026_Mar_24` — **all 4 conform**. (Read srcver from `/sys/module/*/srcversion` — the
+loaded module — since `modinfo` isn't on the non-login PATH.)
 
 ---
 
@@ -17,7 +22,7 @@ Last verified: 2026-06-29 (inventory); **all component versions re-verified 2026
   2026-07-08** — 1.17.9 was found to REGRESS STA power-save ~2× (see `rimba-halow-ps-esp32-vs-linux-ap.md`),
   so the whole bench (ESP + Linux) is now matched at **1.17.8**.
 
-### Component versions — matched 1.17.8 (all devices verified 2026-07-08)
+### Component versions — matched 1.17.8 (all devices verified 2026-07-08; re-confirmed 2026-07-10)
 
 | Component | Repo (github.com/MorseMicro/…) | Ref | SHA | Deployed |
 |---|---|---|---|---|
@@ -45,9 +50,15 @@ Steady-state roles:
     - **chronite** (mesh `10.9.9.2`) — **testing + code-comparison** node (its
       `~/halow` source trees are the reference for diffing against the ESP morselib).
   - **2× Raspberry Pi Zero 2 W + `fgh100mhaamd` MM6108 board** — `fgh100mhaamd-spi` wiring,
-    built 2026-06-27, both power-stable (`throttled=0x0`):
-    - **chronosalt** (mesh `10.9.9.3`) — distant node for the airtime test.
-    - **chronogen** (mesh `10.9.9.4`) — distant node for the airtime test.
+    built 2026-06-27:
+    - **chronosalt** (mesh `10.9.9.3`) — distant node for the airtime test. **⚠ POWER-MARGINAL (found
+      2026-07-10):** intermittently **reboots/browns out when the HaLow radio (`wlan1`) is brought up** —
+      the `fgh100m` radio-up current spike exceeds the supply margin; recovers in ~1 min (`uptime`/`/proc/uptime`
+      show a fresh boot right after it drops off the LAN). Unreliable for mesh bring-up + weakest node under
+      flood; `vcgencmd get_throttled` unavailable on it (`/dev/vcio` absent) so undervoltage isn't directly
+      confirmable, but the reboot-on-radio-up signature is unambiguous. Consider a beefier 5 V supply / shorter
+      cable.
+    - **chronogen** (mesh `10.9.9.4`) — distant node for the airtime test (stayed stable through the same test).
 - **Dev host** — the machine these run from: holds the `rimba` repo + ESP-IDF
   toolchain; all builds/flashing happen here; SSH to the Pis over the LAN.
 - **1× ESP32-C6-DevKitC-1** — measurement-harness companion for board2 (`/dev/ttyUSB0`, target `esp32c6`):
