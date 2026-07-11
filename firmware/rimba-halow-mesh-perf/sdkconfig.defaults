@@ -2,3 +2,7 @@
 # Mesh (like IBSS) reuses the AP-type interface + BSS_CONFIG/beacon code path,
 # so the AP-mode morselib sources must be compiled in.
 CONFIG_HALOW_AP_MODE=y
+
+# PERF: 240 MHz on the mains-powered relay/perf board (~1.5x on the CPU-bound crypto).
+# Do NOT copy to sleep/STA builds (power).
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
