@@ -1,6 +1,6 @@
 # Worklog — 2026-06-23 — Regression + stress test (IBSS + Mesh-gate/AP)
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** regression + stress test every feature built so far on both L2s — the
 Mesh-gate (AP + TWT + STA-scaling) and IBSS — plus the radio-free / scan sanity apps.
 **Status:** PASS overall. One real finding: a **drop/rejoin survivor-side rediscovery

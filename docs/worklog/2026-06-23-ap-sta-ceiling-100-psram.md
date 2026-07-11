@@ -1,6 +1,6 @@
 # Worklog — 2026-06-23 — AP STA-count ceiling → 100, per-STA state in PSRAM (HaLow AP)
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Phase:** scaling the HaLow SoftAP (relay-AP gateway topology) past a handful of leaves.
 **Goal:** make the AP's max-associated-STA count and the per-STA RAM placement
 **configurable from sdkconfig**, allocate per-STA state **strictly from PSRAM**, and

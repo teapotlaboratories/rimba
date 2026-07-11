@@ -1,6 +1,6 @@
 # Worklog — 2026-06-23 — AP STA-count ceiling 127 → 255 (four-block S1G TIM)
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** raise the HaLow AP's structural STA ceiling from 127 to **255** (the max of the
 public `uint8_t mmwlan_ap_args.max_stas` field) and verify it on hardware.
 **Status:** code + build + on-air regression test PASS. AID ≥ 64 path still not exercised

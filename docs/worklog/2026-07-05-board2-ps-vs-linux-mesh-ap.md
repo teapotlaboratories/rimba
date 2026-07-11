@@ -1,6 +1,6 @@
 # Worklog — 2026-07-05 — board2 STA power-save vs a Linux **Mesh+AP** gateway
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** measure board2's full PS ladder against a Linux node running **mesh + AP concurrently** on one
 MM6108, with the mesh actually peering and board2's traffic routing **through** the mesh.
 

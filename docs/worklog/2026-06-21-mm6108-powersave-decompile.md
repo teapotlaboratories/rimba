@@ -1,6 +1,6 @@
 # Worklog — 2026-06-21 — MM6108 firmware decompile + IBSS power-save analysis
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Phase:** 1 — IBSS foundation (power-save de-risking, ahead of Phase 4 leaf sleep)
 **Goal:** answer "the MM6108 can sleep — is IBSS power-save blocked by firmware or
 just the host driver?", and rebaseline the power/battery docs on real datasheet

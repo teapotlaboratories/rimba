@@ -1,6 +1,6 @@
 # Worklog — 2026-06-24 — Action-frame TWT (requester) on hardware
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** exercise the **mid-session, action-frame** TWT path on real hardware. Until now the
 ESP32 STA only ever negotiated TWT in **association IEs** (join-time). This adds the
 **requester-side action-frame sender** that morselib was missing, so a STA can set up *and*

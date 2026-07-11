@@ -1,6 +1,6 @@
 # Worklog — 2026-06-18 — HaLow AP↔STA ping (RISK-01 link proven)
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Phase:** 1 — IBSS Foundation, tasks 1.2–1.3 (two-node link / RISK-01 fallback)
 **Goal:** get two MM6108 boards talking IP to each other.
 

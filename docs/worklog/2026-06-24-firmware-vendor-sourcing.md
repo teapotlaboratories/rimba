@@ -1,6 +1,6 @@
 # Worklog — 2026-06-24 — Firmware single-sourced from vendor/morse-firmware
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** stop vendoring pre-converted firmware blobs in a fork; make
 `vendor/morse-firmware` (upstream ELF) the single source of truth, with the ESP32
 `.mbin` produced at build time. Remove `components/firmware` entirely.

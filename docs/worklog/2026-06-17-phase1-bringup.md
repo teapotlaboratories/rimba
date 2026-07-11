@@ -1,6 +1,6 @@
 # Worklog — 2026-06-17 — Phase 1 bring-up start
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Phase:** 1 — IBSS Foundation (BLOCKING)
 **Goal of this session:** stand up the firmware project, the ESP-IDF toolchain,
 and build + flash a first example firmware to the real hardware.

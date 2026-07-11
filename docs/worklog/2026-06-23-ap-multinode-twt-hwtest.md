@@ -1,6 +1,6 @@
 # Worklog — 2026-06-23 — Multi-node HW test: ESP32 AP + 2 ESP32 STA + Linux STA, TWT
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** on-air validation that the rebuilt ESP32 HaLow AP (two-block S1G TIM, MAX_SUPPORTED_AID
 128, per-STA state + TWT table in PSRAM — see
 [`2026-06-23-ap-sta-ceiling-100-psram.md`](2026-06-23-ap-sta-ceiling-100-psram.md)) still

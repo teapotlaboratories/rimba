@@ -1,6 +1,6 @@
 # Worklog — 2026-06-17 (session 2) — MM6108 HaLow bring-up
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Phase:** 1 — IBSS Foundation (BLOCKING), task 1.1 (SDK + morselib build)
 **Goal:** pull real MM6108 code into a firmware and get the radio to boot.
 

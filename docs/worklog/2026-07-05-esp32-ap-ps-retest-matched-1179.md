@@ -1,6 +1,6 @@
 # Worklog — 2026-07-05 — HaLow STA power-save: ESP32 AP vs Linux AP, retest at MATCHED stock 1.17.9
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** re-run the ESP32-AP-vs-Linux-AP STA power-save comparison with **matched firmware**, after the
 whole bench was brought to stock 1.17.9 — the earlier comparison had a version skew (ESP 1.17.9 / Linux
 1.17.8) that confounded it.

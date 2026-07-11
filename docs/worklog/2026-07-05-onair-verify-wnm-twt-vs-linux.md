@@ -1,6 +1,6 @@
 # Worklog — 2026-07-05 — On-air verify: ESP32-AP WNM / TWT frames vs live Linux
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** close the on-air-verification gap flagged in the WNM/TWT PRs (mm-esp32-halow#20, rimba#29) —
 byte-diff the frames the ESP32 SoftAP transmits against what a **live Linux `hostapd_s1g`** transmits,
 per `.ai/AGENTS.md` → On-air frame verification (the "gold standard" tier). All at stock 1.17.9.

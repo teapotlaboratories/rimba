@@ -1,6 +1,6 @@
 # Worklog — 2026-06-22 — Mesh+AP concurrency + TWT leaf power-save (HaLow AP/STA)
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Phase:** exploring an L2 architecture alternative to IBSS for Rimba leaves/relays.
 **Goal:** verify the MM6108 can run **802.11s mesh + AP concurrently**, get a real
 **TWT** (Target Wake Time) power-save agreement to an ESP32 STA, and rebuild

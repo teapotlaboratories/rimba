@@ -1,6 +1,6 @@
 # Worklog — 2026-06-24 — 802.11s mesh port: recon & effort estimate
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** estimate the work to port Linux 802.11s mesh into morselib (ESP32-S3 +
 MM6108), following the morse Linux kernel/driver flow exactly. **No code** — recon
 only, to size the feature and decide scope before committing.

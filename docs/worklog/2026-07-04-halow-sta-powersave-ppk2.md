@@ -1,6 +1,6 @@
 # Worklog — 2026-07-04 — HaLow STA power-save: PPK2-measured (TWT / dynamic PS / WNM / deep sleep)
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** actually **measure** the board-level current of every HaLow STA power-save feature on
 board2 (the nRF PPK2 node), then push further by sleeping the **ESP32-S3 host** as well
 (light-sleep and deep-sleep). Closes the long-open gap from the 2026-06-22 TWT worklog, which

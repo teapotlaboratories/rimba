@@ -1,6 +1,6 @@
 # Worklog — 2026-06-18 — RISK-01 IBSS bring-up: reconnaissance & plan
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Phase:** 1 — IBSS Foundation, RISK-01 (no public IBSS API on the MM6108)
 **Branch:** `test2` (off `main`)
 **Goal:** prove an MM6108 IBSS / ad-hoc link on **ESP32-S3 + mm-iot-sdk**, by

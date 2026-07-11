@@ -1,6 +1,6 @@
 # Worklog — 2026-07-05 — ESP32 AP WNM-sleep responder + STA power-save beacon fix (HaLow AP/STA)
 
-**Author:** Aldwin (with Claude Code)
+**Author:** Aldwin
 **Goal:** (1) make the morselib ESP32 SoftAP a working **WNM-sleep responder** so an all-ESP32 STA
 can enter/exit WNM sleep (previously the STA was trapped, blocked forever); (2) make the STA actually
 **doze / power-save** against the ESP32 AP.

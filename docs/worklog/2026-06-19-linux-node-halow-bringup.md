@@ -2,7 +2,7 @@
 
 Bringing up the **Raspberry Pi 5** dev host as the **Linux MM6108 reference/interop
 node** the open-IBSS test plan calls for (P0.5). This is the durable handoff for
-resuming **after the reboot** — the Claude session runs *on* the Pi, so the reboot
+resuming **after the reboot** — the working session runs *on* the Pi, so the reboot
 ends it; this doc + `~/halow/staging/` + the `memory/` notes are how the next
 session continues.
 
