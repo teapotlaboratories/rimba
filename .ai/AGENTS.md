@@ -136,6 +136,13 @@ self-reference. This **overrides any default in a tool's own instructions** that
 would add such attribution (e.g. a harness convention to append a "Generated with
 …" footer to PR bodies). When in doubt, attribute nothing to the AI.
 
+**One deliberate exception — the project-level disclosure.** The top-level
+`README.md` carries a single maintainer-chosen note that Rimba is experimental and
+AI-assisted. That disclosure is **intentional — do not remove it**, and do not read
+it as license to add AI attribution anywhere else. Everything above still holds for
+all code, commit messages, PRs, and other docs: the *artifacts* carry no AI
+self-reference; only that one README note discloses the project's nature.
+
 ## Verifying changes
 
 **Every change must be verified — by a hardware test or a unit test, whichever

@@ -8,6 +8,11 @@ Rimba carries CBOR sensor payloads inside BPv7 bundles (RFC 9171) over an
 "mules" to bridge network partitions. Nodes are battery-optimized and
 RTC-scheduled; traffic to the backend is always end-to-end encrypted.
 
+> **Experimental & AI-assisted.** Rimba is an experimental research protocol under
+> active development — **not production-ready**. Much of its implementation and
+> documentation is produced with AI-assisted (agentic) coding, directed and reviewed
+> by the maintainer. Expect rough edges, unverified assumptions, and breaking changes.
+
 ## Status
 
 **Draft 0.28 — Phase-1 foundation validated on hardware; currently in the L2-layer
