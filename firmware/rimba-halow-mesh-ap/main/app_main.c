@@ -191,11 +191,18 @@ static void gw_ap_rx_cb(struct mmpkt *mmpkt, const struct mmwlan_rx_metadata *md
 
 static void gw_setup_ap_netif(void)
 {
-    /* Static-IP netif (no DHCP), distinct if_key, lower route priority than the mesh netif.
-     * Reuse the proven WIFI_STA netstack (generic ethernet L2 lwIP glue). */
-    static const esp_netif_ip_info_t ap_ip = { 0 };
+    /* AP netif with a DHCP SERVER so STAs are zero-config (task #5 de-hardcode; superseded later by the
+     * 802.11s L2-bridge port). The IP goes in the INHERENT config (like stock WIFI_AP) so the netif is
+     * BORN with 192.168.12.1 and AUTOUP's auto-start of dhcps sees a valid server IP. (A 0.0.0.0 IP
+     * makes dhcps fail — dhcpserver.c: ip4_addr_isany -> "could not obtain pcb" — and a later
+     * set_ip_info would then abort with DHCP_NOT_STOPPED, boot-looping the gate.) So we do NOT call
+     * set_ip_info here. Reuse the WIFI_STA netstack (generic ethernet L2 glue); dhcps is L3/UDP. */
+    static esp_netif_ip_info_t ap_ip;              /* runtime-init: esp_ip4addr_aton is not const */
+    ap_ip.ip.addr      = esp_ip4addr_aton(AP_SUBNET_IP);
+    ap_ip.gw.addr      = esp_ip4addr_aton(AP_SUBNET_IP);   /* = router option offered to STAs */
+    ap_ip.netmask.addr = esp_ip4addr_aton(AP_SUBNET_MASK);
     esp_netif_inherent_config_t ap_base_cfg = {
-        .flags = ESP_NETIF_FLAG_AUTOUP,
+        .flags = (esp_netif_flags_t)(ESP_NETIF_DHCP_SERVER | ESP_NETIF_FLAG_AUTOUP),
         .ip_info = &ap_ip,
         .get_ip_event = 0,
         .lost_ip_event = 0,
@@ -220,18 +227,12 @@ static void gw_setup_ap_netif(void)
     if (mmwlan_ap_get_bssid(bssid) == MMWLAN_SUCCESS)
         esp_netif_set_mac(g_ap_netif, bssid);
 
-    /* Create/attach the underlying lwIP netif and install its input path (mirrors mmhalow's
-     * wifi_start). WITHOUT this, esp_netif_receive() dereferences a NULL input fn and the first
-     * AP-client RX frame crashes (PC=0). Must precede action_connected + any RX. */
+    /* Create/attach the underlying lwIP netif + input path (mirrors mmhalow's wifi_start) and bring it
+     * up. WITHOUT action_start, esp_netif_receive() would deref a NULL input fn (PC=0 on first RX).
+     * AUTOUP + the inherent IP => dhcps auto-starts on 192.168.12.1. */
     esp_netif_action_start(g_ap_netif, NULL, 0, NULL);
-
-    esp_netif_ip_info_t ip = { 0 };
-    ip.ip.addr = esp_ip4addr_aton(AP_SUBNET_IP);
-    ip.gw.addr = esp_ip4addr_aton(AP_SUBNET_IP);
-    ip.netmask.addr = esp_ip4addr_aton(AP_SUBNET_MASK);
-    ESP_ERROR_CHECK(esp_netif_set_ip_info(g_ap_netif, &ip));
-    esp_netif_action_connected(g_ap_netif, NULL, 0, NULL); /* bring the netif up (no link event in AP) */
-    ESP_LOGI(TAG, "AP netif up: %s/24, BSSID/MAC=" MACSTR, AP_SUBNET_IP, MAC2STR(bssid));
+    esp_netif_action_connected(g_ap_netif, NULL, 0, NULL); /* no link event in AP */
+    ESP_LOGI(TAG, "AP netif up: %s/24 + DHCP server, BSSID/MAC=" MACSTR, AP_SUBNET_IP, MAC2STR(bssid));
 }
 
 /* Pin the mesh netif's static IP once it is up (mmhalow's netif = the primary/mesh vif). */
