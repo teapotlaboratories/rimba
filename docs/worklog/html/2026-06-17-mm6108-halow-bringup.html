@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MM6108 HaLow bring-up — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-17</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-17</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ success</span>
+    <span class="badge">bring-up · HaLow</span>
+  </div>
+
+  <h1>MM6108 HaLow bring-up<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">Phase 1 — IBSS Foundation (BLOCKING), task 1.1 · SDK + morselib build · session 2</small></h1>
+
+  <p class="lead">Pull real MM6108 code into a firmware and get the radio to boot. <strong>Result: SUCCESS.</strong>
+  The MM6108 boots over SPI on the Seeed XIAO ESP32-S3, loads its firmware + BCF, and runs a HaLow scan.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ What booted</p>
+    <p>SPI wiring correct, <code>mm6108.mbin</code> firmware + <code>bcf_mf16858.mbin</code> BCF load over SPI,
+    regulatory domain configured (US), scan subsystem functional. Author: Aldwin.
+    This is the working <code>mmwlan</code> boot — the foundation for tasks 1.2–1.3 (the ADHOC/IBSS work).</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">XIAO ESP32-S3</div><div class="s">host</div></div>
+      <div class="node acc"><div class="t">SPI</div><div class="s">RESET/WAKE/BUSY/IRQ/CS</div></div>
+      <div class="node"><div class="t">MM6108</div><div class="s">chip ID 0x0306</div></div>
+      <div class="node acc"><div class="t">FW + BCF load</div><div class="s">mm6108.mbin · bcf_mf16858</div></div>
+      <div class="node ok"><div class="t">US channel list</div><div class="s">regdb</div></div>
+      <div class="node ok"><div class="t">scan</div><div class="s">finished</div></div>
+    </div>
+    <figcaption>Boot pipeline proven end-to-end on hardware: host drives the MM6108 over SPI, the chip loads its firmware + board-config file, the regulatory domain sets the channel list, and a scan runs.</figcaption>
+  </figure>
+
+  <h2 id="correction">The key correction to session 1</h2>
+  <p>Session 1 concluded there was <em>no supported ESP32 path</em> for morselib and that we would have to port
+  the HAL ourselves. <strong>That is now superseded.</strong> Aldwin found that Morse Micro publishes the ESP32 port
+  on the <strong>ESP Component Registry</strong>:</p>
+  <ul>
+    <li><a href="https://components.espressif.com/components/morsemicro/halow">components.espressif.com/components/morsemicro/halow</a> (the HAL/driver)</li>
+    <li><a href="https://components.espressif.com/components/morsemicro/firmware">components.espressif.com/components/morsemicro/firmware</a> (the blobs)</li>
+  </ul>
+  <p>This is the same code as the deprecated <code>mm-iot-esp32</code> repo, now packaged and maintained as managed
+  components. So we consume that code instead of porting anything — and have since <strong>vendored it locally</strong>
+  rather than fetching from the registry (see <em>Vendoring the Morse components</em> below). <strong>No HAL port needed.</strong></p>
+
+  <p><strong>Consequences:</strong></p>
+  <ul>
+    <li><strong>ESP-IDF upgraded 5.2.3 → 5.4.2.</strong> All published component versions
+      (<code>2.9.7-esp32-3</code>, <code>2.10.4-esp32-1/-2</code>) require <code>idf &gt;=5.4.2</code>. Initially
+      installed v5.4.2 at <code>~/esp/esp-idf-5.4.2</code>; later <strong>vendored as a submodule at
+      <code>vendor/esp-idf</code></strong> (pinned v5.4.2), which the Makefile default <code>IDF_PATH</code> now points at.</li>
+    <li><code>vendor/mm-iot-sdk</code> (submodule) is now <strong>reference-only</strong> — the build pulls morselib +
+      blobs from the vendored components, not this submodule. Kept for its full docs and the complete BCF set.</li>
+  </ul>
+
+  <h2 id="what-built">What was built — <code>firmware/rimba-halow-scan/</code></h2>
+  <p>Based on the component's own <code>examples/scan</code> (<code>app_main.c</code>, clean high-level API:
+  <code>mmhalow_init()</code> / <code>mmhalow_scan()</code> / <code>mmhalow_print_version_info()</code>), with a
+  Seeed XIAO board overlay. (That overlay was later moved to <code>boards/proto1/</code> and selected via the
+  <code>BOARD</code> make var — see <em>Build/flash</em> below.)</p>
+  <p>The <code>halow</code> + <code>firmware</code> components are vendored under <code>components/</code> (repo root)
+  (see <em>Vendoring</em> below), so <code>main/idf_component.yml</code> no longer lists registry dependencies — IDF
+  picks up the local components automatically. <code>main</code> just declares <code>REQUIRES halow</code>.</p>
+
+  <h3>Board config that matters (<code>boards/proto1/sdkconfig.defaults</code>)</h3>
+  <p><strong>XIAO HaLow SPI/control pins</strong> (from the Seeed <code>mm-iot-esp32</code> fork's Kconfig defaults —
+  the <em>upstream component</em> defaults are a different board, each pin +1, so these overrides are REQUIRED):</p>
+  <table>
+    <thead><tr><th>RESET_N</th><th>WAKE</th><th>BUSY</th><th>IRQ</th><th>CS</th><th>SCK</th><th>MISO</th><th>MOSI</th></tr></thead>
+    <tbody><tr><td>GPIO1</td><td>GPIO2</td><td>GPIO5</td><td>GPIO3</td><td>GPIO4</td><td>GPIO7</td><td>GPIO8</td><td>GPIO9</td></tr></tbody>
+  </table>
+  <p><code>CONFIG_MM_RESET_N=1 … CONFIG_MM_SPI_MOSI=9</code></p>
+  <ul>
+    <li><strong>BCF:</strong> <code>CONFIG_MM_BCF_FILE="bcf_mf16858.mbin"</code>, FW <code>mm6108.mbin</code>,
+      <code>CONFIG_MMHAL_CHIP_TYPE_MM6108=y</code>. <strong>Empirically confirmed correct</strong> — the chip reports
+      <code>{"module": "mm6108-mf16858"}</code>. (The board is NOT the FGH100M variant the Seeed wiki mentions; the
+      silicon's own BCF says mf16858.)</li>
+    <li><strong>Country:</strong> <code>CONFIG_HALOW_COUNTRY_CODE="US"</code>. This was the one non-obvious gotcha —
+      it defaults to <code>"??"</code>, and without a valid code <code>mmhalow_init()</code> logs
+      <code>Channel list not set</code>, version readback returns garbage, and scan fails. Valid codes in the bundled
+      regdb: AU CA EU GB IN JP KR NZ US.</li>
+    <li><code>CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y</code> (the 1.2 MB image doesn't fit the default app
+      partition), console on USB-Serial-JTAG, 16 MB QIO flash, octal PSRAM.</li>
+  </ul>
+  <p><code>REQUIRES</code> for <code>main</code>: <code>halow nvs_flash esp_wifi</code> (component name is <code>halow</code>).</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ The one non-obvious gotcha</p>
+    <p><code>CONFIG_HALOW_COUNTRY_CODE</code> defaults to <code>"??"</code>. Without a valid code,
+    <code>mmhalow_init()</code> logs <code>Channel list not set</code>, version readback returns garbage, and scan
+    fails. Set it (US here). Valid regdb codes: AU CA EU GB IN JP KR NZ US.</p>
+  </div>
+
+  <h2 id="verified">Verified on hardware (console capture)</h2>
+<pre><code>scan: Booted. Initializing Wi-Fi HaLow...
+Morse Micro HaLow NetIF: Setting Channel List US
+  BCF API version:         12.1.0
+  BCF board description:   {"module": "mm6108-mf16858", ...
+  Morselib version:        2.10.4
+  Morse firmware version:  1.17.6
+  Morse chip ID:           0x0306
+Wi-Fi MAC address: 68:24:99:44:6b:b7
+scan: Scan finished</code></pre>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">0x0306</div><div class="lbl">Morse chip ID (stable)</div></div>
+    <div class="stat"><div class="num">1.17.6</div><div class="lbl">Morse firmware</div></div>
+    <div class="stat"><div class="num">2.10.4</div><div class="lbl">Morselib version</div></div>
+    <div class="stat"><div class="num">12.1.0</div><div class="lbl">BCF API version</div></div>
+    <div class="stat"><div class="num acc">mm6108-mf16858</div><div class="lbl">module (from BCF)</div></div>
+    <div class="stat"><div class="num ok">US</div><div class="lbl">channel list / regdb</div></div>
+  </div>
+
+  <p>All readbacks valid: stable chip ID <code>0x0306</code>, real firmware (1.17.6) + morselib (2.10.4) versions,
+  real MAC (<code>68:24:99:44:6b:b7</code>), US channel list. Scan completed with no APs found (expected — nothing
+  else is transmitting HaLow nearby). This proves: SPI wiring correct, firmware+BCF load over SPI, regulatory domain
+  configured, scan subsystem functional.</p>
+  <p><strong>Phase-1 task 1.1 (ESP-IDF + morselib build) is effectively done</strong>, and we have a working
+  <code>mmwlan</code> boot — the foundation for tasks 1.2–1.3 (the ADHOC/IBSS work).</p>
+
+  <h2 id="vendoring">Vendoring the Morse components</h2>
+  <p>Instead of letting <code>idf_component_manager</code> fetch <code>morsemicro/halow</code> +
+  <code>morsemicro/firmware</code> from the ESP Component Registry into <code>managed_components/</code> (gitignored,
+  hash-guarded, clobbered on every <code>reconfigure</code>), the two packages are <strong>vendored as local
+  components</strong> under <code>components/</code> (repo root):</p>
+  <table>
+    <thead><tr><th>Component</th><th>Path</th><th>Submodule remote</th><th>Pinned</th></tr></thead>
+    <tbody>
+      <tr><td><code>halow</code> (driver + morselib)</td><td><code>components/halow</code></td><td><code>teapotlaboratories/mm-esp32-halow</code></td><td><code>2.10.4-esp32-2</code></td></tr>
+      <tr><td><code>firmware</code> (mm6108/mm8108 blobs)</td><td><code>components/firmware</code></td><td><code>teapotlaboratories/mm-esp32-firmware</code></td><td><code>2.10.4-esp32-2</code></td></tr>
+    </tbody>
+  </table>
+  <p>Each is its own git repo, tracked from the main repo as a submodule (first commit = pristine upstream, so later
+  commits are clean diffs of our changes). Why:</p>
+  <ul>
+    <li><strong>Reproducibility insurance</strong> — the build no longer depends on the registry (or a specific
+      published version) staying available; the exact source lives on remotes we control.</li>
+    <li><strong>Track local modifications</strong> — once we start patching morselib/mmhalow (e.g. for the IBSS /
+      raw-L2 work), every edit is a reviewable commit against pristine upstream.</li>
+  </ul>
+  <p>The repo-root <code>components/</code> dir is added to the build via <code>EXTRA_COMPONENT_DIRS</code> in
+  <code>firmware/rimba-halow-scan/CMakeLists.txt</code>; IDF then uses these in place of the registry packages of the
+  same name (a <em>local-component override</em> — confirmed in the configure log: <code>Using component placed at
+  .../components/firmware for dependency "morsemicro/firmware"</code>). No network, no <code>managed_components/</code>.
+  The build output is byte-for-byte identical to the registry-fetched build.</p>
+  <p><code>vendor/mm-iot-sdk</code> is a <em>different</em> git ref (the upstream SDK source) and is kept only as
+  reference; the vendored components above are the registry-packaged <code>-esp32-</code> build, which is what actually compiles.</p>
+
+  <h2 id="build-flash">Build/flash</h2>
+<pre><code>git clone --recurse-submodules …       # or: git submodule update --init
+make build                             # default APP rimba-halow-scan, BOARD proto1
+make flash                             # /dev/ttyACM0</code></pre>
+  <p><code>rimba-halow-scan</code> is now the default <code>APP</code>, and <code>BOARD</code> (default
+  <code>proto1</code>) selects <code>boards/&lt;BOARD&gt;/sdkconfig.defaults</code> via
+  <code>SDKCONFIG_DEFAULTS</code>; output goes to <code>build/&lt;APP&gt;/&lt;BOARD&gt;/</code>. Image:
+  <code>rimba_halow_scan.bin</code> ~1.23 MB (20% partition free). The vendored
+  <code>components/{halow,firmware}</code> must be checked out (submodules) for the build to resolve.</p>
+
+  <h2 id="next-steps">Next steps</h2>
+  <ol>
+    <li><strong>IBSS / RISK-01 (tasks 1.2–1.3):</strong> a first pass through the vendored morselib source
+      (<code>components/halow/.../morselib/include/mmwlan.h</code>) found:
+      <ul>
+        <li><strong>Raw L2 TX/RX is reachable</strong> — <code>mmwlan_tx_pkt()</code> takes a packet that starts
+          with an 802.3 header (<code>DST | SRC | ETHERTYPE | payload</code>, translated to 802.11), so we can set
+          EtherType <code>0x88B5</code> directly; <code>mmwlan_register_rx_cb()</code> / <code>_rx_pkt_cb()</code>
+          deliver RX frames with their 802.3 header, per-VIF. This is the Rimba datapath.</li>
+        <li><strong>No public ADHOC/IBSS</strong> — the low-level <code>mmwlan</code> API exposes only STA
+          (<code>mmwlan_sta_enable</code>) and AP (<code>mmwlan_ap_enable</code>). IBSS code exists only inside the
+          bundled <code>wpa_supplicant</code> (hostap), with no evidence the Morse firmware exposes an ADHOC opmode.
+          <code>mmwlan_boot()</code> only idles the chip; TX/RX needs an active VIF/BSS context.</li>
+        <li><strong>Implication:</strong> raw <code>0x88B5</code> frames work, but ride on an associated STA↔AP link,
+          not a peer IBSS — i.e. the <strong>RISK-01 fallback (AP-STA) is the practical path</strong> unless an ADHOC
+          opmode can be reached. Next: confirm raw TX/RX over a live STA↔AP link before deciding whether to keep probing IBSS.</li>
+      </ul>
+    </li>
+    <li>Two-board test: build a second node, attempt STA↔AP first (known to work) to confirm a live link, then pursue IBSS.</li>
+    <li>Measure MM6108 boot time (RISK-02 / task 1.4) once we control the boot path.</li>
+  </ol>
+
+  <h2 id="open-question">Open question for Aldwin</h2>
+  <div class="callout">
+    <p class="ct">Flag only if RF looks off later</p>
+    <p>The Seeed wiki/schematic call the XIAO module "Quectel FGH100M-H", but the chip's own BCF reports
+    <code>mm6108-mf16858</code> and that BCF works. Confirmed good enough for digital + scan. Flag only if RF
+    range/regulatory later looks off.</p>
+  </div>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#correction">Correction to session 1</a></li>
+  <li><a href="#what-built">What was built</a></li>
+  <li><a href="#verified">Verified on hardware</a></li>
+  <li><a href="#vendoring">Vendoring the components</a></li>
+  <li><a href="#build-flash">Build/flash</a></li>
+  <li><a href="#next-steps">Next steps</a></li>
+  <li><a href="#open-question">Open question</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-17-mm6108-halow-bringup</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

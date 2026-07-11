@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase-1 IBSS validation complete — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-21</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-21</span>
+    <span class="badge">2 min read</span>
+    <span class="badge ok">✓ validated</span>
+    <span class="badge bug">IBSS · soak · power-save</span>
+  </div>
+
+  <h1>Phase-1 IBSS validation complete<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">P0.4 · I.4 · ~6.5 h soak · power-save plan recorded</small></h1>
+
+  <p class="lead">Short session closing out the open-IBSS foundation validation, plus recording the
+  power-save architecture decisions. Continues
+  <a href="../2026-06-20-ibss-adoption-interop-phantom.md"><code>2026-06-20-ibss-adoption-interop-phantom.md</code></a>.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Verdict — the open-IBSS foundation is validated and ready for Phase 2</p>
+    <p>Full suite: P0.1–0.7 ☑, I.1–I.3 ☑, I.5 ☑, P0.4 ☑, P1.4 ☑, P1.5 ☑; only <strong>I.4 ✗</strong>
+    (blocked — needs external S1G sniffer gear).</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">6 h 31–32 m</div><div class="lbl">soak uptime · 0 reboots · 0 asserts</div></div>
+    <div class="stat"><div class="num acc">~47,000</div><div class="lbl">chronium <code>icmp_seq</code> to the end</div></div>
+    <div class="stat"><div class="num">12–19 ms</div><div class="lbl">round-trip RTT under load</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">heap leak — Δ 0 / −108 / −548 B (noise)</div></div>
+    <div class="stat"><div class="num acc">208</div><div class="lbl">cross-peer <code>(tid,seq)</code> collisions correctly ACCEPTED</div></div>
+    <div class="stat"><div class="num">9</div><div class="lbl">genuine same-peer dedup drops</div></div>
+  </div>
+
+  <h2 id="tests">Tests run</h2>
+
+  <table>
+    <thead><tr><th>Test</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>P0.1–0.7 (Phase-0)</td><td><span class="badge ok">☑</span></td></tr>
+      <tr><td>I.1–I.3 (IBSS)</td><td><span class="badge ok">☑</span></td></tr>
+      <tr><td>I.5 (IBSS)</td><td><span class="badge ok">☑</span></td></tr>
+      <tr><td>P0.4 — per-peer dedup</td><td><span class="badge ok">☑</span> forced cross-peer probe</td></tr>
+      <tr><td>I.4 — on-air frame diff</td><td><span class="badge err">✗</span> blocked (external gear)</td></tr>
+      <tr><td>P1.4 — recovery</td><td><span class="badge ok">☑</span> (2026-06-20 stress test)</td></tr>
+      <tr><td>P1.5 — soak</td><td><span class="badge ok">☑</span> ~6.5 h, 4-node</td></tr>
+    </tbody>
+  </table>
+
+  <h3>P0.4 per-peer dedup → ☑ (forced cross-peer probe)</h3>
+  <p>Instrumented the dedup site (<code>umac_datapath_is_rx_frame_duplicate</code>) with a 256-frame
+  cross-peer ring; drove ACM0 with a chronium unicast flood (<strong>8464 frames, 0.06 % loss</strong>) +
+  ACM1/ACM2 pings. <strong>208 cross-peer <code>(tid,seq)</code> collisions correctly ACCEPTED</strong>
+  (not deduped) + <strong>9 genuine same-peer dedup drops</strong>. Dedup state is per-peer
+  (<code>sta_data-&gt;rx_seq_num_spaces</code>) → independence proven. Probe reverted.</p>
+
+  <h3>I.4 on-air frame diff → ✗ BLOCKED</h3>
+  <p>chronium monitor mode on the right S1G channel (<code>morse_cli</code> = 915500 kHz) + raw
+  <code>AF_PACKET</code> capture → <strong>0 frames</strong> (rx delta 0, promisc no help, no
+  <code>morse_cli</code> monitor cmd). <strong>Confirmed not IBSS-specific</strong> — an ESP32 SoftAP
+  beacon also captured 0. The same <code>wlan1</code> RX's fine in connected modes ⇒ morse
+  <strong>monitor mode</strong> is the blocker.</p>
+  <div class="callout warn">
+    <p class="ct">⚠ Backlog — closing <code>#11</code> needs an external S1G sniffer</p>
+    <p>Verifying the S1G beacon on-wire — specifically our ESP32 beacon's <code>source_addr</code>
+    (MAC vs BSSID) — cannot be done with morse monitor mode; it requires <strong>external S1G sniffer</strong> gear.</p>
+  </div>
+
+  <h3>P1.4 recovery → ☑</h3>
+  <p>Done in the 2026-06-20 stress test: mid-stream node drop, survivors unaffected, rejoin.</p>
+
+  <h3>P1.5 soak → ☑ (~6.5 h, 4-node)</h3>
+  <p>3 ESP32 + chronium, continuous traffic, ESP32 instrumented with 30 s heap/uptime telemetry (kept).
+  <strong>Uptime 6 h 31–32 m, 0 reboots, 0 asserts</strong>, data to the end (chronium
+  <code>icmp_seq ~47 000</code>, 12–19 ms RTT). <strong>No heap leak</strong> — <code>heap_min</code> Δ
+  over 6.5 h: <strong>0 / −108 / −548 B</strong> (transient noise).</p>
+
+  <h2 id="decisions">Decisions recorded (see hardening-todo)</h2>
+  <ul>
+    <li><strong><code>#4</code> IBSS merge — OUT OF SCOPE.</strong> Rimba is a <em>provisioned</em> network
+      (agreed BSSID), so coordinator-free TSF merge isn't needed. Documented in code + docs.</li>
+    <li><strong>Create/join role is dynamic, not provisioned</strong> (<code>#7</code> → scan →
+      join-else-create, <code>ieee80211_sta_find_ibss</code>) — field relays are equal; first up creates,
+      rest join.</li>
+    <li><strong>Power-save is an early focus, via RTC, not chip PS.</strong> The morse driver has
+      <strong>no IBSS radio power-save</strong> (TWT is STA/AP-only, no ATIM). So Scheduled mode =
+      <strong>ESP32 + RTC power-cycles the radio</strong> (<code>#8</code>). Bypasses chip PS + TSF sync.
+      Gating unknown = radio <strong>cold-boot-to-joined time (<code>#9</code> / RISK-02)</strong>.</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">RTC timer</div><div class="s">ESP32-scheduled</div></div>
+      <div class="node acc"><div class="t">radio cold-boot</div><div class="s">no chip PS / TSF</div></div>
+      <div class="node"><div class="t">scan</div><div class="s"><code>find_ibss</code></div></div>
+      <div class="node ok"><div class="t">join-else-create</div><div class="s">equal peers</div></div>
+    </div>
+    <figcaption>Scheduled power-save = the ESP32 power-cycles the radio via RTC, then re-joins the provisioned IBSS. The gating number is the cold-boot-to-joined time (<code>#9</code> / RISK-02).</figcaption>
+  </figure>
+
+  <h2 id="git">Git state</h2>
+  <p>All on <code>main</code>: <code>4dd855c</code> (I.4 blocked), <code>254f2b6</code> (P0.4),
+  <code>ce37dd6</code> (soak + heap telemetry), plus this doc-update commit. Radios silent, chronium down.</p>
+
+  <h2 id="next">Next</h2>
+  <p><strong><code>#9</code> — RISK-02 cold-boot-to-IBSS-joined time</strong> (the gating number for
+  RTC-scheduled power-save), then Phase 2 (link security, <code>#3</code> CCMP). Backlog item still open:
+  I.4/<code>#11</code> needs an external S1G sniffer.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#tests">Tests run</a></li>
+  <li><a href="#decisions">Decisions recorded</a></li>
+  <li><a href="#git">Git state</a></li>
+  <li><a href="#next">Next</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-21-phase1-validation-complete</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

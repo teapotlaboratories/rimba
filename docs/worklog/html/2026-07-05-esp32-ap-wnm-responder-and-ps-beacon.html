@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 AP WNM responder + STA power-save — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-05</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-05</span>
+    <span class="badge">8 min read</span>
+    <span class="badge ok">✓ both goals met</span>
+    <span class="badge">power-save · WNM · TWT · AP</span>
+  </div>
+
+  <h1>ESP32 AP WNM-sleep responder + STA power-save beacon fix<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">HaLow AP/STA · all-ESP32 low-power leaf</small></h1>
+
+  <p class="lead">Two goals. <strong>(1)</strong> Make the morselib ESP32 SoftAP a working <strong>WNM-sleep responder</strong>
+  so an all-ESP32 STA can enter/exit WNM sleep — previously the STA was trapped, blocked forever. <strong>(2)</strong>
+  Make the STA actually <strong>doze / power-save</strong> against the ESP32 AP.</p>
+
+  <p><strong>Author:</strong> Aldwin</p>
+
+  <div class="callout" style="border-left-color:var(--accent2)">
+    <p class="ct" style="color:var(--accent2)">Bench &amp; method</p>
+    <p><strong>board0</strong> = ESP32-S3 + FGH100M SoftAP (app <code>rimba-halow-ap</code>), <strong>board2</strong> =
+    ESP32-S3 + FGH100M STA (app <code>rimba-halow-sta</code>), morselib fw 1.17.6, <code>BOARD=proto1-fgh100m</code>.
+    board2 is PPK2-powered (current measured). <strong>chronite</strong> = Linux hostapd_s1g AP (reference).
+    <strong>chronium</strong> = HaLow monitor (morse0, S1G ch27, freq 5560) — the on-air ground truth. Method
+    throughout: byte-diff on-air vs a live Linux AP (see <code>docs/reference/rimba-linux-halow-monitor.md</code>).</p>
+  </div>
+
+  <h2 id="results">Results at a glance</h2>
+
+  <div class="callout ok">
+    <p class="ct">✓ Status — both goals met (+ a bonus beacon fix + TWT)</p>
+    <ul style="margin:.2em 0">
+      <li><strong>(1) DONE</strong> — responder works end-to-end, on-air verified (<code>WNM ENTER/EXIT RETURNED 0</code>,
+        CCMP-encrypted response, board2 ACKing).</li>
+      <li><strong>(2) DONE</strong> — the doze was a STA-app config issue (PS disabled by <code>mmhalow.c:200</code>),
+        <strong>NOT</strong> an AP gap. With PS re-enabled, board2 dozes to <strong>~13 mA (dynamic PS) / ~4–5 mA
+        (WNM+powerdown)</strong> against the ESP32 AP — the all-ESP32 low-power leaf works.</li>
+      <li><strong>Bonus:</strong> fixed a real beacon bug along the way (<code>short_beacon_int</code>, EID 213
+        <code>beacon_interval</code> 0→100).</li>
+      <li><strong>(3) TWT verified (Part 3)</strong> — board2 negotiates a TWT agreement with the ESP32 AP and dozes on
+        its 10 s schedule (~6 mA, waking every ~10 s), on-air ACCEPT + PPK2 cadence confirmed. No AP code change.</li>
+    </ul>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">~4–5 mA</div><div class="lbl">WNM + powerdown doze (min 4 mA)</div></div>
+    <div class="stat"><div class="num acc">~13 mA</div><div class="lbl">dynamic-PS doze (~9–13 mA)</div></div>
+    <div class="stat"><div class="num acc">~6 mA</div><div class="lbl">TWT floor · 10 s service period</div></div>
+    <div class="stat"><div class="num">66 mA</div><div class="lbl">before — PS disabled by <code>mmhalow.c:200</code></div></div>
+    <div class="stat"><div class="num">5</div><div class="lbl">-part responder fix chain (Part 1)</div></div>
+    <div class="stat"><div class="num">13 / 6.7 mA</div><div class="lbl">Linux-AP ladder (reference — matched/beaten)</div></div>
+  </div>
+
+  <p>The doze ladder against the board0 ESP32 AP, to scale (PPK2 on board2):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">PS off · before</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">66 mA</span></div>
+    <div class="bar-row"><span class="lbl">dynamic PS</span><span class="bar-track"><span class="bar-fill fast" style="width:19.7%"></span></span><span class="val">~13 mA</span></div>
+    <div class="bar-row"><span class="lbl">TWT · 10 s SP</span><span class="bar-track"><span class="bar-fill fast" style="width:9.1%"></span></span><span class="val">~6 mA</span></div>
+    <div class="bar-row"><span class="lbl">WNM+powerdown</span><span class="bar-track"><span class="bar-fill fast" style="width:6.8%"></span></span><span class="val">~4–5 mA</span></div>
+  </div>
+
+  <h2 id="part1">Part 1 · WNM-sleep responder — a 5-part fix chain</h2>
+
+  <p><strong>Symptom:</strong> board2 sends a WNM-Sleep ENTER request; <code>mmwlan_set_wnm_sleep_enabled(true)</code>
+  blocks forever, retrying every 1 s (60×) then <code>MMWLAN_TIMED_OUT</code>; <code>Transmit blocked: 6</code> recurs.
+  Against a Linux AP the SAME board2 entered/exited WNM sleep cleanly (6.7 mA). So the STA is capable; the ESP32 AP's
+  responder was the gap. Root-caused by two adversarial-verification workflows; each fix follows the hostapd/Linux
+  code faithfully.</p>
+
+  <table>
+    <thead><tr><th class="num">#</th><th>Fix</th><th>File</th><th>Root cause / evidence</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="num">1</td>
+        <td>Compile the dormant responder: add <code>src/ap/wnm_ap.c</code> to SRCS + <code>CONFIG_WNM_AP=1</code></td>
+        <td><code>components/halow/components/hostap/CMakeLists.txt</code> (AP SRCS + BUILD_DEFINES blocks)</td>
+        <td><code>wnm_ap.c</code> (<code>ieee802_11_rx_wnmsleep_req</code>) was never compiled; the
+          <code>case WLAN_ACTION_WNM</code> dispatch (<code>ieee802_11.c:6194</code>) is <code>#ifdef CONFIG_WNM_AP</code>.
+          Linux <code>hostapd_s1g</code> builds both.</td>
+      </tr>
+      <tr>
+        <td class="num">2</td>
+        <td><code>bss-&gt;wnm_sleep_mode = 1</code></td>
+        <td><code>src/hostap/wpa_supplicant/ap.c</code> <code>wpa_supplicant_conf_ap</code> (after <code>dtim_period</code>)</td>
+        <td><code>wnm_ap.c:292</code> early-returns if <code>!conf-&gt;wnm_sleep_mode</code>. Linux sets it via
+          <code>wnm_sleep_mode=1</code> in <code>.conf</code>; wpa_supplicant AP mode has no knob. On-air:
+          <code>rx_wnmsleep_req mode=1</code>.</td>
+      </tr>
+      <tr>
+        <td class="num">3</td>
+        <td>Add an AP <code>send_action</code> op <code>mmwpas_send_action_ap</code> (wired into <code>mmwlan_wpas_ops_ap</code>)</td>
+        <td><code>src/umac/supplicant_shim/driver_ap.c</code></td>
+        <td><code>hapd_drv_send_action()</code> (<code>ap_drv_ops.c</code>) does <code>if (!driver-&gt;send_action) return 0;</code>
+          — <strong>returns success without sending</strong> when the driver has no <code>.send_action</code>. The AP ops had
+          none, so the response was silently dropped. Builds the PV0 mgmt header (<code>dot11_build_pv0_mgmt_header</code>,
+          <code>DOT11_FC_SUBTYPE_ACTION</code>) around hostapd's action body and TXs via
+          <code>umac_datapath_tx_mgmt_frame_ap</code>.</td>
+      </tr>
+      <tr>
+        <td class="num">4</td>
+        <td>CCMP-protect the robust unicast response</td>
+        <td><code>src/umac/datapath/umac_datapath_ap.c</code> <code>umac_datapath_tx_mgmt_frame_ap</code></td>
+        <td>Response went out <strong>unprotected</strong>; board2 (SAE+PMF) deterministically drops unprotected robust mgmt
+          (<code>umac_datapath.c:390</code>). Deterministic 100% failure across 60 retries ruled out PS-timing. Mirror the
+          proven STA protect block (<code>umac_datapath.c:2450</code>): look up the DEST stad by <code>header-&gt;addr1</code>,
+          and if <code>pmf_is_required &amp;&amp; frame_is_robust_mgmt &amp;&amp; !multicast</code>: set
+          <code>DOT11_MASK_FC_PROTECTED</code>, <code>key_id = umac_keys_get_active_key_id(dst_stad, PAIRWISE)</code>,
+          <code>umac_keys_increment_tx_seq</code>, then <code>HW_ENC</code>. Safe (AP↔STA unicast A2=TA=BSSID; the mesh
+          <code>#20</code> A4≠TA gate does not apply).</td>
+      </tr>
+      <tr>
+        <td class="num">5</td>
+        <td>Reserve CCMP header headroom + MIC tailroom in the response buffer</td>
+        <td><code>src/umac/supplicant_shim/driver_ap.c</code> <code>mmwpas_send_action_ap</code> alloc</td>
+        <td>Alloc was <code>MMDRV_PKT_CLASS_DATA_TID7, 0, hdr+body</code> (zero headroom) but flagged <code>HW_ENC</code> →
+          the FW could not prepend the 8-byte CCMP header / append the MIC → <strong>malformed on-air</strong> → board2
+          dropped it <strong>pre-ACK</strong>. Fix mirrors the STA mgmt path (<code>frame_constructor.c:21</code>):
+          <code>MMDRV_PKT_CLASS_MGMT, DOT11_CCMP_HEADER_LEN, hdr+body+DOT11_CCMP_256_MIC_LEN</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>The decisive on-air discriminators (chronium monitor)</h3>
+
+  <figure>
+    <div class="flow">
+      <div class="node err"><div class="t">Before #4</div><div class="s">PROT=0 → board2 drops (PMF)</div></div>
+      <div class="node"><div class="t">After #4, before #5</div><div class="s">PROT=1, PN=0x91 const, retry=1 ×11 → dropped pre-ACK</div></div>
+      <div class="node ok"><div class="t">After #5</div><div class="s">PN 0x49→0x52 rising, retry=0 → board2 ACKing</div></div>
+    </div>
+    <figcaption>The PN + retry signature localized each fix: a decrypt-asymmetry would ACK first then advance the PN — a constant PN with retry=1 is a pre-ACK drop, i.e. the malformed-buffer clue that pointed at fix #5.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Before #4:</strong> response <code>PROT=0</code> → board2 drops it (PMF).</li>
+    <li><strong>After #4, before #5:</strong> response <code>PROT=1</code> but <strong>constant PN=0x91, retry=1</strong> ×11
+      = board2 dropping it <strong>pre-ACK</strong> (a decrypt-asymmetry would ACK first, then advance the PN) → the
+      malformed-buffer clue.</li>
+    <li><strong>After #5:</strong> <strong>PN 0x49→0x52 (incrementing), retry=0</strong> = board2 ACKing fresh responses →
+      and on the STA: <strong><code>WNM ENTER #0/EXIT #0/ENTER #1 RETURNED 0</code></strong>, looping. Responder works.</li>
+  </ul>
+
+  <h2 id="part2">Part 2 · The doze (STA power-save) — SOLVED (it was the STA, not the AP)</h2>
+
+  <p><strong>Symptom:</strong> with the WNM handshake working, board2's radio still sat at steady <strong>~66 mA</strong>
+  through both the dynamic-PS and WNM windows (85/85 samples radio-on, PPK2). It looked like an AP-side gap because the
+  same board2 dozed to 6.7/13 mA against a Linux AP.</p>
+
+  <p><strong>RESOLUTION — the AP was fine; the STA test app had power-save disabled.</strong> <code>mmhalow_init()</code>
+  explicitly calls <strong><code>mmwlan_set_power_save_mode(MMWLAN_PS_DISABLED)</code> (<code>components/halow/mmhalow.c:200</code>)</strong>,
+  so the radio stays on at ~64 mA regardless of the AP (this is exactly the "No PS = 64.2 mA" row in the 2026-07-04 PPK2
+  worklog). The WNM test never re-enabled PS, and it used the <strong>basic</strong>
+  <code>mmwlan_set_wnm_sleep_enabled(true)</code> which negotiates the protocol but leaves
+  <code>chip_powerdown_enabled=0</code>, so the radio never powers down. <strong>The fix is entirely STA-app-side</strong>
+  (no morselib/AP change):</p>
+
+  <pre><code>mmwlan_set_power_save_mode(MMWLAN_PS_ENABLED);                       /* undo mmhalow.c:200 */
+struct mmwlan_set_wnm_sleep_enabled_args a = {.wnm_sleep_enabled=1, .chip_powerdown_enabled=1};
+mmwlan_set_wnm_sleep_enabled_ext(&amp;a);                               /* WNM + radio powerdown */</code></pre>
+
+  <p><strong>Measured after (PPK2, board2 against the board0 ESP32 AP):</strong> dynamic-PS baseline <strong>~9–13 mA</strong>,
+  WNM sleep <strong>~4–5 mA</strong> (min 4 mA) — matching/beating the Linux-AP ladder (13 / 6.7 mA). <strong>The all-ESP32
+  low-power leaf works.</strong></p>
+
+  <div class="callout warn">
+    <p class="ct">Red-herring trail (documented so it isn't re-run)</p>
+    <p>While assuming an AP gap, three AP-beacon candidates were fixed/tested on-air and <strong>all RULED OUT by
+    re-measuring</strong> — none moved the 66 mA because PS was off the whole time:</p>
+    <ul style="margin:.2em 0">
+      <li><strong>S1G Beacon Compatibility <code>beacon_interval</code> (EID 213) = 0</strong> (Linux = 100). This IS a real
+        beacon bug: <code>hostapd_eid_s1g_beacon_compat</code> (<code>ieee802_11_s1g.c:118</code>) computes
+        <code>short_beacon_int * beacon_int</code> and <code>short_beacon_int</code> has no default (0). Fixed via
+        <code>bss-&gt;short_beacon_int = 1</code> in <code>wpa_supplicant_conf_ap</code> — on-air confirmed 0→100.
+        <strong>Kept</strong> as a legitimate correctness fix (matches Linux), though NOT the doze cause.</li>
+      <li><strong>S1G Capabilities (EID 217):</strong> overrode <code>hw_mode-&gt;s1g_capab</code> (driver_ap.c) to the exact
+        Linux bytes <code>9e0040f8800c00024000</code>, confirmed on-air — no change. Reverted.</li>
+      <li><strong>AP app pings the STA at 1 Hz forever</strong> (<code>start_ping_octet</code>,
+        <code>ESP_PING_COUNT_INFINITE</code>); disabling it did not move the 66 mA. Left enabled (it's a downlink/TWT test
+        aid) but noted it keeps a PS STA busier.</li>
+      <li>The "Linux AP sends short beacons, ESP sends full" delta was also a red herring: the FC <code>0x08</code>/<code>0x40</code>
+        is BSS-BW vs the Security bit, <strong>not</strong> the short-beacon (Next-TBTT) indicator, and the dozing Linux AP
+        sends non-short beacons too. <strong>Short beacons are NOT required to doze.</strong> (A workflow risk-analysis caught
+        this before any short-beacon code was written.)</li>
+    </ul>
+  </div>
+
+  <h2 id="part3">Part 3 · TWT (Target Wake Time) verified end-to-end on the ESP32 AP</h2>
+
+  <p>The natural completion of the power-save story: WNM is a whole-session sleep; <strong>TWT</strong> is the modern S1G
+  <em>scheduled</em> wake mechanism. An understand-workflow (4 agents) first confirmed the AP TWT <strong>responder</strong>
+  is fully compiled + dispatched with <strong>no WNM-class gaps</strong> — TWT setup/teardown are <strong>unprotected S1G
+  Action frames (category 22)</strong> sent via the umac datapath directly, so they never needed the WNM
+  <code>send_action</code> or CCMP-protect fixes (<code>frame_is_robust_action</code> returns false for cat 22, so the CCMP
+  blocks correctly skip). <strong>No AP code change was required</strong> — the AP vif auto-arms as TWT responder
+  (<code>umac_interface.c:147</code>).</p>
+
+  <p><strong>STA test app</strong> (<code>rimba-halow-sta</code>, netif-free) sequence —
+  <code>mmwlan_twt_config_args{REQUESTER, wake_interval=10 s, min_wake=65280 us, SETUP_REQUEST}</code>:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">connect</div></div>
+      <div class="node acc"><div class="t">PS_ENABLED</div><div class="s">set_power_save_mode</div></div>
+      <div class="node acc"><div class="t">twt_config</div><div class="s">REQUESTER · 10 s · SETUP_REQUEST</div></div>
+      <div class="node acc"><div class="t">setup_request()</div><div class="s">TWT SETUP RETURNED 0</div></div>
+      <div class="node"><div class="t">hold idle</div></div>
+      <div class="node"><div class="t">teardown()</div><div class="s">action 7</div></div>
+    </div>
+    <figcaption>STA-side TWT flow (<code>rimba-halow-sta</code>) — the AP needed no change.</figcaption>
+  </figure>
+
+  <p><strong>Verified (on-air chronium morse0 + PPK2 board2):</strong></p>
+  <ul>
+    <li><strong>On-air:</strong> <strong>AP → STA</strong> <code>category 22, action 6, setup_command = ACCEPT(4), PROT=0</code>
+      (unprotected, no PN — spec-correct for an S1G Unprotected action, and distinct from the WNM response which carries a PN);
+      STA → AP <code>action 7</code> teardown. The responder answers a mid-session TWT Setup with ACCEPT.</li>
+    <li><strong>PPK2:</strong> in the TWT window board2 sits at <strong>~6 mA floor with a ~20 mA wake spike every ~10 s</strong>
+      — the <strong>wake cadence matches the negotiated 10 s service period</strong>. That cadence (not the average) is the
+      proof: it resolves the two pre-identified risks — <strong>R1</strong> (FW cmd 0x26 <code>TWT_AGREEMENT_INSTALL</code>
+      <em>did</em> arm the schedule on the STA vif; a failed install would wake every ~102 ms DTIM) and <strong>R4</strong>
+      (TWT is genuinely scheduling wakes, not just reading like dynamic PS). STA UART: <code>TWT SETUP RETURNED 0</code>.</li>
+    <li><strong>R3 CONFIRMED — downlink to a dozing STA works (AP host-buffer + flush-on-wake).</strong> Gave board2 a static IP
+      (192.168.12.51) so the AP's 1 Hz pinger reaches it, and measured both PS modes at once (all three signals agree):
+      <strong>Dynamic PS</strong> — every ping succeeds (RTT ~40–130 ms); the AP buffers + delivers at DTIM while the STA
+      dozes. <strong>TWT (5 s SP)</strong> — the pings are buffered and flushed as a ~5-frame BURST at each 5 s service period
+      (on-air: AP→STA + STA→AP bursts at sec 37/42/47/52/57…; PPK2: ~4 mA floor with a ~24 mA spike every 5 s; AP
+      ping-success cadence flips 1→5, i.e. 1 ping/SP lands inside the 1 s ping timeout, the rest are delivered
+      late-but-correctly at the SP). So downlink to a <em>sleeping</em> leaf is buffered while it dozes and delivered at its
+      next wake — not dropped.</li>
+    <li><strong>ESP AP vs LINUX AP (chronite hostapd_s1g), same R3 test:</strong> (i) <strong>core R3 EQUIVALENT</strong> — the
+      Linux AP also delivers downlink at DTIM to a dynamic-PS STA (continuous 1/s, RTT ~46–126 ms, board2 ~25 mA); (ii) but
+      for <strong>mid-session TWT</strong> (what <code>mmwlan_twt_setup_request</code> uses) the <strong>ESP AP is the better
+      responder</strong> — it answers the TWT Setup Request with ACCEPT and gives a ~6 mA SP-only doze with buffered burst
+      delivery, whereas chronite sent <strong>no TWT response</strong> on-air (with any config this hostapd_s1g accepts —
+      <code>enable_twt</code> is rejected, <code>ht_vht_twt_responder=1</code> didn't engage the mid-session responder), so
+      board2 stayed in dynamic PS at ~25 mA (0/123 s below 12 mA). Caveat: only the mid-session TWT path was tested; chronite
+      may support <strong>assoc-embedded</strong> TWT (a different path, likely the 2026-07-04 ~13 mA run). So the ESP AP leads
+      specifically on the mid-session path + doze depth (SP-only ~6 mA vs the Linux AP's DTIM-cadence ~13 mA).</li>
+  </ul>
+
+  <h2 id="codemap">Code-map (new/changed code ↔ anchor)</h2>
+
+  <p>All in <code>components/halow/components/mm-iot-sdk/framework/</code> unless noted; verify by grepping both trees.</p>
+
+  <table>
+    <thead><tr><th>File:sym</th><th>Change</th><th>Linux/hostapd anchor</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>components/halow/components/hostap/CMakeLists.txt</code> (SRCS + BUILD_DEFINES, <code>CONFIG_HALOW_AP_MODE</code> blocks)</td>
+        <td>+<code>src/ap/wnm_ap.c</code>, +<code>CONFIG_WNM_AP=1</code></td>
+        <td>same bundled <code>wnm_ap.c</code>; Linux <code>hostapd_s1g</code> compiles it</td>
+      </tr>
+      <tr>
+        <td><code>src/hostap/wpa_supplicant/ap.c</code> <code>wpa_supplicant_conf_ap</code></td>
+        <td><code>bss-&gt;wnm_sleep_mode = 1</code>; <code>if (!bss-&gt;short_beacon_int) bss-&gt;short_beacon_int = 1</code></td>
+        <td>Linux <code>.conf</code>: <code>wnm_sleep_mode=1</code>, <code>short_beacon_int</code></td>
+      </tr>
+      <tr>
+        <td><code>src/umac/supplicant_shim/driver_ap.c</code> <code>mmwpas_send_action_ap</code> + <code>.send_action</code> in <code>mmwlan_wpas_ops_ap</code></td>
+        <td>new AP action-frame TX (PV0 hdr + CCMP headroom/MIC tailroom) via <code>umac_datapath_tx_mgmt_frame_ap</code></td>
+        <td>STA <code>mmwpas_send_action</code> (<code>driver.c</code>) + <code>frame_constructor.c:21</code> alloc</td>
+      </tr>
+      <tr>
+        <td><code>src/umac/datapath/umac_datapath_ap.c</code> <code>umac_datapath_tx_mgmt_frame_ap</code></td>
+        <td>robust-unicast-PMF CCMP-protect block (dest-stad key)</td>
+        <td>STA-side protect block <code>umac_datapath.c:2450</code></td>
+      </tr>
+      <tr>
+        <td><code>src/hostap/src/ap/wnm_ap.c</code> <code>hostapd_eid_s1g_beacon_compat</code> (<code>ieee802_11_s1g.c:118</code>)</td>
+        <td>(unchanged — the <code>short_beacon_int*beacon_int</code> formula that made the fix necessary)</td>
+        <td>—</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="state">State at end</h2>
+
+  <p>WNM responder fix committed to the working tree (5 files in the halow submodule); debug <code>printf</code> probes
+  stripped. board2 test firmware = a WNM sleep test (<code>rimba-halow-sta</code>). Bench left UP for the follow-up:
+  board0 = fixed AP, board2 = STA, chronite = Linux reference AP (SSID <code>rimba-linux</code>), chronium = monitor.
+  Measurement scripts in <code>~/pwr_test/</code> (<code>ppk2_mon2.py</code> robust monitor, <code>reflash_and_flash.py</code>,
+  the on-air beacon decoders on chronium <code>/tmp/*.py</code>). Both goals met.</p>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Carry-forward gotcha — re-enable PS after <code>mmhalow_init()</code></p>
+    <p>Any app that wants STA power-save against this (or any) AP must re-enable it after <code>mmhalow_init()</code> —
+    <code>mmwlan_set_power_save_mode(MMWLAN_PS_ENABLED)</code> + <code>mmwlan_set_wnm_sleep_enabled_ext(chip_powerdown_enabled=1)</code>
+    — because <code>mmhalow.c:200</code> disables it.</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#results">Results at a glance</a></li>
+  <li><a href="#part1">Part 1 · WNM responder (5-part fix)</a></li>
+  <li><a href="#part2">Part 2 · The doze — solved</a></li>
+  <li><a href="#part3">Part 3 · TWT verified</a></li>
+  <li><a href="#codemap">Code-map</a></li>
+  <li><a href="#state">State at end</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-05-esp32-ap-wnm-responder-and-ps-beacon</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

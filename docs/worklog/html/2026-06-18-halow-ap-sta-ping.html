@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HaLow AP↔STA ping — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-18</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-18</span>
+    <span class="badge">3 min read</span>
+    <span class="badge ok">✓ success</span>
+    <span class="badge">bring-up · AP↔STA</span>
+  </div>
+
+  <h1>HaLow AP↔STA ping<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">RISK-01 link proven — Phase 1, tasks 1.2–1.3 (two-node link / RISK-01 fallback)</small></h1>
+
+  <p class="lead">Two XIAO ESP32-S3 + MM6108 boards run a <strong>bidirectional ICMP ping</strong> over an
+  802.11ah AP↔STA link — ~12 ms RTT, US 915.5 MHz, 1 MHz BW. This validates the Phase-1 RISK-01 AP-STA
+  link with a working bidirectional IP data path on real MM6108 hardware. Author: Aldwin;
+  goal was simply to get two MM6108 boards talking IP to each other.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Result — SUCCESS</p>
+    <p>Bidirectional ICMP ping over an 802.11ah AP↔STA link, ~12 ms RTT, US 915.5 MHz, 1 MHz BW. Symmetric
+    ~11–27 ms RTT, 0 timeouts once both sides are up.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">~12 ms</div><div class="lbl">RTT (bidirectional)</div></div>
+    <div class="stat"><div class="num acc">11–27 ms</div><div class="lbl">symmetric RTT range</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">timeouts (both sides up)</div></div>
+    <div class="stat"><div class="num">915.5 MHz</div><div class="lbl">US band, 1 MHz BW</div></div>
+  </div>
+
+  <h2 id="built">What was built — <code>rimba-halow-ap</code> + <code>rimba-halow-sta</code></h2>
+  <p>Two apps (under <code>firmware/</code>), built on the vendored <code>halow</code> component:</p>
+  <ul>
+    <li><strong><code>rimba-halow-ap</code></strong> — SoftAP (SAE, S1G chan 27 / op-class 68), static IP
+      <code>192.168.12.1</code>, also pings the STA.</li>
+    <li><strong><code>rimba-halow-sta</code></strong> — associates, static IP <code>192.168.12.2</code>, pings the AP.</li>
+  </ul>
+  <p>SSID <code>rimba-ping</code>, SAE passphrase, PMF required. The link params are duplicated in both apps with
+  a "MUST MATCH" comment.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">rimba-halow-sta</div><div class="s">192.168.12.2</div></div>
+      <div class="node acc"><div class="t">rimba-halow-ap</div><div class="s">192.168.12.1 · SoftAP</div></div>
+    </div>
+    <figcaption>SSID <code>rimba-ping</code> · SAE · PMF required · S1G chan 27 / op-class 68 · US 915.5 MHz / 1 MHz BW — bidirectional ICMP ping between the two static IPs.</figcaption>
+  </figure>
+
+  <p>Flash one board as AP, the other as STA (different ports), e.g.:</p>
+  <pre><code>make flash APP=rimba-halow-ap  PORT=/dev/ttyACM0
+make flash APP=rimba-halow-sta PORT=/dev/ttyACM1</code></pre>
+
+  <h2 id="findings">The two findings that mattered</h2>
+  <p>Association came up easily (SAE auth, <code>STA link up</code>) — but IP traffic did <strong>not</strong> flow
+  at first. Two distinct issues, found by iterating on hardware:</p>
+
+  <div class="callout bug">
+    <p class="ct">🐛 1 · No DHCP in AP mode</p>
+    <p><code>mmhalow</code> always creates the netif with <code>ESP_NETIF_DEFAULT_WIFI_STA()</code> — a DHCP
+    <em>client</em> — even when acting as an AP. There is no DHCP server, so the STA's auto-started DHCP client
+    waits forever. → Both sides use <strong>static IPs</strong> (stop the DHCP client,
+    <code>esp_netif_set_ip_info</code>).</p>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">🐛 2 · The AP never brings its netif up</p>
+    <p><code>mmhalow</code> calls <code>esp_netif_action_connected()</code> from its link-state callback, but in
+    <strong>AP mode that link-up never fires</strong>, so the AP netif stays DOWN and lwIP silently drops every
+    ICMP — association up, IP dead. <strong>The fix is one line:</strong> the AP calls
+    <code>esp_netif_action_connected()</code> itself after setting its static IP. With that, pings flow immediately.</p>
+  </div>
+
+  <p>Ruling-out steps along the way (kept here so we don't repeat them): the STA TX failures were unresolved ARP
+  (static ARP entry made TX succeed but still no replies); switching SAE→OPEN didn't help (ruled out encryption);
+  the AP netif being DOWN was the actual cause. Static-ARP and OPEN were diagnostic scaffolding and have been
+  removed.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ After the netif-up fix</p>
+    <p>Both <strong>dynamic ARP and SAE work</strong> — no static ARP entry and no OPEN fallback needed.</p>
+  </div>
+
+  <h2 id="verified">Verified on hardware (both directions)</h2>
+  <pre><code>STA → AP (192.168.12.1):  reply ... ttl=64 time=12 ms   (0 timeouts)
+AP → STA (192.168.12.2):  reply ... ttl=64 time=12 ms   (0 timeouts once STA up)</code></pre>
+  <p>Symmetric ~11–27 ms RTT. <strong>This validates the Phase-1 RISK-01 AP-STA link with a working bidirectional
+  IP data path on real MM6108 hardware.</strong></p>
+
+  <h2 id="esp-idf">Also this session: ESP-IDF vendored</h2>
+  <p>ESP-IDF v5.4.2 is now a submodule at <code>vendor/esp-idf</code> (pinned), and the Makefile's default
+  <code>IDF_PATH</code> points there — the build no longer depends on an out-of-tree install. The old
+  <code>~/esp</code> + <code>~/.espressif</code> toolchains were removed and reinstalled from the vendored tree.</p>
+
+  <h2 id="build-note">Build-system note</h2>
+  <p>The Makefile now layers <code>boards/&lt;BOARD&gt;/sdkconfig.defaults</code> first, then the app's own
+  <code>firmware/&lt;APP&gt;/sdkconfig.defaults</code> (if present). <code>rimba-halow-ap</code> uses this to add
+  <code>CONFIG_HALOW_AP_MODE=y</code>; <code>rimba-halow-sta</code> needs no app override.</p>
+
+  <h2 id="next">Next steps</h2>
+  <ol>
+    <li>Move from ICMP to the real Rimba datapath: raw L2 frames (EtherType <code>0x88B5</code>) over this AP-STA
+      link via <code>mmwlan_tx_pkt</code> / <code>mmwlan_register_rx_cb</code>.</li>
+    <li>Measure MM6108 boot time (RISK-02 / task 1.4).</li>
+    <li>Revisit whether IBSS is reachable at all, or commit to AP-STA for Phase 1.</li>
+  </ol>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#built">What was built</a></li>
+  <li><a href="#findings">The two findings</a></li>
+  <li><a href="#verified">Verified on hardware</a></li>
+  <li><a href="#esp-idf">ESP-IDF vendored</a></li>
+  <li><a href="#build-note">Build-system note</a></li>
+  <li><a href="#next">Next steps</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-18-halow-ap-sta-ping</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

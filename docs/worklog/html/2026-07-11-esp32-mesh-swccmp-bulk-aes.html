@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 mesh SW-CCMP: bulk-DMA AES-CCM — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-11</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-11</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ fixed &amp; merged</span>
+    <span class="badge bug">mesh · SW-CCMP · crypto</span>
+  </div>
+
+  <h1>ESP32 mesh SW-CCMP: bulk-DMA AES-CCM<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">relay crypto ~14–28× cheaper · +240 MHz · in-place</small></h1>
+
+  <p class="lead">Root-caused and fixed the host <strong>SW-CCMP</strong> per-frame crypto cost that shows up as a
+  relay bottleneck under concurrent load. SW-CCMP is the mesh's host-side CCMP: the MM6108 firmware holds
+  <strong>no</strong> mesh key, so it delivers protected frames raw and the host encrypts/decrypts — this is what
+  sidesteps the <code>#20</code> HW-crypto A4≠TA firmware gate, so keeping crypto host-side is a hard requirement.</p>
+
+  <p>A relay pays CCMP <strong>twice</strong> per forwarded frame — RX decrypt keyed by the transmitter, then TX
+  re-encrypt keyed by the next hop. 802.11s per-link keys make the re-encryption unavoidable:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">RX frame</div><div class="s">protected</div></div>
+      <div class="node acc"><div class="t">decrypt</div><div class="s">key = TA</div></div>
+      <div class="node"><div class="t">forward</div><div class="s">HWMP next-hop</div></div>
+      <div class="node acc"><div class="t">re-encrypt</div><div class="s">key = next-hop</div></div>
+      <div class="node"><div class="t">TX frame</div><div class="s">protected</div></div>
+    </div>
+    <figcaption>Every relayed mesh frame is decrypted and re-encrypted under <em>different</em> per-link keys — two full CCM passes per hop.</figcaption>
+  </figure>
+
+  <h2 id="bottom-line">Bottom line</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">14–28×</div><div class="lbl">cheaper relay crypto (avg)</div></div>
+    <div class="stat"><div class="num acc">187 → 3</div><div class="lbl">HW-AES passes / frame</div></div>
+    <div class="stat"><div class="num acc">384 → 6</div><div class="lbl"><code>AES_LOCK</code> ops / relay-frame</div></div>
+    <div class="stat"><div class="num ok">11 → 0.6 ms</div><div class="lbl">per-frame latency (contended)</div></div>
+    <div class="stat"><div class="num">−3.2 KB</div><div class="lbl">static RAM (in-place)</div></div>
+    <div class="stat"><div class="num ok">3 ways</div><div class="lbl">correctness proof</div></div>
+  </div>
+
+  <ol>
+    <li><strong>Root cause (measured on-device, not theory):</strong> the CCM ran AES <strong>one 16-byte ECB
+      block at a time</strong> — hostap <code>aes-ccm.c</code> <code>aes_ccm_ae/ad</code> →
+      <code>aes_encrypt</code> = <code>mbedtls_aes_crypt_ecb</code> (ESP32-S3 HW AES),
+      <strong>~2·⌈len/16⌉ ≈ 187 single-block ops per 1442 B frame</strong>. Each ECB op pays the full
+      <code>esp_aes</code> fixed wrapper (<code>esp_aes_acquire_hardware</code> = global <code>AES_LOCK</code>
+      mutex + bus-clock enable + peripheral reset → per-call DMA descriptor → poll → release). That is
+      <strong>≈ 384 <code>AES_LOCK</code> acquire/release per relayed frame</strong>. The fixed per-op overhead
+      and lock churn — not the AES math — dominate.</li>
+    <li><strong>Fix:</strong> a bulk-DMA CCM — <strong>one</strong> <code>mbedtls_aes_crypt_cbc</code> (CBC-MAC) +
+      <strong>one</strong> <code>mbedtls_aes_crypt_ctr</code> + <strong>one</strong> ECB (S₀): ~3 HW-AES passes
+      instead of ~187, ~6 lock acquisitions instead of ~384. Plus CPU 160→240 MHz and in-place crypto.</li>
+    <li><strong>Measured crypto cost dropped ~14–28× (avg) / ~3.6× (min).</strong> Proven correct 3 ways
+      (RFC-3610 KAT + <code>mbedtls_ccm</code> cross-check + on-device ping).</li>
+  </ol>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Honest scope — this is not a single-flow throughput win</p>
+    <p>Single-flow relay throughput is <strong>airtime-bound</strong> (single-MPDU, no A-MPDU — the open-vs-secured
+    A/B, ~0.14 vs ~0.23 Mbit/s, already showed CCMP isn't the dominant single-flow cost). The value is the
+    <strong>concurrent-load</strong> relay case (relay saturates carrying its own traffic <em>and</em> relaying),
+    lower per-frame latency under contention (≈11 ms → ≈0.6 ms), freeing the shared AES peripheral for
+    SAE/AMPE/beacon crypto, and being a <strong>prerequisite</strong> so crypto doesn't re-emerge as the bottleneck
+    once A-MPDU lifts the airtime ceiling.</p>
+  </div>
+
+  <h2 id="measurement">1 · Measurement method + baseline</h2>
+  <p>Instrumented <code>mesh_ccmp_encrypt/decrypt</code> with the Xtensa cycle counter (<code>rsr ccount</code>)
+  around the CCM call, tracking running min + count, logged per 500 frames. App <code>rimba-halow-mesh-perf</code>
+  (<code>MESH_IPERF</code> line topology), secured mesh (SAE+AMPE+CCMP), SW-CCMP default. Driven with 1400 B pings
+  (each round-trip makes the peer do enc+dec of full-size frames). Per 1442 B frame, wall-clock:</p>
+
+  <table>
+    <thead><tr><th>CCMP</th><th class="num">Original per-block<br>(160 MHz)</th><th class="num">bulk CCM<br>(160 MHz)</th><th class="num">bulk + 240 MHz + in-place</th></tr></thead>
+    <tbody>
+      <tr><td>encrypt min / <strong>avg</strong></td><td class="num">339 / <strong>7038</strong> µs</td><td class="num">154 / 254 µs</td><td class="num"><strong>94 / 197 µs</strong></td></tr>
+      <tr><td>decrypt min / <strong>avg</strong></td><td class="num">290 / <strong>4401</strong> µs</td><td class="num">142 / 321 µs</td><td class="num"><strong>102 / 285 µs</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>Average wall-clock per frame, before vs after (bars to scale — the tall bars are the original per-block path):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">encrypt · orig</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">7038 µs</span></div>
+    <div class="bar-row"><span class="lbl">encrypt · fixed</span><span class="bar-track"><span class="bar-fill fast" style="width:2.8%"></span></span><span class="val">197 µs</span></div>
+    <div class="bar-row"><span class="lbl">decrypt · orig</span><span class="bar-track"><span class="bar-fill slow" style="width:62.5%"></span></span><span class="val">4401 µs</span></div>
+    <div class="bar-row"><span class="lbl">decrypt · fixed</span><span class="bar-track"><span class="bar-fill fast" style="width:4%"></span></span><span class="val">285 µs</span></div>
+  </div>
+
+  <p>The <strong>min→avg gap collapsed from ~21× to ~1.6×</strong> — the ~187-op window was where lock contention +
+  task preemption inflated the per-frame wall-clock; ~3 bulk ops removes it. Crypto <em>ceiling</em> per forwarded
+  frame (enc+dec): contended ~11 ms → ~0.6 ms (≈ 1 → 24 Mbit/s <em>if</em> crypto were the limiter — it isn't, at
+  the current airtime-bound throughput).</p>
+  <div class="callout warn"><p class="ct">⚠ Instrumentation caveat</p><p>The temp instrumentation hardcodes
+  <code>µs = cyc/160</code>; at 240 MHz its printed µs are 1.5× inflated — the cycle counts are truth, divide by 240.</p></div>
+
+  <h2 id="bulk-ccm">2 · The bulk-DMA CCM (byte-exact, RFC-3610)</h2>
+  <p><code>esp_mesh_ccm_ae/ad</code> + <code>esp_ccm_cbc_mac</code> (static, file-local in <code>ccmp.c</code>;
+  L=2, aad ≤ 30, M ∈ {8,16}) reduce the whole CCM to three bulk HW-AES passes:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">CBC-MAC</div><div class="s">1× crypt_cbc, IV=0</div></div>
+      <div class="node acc"><div class="t">CTR</div><div class="s">1× crypt_ctr, A₁</div></div>
+      <div class="node acc"><div class="t">S₀ = E(A₀)</div><div class="s">1× ECB</div></div>
+      <div class="node ok"><div class="t">MIC = T ⊕ S₀</div><div class="s">tag</div></div>
+    </div>
+    <figcaption>Three HW-AES passes replace ~187 single-block ECB ops. Decrypt runs CTR (symmetric) → CBC-MAC over the recovered plaintext → constant-time compare against T ⊕ E(A₀).</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>CBC-MAC:</strong> build <code>[B₀ | len16‖AAD zero-padded | plaintext zero-padded]</code> in a
+      static scratch, one <code>mbedtls_aes_crypt_cbc(ENCRYPT, IV=0)</code>; the <strong>last output block is the
+      MAC T</strong> (CBC-MAC = CBC with IV=0).</li>
+    <li><strong>CTR:</strong> one <code>mbedtls_aes_crypt_ctr</code> from counter block A₁ =
+      <code>[L-1 | nonce13 | 0x0001]</code> (mbedtls increments the full 16-byte counter; the low 2 bytes never
+      overflow for &lt; 65536 blocks, so it matches CCM's 2-byte counter). CTR is in==out safe.</li>
+    <li><strong>MIC</strong> = T ⊕ E(A₀), A₀ = <code>[L-1 | nonce13 | 0x0000]</code> (one ECB).</li>
+  </ul>
+
+  <div class="callout ok">
+    <p class="ct">✓ Correctness — proven 3 independent ways (all PASS)</p>
+    <ul style="margin:.2em 0">
+      <li><strong>RFC-3610 Packet-Vector-<code>#1</code> KAT</strong> — exact (ct/MIC match the published vector).</li>
+      <li><strong>byte-identical to <code>mbedtls_ccm_encrypt_and_tag</code></strong> at sizes 63…1600.</li>
+      <li>on-device: mesh peers + pings work with the datapath on the bulk CCM (36–501 replies across runs).</li>
+    </ul>
+    <p>A dev-only scare — "A/B fail at exactly len=1500" — was a test-harness buffer edge (buffers were
+    <code>[1500]</code>); bumping to <code>[1600]</code> cleared it. Not a crypto bug.</p>
+  </div>
+
+  <p>Only the <strong>mesh datapath</strong> uses the bulk CCM; the SAE/AMPE/TLS handshake keeps the per-block
+  hostap path. The datapath is single-task, so the static CBC scratch is race-free.</p>
+
+  <h2 id="cpu-inplace">3 · CPU 240 MHz + in-place</h2>
+  <ul>
+    <li><code>CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y</code> in <code>rimba-halow-mesh-perf/sdkconfig.defaults</code>
+      (was 160). ~1.3–1.5× on the CPU/DMA-orchestration portion. <strong>Mains-powered relay/perf only — NOT for
+      sleep/STA builds (power).</strong></li>
+    <li>In-place crypto: dropped <code>ct_scratch</code>/<code>pt_scratch</code> (−3.2 KB static RAM) + the two
+      full-payload memcpy-backs in <code>umac_datapath_sw_ccmp_encrypt/decrypt</code>; the datapath now passes
+      <code>body_out == body_in</code>. Safe because the bulk CCM takes the CBC-MAC over the scratch copy before
+      the in==out-safe CTR pass.</li>
+  </ul>
+
+  <h2 id="gotchas">4 · Gotchas learned</h2>
+  <div class="callout bug"><p class="ct">🐛 Duplicate-symbol landmine</p><p><code>crypto_mbedtls_mm.c</code> exists
+  <strong>twice</strong> — <code>components/shims/</code> and a vendored copy compiled into morselib. Adding a new
+  exported symbol to the shims copy and referencing it from morselib drags <strong>both</strong> into the link →
+  <code>multiple definition of mmint_crypto_ec_*</code>. Fix: keep the CCM self-contained in <code>ccmp.c</code>
+  (includes <code>&lt;mbedtls/aes.h&gt;</code>) — no cross-component symbol.</p></div>
+  <ul>
+    <li>The <code>esp_aes</code> DMA driver <strong>polls</strong> for len ≤ <code>AES_DMA_INTR_TRIG_LEN</code> (2000),
+      so <code>CONFIG_MBEDTLS_AES_USE_INTERRUPT</code> is inert for every ≤1500 B mesh frame — toggling it does nothing.</li>
+    <li>A raw <code>printf</code> inside a morselib driver task stack-overflows → boot loop; use
+      <code>esp_rom_printf</code> (or read <code>ccount</code> via inline asm) for datapath-context tracing.</li>
+  </ul>
+
+  <h2 id="non-levers">5 · Non-levers ruled out</h2>
+  <ul>
+    <li><code>mbedtls_ccm_*</code> — loops per-block ECB internally (no HW CCM on S3, only HW GCM); reproduces the overhead.</li>
+    <li>pure SW AES (<code>CONFIG_MBEDTLS_HARDWARE_AES=n</code>) — ~3× <em>slower</em> + steals HW offload from SAE.</li>
+    <li>dual-core parallel AES — impossible (single AES peripheral behind one global lock).</li>
+    <li>GCMP — breaks CCMP interop with Linux. Per-STA key-schedule caching — ~1–3 µs (HW re-uploads the key per op regardless).</li>
+  </ul>
+
+  <h2 id="files">6 · Files changed</h2>
+  <ul>
+    <li><code>morselib/…/supplicant_shim/ccmp.c</code> — bulk CCM (self-contained statics) + datapath calls it + a
+      quiet RFC-3610-KAT <code>esp_mesh_ccm_selftest</code> (not auto-called).</li>
+    <li><code>morselib/…/umac/datapath/umac_datapath.c</code> — in-place encrypt/decrypt.</li>
+    <li><code>firmware/rimba-halow-mesh-perf/sdkconfig.defaults</code> — 240 MHz.</li>
+  </ul>
+  <p><em>Dropped (inert here):</em> the latent <code>aes_encrypt_init</code> <code>setkey_dec→enc</code> fix in
+  <code>crypto_mbedtls_mm.c:675</code> — a real one-line correctness bug for the per-block path, but inert on HW AES
+  and unused by the bulk path. Worth a separate hygiene commit.</p>
+
+  <h2 id="next">7 · Disposition + next</h2>
+  <p>The host SW-CCMP relay crypto is no longer a meaningful CPU/latency cost. The <strong>remaining, dominant</strong>
+  relay throughput limiter is airtime: <strong>mesh sends single MPDUs, no A-MPDU aggregation</strong> — per-frame
+  preamble/IFS/backoff/ACK caps relay goodput independent of CPU. The crypto fix is the prerequisite so crypto
+  doesn't re-emerge as the bottleneck once A-MPDU lifts that ceiling. Optional follow-on: in-place forward (rewrite
+  headers on the RX mmpkt vs <code>build_mgmt_frame</code> alloc+copy in <code>umac_mesh_forward_data</code>).</p>
+
+  <div class="callout"><p style="margin:0">Bench radio-silent after (3 ESPs on <code>rimba-hello</code>).</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#bottom-line">Bottom line</a></li>
+    <li><a href="#measurement">1 · Measurement + baseline</a></li>
+    <li><a href="#bulk-ccm">2 · The bulk-DMA CCM</a></li>
+    <li><a href="#cpu-inplace">3 · CPU 240 MHz + in-place</a></li>
+    <li><a href="#gotchas">4 · Gotchas</a></li>
+    <li><a href="#non-levers">5 · Non-levers ruled out</a></li>
+    <li><a href="#files">6 · Files changed</a></li>
+    <li><a href="#next">7 · Disposition + next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-11-esp32-mesh-swccmp-bulk-aes</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

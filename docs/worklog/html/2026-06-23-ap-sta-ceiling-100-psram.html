@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AP STA-count → 100, per-STA in PSRAM — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-06-23</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-23</span>
+    <span class="badge">9 min read</span>
+    <span class="badge">AP · S1G TIM · PSRAM · scaling</span>
+    <span class="badge warn">code complete · hw deferred</span>
+  </div>
+
+  <h1>AP STA-count ceiling → 100, per-STA state in PSRAM<br><small style="font-weight:600;color:var(--muted);font-size:1.05rem">Scaling the HaLow SoftAP past a handful of leaves — configurable cap, PSRAM-only per-STA state, structural ceiling 100</small></h1>
+
+  <p class="lead">Make the AP's max-associated-STA count and the per-STA RAM placement
+  <strong>configurable from sdkconfig</strong>, allocate per-STA state <strong>strictly from PSRAM</strong>,
+  and <strong>raise the structural ceiling to 100</strong> associated stations. Two bounds fell: a hard STA-count
+  ceiling baked into morselib's S1G TIM encoding, and the default routing of per-STA state into scarce internal SRAM.</p>
+
+  <p><strong>Author:</strong> Aldwin. <strong>Phase:</strong> scaling the HaLow SoftAP
+  (relay-AP gateway topology) past a handful of leaves. Self-contained record. ESP32 = XIAO ESP32-S3 + FGH100M
+  (<code>BOARD=proto1-fgh100m</code>), 8&nbsp;MB octal PSRAM, morselib fw 1.17.6 (mm-iot-sdk 2.10.4-esp32-2). All
+  morselib edits are in the <code>components/halow</code> submodule fork.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Status — code complete + build-verified, hardware deferred</p>
+    <p>Code complete and build-verified at <strong>cap=100 / PSRAM=y</strong>. Hardware validation at high STA
+    counts is <strong>deferred</strong> — only 3 boards on the bench, so ~100 live associations aren't reproducible.
+    The ceiling is proven <em>structurally</em> (encoding + storage + static asserts), not by 100 live associations.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">63 → 100</div><div class="lbl">associated-STA build ceiling</div></div>
+    <div class="stat"><div class="num acc">1 → 2</div><div class="lbl">S1G TIM PVB blocks</div></div>
+    <div class="stat"><div class="num acc">64 → 128</div><div class="lbl"><code>MAX_SUPPORTED_AID</code></div></div>
+    <div class="stat"><div class="num acc">10 → 20</div><div class="lbl"><code>MAX_SUPPORTED_PVB_LEN</code></div></div>
+    <div class="stat"><div class="num">~90 KB</div><div class="lbl">per-STA state in PSRAM @ cap 100</div></div>
+    <div class="stat"><div class="num acc">127</div><div class="lbl">structural max (<code>≤ 127</code>)</div></div>
+  </div>
+
+  <h2 id="why">Why this matters</h2>
+  <p>The Mesh+AP gateway topology (see <a href="2026-06-22-mesh-ap-twt.html">2026-06-22-mesh-ap-twt</a>) puts leaves
+  under a relay-AP. That only scales if the AP can actually hold many leaves. Two things bound that on the ESP32 side:</p>
+  <ol>
+    <li><strong>A hard STA-count ceiling</strong> baked into morselib's S1G TIM encoding (the partial virtual
+      bitmap). The shipped code asserts a <em>single</em> TIM block → AID &lt; 64 → at most 63 STAs, and the vendor
+      left a tripwire (<code>"Review the TIM logic if changing this limit"</code>) daring anyone to raise it.</li>
+    <li><strong>RAM placement.</strong> Each associated STA costs ~912&nbsp;B of <code>umac_sta_data</code> plus
+      buffers. By default small allocations land in internal SRAM (below <code>CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL</code>,
+      16&nbsp;KB), which is the scarce pool. At 100 STAs that's ~90&nbsp;KB of per-STA state that must not come from
+      internal SRAM.</li>
+  </ol>
+
+  <h2 id="tim-ceiling">1 · The STA-count ceiling is the S1G TIM partial-virtual-bitmap encoding</h2>
+  <p>morselib advertises buffered downlink per-AID in the beacon's S1G TIM element using a <strong>partial virtual
+  bitmap (PVB)</strong>. The PVB is a sequence of <em>blocks</em>; each block covers <strong>64 AIDs</strong> and is
+  encoded as <code>[block-control][block-bitmap][present subblocks...]</code> (802.11ah §9.4.2.6 S1G-style
+  hierarchical bitmap).</p>
+  <p>The relevant code is <code>src/umac/ap/traffic_bitmap.h</code> (the bitmap storage + AID validity) and
+  <code>src/umac/ies/s1g_tim.c</code> (<code>ie_s1g_tim_build</code>, the encoder).</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">S1G TIM element</div><div class="s">beacon</div></div>
+      <div class="node"><div class="t">PVB</div><div class="s">partial virtual bitmap</div></div>
+      <div class="node acc"><div class="t">block 0</div><div class="s">AIDs 1..63</div></div>
+      <div class="node acc"><div class="t">block 1 <strong>(new)</strong></div><div class="s">AIDs 64..127</div></div>
+    </div>
+    <figcaption>Raising <code>MAX_SUPPORTED_AID</code> 64→128 lights up a second PVB block (AIDs 64..127) — the one
+    genuinely new code path. The encoder loop was already generic over blocks.</figcaption>
+  </figure>
+
+  <p>What pinned it to 63 STAs was <strong>not</strong> the encoder logic — it was a derived size and a tripwire assert:</p>
+<pre><code>/* traffic_bitmap.h (shipped) */
+#define MAX_SUPPORTED_AID    64                              /* one block */
+#define S1G_BITMAP_SUBBLOCKS ((MAX_SUPPORTED_AID + 7) / 8)   /* = 8 */
+
+/* s1g_tim.c, inside ie_s1g_tim_build (shipped) */
+MAX_ENCODED_BLOCKS   = ceil(S1G_BITMAP_SUBBLOCKS / 8) = 1
+MAX_SUPPORTED_PVB_LEN = MAX_ENCODED_BLOCKS * (2 + 8) = 10
+MM_STATIC_ASSERT(MAX_SUPPORTED_PVB_LEN == 10, "Review the TIM logic if changing this limit");</code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ Key finding — the encoder body is already generic over multiple blocks</p>
+<pre style="margin:.4em 0"><code>for (size_t block = 0; block &lt; MAX_ENCODED_BLOCKS; ++block) {
+    ...
+    DOT11_TIM_BLOCK_HDR_SET_BLOCK_OFFSET(*block_control, block);  /* per-block offset */
+    pvb_len += block_size;
+}</code></pre>
+    <p>It loops over <code>MAX_ENCODED_BLOCKS</code>, emits an empty-block skip, and writes the absolute block offset
+    into each block-control byte. So the "single block" limitation is purely the <code>MAX_SUPPORTED_AID = 64</code>
+    derivation plus the <code>== 10</code> tripwire. The vendor's comment is a "did you check the surrounding
+    invariants?" gate, not a sign the logic is broken.</p>
+  </div>
+
+  <p>I checked the surrounding invariants for two blocks (AID up to 127):</p>
+  <table>
+    <thead><tr><th>Invariant</th><th>Source</th><th>Two-block (AID=128)</th><th>OK?</th></tr></thead>
+    <tbody>
+      <tr><td>Block-offset field width</td><td><code>AID_BLOCK_OFFSET_MASK = 0x1f &lt;&lt; 6</code> (5 bits, 0..31)</td><td>block 1 used</td><td>✓</td></tr>
+      <tr><td>TIM page index</td><td><code>MM_STATIC_ASSERT(MAX_SUPPORTED_AID &lt; 512, ...)</code>; page = 2048 AIDs</td><td>128 &lt; 512, all in page 0</td><td>✓</td></tr>
+      <tr><td>PVB fits the block size</td><td>line 474 <code>pvb_len &lt;= S1G_TIM_MAX_BLOCK_SIZE - 5</code> (256-5=251)</td><td>max pvb_len = 20</td><td>✓</td></tr>
+      <tr><td>PVB ≤ spec limit</td><td><code>MAX_SUPPORTED_PVB_LEN &lt;= MAX_PVB_LEN</code> (251)</td><td>20 ≤ 251</td><td>✓</td></tr>
+      <tr><td>Bitmap storage</td><td><code>umac_ap_data.h: bitmap[S1G_BITMAP_SUBBLOCKS]</code>, asserts <code>*8 &gt;= MAX_SUPPORTED_AID</code></td><td>16 B → 128 ≥ 128</td><td>✓</td></tr>
+      <tr><td>Cap vs AID space</td><td><code>umac_ap_data.h: MMWLAN_AP_MAX_STAS_LIMIT &lt; MAX_SUPPORTED_AID</code></td><td>100 &lt; 128</td><td>✓</td></tr>
+    </tbody>
+  </table>
+
+  <p>The <strong>parse</strong> side (<code>ie_s1g_tim_block_bitmap_has_aid</code> / <code>_olb_has_aid</code>, used
+  when <em>we</em> are a STA reading an AP's TIM) was already fully multi-block — it reads <code>block_offset</code>
+  and <code>page_index</code> and walks N blocks. So nothing to change there.</p>
+
+  <h3>The off-by-one that makes "100" actually 100</h3>
+  <p><code>umac_ap.c</code> reserves AID 0 for the common/broadcast pseudo-STA (<code>stas[0] = sta_common</code>):</p>
+<pre><code>if (args-&gt;max_stas &gt; MMWLAN_AP_MAX_STAS_LIMIT) { error; }     /* line 71 */
+data-&gt;max_stas = 1 + (args-&gt;max_stas ? args-&gt;max_stas : MMWLAN_DEFAULT_AP_MAX_STAS);  /* line 98 */
+data-&gt;stas = calloc(data-&gt;max_stas, sizeof(struct umac_sta_data *));
+...
+if (aid == 0 || aid &gt;= data-&gt;max_stas) reject;                /* line 513: AID in 1..max_stas-1 */</code></pre>
+  <p>So a configured cap of <code>N</code> yields usable AIDs <code>1..N</code> = exactly <strong>N</strong>
+  stations, and the largest AID is <code>N</code>. For N=100 the largest AID is 100, which needs
+  <code>MAX_SUPPORTED_AID &gt; 100</code> → 128 (two blocks). The structural max is
+  <code>MMWLAN_AP_MAX_STAS_LIMIT &lt;= 127</code>.</p>
+
+  <h2 id="changes">2 · Changes made</h2>
+  <p>All in the <code>components/halow</code> submodule unless noted.</p>
+
+  <h3>a. Raise the AID space to two TIM blocks</h3>
+  <p><code>src/umac/ap/traffic_bitmap.h</code>:</p>
+<pre><code>#define MAX_SUPPORTED_AID    128   /* was 64; two PVB blocks, AIDs 1..127 */</code></pre>
+  <p>This auto-recomputes <code>S1G_BITMAP_SUBBLOCKS</code> (8→16), <code>MAX_ENCODED_BLOCKS</code> (1→2) and
+  <code>MAX_SUPPORTED_PVB_LEN</code> (10→20) in the encoder.</p>
+
+  <h3>b. Update the tripwire assert</h3>
+  <p><code>src/umac/ies/s1g_tim.c</code>:</p>
+<pre><code>MM_STATIC_ASSERT(MAX_SUPPORTED_PVB_LEN == 20, "Review the TIM logic if changing this limit");</code></pre>
+  <p>Kept as an exact-value tripwire (not relaxed to <code>&lt;=</code>) so a <em>future</em> AID bump still forces
+  the same review. Documented in-comment that the block loop is already generic and which invariants were re-confirmed.</p>
+
+  <h3>c. Configurable cap</h3>
+  <p><code>Kconfig</code> + <code>include/mmwlan.h</code> (from earlier <code>#6</code> work, range now widened):</p>
+<pre><code>config HALOW_AP_MAX_STAS   int   default 20   range 1 127</code></pre>
+<pre><code>#if defined(CONFIG_HALOW_AP_MAX_STAS)
+#define MMWLAN_AP_MAX_STAS_LIMIT (CONFIG_HALOW_AP_MAX_STAS)
+#else
+#define MMWLAN_AP_MAX_STAS_LIMIT (20)
+#endif</code></pre>
+  <p><code>UMAC_TWT_NUM_AGREEMENTS = MMWLAN_AP_MAX_STAS_LIMIT</code>, so the per-vif TWT agreement table scales with the cap.</p>
+
+  <h3>d. Per-STA state strictly in PSRAM (configurable)</h3>
+  <p><code>Kconfig</code> + <code>src/umac/data/umac_data.c</code>:</p>
+<pre><code>config HALOW_STA_DATA_IN_PSRAM   bool   default n   # requires CONFIG_SPIRAM</code></pre>
+<pre><code>struct umac_sta_data *umac_sta_data_alloc(struct umac_data *umacd)
+{
+#if defined(CONFIG_HALOW_STA_DATA_IN_PSRAM) &amp;&amp; CONFIG_HALOW_STA_DATA_IN_PSRAM
+    struct umac_sta_data *stad =
+        (struct umac_sta_data *)heap_caps_calloc(1, sizeof(*stad), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    struct umac_sta_data *stad = (struct umac_sta_data *)mmosal_calloc(1, sizeof(*stad));
+#endif
+    if (stad != NULL) { stad-&gt;umacd = umacd; }
+    return stad;
+}</code></pre>
+  <div class="callout">
+    <p class="ct">Strictly PSRAM — no internal-SRAM fallback</p>
+    <p>A deliberate choice: at high STA counts we want a hard failure if PSRAM is exhausted rather than silently
+    eating the scarce internal pool. <code>sdkconfig.h</code> is included guarded by <code>ESP_PLATFORM</code> so the
+    upstream host build is untouched.</p>
+  </div>
+
+  <h3>e. Reference AP app exercises the ceiling</h3>
+  <p><code>firmware/rimba-halow-ap/sdkconfig.defaults</code> (superproject):
+  <code>CONFIG_HALOW_AP_MAX_STAS=100</code>, <code>CONFIG_HALOW_STA_DATA_IN_PSRAM=y</code>.</p>
+  <div class="callout">
+    <p style="margin:0">Note the <em>runtime</em> accept limit (<code>cfg.ap.max_stas</code> / <code>LINK_MAX_STAS</code>
+    in <code>app_main.c</code>) is a separate, smaller value tuned for the 3-board bench; the 100 here is the
+    <strong>build ceiling</strong>.</p>
+  </div>
+
+  <h2 id="build">3 · Build verification</h2>
+  <p><code>make build APP=rimba-halow-ap BOARD=proto1-fgh100m</code> from a fresh sdkconfig. Resolved config:</p>
+<pre><code>CONFIG_SPIRAM=y
+CONFIG_HALOW_AP_MAX_STAS=100
+CONFIG_HALOW_STA_DATA_IN_PSRAM=y</code></pre>
+  <p>Result: <strong>Project build complete</strong> (exit 0), <code>rimba_halow_ap.bin</code> ~1.48&nbsp;MB. All four
+  static asserts that guard the TIM math passed (they would have failed the compile if the two-block arithmetic were
+  wrong): <code>MAX_SUPPORTED_PVB_LEN == 20</code>, <code>MMWLAN_AP_MAX_STAS_LIMIT &lt; MAX_SUPPORTED_AID</code>
+  (100&lt;128), <code>bitmap*8 &gt;= MAX_SUPPORTED_AID</code> (128≥128), <code>MAX_SUPPORTED_AID &lt; 512</code>.</p>
+  <p>Earlier in <code>#6</code> the cap=63 + PSRAM path was also build-verified; the default (cap=20, PSRAM off) path builds too.</p>
+
+  <h2 id="deferred">4 · What is NOT validated / deferred</h2>
+  <ul>
+    <li><strong>High-STA hardware test.</strong> We have 3 boards; associating ~100 real STAs to one AP is not
+      reproducible on the bench. The ceiling is proven <em>structurally</em> (encoding + storage + asserts), not by
+      100 live associations. A multi-block TIM should be sanity-checked on air with ≥2 STAs whose AIDs straddle the
+      64 boundary (i.e. force an AID ≥ 64) so a STA in <strong>block 1</strong> is exercised — that is the one new
+      code path. Needs forcing AID assignment past 63, which the dense allocator won't do until 64+ STAs associate.</li>
+    <li><strong>Per-STA PSRAM cost at scale.</strong> ~912&nbsp;B × 100 ≈ 90&nbsp;KB from PSRAM is comfortable in
+      8&nbsp;MB, plus the TWT table (§6) and per-STA TX/RX buffers; total high-water not measured.</li>
+    <li><strong>Interop:</strong> Linux morse_driver as the STA parsing our two-block TIM not yet tested on air.</li>
+  </ul>
+
+  <h2 id="capacity">5 · How many STAs <em>can</em> an MM6108 AP hold? (spec vs. Linux vs. firmware)</h2>
+  <p>Three different ceilings, often conflated:</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">8191</div><div class="lbl">802.11ah spec AID space (marketing)</div></div>
+    <div class="stat"><div class="num acc">2007</div><div class="lbl">Linux / Morse stack code limit</div></div>
+    <div class="stat"><div class="num">unknown</div><div class="lbl">MM6108 firmware concurrent capacity</div></div>
+  </div>
+
+  <table>
+    <thead><tr><th>Ceiling</th><th class="num">Value</th><th>Source</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>802.11ah spec (AID space)</strong></td>
+        <td class="num"><strong>8191</strong></td>
+        <td>13-bit AID (1..8191, 0 reserved). This is the marketing number Morse Micro and the module datasheets
+          quote ("connects up to 8,191 devices") — it is the <em>addressable</em> maximum, not a tested
+          concurrent-association figure.</td>
+      </tr>
+      <tr>
+        <td><strong>Linux / Morse stack code limit</strong></td>
+        <td class="num"><strong>2007</strong></td>
+        <td>Found in the vendored Morse hostap + nl80211 source:
+          <code>src/hostap/src/utils/morse.h: #define MAX_AID (2007)</code> and
+          <code>driver_nl80211.c: #define RAW_CMD_MAX_AID (2007) /* set by linux */</code>. This is
+          <code>mac80211</code>'s <code>IEEE80211_MAX_AID</code> — the real per-AP STA ceiling the Linux-side stack
+          enforces (RAW groups, AID assignment). Far above anything we'd run.</td>
+      </tr>
+      <tr>
+        <td><strong>MM6108 firmware concurrent capacity</strong></td>
+        <td class="num"><strong>unknown / unpublished</strong></td>
+        <td>The closed <code>.mbin</code> keeps its own per-STA hardware context tables. No datasheet, forum, or the
+          vendored source states a tested concurrent-STA number for the chip in AP mode. This — not our host code —
+          is almost certainly the practical ceiling, and we cannot introspect it.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>So the honest bound for <em>our</em> ESP32 AP is: host structure now supports up to 127 (or 255 with a larger
+  AID space), the Linux reference stack would allow 2007, and the firmware caps it at some unpublished number we have
+  to discover empirically. The 8191 figure is the spec, not a promise.</p>
+  <p>Searched: morsemicro.com datasheets/product pages, module user guides, CNX-Software, Argenox, iotclass — all
+  repeat the 8191 spec figure; none give a tested concurrent count. The <code>2007</code> came from reading the
+  vendored stack source, which is more authoritative than the marketing.</p>
+
+  <h2 id="twt-psram">6 · TWT agreement table moved to PSRAM (was static internal-SRAM <code>.bss</code>)</h2>
+  <p><strong>Finding:</strong> <code>struct umac_data</code> is a single <strong>file-scope static global</strong>
+  (<code>umac_data.c</code>), so its embedded <code>struct umac_twt_data twt</code> — which holds
+  <code>agreements[UMAC_TWT_NUM_AGREEMENTS]</code> + <code>responder_peers[N][6]</code>, both sized to the STA cap —
+  lived in <strong>internal-SRAM <code>.bss</code>, reserved at link time by the cap</strong> (not by runtime STA
+  count). The PSRAM knob from §2 only covered the heap-allocated <code>umac_sta_data</code>, so it did
+  <strong>not</strong> touch this. One packed agreement is ~48&nbsp;B; with the 6&nbsp;B peer MAC that's
+  ~54&nbsp;B/STA → ~5&nbsp;KB static at cap=100, ~14&nbsp;KB at cap=255 — all internal SRAM.</p>
+  <p><strong>Change</strong> (<code>umac_data.c</code>): converted <code>twt</code> from an embedded member to a
+  <strong>heap pointer</strong> and allocate it in <code>umac_data_init()</code>, freed in
+  <code>umac_data_deinit()</code>, gated on the same <code>CONFIG_HALOW_STA_DATA_IN_PSRAM</code>:</p>
+<pre><code>struct umac_twt_data *twt;   /* was: struct umac_twt_data twt; */
+...
+#if CONFIG_HALOW_STA_DATA_IN_PSRAM
+    umac_data.twt = heap_caps_calloc(1, sizeof(*umac_data.twt), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    umac_data.twt = mmosal_calloc(1, sizeof(*umac_data.twt));
+#endif
+    MMOSAL_ASSERT(umac_data.twt != NULL);</code></pre>
+  <p>Safe because <strong>every</strong> access goes through the single accessor <code>umac_data_get_twt()</code>
+  (verified: no direct <code>umacd-&gt;twt.</code> field access anywhere); it now returns the pointer. Allocated
+  before <code>root.is_initialised = true</code>, so the accessor's sanity check still holds. Strict PSRAM, no
+  fallback (matches <code>umac_sta_data_alloc</code>). Even with the knob <em>off</em>, the table now comes from the
+  internal heap rather than <code>.bss</code>, so a large cap no longer bloats the static image.</p>
+  <p>Build-verified both ways: AP app at cap=100 + PSRAM=y (exit 0) and a non-AP app
+  (<code>rimba-halow-scan</code>, knob unset → <code>#else</code> path, exit 0) — this file compiles into every app,
+  so both branches matter.</p>
+  <p>Updated the <code>HALOW_STA_DATA_IN_PSRAM</code> Kconfig help to state it now covers both
+  <code>umac_sta_data</code> <em>and</em> the TWT table.</p>
+
+  <h2 id="linux">Linux alignment (verified against <code>morse_driver</code> 1.17.8)</h2>
+  <p>Later confirmed against the actual driver source (<code>/home/chronium/halow/morse_driver</code>, the loaded
+  <code>0-rel_1_17_8_2026_Mar_24</code>): morselib's S1G TIM is a <strong>port of Linux <code>dot11ah/tim.c</code></strong>,
+  so the multi-block change follows Linux rather than diverging. Shared: the constant
+  <code>S1G_TIM_MAX_BLOCK_SIZE = 256</code> (same name + value), the 8-subblocks/64-AIDs-per-block geometry
+  (<code>S1G_TIM_NUM_SUBBLOCKS_PER_BLOCK = 8</code>, <code>dot11ah/tim.h:52</code>), the four encoding modes
+  (<code>ENC_MODE_BLOCK/AID/OLB/ADE</code> ≡ morselib's four <code>ie_s1g_tim_*_has_aid</code>), the entire-page slice
+  <code>31</code> (<code>page_index = 0</code>), and the block-loop encoder (<code>morse_dot11ah_insert_s1g_tim</code>,
+  <code>dot11ah/tim.c:1030</code>). Linux sizes its <code>aid_bitmap</code> to the full
+  <code>MORSE_AP_AID_BITMAP_SIZE = AID_LIMIT + 1</code> (<code>morse.h:398</code>); morselib's single-block
+  <code>MAX_SUPPORTED_AID = 64</code> cap was a self-imposed embedded limit, not a behaviour difference — the encoder
+  loop was already generic. The <strong>PSRAM routing has no Linux counterpart</strong> (kernel single address space)
+  — an ESP32-specific adaptation. Full new-code ↔ Linux table:
+  <code>docs/mesh-ap/rimba-mesh-ap-milestones.md</code> ("AP STA-count scaling" section).</p>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#why">Why this matters</a></li>
+    <li><a href="#tim-ceiling">1 · S1G TIM PVB ceiling</a></li>
+    <li><a href="#changes">2 · Changes made</a></li>
+    <li><a href="#build">3 · Build verification</a></li>
+    <li><a href="#deferred">4 · Not validated / deferred</a></li>
+    <li><a href="#capacity">5 · Spec vs. Linux vs. firmware</a></li>
+    <li><a href="#twt-psram">6 · TWT table → PSRAM</a></li>
+    <li><a href="#linux">Linux alignment</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-06-23-ap-sta-ceiling-100-psram</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

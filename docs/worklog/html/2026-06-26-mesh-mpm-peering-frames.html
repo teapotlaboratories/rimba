@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh MPM peering frames — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-26</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-26</span>
+    <span class="badge">24 min read</span>
+    <span class="badge ok">✓ ESP↔Linux mesh IP working</span>
+    <span class="badge">mesh · MPM · HWMP</span>
+  </div>
+
+  <h1>Mesh peering (MPM) exchange: decoded reference frames<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">from the 802.11s handshake spec to a fully-forwarding ESP mesh, byte-verified on air</small></h1>
+
+  <p class="lead">Captured the <strong>802.11s mesh peering handshake</strong> between two Linux morse nodes
+  (chronium <code>3c:22:7f:37:50:42</code> ↔ chronite <code>3c:22:7f:37:51:38</code>, open mesh,
+  <code>user_mpm=1</code>) to spec the ESP (morselib) MPM implementation for P2. Source:
+  <code>wpa_supplicant_s1g -dd -K</code> logs (the supplicant builds/parses the Self-Protected Action frames, so its
+  log carries the exact bytes); cross-checked on-air via the chronium <code>morse0</code> monitor (see
+  <code>docs/reference/rimba-linux-halow-monitor.md</code>).</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Where this worklog lands</p>
+    <p>Across 15 updates the ESP grows a full 802.11s mesh: MPM peering (ESP↔ESP <em>and</em> ESP↔Linux) reaching
+    <strong>ESTAB in ~1.5 s</strong>, S1G mesh beacons, a 4-address data path, minimal HWMP (PREQ / PREP / PERR),
+    unicast relay + group/multicast forwarding + broken-link teardown — and every frame type
+    <strong>byte-verified on a third-node monitor</strong> against the live Linux <code>net/mac80211</code> layouts
+    (which surfaced 3 value-level deltas, now fixed).</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">P2</div><div class="s">MPM peering → ESTAB</div></div>
+      <div class="node"><div class="t">S1G beacon</div><div class="s">legacy → S1G</div></div>
+      <div class="node"><div class="t">P4</div><div class="s">4-addr data path</div></div>
+      <div class="node"><div class="t">P5</div><div class="s">HWMP endpoint</div></div>
+      <div class="node"><div class="t">P5b</div><div class="s">unicast relay</div></div>
+      <div class="node"><div class="t">P6a</div><div class="s">group forwarding</div></div>
+      <div class="node"><div class="t">P6b</div><div class="s">PERR teardown</div></div>
+      <div class="node ok"><div class="t">verified</div><div class="s">on-air byte-diff</div></div>
+    </div>
+    <figcaption>The milestone arc this worklog walks through — each stage implemented, hardware-tested, and then captured on air.</figcaption>
+  </figure>
+
+  <h2 id="happy-path">Handshake / state machine (the happy path)</h2>
+<pre><code>A=local (chronium, llid=0xc7e1)             B=peer (chronite, llid=0xac4b)
+A: Mesh Peering OPEN  (type 1, llid=A)  --> B          # IE75 len4: proto, llid
+B: Mesh Peering OPEN  (type 1, llid=B)  --> A          # A learns B's llid
+A: state OPN_SNT --event OPN_ACPT--> OPN_RCVD
+A: Mesh Peering CONFIRM (type 2, llid=A, plid=B) --> B # IE75 len6: proto, llid, plid
+B: Mesh Peering CONFIRM (type 2, llid=B, plid=A) --> A
+A: state OPN_RCVD --event CNF_ACPT--> ESTAB            # "mesh plink … established"</code></pre>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">OPN_SNT</div><div class="s">TX Open (llid)</div></div>
+      <div class="node acc"><div class="t">OPN_RCVD</div><div class="s">RX Open → TX Confirm (plid=echo)</div></div>
+      <div class="node ok"><div class="t">ESTAB</div><div class="s">RX Confirm → plink up</div></div>
+    </div>
+    <figcaption>The happy-path FSM: OPN_SNT → OPN_RCVD → ESTAB.</figcaption>
+  </figure>
+
+  <p>Peer link IDs (llid/plid) are random per session. A stale plid causes a CLOSE (type 3, reason 52/55,
+  <code>peer_lid mismatch</code>) and a re-OPEN with a fresh llid — normal session churn, not an error. Frame types:
+  <strong>1=Open, 2=Confirm, 3=Close</strong>; Category = <strong>15</strong> (Self-Protected).</p>
+
+  <h2 id="open">Reference frame: Mesh Peering OPEN <small style="color:var(--muted);font-weight:600">(chronite TX, on-air, len=138 mgmt)</small></h2>
+<pre><code>d0 00 d0 02                                  FC=action, dur
+3c 22 7f 37 50 42                            A1 DA   = chronium
+3c 22 7f 37 51 38                            A2 SA   = chronite
+3c 22 7f 37 51 38                            A3 BSSID= chronite (own MAC)
+50 03                                        seq
+-- action body (this is the "DataLen" wpa_supplicant reports) --
+0f                                           Category = 15 (Self-Protected)
+01                                           Action   = 1  (Mesh Peering Open)
+00 00                                        Capability (2)            [Open has cap, no AID]
+01 08 02 04 0b 8c 16 98 24 b0                Supported Rates (id 1, len 8)
+71 07 01 01 00 01 00 00 09                   Mesh Configuration (id 0x71=113, len 7)
+72 0a 72 69 6d 62 61 2d 6d 65 73 68          Mesh ID (id 0x72=114, len 10, "rimba-mesh")
+75 04 00 00 4b ac                            *** Mesh Peering Mgmt (id 0x75=117, len 4):
+                                                 protocol=0x0000, local link id=0xac4b
+2d 1a ...                                    HT Capabilities (id 0x2d=45, len 26)
+3d 16 70 00 ...                              HT Operation   (id 0x3d=61, len 22)
+bf 0c 66 00 80 03 fd ff ...                  VHT Capabilities (id 0xbf=191, len 12)
+c0 05 00 70 00 fd ff                         VHT Operation  (id 0xc0=192, len 5)</code></pre>
+
+  <h2 id="confirm">Reference frame: Mesh Peering CONFIRM <small style="color:var(--muted);font-weight:600">(chronium TX, len=158 incl. CMD_FRAME hdr)</small></h2>
+  <p>Same IE list, but the fixed fields and IE75 differ:</p>
+<pre><code>0f 02            Category 15, Action 2 (Confirm)
+00 00            Capability
+01 00            AID (2)                       [Confirm adds AID; Open does not]
+01 08 ...        Supported Rates
+32 0e 09 0b 8c ...   Extended Supported Rates (id 0x32=50, len 14)   [present here]
+72 0a "rimba-mesh"   Mesh ID
+71 07 01 01 00 01 00 00 09   Mesh Configuration
+75 06 00 00 e1 c7 4b ac      *** Mesh Peering Mgmt len 6: proto, llid=0xc7e1, plid=0xac4b
+2d 1a ... / 3d 16 ... / bf 0c ... / c0 05 ...   HT/VHT</code></pre>
+
+  <h2 id="mpm-element">Mesh Peering Management element (IE 117 / 0x75) — the crux</h2>
+  <table>
+    <thead><tr><th>Frame</th><th>Action</th><th>Bytes</th><th>Fields</th></tr></thead>
+    <tbody>
+      <tr><td>Open</td><td class="num">1</td><td><code>75 04 &lt;proto:2&gt; &lt;llid:2&gt;</code></td><td>protocol, local link id</td></tr>
+      <tr><td>Confirm</td><td class="num">2</td><td><code>75 06 &lt;proto:2&gt; &lt;llid:2&gt; &lt;plid:2&gt;</code></td><td>+ peer link id</td></tr>
+      <tr><td>Close</td><td class="num">3</td><td><code>75 08 &lt;proto:2&gt; &lt;llid:2&gt; &lt;plid:2&gt; &lt;reason:2&gt;</code></td><td>+ reason code</td></tr>
+    </tbody>
+  </table>
+  <p><code>protocol</code> = <code>00 00</code> (0 = mac80211 / vendor-neutral MPM). Link IDs are little-endian in the
+  frame (<code>4b ac</code> = 0xac4b).</p>
+
+  <h2 id="mesh-config">Mesh Configuration element (IE 113 / 0x71), 7 bytes: <code>01 01 00 01 00 00 09</code></h2>
+  <ul>
+    <li>Active Path Selection Protocol = <code>01</code> (HWMP)</li>
+    <li>Active Path Selection Metric = <code>01</code> (Airtime)</li>
+    <li>Congestion Control Mode = <code>00</code> (none)</li>
+    <li>Synchronization Method = <code>01</code> (neighbour offset) — matches the morselib default we set</li>
+    <li>Authentication Protocol = <code>00</code> (none / open)</li>
+    <li>Mesh Formation Info = <code>00</code></li>
+    <li>Mesh Capability = <code>09</code></li>
+  </ul>
+  <p>Both peers must present a matching Mesh Configuration for <code>mesh_matches_local</code> to accept the candidate,
+  otherwise no peering even starts.</p>
+
+  <h2 id="esp-gap">The ESP gap (what board0/board1 send today)</h2>
+  <p>The ESPs DO transmit Mesh Peering Open (Category=15, Action=1) — P2 is partly done — but the frame is
+  <strong>DataLen=13 and wpa_supplicant logs <code>No Mesh Peering Management element</code></strong>. A correct Open
+  is DataLen≈23+ (the reference above). So the ESP frame is missing at minimum the <strong>Mesh Peering Management
+  element (IE 117)</strong> — and likely Supported Rates / Mesh ID too. It also never advances the state machine (no
+  Confirm), so no plink forms.</p>
+
+  <h3>morselib work items for P2 (next)</h3>
+  <ol>
+    <li><strong>Build the Mesh Peering Management element (IE 117)</strong> into the Open/Confirm/Close TX path —
+      <code>75 04 00 00 &lt;llid&gt;</code> (Open), <code>75 06 …&lt;plid&gt;</code> (Confirm),
+      <code>75 08 …&lt;reason&gt;</code> (Close), llid/plid little-endian.</li>
+    <li>Include <strong>Supported Rates (1)</strong>, <strong>Mesh ID (114)</strong>, <strong>Mesh Configuration
+      (113)</strong> with the exact values above in every peering frame.</li>
+    <li>Implement the <strong>MPM state machine</strong>: on RX Open → reply Open (if needed) + Confirm; track
+      llid/plid; OPN_SNT→OPN_RCVD→ESTAB; handle Close/timeout. Mirror <code>net/mac80211/mesh_plink.c</code>.</li>
+    <li>Generate a random <strong>local link id</strong> per peer; echo the peer's llid back as plid.</li>
+  </ol>
+  <p>Build directly from the decoded frames above + <code>net/mac80211/mesh_plink.c</code>
+  (<code>mesh_plink_frame_tx</code>) as the canonical reference.</p>
+
+  <h2 id="esp-status">ESP implementation status (2026-06-26)</h2>
+  <p>Implemented in <code>morselib/src/umac/mesh/umac_mesh.c</code> (+ <code>umac_mesh.h</code>,
+  <code>firmware/rimba-halow-mesh</code>):</p>
+  <ul>
+    <li><strong>Proper peering frame builder</strong> <code>umac_mesh_build_peering()</code> — Open/Confirm/Close
+      with fixed fields (Capability; +AID for Confirm), S1G Capabilities, Mesh ID (114), Mesh Configuration (113),
+      and the <strong>Mesh Peering Management element (117)</strong> with little-endian link ids, per the table above.</li>
+    <li><strong>Peer table + FSM</strong> <code>umac_mesh_handle_action()</code> —
+      LISTEN/OPN_SNT/OPN_RCVD/CNF_RCVD/ESTAB, derived from <code>mesh_plink.c</code>. Responder (answer Open with
+      Open+Confirm) and the link-id convention (peer's local-link-id → our <code>plid</code>; we echo it back as the
+      Confirm's plid).</li>
+    <li><strong>Initiator</strong> <code>mmwlan_mesh_peer_open()</code> — sends an Open (→ OPN_SNT) on a heard peer
+      beacon (driven from the app's beacon callback for same-Mesh-ID neighbours), mirroring mac80211 opening a plink
+      on a candidate beacon. The old broadcast <code>send_test_action</code> probe is retired.</li>
+  </ul>
+  <p><strong>On-air verification</strong> (chronium <code>morse0</code> monitor) — the frames are now correct; the
+  original "No Mesh Peering Management element" rejection is gone:</p>
+<pre><code>board0 Open  (act1): 0f 01 |0000| d90f.. (S1G caps) |72 0a "rimba-mesh"|
+                     71 07 01 01 00 01 00 00 01 (Mesh Cfg)| 75 04 0000 e208   (IE117 llid=0x08e2)
+board1 Cnf   (act2): 0f 02 |0000|0100| .. same IEs .. | 75 06 0000 e16d e208 (IE117 llid=0x6de1,
+                                                                              plid=0x08e2 = echo)</code></pre>
+  <p>board1 answering board0's Open with a <strong>Confirm</strong> proves the Open is well-formed and accepted, and
+  that the llid/plid echo is correct.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Not yet reaching ESTAB — next increment</p>
+    <p>A lost frame stalls the handshake (board0 lands in CNF_RCVD waiting for board1's Open, which was lost) because
+    there are <strong>no retransmit/holding timers</strong> yet. mac80211 uses <code>mesh_plink_timer</code> to
+    retransmit Open/Confirm and to handle link-id mismatch with a reason-coded Close.</p>
+  </div>
+  <p>TODO for the next increment:</p>
+  <ol>
+    <li>Add a per-peer retransmit timer (resend Open in OPN_SNT, Confirm in OPN_RCVD) with a small retry count —
+      <code>dot11MeshRetryTimeout</code> / <code>dot11MeshMaxRetries</code>.</li>
+    <li>Validate the echoed peer-link-id against our <code>llid</code>; on mismatch send Close (reason 52/55) and
+      restart, instead of stalling.</li>
+    <li>Add the per-peer stad (<code>umac_sta_data_alloc</code>) + 4-address mesh data path so an ESTAB link can carry
+      traffic (the P4 data path).</li>
+    <li>Re-test ESP↔ESP and ESP↔Linux to ESTAB; confirm with <code>iw dev wlan1 station dump</code> (plink ESTAB) on
+      the Linux side and a mesh ping.</li>
+  </ol>
+  <p>Diagnostic <code>MMLOG_ERR</code> traces (OPN_SNT tx status, action RX) are currently left in
+  <code>umac_mesh.c</code> for bring-up; demote to <code>MMLOG_INF</code>/remove once ESTAB is reliable. Note: on ESP
+  serial only <code>MMLOG_ERR</code> (prefix <code>E</code>) is visible — <code>MMLOG_INF</code> is filtered out.</p>
+
+  <h2 id="u2">Update 2 — retransmit timers added; ESP↔ESP reaches ESTAB ✓</h2>
+  <p>Added the peer-link retransmission tick (<code>umac_mesh_plink_tick</code>, mirrors mac80211
+  <code>mesh_plink_timer</code>) on the umac-core timeout queue (<code>umac_core_register_timeout</code>, runs in the
+  RX context so TX is safe; self-reschedules while the mesh is active):</p>
+  <ul>
+    <li>OPN_SNT / OPN_RCVD / CNF_RCVD → <strong>retransmit Open</strong> until ESTAB or max retries; resending the
+      Open is what recovers a lost frame (a peer stuck in CNF_RCVD reaches ESTAB when the other side retransmits its
+      Open).</li>
+    <li>max retries → reason-coded <strong>Close</strong> → HOLDING → free the slot (next beacon re-opens).</li>
+    <li>Retry counter resets on any received peering frame (forward progress).</li>
+    <li>Added a <strong>stale-session guard</strong>: a peer-link-id echo ≠ our current llid (peer rebooted across an
+      established link) → Close + free + re-open with fresh ids.</li>
+  </ul>
+  <p>First cut (<code>RETRY=300ms</code>, <code>MAX_RETRIES=5</code>, fixed interval) reached ESTAB but churned for
+  ~23 s: the two boards' Opens collided in lockstep (half-duplex) and a 5-retry budget tore down active handshakes.
+  Fixes: <strong><code>MAX_RETRIES=16</code></strong> (tolerate ~5 s of transient silence) + <strong>interval
+  jitter</strong> (<code>+rand(0..200ms)</code>) to break lockstep. Result:</p>
+<pre><code>board0 from boot:  MESH peer e2:72:a1:f8:f9:40 ESTABLISHED   @ ~1.5 s   (no churn, stable)</code></pre>
+  <p><strong>ESP↔ESP 802.11s mesh peering now reaches ESTAB cleanly in ~1.5 s and holds.</strong> Bidirectional by
+  protocol (board0 ESTAB requires board1's Confirm, and board0 sent board1 its Confirm).</p>
+
+  <h2 id="u3">Update 3 — ESP↔Linux peering blocked by a beacon-format asymmetry (separate issue)</h2>
+  <p>The ESP does not peer with the Linux node yet, but <strong>not because of the MPM</strong> — the ESPs never
+  <em>hear</em> the Linux node, so they never initiate. chronium <code>morse0</code> monitor, all three on ch27:</p>
+<pre><code>S1Gbcn sa=3c:22:7f:37:51:38 x94   &lt;- chronite (Linux): S1G SHORT beacon (ext type3/sub1)
+bcn    sa=e2:72:a1:f8:ef:a4 x94   &lt;- board0 (ESP):    LEGACY beacon (type0/sub8)
+bcn    sa=e2:72:a1:f8:f9:40 x95   &lt;- board1 (ESP):    LEGACY beacon (type0/sub8)</code></pre>
+  <p>The ESP mesh beacon goes out <strong>legacy (type0/sub8)</strong>, while morse Linux mesh emits <strong>S1G short
+  beacons</strong>. The ESPs hear each other (both legacy) but log no <code>3c:22:7f…</code> beacon — so they never
+  <code>mmwlan_mesh_peer_open()</code> the Linux node, and chronite receives 0 ESP peering frames. (chronite
+  <em>does</em> hear the ESP legacy beacons — it adds them as a scan BSS — so the asymmetry is one-way.)</p>
+  <p>Two hypotheses for "ESP doesn't hear the Linux S1G short beacon", to investigate next:</p>
+  <ol>
+    <li><strong>Beacon delivery/parse</strong> — the firmware should convert a received S1G short beacon to a legacy
+      beacon for the host (dot11ah <code>s1g_to_beacon</code>); if the mesh beacon RX filter
+      (<code>MMWLAN_FRAME_BEACON</code>) doesn't surface S1G short beacons, the app's <code>peer_beacon_cb</code> never
+      sees it. Also worth checking: should the ESP itself be emitting an <strong>S1G</strong> mesh beacon (like its AP
+      beacons / the Linux reference) rather than a legacy one?</li>
+    <li><strong>RF asymmetry</strong> — ESP↔ESP is strong (co-located modules); ESP↔Linux may be marginal. Cross-check
+      signal via the monitor / swap which node initiates.</li>
+  </ol>
+  <p>This is independent of the MPM (which is done). Next: characterize #1 (instrument the ESP mesh beacon RX path;
+  confirm whether S1G short beacons reach the host) and decide whether the ESP mesh beacon should be S1G.</p>
+
+  <h2 id="u4">Update 4 — ESP↔Linux peering RESOLVED ✓ (S1G-beacon peer discovery)</h2>
+  <p>Diagnosis #1 was correct (not RF). Instrumenting <code>umac_datapath_process_s1g_beacon</code> showed chronite's
+  S1G beacon <strong>does</strong> reach the ESP host (~10/s, <code>src=3c:22:7f:37:51:38</code> — its real MAC, since
+  a mesh BSSID equals the sender's own MAC). The two reasons it never triggered peering:</p>
+  <ol>
+    <li><strong>S1G beacons bypass the app callback.</strong> Legacy beacons (type0/sub8) flow through the
+      <code>rx_frame_cb</code> path where the app's <code>peer_beacon_cb</code> runs; S1G beacons (ext type3/sub1)
+      branch to <code>process_s1g_beacon</code>, which never calls <code>rx_frame_cb</code>. That's why the ESPs only
+      "saw" each other (both emit legacy beacons) and not the Linux node.</li>
+    <li><strong><code>process_s1g_beacon</code> dropped foreign-BSSID beacons</strong> at the
+      <code>addr_matches_bssid</code> early return — correct for STA/IBSS (where <code>source_addr</code> = BSSID ≠
+      sender), but wrong for mesh (where <code>source_addr</code> = the peer's own MAC and is exactly what we need).</li>
+  </ol>
+  <p>Fix (<code>umac_datapath.c</code> + <code>umac_mesh.c</code>): in <code>process_s1g_beacon</code>, when a mesh vif
+  is active and the beacon is foreign-BSSID, strip the optional S1G beacon fields and call the new
+  <code>umac_mesh_handle_peer_beacon(source_addr, ies, ies_len)</code>, which matches the Mesh ID (114) and calls
+  <code>mmwlan_mesh_peer_open()</code> — the same initiator path used for legacy peer beacons. Result:</p>
+<pre><code>board0:    MESH open -> 3c:22:7f:37:51:38  OPN_SNT
+board0:    MESH peer  3c:22:7f:37:51:38  ESTABLISHED   @ ~1.5 s
+chronite:  Station e2:72:a1:f8:ef:a4   signal -9 dBm   mesh plink: ESTAB</code></pre>
+  <p><strong>ESP↔Linux 802.11s mesh peer link established, confirmed on both sides.</strong> Note we did <em>not</em>
+  need to change the ESP's beacon to S1G — the ESP still emits a legacy mesh beacon (which the Linux side accepts as a
+  scan BSS), and now also <em>consumes</em> the Linux S1G beacon for discovery. (Whether the ESP mesh beacon should
+  additionally be S1G for airtime efficiency / spec conformance is a separate, lower-priority question.)</p>
+
+  <h2 id="u5">Update 5 — ESP mesh beacon converted from legacy to S1G ✓</h2>
+  <p>On-air audit (chronium <code>morse0</code>) found the ESP mesh beacon was a <strong>legacy PV0 beacon</strong>
+  (mgmt type0/sub8, 3-address, ~36 B header) while morse <strong>Linux</strong> mesh and the ESP's own <strong>AP</strong>
+  mode both emit <strong>S1G short beacons</strong> (ext type3/sub1, 1-address, ~15 B header). The ESP mesh was the only
+  node sending legacy — non-conformant for HaLow and ~2× the beacon airtime.</p>
+  <p>Mechanism: the morse firmware auto-generates S1G short beacons only for an <strong>AP-type</strong> vif; for a
+  <strong>MESH-type</strong> vif it transmits the host's beacon as-is (morselib has no host-side legacy→S1G conversion,
+  unlike the Linux driver's <code>morse_dot11ah_beacon_to_s1g</code>). Using AP vif type isn't an option (MESH_CONFIG/MBCA
+  need MESH type). So the fix is to <strong>build the S1G beacon host-side</strong> in
+  <code>umac_mesh_build_beacon</code>:</p>
+  <ul>
+    <li>15-byte S1G short-beacon header (<code>dot11_s1g_beacon_hdr</code>): FC <code>0x081c</code> (ext/S1G_BEACON,
+      no optional TBTT/CSSID/ANO), <code>source_addr</code> = our mesh MAC, <code>time_stamp</code>/<code>change_sequence</code>
+      0.</li>
+    <li>IEs: <strong>S1G Beacon Compatibility (213)</strong> carrying the beacon interval (S1G beacons have no legacy
+      Beacon-Interval fixed field), S1G Capabilities (217), S1G Operation (232), Mesh ID (114), Mesh Configuration
+      (113). Dropped the legacy fixed fields + zero-length SSID.</li>
+  </ul>
+  <p>The firmware fills the real TSF at the S1G <code>time_stamp</code> offset (verified: I wrote 0, on-air it carried
+  a live TSF), and beaconing/peering keep working. Verified on-air — all nodes now S1G, zero legacy:</p>
+<pre><code>board0/board1 (ESP mesh)  S1G-Beacon       (was legacy)
+board2 (ESP AP)           S1G-Beacon
+chronite (Linux mesh)     S1G-Beacon
+chronite station dump: board0 + board1 both mesh plink ESTAB</code></pre>
+  <p>board0's S1G beacon decodes structurally identical to chronite's. Open question (low priority): the ESP could
+  also send periodic <strong>long</strong> beacons (full IE set) like an AP; the short beacon alone is sufficient for
+  discovery + peering here.</p>
+
+  <h3>Remaining for a usable mesh (P4)</h3>
+  <p>Peering (control plane) is done both ESP↔ESP and ESP↔Linux, and beacons are now S1G. Still needed to pass user
+  traffic: the mesh <strong>data path</strong> + link-up.</p>
+
+  <h2 id="u6">Update 6 — P4 data-path design (grounded in code + a captured on-air frame)</h2>
+  <p><strong>Link-up works.</strong> Added <code>umac_mesh_link_up_once()</code> (signals <code>MMWLAN_LINK_UP</code>
+  on first ESTAB, mirroring IBSS). Confirmed on board0: <code>MESH link up (first peer established)</code> fires at
+  ESTAB with <strong>no crash</strong> — the old "link-up crashes in tx_frame" warning is resolved by the P2 datapath
+  setup. lwIP produced no observable traffic yet (no IP configured / no active sender).</p>
+  <p><strong>Authoritative on-air mesh data frame</strong> (chronite broadcast ARP, via chronium <code>morse0</code>):</p>
+<pre><code>88 02 |0000| ffffffffffff | 3c227f375138 | 3c227f375138 |90 09|20 01| 00 1f 0c000000 |
+FC0x0288 dur  A1=DA(bcast)   A2=TA=chronite  A3=meshSA=chronite seq   QoS   MeshControl
+  aaaa03 000000 0806 | 0001 0800 0604 0001 3c227f375138 0a090902 ...
+  LLC/SNAP  eth=ARP   &lt;ARP: sender=chronite / 10.9.9.2&gt;</code></pre>
+  <p>Decoded structure (verified, not inferred):</p>
+  <ul>
+    <li><strong>QoS Data</strong> (subtype 8) — has a 2-byte QoS Control field after the addresses.</li>
+    <li><strong>Group-addressed (bcast/mcast) = 3-address, fromDS=1, toDS=0</strong>: A1=DA, A2=TA(us), A3=mesh-SA(us).
+      (Unicast to a peer = <strong>4-address, toDS=fromDS=1</strong>: A1=peer/nexthop, A2=us, A3=mesh-DA, A4=mesh-SA.)</li>
+    <li><strong>Mesh Control header</strong> (after QoS ctrl, before LLC/SNAP): <code>flags(1)=0, ttl(1)=31
+      (dot11MeshTTL), seqnum(4, le, incrementing)</code>; +6/+12 bytes only with address extension (proxy/multi-hop).
+      Ref: <code>ieee80211_new_mesh_header</code>, <code>net/mac80211/tx.c</code>.</li>
+    <li>Then LLC/SNAP (<code>aa aa 03 00 00 00</code> + ethertype) + payload.</li>
+  </ul>
+  <p><strong>Architecture (verified):</strong> morselib builds the 802.11 frame, the firmware converts to S1G (no
+  host-side S1G data conversion). <code>dot11_data_hdr</code> has <code>addr4</code>; the AP datapath already fills it
+  (<code>umac_datapath_ap.c</code>). The TX assembly (<code>umac_datapath_tx_frame</code>) does
+  <code>construct_80211_data_header</code> → strip 802.3 MACs → prepend SNAP → prepend 802.11 header; the
+  <strong>Mesh Control header is a new insertion between the 802.11 header and SNAP</strong>.</p>
+
+  <h3>Concrete P4 steps (next)</h3>
+  <ol>
+    <li><code>umac_datapath_construct_80211_data_header_mesh</code>: group-addr → 3-addr QoS data fromDS=1 (A1=DA,
+      A2=A3=us); unicast → 4-addr toDS=fromDS=1 (A1=peer, A2=us, A3=DA, A4=us).</li>
+    <li>Insert the 6-byte Mesh Control header (flags=0, ttl=31, mesh seqnum++) in the mesh TX path, after QoS ctrl /
+      before SNAP.</li>
+    <li>RX: parse QoS + Mesh Control, strip to 802.3, deliver to lwIP (the mesh RX data handler).</li>
+    <li>Per-peer stad at ESTAB (<code>umac_sta_data_alloc</code>, bind peer/bssid) for unicast lookups + RX.</li>
+    <li>App: static IP on the mesh netif (e.g. <code>10.9.9.3/24</code>) so it can join the Linux mesh ping.</li>
+    <li><strong>Verify the firmware S1G-converts a mesh QoS-data + Mesh-Control frame</strong> (the one real unknown)
+      — capture the ESP's TX on <code>morse0</code> and confirm it reaches air as S1G.</li>
+    <li>(Later) HWMP path selection for multi-hop; for now next-hop = the directly-peered dest.</li>
+  </ol>
+
+  <h2 id="u7">Update 7 — P4 data path BUILT + verified to the frame layer; ping gated on HWMP</h2>
+  <p>Implemented and verified on hardware:</p>
+  <ul>
+    <li><strong>TX header</strong> <code>umac_datapath_construct_80211_data_header_mesh</code> (group→3-addr fromDS=1;
+      unicast→4-addr toDS=fromDS=1) + <strong>Mesh Control header</strong> insertion in
+      <code>umac_datapath_tx_frame</code> (flags=0, ttl=31, mesh seqnum) + QoS <strong>Mesh Control Present</strong>
+      bit (0x0100).</li>
+    <li><strong>RX</strong>: strip the Mesh Control header (gated on the QoS bit; AE-aware length) before LLC/SNAP.</li>
+    <li><strong>Link-up</strong> at first ESTAB; <strong>app</strong>: static mesh IP + ping; <strong>MAC sync</strong>
+      (<code>esp_netif_set_mac</code> to the mesh vif MAC) so L2(vif)==L3(ARP).</li>
+  </ul>
+  <p>On-air verification (chronium <code>morse0</code>):</p>
+  <ul>
+    <li>board0 emits <strong>consistent mesh data frames</strong> (fromDS + Mesh Control), e.g.
+      <code>88 02 … A1=bcast A2=A3=board0 QoS=0x0100 MeshCtrl=00 1f &lt;seqnum&gt; SNAP …</code> — matches the
+      chronite reference exactly.</li>
+    <li><strong>chronite receives them</strong> (station <code>rx bytes</code> climbs to ~75 KB; <strong>learns
+      board0's ARP</strong> <code>10.9.9.136 → e2:72:a1:f8:ef:a4</code>, the synced MAC). So broadcast data
+      board0→chronite reaches L3, and the TX format is accepted.</li>
+  </ul>
+  <div class="callout err">
+    <p class="ct">✗ Remaining blocker: HWMP path resolution (the final piece)</p>
+    <p>chronite's <code>mpath dump</code> shows board0 with <code>NEXT_HOP 00:00:00:00:00:00</code>,
+    <code>FLAGS 0x2 = MESH_PATH_RESOLVING</code>. mac80211 mesh forwards ALL unicast via the mesh path table, even to a
+    direct peer: it sends a PREQ targeting board0, but morselib has no HWMP, so no PREP is returned, the path never
+    goes ACTIVE, and the unicast ARP-reply / ICMP-reply is never delivered to board0 (hence ping timeout; board0's own
+    ARP never resolves so it sends no 4-addr unicast either).</p>
+  </div>
+
+  <h3>Next: minimal HWMP (mirror net/mac80211/mesh_hwmp.c)</h3>
+  <ol>
+    <li><strong>Respond to PREQ</strong> targeting us with a <strong>PREP</strong> (so chronite resolves its path to us
+      → can unicast to us). This alone should let chronite deliver the ARP reply + ICMP echo reply.</li>
+    <li><strong>Originate a PREQ</strong> + accept PREP (so we resolve our path to chronite → can send our own unicast).
+      For a single-hop direct peer, the path is one hop (next hop = the peer).</li>
+    <li>Airtime-metric link metric element + the HWMP IE formats (PREQ/PREP/PERR action frames, category 13/15 mesh
+      path selection). Verify with chronite's <code>mpath dump</code> going ACTIVE and the ESP joining the Linux
+      <code>10.9.9.x</code> ping.</li>
+  </ol>
+  <p>Data path otherwise complete; this is the last gate for routable mesh IP.</p>
+
+  <h2 id="u8">Update 8 — ESP32 pings the Linux mesh ✅ (minimal HWMP + RX vif fix)</h2>
+  <p>Two fixes closed it:</p>
+  <ol>
+    <li><strong>HWMP target role</strong> (<code>umac_mesh.c</code>): on a received PREQ (Mesh Action cat 13 / action
+      1) that targets us, build + send a <strong>PREP</strong> (EID 131: flags, hop_count, ttl, target=us, target_sn,
+      lifetime, metric=0, orig=PREQ-originator, orig_sn). Mirrors <code>net/mac80211/mesh_hwmp.c</code>
+      <code>mesh_path_sel_frame_tx</code>. After this, chronite's <code>mpath dump</code> for board0 went
+      <code>FLAGS 0x5</code> (ACTIVE|RESOLVED), <code>NEXT_HOP=board0</code> — chronite could finally unicast to the
+      ESP. (We don't originate PREQs; our own TX is direct single-hop.)</li>
+    <li><strong>RX vif fix</strong> (<code>umac_datapath.c</code>): the RX data path's vif determination only matched
+      <code>STA</code> and <code>AP|ADHOC</code>, so mesh frames hit <code>"Invalid RX VIF"</code> and were dropped
+      <em>after</em> the Mesh Control strip. Added <code>UMAC_INTERFACE_MESH</code> to the <code>AP|ADHOC</code>
+      branch (mesh reuses the AP per-vif slot, like IBSS). A diagnostic confirmed board0 received chronite's unicast
+      data (<code>sa=chronite da=board0 mctrl=1</code>) but dropped it here.</li>
+  </ol>
+  <p>Result — board0 (ESP 10.9.9.136) ↔ chronite (Linux 10.9.9.2):</p>
+<pre><code>reply from 10.9.9.2: seq=2 time=93 ms ... seq=10 time=11 ms ... seq=13 time=13 ms</code></pre>
+  <p><strong>Single-hop ESP↔Linux mesh IP is working end-to-end.</strong> P4 complete. Feature status + Linux/ESP
+  comparison table: <code>docs/mesh-ap/rimba-mesh-ap-milestones.md</code>. Remaining (P5): HWMP source role (PREQ
+  originate) + mesh path table + multi-hop forwarding.</p>
+
+  <h2 id="u9">Update 9 — P5: HWMP source role + path table + multi-hop endpoint ✅</h2>
+  <p>Implemented in <code>umac_mesh.c</code> (derived from <code>mesh_hwmp.c</code> / <code>mesh_pathtbl.c</code>):</p>
+  <ul>
+    <li><strong>Mesh path table</strong> (<code>mesh_path_*</code>): dest → next_hop, SN, metric, hop_count, expiry.
+      Install rule mirrors <code>hwmp_route_info_get</code> fresh-info (take if inactive / newer SN / same SN + better
+      metric). Fixed per-hop metric (100); 5 s lifetime.</li>
+    <li><strong>HWMP source role</strong>: <code>umac_mesh_start_discovery()</code> originates a PREQ (broadcast,
+      rate-limited) when the data path has no route; <code>umac_mesh_lookup_next_hop()</code> returns the resolved next
+      hop.</li>
+    <li><strong>Path-based TX</strong> (<code>construct_80211_data_header_mesh</code>): A1 = HWMP next hop; falls back
+      to direct + kicks off discovery if unresolved (so a directly-peered dest still works immediately).</li>
+    <li><strong>PREQ/PREP RX</strong>: install reverse/forward path from the immediate sender; reply with PREP if we
+      are the target (existing); <strong>forward</strong> PREQ (flood, ttl--) and PREP (toward orig via our path).</li>
+  </ul>
+  <p><strong>Multi-hop demonstrated</strong> (ESP as endpoint, Linux as relay). Forced a line topology with a per-node
+  <strong>peer allowlist</strong> (<code>mmwlan_mesh_set_peer_allowlist</code>, app toggle
+  <code>MESH_MULTIHOP_DEMO</code>) so board0 peers ONLY with chronite, plus an HWMP-RX transmitter filter so board0
+  only learns paths via chronite (all bench nodes are in RF range, else HWMP finds a 1-hop path):</p>
+<pre><code>board0 (peers only with chronite) --PREQ--> chronite --fwd--> chronium
+chronium --PREP--> chronite --fwd--> board0 :  MESH path to chronium via chronite (metric 5952)
+board0 ping 10.9.9.1 (chronium):  reply seq=10..17  ~14-20 ms   (2 hops, chronite relays the data)</code></pre>
+  <p>board0 reaches a node it has <strong>no direct peer link with</strong>, over a 2-hop HWMP path. P5 done for the
+  ESP-as-endpoint case.</p>
+  <p><strong>Remaining (P5b):</strong> ESP <strong>data-frame relay</strong> — forward a received mesh data frame whose
+  mesh DA isn't us toward the next hop (re-inject preserving A4=mesh-SA). Needs custom frame re-injection; the demo
+  above uses Linux (chronite) for the relay. Table: <code>docs/mesh-ap/rimba-mesh-ap-milestones.md</code>.</p>
+
+  <h2 id="u10">Update 10 — P5b: ESP relays others' traffic ✅ (full ESP multi-hop)</h2>
+  <p><code>umac_mesh_forward_data</code> (umac_mesh.c) + an RX hook (umac_datapath.c): when a mesh data frame's mesh DA
+  (A3, 4-addr unicast) isn't us, build a <strong>fresh</strong> forwarded frame — 4-addr header (A1=HWMP next hop to
+  the DA, A2=us, A3=DA unchanged, <strong>A4=mesh SA preserved</strong>), QoS mesh-control-present, Mesh Control, and
+  the copied LLC/SNAP+payload — and TX it; the original is dropped. Built via <code>build_mgmt_frame</code> (measures +
+  allocs a right-sized txbuf). <strong>First attempt re-used the rxbuf and crashed (StoreProhibited) — the RX buffer
+  lacks headroom for tx_frame's header prepends; copying into a fresh txbuf fixed it.</strong></p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">board1</div><div class="s">source</div></div>
+      <div class="node acc"><div class="t">board0</div><div class="s">ESP relay</div></div>
+      <div class="node ok"><div class="t">board2</div><div class="s">10.9.9.108</div></div>
+    </div>
+    <figcaption>The 3-ESP line the relay was demoed on — board0 forwards board1→board2 (4-addr, A4=mesh-SA preserved).</figcaption>
+  </figure>
+
+  <p>Demoed a 3-ESP line <code>board1 → board0(ESP relay) → board2</code> (forced via per-node peer allowlists +
+  HWMP/data TA filters + static ARP, since the bench is all-in-range and ARP can't yet traverse a relay):</p>
+<pre><code>board0 (relay): MESH relay e2:72:..f9:40 -> e2:72:..f0:08    (forwards board1->board2)
+board1: MESH path to board2 via board0;  reply from 10.9.9.108  27 replies / 29 (~50 ms)</code></pre>
+  <p><strong>An ESP32 now both originates multi-hop traffic AND relays it.</strong> P5 + P5b complete. Limits + full
+  Linux/ESP feature table: <code>docs/mesh-ap/rimba-mesh-ap-milestones.md</code>. Next (P6): group/multicast forwarding
+  (so ARP traverses relays), PERR, airtime metric, security, power save.</p>
+
+  <h2 id="u11">Update 11 — P6a: group/multicast forwarding ✅ (ARP traverses a relay)</h2>
+  <p><code>umac_mesh_handle_group_data</code> + a mesh RMC (<code>mesh_rmc_seen</code>, per-(mesh-SA, mesh-seqnum)
+  cache, 2 s window), wired into the RX path. On a group-addressed mesh frame (mesh DA multicast): drop duplicates /
+  our own echoes via the RMC, else <strong>re-broadcast</strong> it (3-address fromDS, A1=bcast, A2=us, A3=mesh-SA
+  unchanged, ttl-1, <strong>seqnum preserved</strong> so other nodes dedup) AND deliver locally. Mirrors
+  <code>net/mac80211</code> mesh group forwarding + <code>mesh_rmc_check</code>. The RX path now reads the Mesh Control
+  ttl/seqnum before stripping it.</p>
+  <p>Result: removed the static-ARP crutch from the relay demo — board1's broadcast ARP for board2 now propagates
+  through board0 (group re-broadcast), board2 replies, and the unicast ping flows:</p>
+<pre><code>board1 -> board0(ESP relay) -> board2 (10.9.9.108), NO static ARP:  28 replies / 29 (~50 ms)</code></pre>
+  <p><strong>Full ESP mesh forwarding now: unicast relay (P5b) + group/multicast (P6a).</strong> Remaining (P6b):
+  PERR, airtime metric, RANN/root, proxy/gate, security, power save.</p>
+
+  <h2 id="u12">Update 12 — P6b: PERR broken-link teardown + peer-inactivity link-failure detection ✅</h2>
+  <p>Two pieces, both grounded in <code>net/mac80211</code>:</p>
+  <p><strong>1. PERR (<code>mesh_hwmp.c</code> mesh_path_error_tx / hwmp_perr_frame_process).</strong> PERR element
+  (EID 132): <code>ttl, num_dest(=1), {flags=0, target_addr(6), target_sn(4), reason(2)}</code> — one destination per
+  frame, like <code>mesh_path_error_tx</code>. New in <code>umac_mesh.c</code>:</p>
+  <ul>
+    <li><code>umac_mesh_build_perr</code> / <code>umac_mesh_tx_perr</code> — Mesh-Action cat 13 / action 1 carrying
+      the PERR element.</li>
+    <li><code>umac_mesh_invalidate_paths_via(next_hop)</code> — when a link to <code>next_hop</code> breaks, mark every
+      path through it inactive, <code>++sn</code> (so a stale cached PREP can't reinstate it — mirrors
+      <code>mesh_plink_broken</code> doing <code>++mpath-&gt;sn</code> before <code>mesh_path_error_tx</code>), and
+      announce each now-unreachable destination with a broadcast PERR.</li>
+    <li>PERR RX in <code>umac_mesh_handle_hwmp</code>: for each listed target, tear our path down <strong>only if</strong>
+      it goes via the PERR sender (<code>next_hop == TA</code>) and the announced SN isn't older than ours
+      (<code>hwmp_perr_frame_process</code>), then flood the PERR onward (<code>ttl-1</code>).</li>
+  </ul>
+  <p><strong>2. Link-failure detection (the trigger PERR needs).</strong> The implementation had no way to notice an
+  established peer going silent — <code>mesh_plink_timer</code> only retransmits during the handshake, and a rebooting
+  peer's fresh Open (llid echo = 0) doesn't trip the stale-llid Close, so PERR could never actually fire. mac80211
+  detects this in housekeeping: <code>mesh.c:916</code> <code>ieee80211_sta_expire(sdata, mshcfg.plink_timeout * HZ)</code>
+  reaps peers idle past <code>plink_timeout</code> (<code>last_rx</code> updated on every RX,
+  <code>mesh_plink.c:446</code>). Mirrored here:</p>
+  <ul>
+    <li><code>struct mesh_peer</code> gains <code>last_rx_ms</code>, bumped on every beacon from the peer
+      (<code>umac_mesh_handle_peer_beacon</code>) and every peering frame (<code>handle_action</code>).</li>
+    <li><code>umac_mesh_plink_tick</code> ESTAB case: idle &gt; <code>MESH_PLINK_INACTIVITY_MS</code> (6 s ≈ 60 missed
+      ~100 ms beacons) → send Close, <code>umac_mesh_invalidate_paths_via(peer)</code>, free the slot.</li>
+  </ul>
+  <p>Both teardown paths (ESTAB-inactivity, and OPN-retry-exhaustion → HOLDING → free) funnel into
+  <code>invalidate_paths_via</code>, so a lost next hop always flushes paths + PERRs regardless of the peer's state at
+  the moment it dies.</p>
+  <p><strong>Verified</strong> (3-ESP line <code>board1 → board0(relay) → board2</code>, board2 dropped into ROM
+  download mode so it stays truly silent past the timeout):</p>
+<pre><code>board1: 34 ping replies, then board2 goes silent
+board0 (relay) t=51.4s: MESH peer ...f0:08 detected gone
+board0          t=52.3s: MESH PERR tx: dest ...f0:08 unreachable (next-hop ...f0:08 lost)
+board1 (source) t=52.3s: MESH PERR rx: path to ...f0:08 via ...ef:a4 torn down
+board2 returns  t=66s  : re-ESTABLISHED -> ping resumes (seq 78-80, ~35 ms)</code></pre>
+  <p>No false teardowns: the healthy <code>board1↔board0</code> link (52 replies) never tripped the inactivity
+  timeout. Remaining (P6c): airtime metric, RANN/root, proxy/gate, SAE/AMPE, mesh power save. Plus a testing TODO:
+  mesh throughput with iperf (see milestones doc).</p>
+  <p>Reference revisions this was matched against (checked out on <code>chronite</code>): kernel
+  <code>MorseMicro/rpi-linux</code> branch <code>mm/rpi-6.12.21/1.17.x</code> (Linux 6.12.21) @
+  <code>372414fd42cdd4d8bfcf888cac62db9da947fdb6</code> — <code>net/mac80211/mesh_hwmp.c</code>, <code>mesh.c</code>;
+  driver <code>MorseMicro/morse_driver</code> 1.17.8 (<code>0-rel_1_17_8_2026_Mar_24</code>) @
+  <code>3eef5a0a43645808e501ff4b83f29d675588bd9b</code>.</p>
+
+  <h2 id="u13">Update 13 — On-air verification on chronium's <code>morse0</code> monitor ✅ (third-party byte-diff)</h2>
+  <p>Closed the verification gap: the ESP mesh frames were captured <strong>on the air by a third node</strong>
+  (chronium as a <code>CONFIG_MORSE_MONITOR</code> sniffer on S1G ch27 / freq 5560) and decoded byte-for-byte against
+  both the ESP encoders (<code>umac_mesh.c</code>) and the Linux <code>mesh_hwmp.c</code> element layouts. Setup:
+  <code>docs/reference/rimba-linux-halow-monitor.md</code> (<code>iw dev wlan1 set type monitor</code> +
+  <code>set freq 5560</code>, read <code>morse0</code> via AF_PACKET, skip radiotap); capture filtered to the ESP TA
+  prefix <code>e2:72:a1</code>. Scenario: the <code>board1 → board0(relay) → board2</code> line with a forced link
+  break (board2 → ROM download mode) to generate PERR + re-discovery. Window counts:</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">355</div><div class="lbl">DATA · 4-addr</div></div>
+    <div class="stat"><div class="num">18</div><div class="lbl">DATA · 3-addr</div></div>
+    <div class="stat"><div class="num acc">314</div><div class="lbl">PREQ</div></div>
+    <div class="stat"><div class="num">27</div><div class="lbl">PREP</div></div>
+    <div class="stat"><div class="num">3</div><div class="lbl">PERR</div></div>
+    <div class="stat"><div class="num">8</div><div class="lbl">peering</div></div>
+  </div>
+
+  <p><strong>4-addr mesh DATA</strong> (board1→board0→board2), on-air after-header bytes:</p>
+<pre><code>00 01 | 00 1f ad 09 00 00 | aa aa 03 00 00 00 08 00 | 45 00 …</code></pre>
+  <ul>
+    <li><code>00 01</code> QoS Control = 0x0100 → <strong>Mesh Control Present</strong> bit ✓</li>
+    <li><code>00 1f ad 09 00 00</code> Mesh Control = flags 0x00, <strong>ttl 0x1f=31</strong> (dot11MeshTTL), seqnum
+      LE ✓</li>
+    <li><code>aa aa 03 …08 00</code> LLC/SNAP IPv4, then the IP header. Matches <code>umac_mesh_build_forward</code>.</li>
+    <li>A1/A2/A3/A4 on the two hops: <code>TA=board1 A1=board0 A3=board2 A4=board1</code>, then the relay
+      <code>TA=board0 A1=board2 A3=board2 A4=board1</code> — <strong>A4 (mesh-SA) preserved through the relay</strong> ✓.</li>
+  </ul>
+  <p><strong>PREQ</strong> (EID 130, len 37) —
+  <code>00 00 1f 6f000000 | board1 | fd000000 | 30 75 00 00 | 00000000 | 01 00 | board2 | 16000000</code> = flags,
+  hop 0, ttl 31, preq_id, orig=board1, orig_sn, <strong>lifetime 0x7530=30000ms</strong>, metric 0, target_count 1,
+  target_flags, target=board2, target_sn. The flood shows hop_count 0→1→2→3 with <strong>metric 0 → 0x64 → 0xc8 →
+  0x12c (per-hop +100 = MESH_PATH_LINK_METRIC)</strong> and ttl decrementing 0x1f→0x1e→0x1d ✓.</p>
+  <p><strong>PREP</strong> (EID 131, len 31) —
+  <code>00 00 1f | board2 | 01000000 | 30 75 00 00 | 00000000 | board1 | 10010000</code> = flags, hop 0, ttl 31,
+  target=board2, target_sn, lifetime 30000, metric 0, orig=board1, orig_sn. Relay forwards at hop 1 / ttl 0x1e /
+  metric 0x64 ✓ (toward the originator).</p>
+  <p><strong>PERR</strong> (EID 132, len 15) — <code>1f 01 00 | board2 | 16000000 | 3e 00</code> = <strong>ttl 0x1f=31,
+  num_dest 1, flags 0, target=board2, target_sn=0x16=22, reason 0x3e=62</strong>
+  (<code>WLAN_REASON_MESH_PATH_NOFORWARD</code>). board0 originates it; <strong>board1 re-emits the same PERR at ttl
+  0x1e=30 (ttl−1)</strong> → PERR RX + forward-on confirmed on air. Exact match to <code>umac_mesh_build_perr</code>
+  and <code>mesh_path_error_tx</code>.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Verdict</p>
+    <p>Every ESP mesh frame on the air (data, PREQ, PREP, PERR, peering) is byte-identical to the Linux
+    <code>net/mac80211</code> element layouts (field order, little-endian SNs, and the constants dot11MeshTTL=31 /
+    lifetime 30000 / per-hop metric 100 / reason 62). Per <code>[[verify-onair-chronium-monitor]]</code> this
+    third-party capture — not endpoint logs — is the ground-truth check, and it now backs P4–P6b. Gold-standard
+    follow-up still open: a <em>live</em> Linux node (chronite on ch27 mesh) originating the same HWMP/PERR for a
+    same-capture A/B (the peering frames already have that from earlier in this worklog; the element formats here are
+    from the authoritative <code>mesh_hwmp.c</code> source). The <code>morse0</code> tap worked cleanly this time
+    (451 frames/12 s).</p>
+  </div>
+
+  <h2 id="u14">Update 14 — Live Linux-device A/B on the air (chronite TX vs ESP TX) ✅ + 3 deltas found</h2>
+  <p>Per <code>[[verify-onair-chronium-monitor]]</code>, went past "matches the Linux source layout" to "matches what
+  a Linux node actually transmits." Brought <strong>chronite</strong> up as a live 802.11s mesh node
+  (<code>wpa_supplicant_s1g</code>, <code>ssid=rimba-mesh</code>, ch27/5560, <code>MESH-GROUP-STARTED</code>, 10.9.9.2)
+  and captured its frames on <strong>chronium's monitor</strong> (filter TA <code>3c:22:7f</code>), then byte-diffed
+  against the ESP frames from Update 13. Bring-up notes: chronite's morse stack was wedged (every <code>wlan1</code> op
+  dropped ssh, <code>wpa</code> exited pre-<code>MESH-GROUP-STARTED</code>) and needed a <strong>reboot</strong>; after
+  reboot, <strong>NetworkManager + the system <code>wpa_supplicant</code> grab <code>wlan1</code></strong>
+  (→ <code>nl80211 ... mode: -16 busy</code>), so <code>nmcli dev set wlan1 managed no</code> is required, and
+  <code>wpa_supplicant_s1g</code> must run <strong>foreground</strong> (detached/<code>systemd-run</code> starts the
+  mesh but it doesn't stay up). To force a Linux PREQ, give chronite a static <code>ip neigh</code> for the ESP MAC
+  (else its ARP never resolves → no path discovery).</p>
+  <p>The element <strong>structure</strong> matches perfectly (same field order, lengths, little-endian SNs, Mesh
+  Control header, addressing). But the live capture surfaced <strong>3 value-level deltas the source-format check
+  missed</strong>:</p>
+
+  <table>
+    <thead><tr><th>#</th><th>Frame / field</th><th>Linux (chronite) on-air</th><th>ESP on-air</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td><strong>Group/bcast QoS Ack Policy</strong></td><td><code>20 01</code> → <strong>No-Ack</strong> (0x20)</td><td><code>00 01</code> → <strong>Normal-Ack</strong> (0x00)</td><td>bcast/group frames should be No-Ack; ESP requests normal ack</td></tr>
+      <tr><td class="num">2</td><td><strong>PREQ per-target flags</strong></td><td><code>01</code> → <strong>Target-Only (TO) set</strong></td><td><code>00</code> → TO clear</td><td>TO=1 makes only the target answer; ESP lets intermediate nodes reply with possibly-stale paths</td></tr>
+      <tr><td class="num">3</td><td><strong>PREQ lifetime</strong></td><td><code>0xbebc</code> = 48828 <strong>TU</strong> (≈50 s)</td><td><code>0x7530</code> = 30000</td><td>ESP writes raw ms into a field 802.11s defines in TUs (no ms→TU convert); also a different magnitude</td></tr>
+    </tbody>
+  </table>
+
+  <p>Captured live from Linux: <strong>beacon</strong> (1000s), <strong>group-addressed data (ARP)</strong> [delta #1],
+  <strong>PREQ</strong> [deltas #2/#3]. Decoded bytes:</p>
+<pre><code>Linux PREQ : 00 00 1f 00000000 3c227f375138 01000000 bcbe0000 00000000 01 01 e272a1f8efa4 00000000
+ESP   PREQ : 00 00 1f 6f000000 e272a1f8f940 fd000000 30750000 00000000 01 00 e272a1f8f008 16000000
+Linux grp  : 20 01 | 00 1f &lt;sn&gt; | aa aa 03 00 00 00 08 06 (ARP)
+ESP   grp  : 00 01 | 00 1f &lt;sn&gt; | aa aa 03 00 00 00 08 06 (ARP)</code></pre>
+  <p>Not yet captured live from Linux: <strong>PREP</strong> (needs chronite to be a PREQ target) and
+  <strong>PERR</strong> (needs an active Linux path to break) — both blocked by the ESP peer-allowlist (no Linux↔ESP
+  plink), so they remain verified against the <code>mesh_hwmp.c</code> source layout only. A full peered Linux↔ESP
+  HWMP exchange would need an ESP flashed without the forced-topology allowlist.</p>
+  <p>These 3 deltas are now P6c fix items (set the PREQ TO flag, use No-Ack on group frames, convert the PREQ lifetime
+  ms→TU) — found precisely because the comparison was against the live device, not the spec. Vindicates the
+  <code>[[verify-onair-chronium-monitor]]</code> rule.</p>
+
+  <h2 id="u15">Update 15 — Fixed the 3 live-Linux deltas + verified on air; Linux PREP captured</h2>
+  <p>Fixed the three deltas from Update 14, each grounded in <code>net/mac80211</code> source, then re-verified on
+  chronium's monitor against the live Linux device.</p>
+  <p><strong>Fixes</strong> (<code>umac_mesh.c</code>, <code>umac_datapath.c</code>):</p>
+  <ol>
+    <li><strong>PREQ Target-Only flag</strong> — <code>umac_mesh_start_discovery</code> now sets
+      <code>target_flags = MESH_PREQ_TO_FLAG (1&lt;&lt;0)</code> on a <strong>refresh</strong> (path already known:
+      <code>p-&gt;sn != 0</code>), 0 on first discovery — mirrors <code>mesh_queue_preq</code>
+      (<code>PREQ_Q_F_REFRESH → IEEE80211_PREQ_TO_FLAG</code>).</li>
+    <li><strong>PREQ lifetime in TUs</strong> — <code>MESH_MSEC_TO_TU(ms) = ms*1000/1024</code> (mesh_hwmp.c
+      <code>MSEC_TO_TU</code>); PREQ lifetime is now <code>MESH_MSEC_TO_TU(MESH_PATH_LIFETIME_MS)</code> = 29296
+      (was raw 30000).</li>
+    <li><strong>No-Ack on group/broadcast</strong> — QoS Ack Policy bits 5-6 = <code>01</code> (<code>|0x0020</code>)
+      for group frames, in both the re-broadcast builder (<code>umac_mesh_build_rebcast</code>) and the originate path
+      (<code>umac_datapath</code> <code>construct</code>/QoS, gated on <code>is_multicast</code>). Unicast keeps
+      Normal-Ack.</li>
+  </ol>
+  <p><strong>On-air verification</strong> (board0 flashed with the fix + a <code>MESH_LINUX_INTEROP</code> app mode =
+  open peering + ping chronite; board1/board2 left on the <em>old</em> firmware as a live control):</p>
+
+  <table>
+    <thead><tr><th>Field</th><th>board0 (fixed)</th><th>board1 (old)</th><th>live Linux (chronite)</th></tr></thead>
+    <tbody>
+      <tr><td>PREQ target_flags</td><td><strong><code>01</code></strong> (TO)</td><td><code>00</code></td><td><code>01</code></td></tr>
+      <tr><td>PREQ lifetime</td><td><strong><code>70 72</code></strong> = 29296 TU</td><td><code>30 75</code> = 30000</td><td><code>70 72</code>/<code>bc be</code> (TU)</td></tr>
+      <tr><td>group QoS</td><td><strong><code>20 01</code></strong> (No-Ack)</td><td><code>00 01</code></td><td><code>20 01</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>board0's originated PREQ for chronite: <code>00 00 1f … 70 72 00 00 00000000 01 01 3c227f375138 …</code> — TO set
+  + lifetime in TUs, byte-matching what Linux emits. The old-firmware board1 frames in the same capture still show
+  <code>00</code>/<code>30 75</code>/<code>00 01</code>, a clean before/after control.</p>
+  <p><strong>Linux PREP captured</strong> (the 4th frame type, live from chronite as a PREQ target):
+  <code>00 00 1f | 3c227f375138 | 03000000 | 70 72 00 00 | 00000000 | e272a1f8efa4 | 03000000</code> — hop 0, ttl 31,
+  target=chronite, lifetime <strong><code>0x7270</code></strong> (it echoes board0's <em>fixed</em> TU lifetime),
+  orig=board0. Structure + the now-matching lifetime confirm the ESP↔Linux PREP interop.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Linux PERR — not capturable on this bench (a finding, not a gap)</p>
+    <p>PERR is fundamentally a <em>forwarder's</em> frame (<code>mesh_path_error_tx</code> on a relay hitting a dead
+    next hop). Here chronite is always an <em>endpoint</em> (it only peers board0; no node routes through it), so it
+    never forwards. And when board0 (chronite's next hop to board1/board2) was dropped to download mode while chronite
+    kept pinging board2, chronite sent <strong>136 DATA-4addr frames to the dead next hop, 0 PERR, 0 PREQ</strong> —
+    the morse driver gives mac80211 no TX-failure feedback to fire <code>mesh_plink_broken</code>, and
+    <code>mesh_plink_timeout</code> expiry didn't emit a PERR either. So a live Linux PERR needs a multi-Linux
+    forwarding mesh (a second non-monitor Linux node) — beyond this single-mesh-node + monitor bench. The ESP PERR
+    stays verified against the <code>mesh_path_error_tx</code> source layout + its own on-air capture (Update 13);
+    notably the ESP's peer-inactivity PERR is <em>more</em> proactive than what Linux emitted here. All on-air work
+    follows <code>[[verify-onair-chronium-monitor]]</code>.</p>
+  </div>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#happy-path">Handshake / state machine</a></li>
+  <li><a href="#open">Reference: Peering OPEN</a></li>
+  <li><a href="#confirm">Reference: Peering CONFIRM</a></li>
+  <li><a href="#mpm-element">Mesh Peering Mgmt element (117)</a></li>
+  <li><a href="#mesh-config">Mesh Configuration element (113)</a></li>
+  <li><a href="#esp-gap">The ESP gap</a></li>
+  <li><a href="#esp-status">ESP implementation status</a></li>
+  <li><a href="#u2">Update 2 — ESP↔ESP ESTAB</a></li>
+  <li><a href="#u3">Update 3 — beacon asymmetry</a></li>
+  <li><a href="#u4">Update 4 — ESP↔Linux resolved</a></li>
+  <li><a href="#u5">Update 5 — S1G mesh beacon</a></li>
+  <li><a href="#u6">Update 6 — P4 data-path design</a></li>
+  <li><a href="#u7">Update 7 — data path built</a></li>
+  <li><a href="#u8">Update 8 — pings Linux mesh</a></li>
+  <li><a href="#u9">Update 9 — P5 HWMP endpoint</a></li>
+  <li><a href="#u10">Update 10 — P5b relay</a></li>
+  <li><a href="#u11">Update 11 — P6a group fwd</a></li>
+  <li><a href="#u12">Update 12 — P6b PERR</a></li>
+  <li><a href="#u13">Update 13 — on-air byte-diff</a></li>
+  <li><a href="#u14">Update 14 — live Linux A/B</a></li>
+  <li><a href="#u15">Update 15 — deltas fixed</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-26-mesh-mpm-peering-frames</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

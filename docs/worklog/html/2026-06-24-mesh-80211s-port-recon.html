@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>802.11s mesh port: recon &amp; effort estimate — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-24</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-24</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">✓ done · P0 gate passed</span>
+    <span class="badge">mesh · recon · 802.11s</span>
+  </div>
+
+  <h1>802.11s mesh port: recon &amp; effort estimate<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">sizing the largest feature in the project before committing code</small></h1>
+
+  <p class="lead"><strong>Author:</strong> Aldwin. <strong>Goal:</strong> estimate the work to port
+  Linux 802.11s mesh into morselib (ESP32-S3 + MM6108), following the morse Linux kernel/driver flow exactly.
+  <strong>No code</strong> — recon only, to size the feature and decide scope before committing.</p>
+
+  <div class="callout">
+    <p class="ct">Verdict</p>
+    <p><strong>This is by far the largest feature in the project</strong> — ~8k lines of kernel-coupled code across
+    6 subsystems, on a stack that has none of the kernel primitives (rhashtable / RCU / cfg80211 / host timers) the
+    Linux mesh code leans on. The firmware, however, <strong>already supports mesh</strong> (commands defined;
+    ESP32 <code>.mbin</code> matches the Linux blob) — which removes the single biggest risk.</p>
+  </div>
+
+  <p><strong>Sources:</strong> <code>net/mac80211/mesh*.c</code> + <code>morse_driver/mesh.{c,h}</code> +
+  <code>morse_commands.h</code> on chronium (<code>~/halow</code>, <code>morse_driver</code> 1.17.8 /
+  <code>rpi-linux</code>); morselib at <code>components/halow/.../morselib/src</code> (Explore inventory, full-tree
+  greps + direct reads).</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">~8k</div><div class="lbl">lines of kernel-coupled code to port</div></div>
+    <div class="stat"><div class="num">6</div><div class="lbl">subsystems</div></div>
+    <div class="stat"><div class="num">~170</div><div class="lbl">kernel-primitive refs to stand in for</div></div>
+    <div class="stat"><div class="num acc">6</div><div class="lbl">staged phases (P0 → P5)</div></div>
+    <div class="stat"><div class="num">~1 day</div><div class="lbl">P0 feasibility probe (gate)</div></div>
+    <div class="stat"><div class="num ok">MESH(5) ✓</div><div class="lbl">firmware recognizes the type</div></div>
+  </div>
+
+  <h2 id="two-layer">The two-layer Linux structure (and why it matters)</h2>
+  <p>802.11s on Linux is <strong>two layers</strong>, and morselib has the equivalent of <em>neither</em>:</p>
+
+  <p><strong>1. Generic protocol — <code>net/mac80211/mesh*.c</code> (6,913 lines).</strong> The actual 802.11s:
+  peering, routing, path table, sync, power-save. Host-side, in the mac80211 stack.</p>
+
+  <table>
+    <thead><tr><th>File</th><th class="num">Lines</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><code>mesh.c</code></td><td class="num">1,815</td><td>MBSS bring-up, Mesh ID/Config IEs, beaconing, IE parse, glue</td></tr>
+      <tr><td><code>mesh_hwmp.c</code></td><td class="num">1,467</td><td>HWMP routing — PREQ/PREP/PERR/RANN, path selection, airtime metric</td></tr>
+      <tr><td><code>mesh_plink.c</code></td><td class="num">1,260</td><td>Peer Link Mgmt (MPM) state machine — OPEN/CONFIRM/CLOSE</td></tr>
+      <tr><td><code>mesh_pathtbl.c</code></td><td class="num">1,106</td><td>mpath/mpp path tables (built on <strong>rhashtable</strong>)</td></tr>
+      <tr><td><code>mesh_ps.c</code></td><td class="num">612</td><td>Mesh power-save (peer-service-period buffering)</td></tr>
+      <tr><td><code>mesh_sync.c</code></td><td class="num">215</td><td>TSF neighbour sync</td></tr>
+      <tr><td><code>mesh.h</code></td><td class="num">438</td><td>per-vif <code>ieee80211_if_mesh</code> state, structs</td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>2. Morse S1G glue — <code>morse_driver/mesh.{c,h}</code> (1,006 lines).</strong> Adapts the generic
+  mesh to S1G/HaLow and to firmware offload: MBCA (beacon-collision avoidance), dynamic RSSI-based peering, mesh
+  probe req/resp, Mesh ID IE insertion into S1G beacons, beacon-timing element, and the <strong>firmware commands</strong>
+  below.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Crucial — nothing to hook into</p>
+    <p>On Linux the <em>protocol</em> is host-side (mac80211); the <em>firmware</em> only does beaconing/MBCA/peer-link
+    limits via commands. morselib has <strong>its own umac, not mac80211</strong> — so there is no mesh scaffolding to
+    hook into. Porting "the Linux flow" means bringing the mac80211 mesh MLME into a stack that lacks mac80211's
+    foundations.</p>
+  </div>
+
+  <h2 id="firmware-derisk">Firmware already supports mesh — the big de-risk</h2>
+  <p><code>morse_driver</code> issues real firmware commands for mesh (<code>command.c</code> /
+  <code>morse_commands.h</code>):</p>
+  <ul>
+    <li><code>MORSE_CMD_ID_MESH_CONFIG</code> (START/STOP opcodes) — create/stop the mesh BSS</li>
+    <li><code>MORSE_CMD_ID_SET_MESH_CONFIG</code> — Mesh ID, peer-link min/max, beaconless mode</li>
+    <li><code>MORSE_CMD_ID_DYNAMIC_PEERING_CONFIG</code> — RSSI-based auto-peering</li>
+    <li><code>MORSE_CMD_INTERFACE_TYPE_MESH</code> (=5) accepted by <code>ADD_INTERFACE</code></li>
+    <li>MBCA TBTT selection/adjustment knobs (<code>MESH_MBCA_CFG_TBTT_*</code>)</li>
+  </ul>
+  <p>The ESP32 MM6108 <code>.mbin</code> (1.17.6) was already found byte-identical to the Linux blob for the TWT path;
+  mesh commands are defined in the same firmware command set. So the firmware very likely <strong>already implements
+  mesh</strong> — unlike TWT install (<code>0x26</code>), which the firmware <em>gates</em> to STA vifs. This is the
+  inverse of the TWT surprise: the risk here is host-side volume, not a firmware wall.</p>
+
+  <div class="callout">
+    <p class="ct">De-risk step 0 (do first, ~1 day) — prove it on hardware</p>
+    <p>morselib already has the probe hook <code>mmprobe_add_iface_raw(5, …)</code> (<code>internal/mmdrv.h:304</code>)
+    made exactly for this. Add the <code>MESH_CONFIG</code> START command wrapper and confirm the ESP32 firmware
+    <code>ADD_INTERFACE(type=5)</code> + <code>MESH_CONFIG</code> returns success and beacons. If it does, the port is
+    "only" a large host-side job. If it doesn't, mesh is firmware-blocked and the whole effort changes — so this gate
+    comes before anything else.</p>
+  </div>
+
+  <h2 id="reusable-missing">What morselib already has (reusable) vs. what's missing</h2>
+
+  <p><strong>Reusable (good news):</strong></p>
+  <ul>
+    <li>Generic action-frame build + RX <strong>category dispatch</strong> (<code>frames/action.c</code>,
+      <code>umac_datapath.c:236</code>) — TWT plugged in here; mesh peering/HWMP categories slot in the same way.
+      TWT is a working template.</li>
+    <li>Host-built beacon with <strong>opaque head/tail</strong> (arbitrary IEs already carriable) + firmware-IRQ
+      beacon engine (<code>umac_ap.c:289</code>, <code>driver/beacon/beacon.c</code>).</li>
+    <li><strong>Generic, id-agnostic IE build/parse</strong> (<code>ies_common.h</code>) — Mesh ID/Config/HWMP IEs
+      can be emitted/parsed once constants are added.</li>
+    <li><strong>IBSS</strong> (<code>umac/ibss/</code>, <code>MORSE_CMD_ID_IBSS_CONFIG 0x35</code>) — an
+      association-less, self-beaconing vif with an 8-peer table + callbacks. The nearest architectural precedent for
+      a mesh vif and neighbour table.</li>
+    <li>4-address header struct (<code>dot11_data_hdr</code> + to_ds/from_ds accessors).</li>
+    <li>Uniform firmware-command mechanism (<code>morse_cmd_tx</code> + <code>driver/driver.c</code> wrappers).</li>
+    <li>SAE crypto primitives in the hostap shim (for later AMPE).</li>
+  </ul>
+
+  <p><strong>Missing — must build (the work):</strong></p>
+  <ol>
+    <li><strong>Interface plumbing</strong> — MESH in all three type enums (<code>morse_commands.h</code>,
+      <code>mmdrv.h</code>, <code>umac_interface.h</code>) + a <code>umac/mesh/</code> bring-up module.
+      <em>Small–med.</em></li>
+    <li><strong>Mesh firmware-command wrappers</strong> — <code>MESH_CONFIG</code> / <code>SET_MESH_CONFIG</code> /
+      <code>DYNAMIC_PEERING_CONFIG</code> defs + <code>driver/driver.c</code> wrappers (firmware side exists).
+      <em>Small</em> (gated on de-risk step 0).</li>
+    <li><strong>Mesh IE constants + structs + parsers</strong> — Mesh ID, Mesh Configuration, Peering Management,
+      HWMP PREQ/PREP/PERR/RANN, Beacon Timing. Machinery exists; structs don't. <em>Medium.</em></li>
+    <li><strong>Host-timer scaffolding in umac</strong> — umac uses <strong>zero</strong> <code>mmosal_timer</code>
+      today; it's all firmware-IRQ/schedule driven. Mesh needs many host timers (plink retry, HWMP PREQ retransmit,
+      path expiry, sync). Foundational. <em>Medium.</em></li>
+    <li><strong>Peer Link Management (MPM)</strong> — port <code>mesh_plink.c</code>. Open-mesh peering state
+      machine. <em>Large.</em> (AMPE/authenticated peering deferred — open mesh first.)</li>
+    <li><strong>HWMP routing</strong> — port <code>mesh_hwmp.c</code> + the airtime link metric. <em>Large.</em>
+      Needs (4) and (7).</li>
+    <li><strong>Path table</strong> — port <code>mesh_pathtbl.c</code>; <strong>replace rhashtable</strong> with a
+      morselib data structure (only fixed arrays / 8-entry LRU exist today). <em>Med–large.</em></li>
+    <li><strong>4-address mesh data path + forwarding</strong> — mesh control header (absent), 4-addr mesh framing,
+      <strong>forwarding/relay + mesh TTL</strong>. morselib's datapath is strictly endpoint (STA/AP/IBSS) — no relay
+      logic anywhere. <em>Large.</em></li>
+    <li><strong>Morse S1G glue</strong> — port the relevant half of <code>morse_driver/mesh.c</code>: Mesh ID IE in
+      S1G beacon, mesh probe req/resp, beacon-timing element, (MBCA + dynamic peering can be minimised for MVP).
+      <em>Medium.</em></li>
+    <li><strong>Mesh sync / mesh PS</strong> — <code>mesh_sync.c</code> (maybe fw/MBCA-assisted) +
+      <code>mesh_ps.c</code>. <em>Deferrable for an MVP.</em></li>
+  </ol>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Absent kernel foundations the port must stand in for</p>
+    <p><code>rhashtable</code> (path table), RCU, the cfg80211 mesh-config layer, kernel
+    <code>timer_list</code>/workqueues, and the airtime metric — <strong>~170 references</strong> across
+    <code>mesh.c</code>/<code>mesh_pathtbl.c</code>/<code>mesh_hwmp.c</code> alone. Each becomes a morselib equivalent
+    (<code>mmosal_calloc</code> tables, mutexes, <code>mmosal_timer</code>).</p>
+  </div>
+
+  <h2 id="effort-phasing">Effort verdict &amp; suggested phasing</h2>
+  <p><strong>Size:</strong> the largest single feature in Rimba to date — porting ~8k lines of tightly kernel-coupled
+  code, plus building the timer + table foundations mesh assumes. Bigger than the TWT responder, STA-scaling, and
+  action-frame TWT efforts combined. Not a one-PR job; it needs to be staged.</p>
+
+  <p>Suggested phases (each its own branch + PR + HW validation, following Linux exactly):</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">P0</div><div class="s">fw feasibility gate</div></div>
+      <div class="node"><div class="t">P1</div><div class="s">vif up + beacon</div></div>
+      <div class="node"><div class="t">P2</div><div class="s">peering (open MPM)</div></div>
+      <div class="node"><div class="t">P3</div><div class="s">path table + HWMP</div></div>
+      <div class="node"><div class="t">P4</div><div class="s">4-addr forwarding</div></div>
+      <div class="node"><div class="t">P5</div><div class="s">hardening</div></div>
+    </div>
+    <figcaption>Staged plan — P0 is the cheap gate that must pass before P1+ is committed.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>P0 — Firmware feasibility probe</strong> (de-risk step 0). Gate. <em>~1 day.</em></li>
+    <li><strong>P1 — Mesh vif up + beacon.</strong> Interface plumbing, fw command wrappers, Mesh ID/Config IEs in an
+      S1G beacon; a mesh node that beacons + is seen by a Linux mesh node (interop oracle: chronium
+      <code>iw mesh</code>). No peering yet.</li>
+    <li><strong>P2 — Peering (open MPM).</strong> Port <code>mesh_plink.c</code> (open, no AMPE) + the peer table +
+      the timer scaffolding. Two ESP32 nodes establish a peer link; Linux node peers with an ESP32 node.</li>
+    <li><strong>P3 — Path table + HWMP.</strong> Port <code>mesh_pathtbl.c</code> + <code>mesh_hwmp.c</code>. Routing
+      converges on a 3-node line; PREQ/PREP observed.</li>
+    <li><strong>P4 — 4-addr forwarding datapath.</strong> Mesh header + relay + TTL. End-to-end ping across a 3-node
+      mesh where the middle node forwards.</li>
+    <li><strong>P5 — Hardening.</strong> MBCA, dynamic peering, mesh sync, mesh PS, AMPE (encrypted mesh).</li>
+  </ul>
+
+  <div class="callout">
+    <p class="ct">Decision input</p>
+    <p>This is the all-ESP32-relay enabler, but it's a multi-PR undertaking. If the goal is only "a relay that leaves
+    can TWT-sleep under," the <strong>Mesh-gate already works with the AP half on ESP32 + mesh on a Linux relay</strong>
+    today — full ESP32 mesh (P1–P5) is what removes the Linux relay dependency. Worth weighing P0 (cheap) before
+    committing to P1+.</p>
+  </div>
+
+  <h2 id="p0-result">P0 result (executed 2026-06-24) — ✅ firmware recognizes MESH(5)</h2>
+  <p>Built a diagnostic app <code>firmware/rimba-halow-mesh/</code> that asks the blob directly. It sends
+  <code>ADD_INTERFACE</code> for a matrix of interface types (each add immediately removed via the new
+  <code>mmprobe_iface_type_supported()</code> helper, so slots aren't exhausted) and reports the firmware verdict per
+  type. Flashed to one board, MM6108 fw <strong>1.17.6</strong>:</p>
+
+  <table>
+    <thead><tr><th>Type</th><th><code>fw_status</code></th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>STA (1)</td><td class="num">0</td><td>accepted (known-good control)</td></tr>
+      <tr><td>AP (2)</td><td class="num">0</td><td>accepted (known-good control)</td></tr>
+      <tr><td>ADHOC (4)</td><td class="num">0</td><td>accepted (known-good — matches IBSS recon)</td></tr>
+      <tr><td><strong>MESH (5)</strong></td><td class="num"><strong>0</strong></td><td><strong>accepted</strong></td></tr>
+      <tr><td>BOGUS (99)</td><td class="num">4294967274 = <code>0xFFFFFFEA</code> = <strong>-22 (EINVAL)</strong></td><td>rejected (known-bad control)</td></tr>
+    </tbody>
+  </table>
+
+  <p>Stable across two passes. The firmware <strong>actively rejects</strong> an undefined type (BOGUS → -22), so
+  MESH(5) returning <code>fw_status=0</code> like the real types — and unlike BOGUS — means the firmware genuinely
+  recognizes a mesh interface. This is the inverse of the TWT <code>0x26</code> gating: mesh is <strong>not</strong>
+  firmware-blocked at the interface level.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Gate passed → P1 unblocked</p>
+    <p><em>Caveat:</em> this only proves <code>ADD_INTERFACE(MESH)</code> is accepted. The next firmware unknown is
+    whether <code>MESH_CONFIG</code>/<code>SET_MESH_CONFIG</code> are honoured and the node actually beacons — that's
+    the first task inside P1, but the expensive risk, "does the firmware know mesh at all", is now retired.</p>
+  </div>
+
+  <p><strong>Evidence:</strong> <code>/tmp/mesh-p0.log</code>; app
+  <code>firmware/rimba-halow-mesh/main/app_main.c</code>; helper <code>morselib/src/driver/driver.c</code>
+  <code>mmprobe_iface_type_supported()</code>.</p>
+
+  <h2 id="next">Next</h2>
+  <ul>
+    <li><strong>P1 — mesh vif up + beacon.</strong> Interface-type plumbing (3 enums) + <code>MESH_CONFIG</code>
+      command wrapper + Mesh ID/Config IEs in an S1G beacon; confirm a Linux <code>iw mesh</code> node sees the ESP32
+      node. First in-P1 step: verify <code>MESH_CONFIG</code> START is honoured (the remaining firmware unknown).</li>
+  </ul>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#two-layer">The two-layer Linux structure</a></li>
+  <li><a href="#firmware-derisk">Firmware already supports mesh</a></li>
+  <li><a href="#reusable-missing">Reusable vs. missing</a></li>
+  <li><a href="#effort-phasing">Effort verdict &amp; phasing</a></li>
+  <li><a href="#p0-result">P0 result — MESH(5) recognized</a></li>
+  <li><a href="#next">Next</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-24-mesh-80211s-port-recon</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

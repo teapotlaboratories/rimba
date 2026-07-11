@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate stress: full permutation matrix + flood — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-10</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-10</span>
+    <span class="badge">3 min read</span>
+    <span class="badge ok">✓ every permutation passes</span>
+    <span class="badge bug">mesh · gate · stress-test</span>
+  </div>
+
+  <h1>Mesh-gate stress test: full source→destination permutation matrix + flood<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">every pair connects · gate is the throughput ceiling · graceful under flood</small></h1>
+
+  <p class="lead">A whole-network stress test of the all-ESP L3 Mesh-gate: exercise <strong>every source→destination permutation</strong>
+  across both subnets (mesh <code>10.9.9.0/24</code> ↔ AP <code>192.168.12.0/24</code>, bridged by the gate's <code>ip_forward</code>),
+  then hammer it with concurrent and flood load to find the limits. Follows the task-<code>#3</code> coverage work (same gate).</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">15 / 15</div><div class="lbl">source→dest pairs connect (cold)</div></div>
+    <div class="stat"><div class="num ok">1 in 600</div><div class="lbl">loss under ~11 concurrent ping-storms</div></div>
+    <div class="stat"><div class="num acc">80.8%</div><div class="lbl">delivered under flood (4158/5145)</div></div>
+    <div class="stat"><div class="num ok">0 crashes</div><div class="lbl">graceful degradation, all paths alive</div></div>
+  </div>
+
+  <h2 id="rig">Rig</h2>
+  <p>Mesh (<code>10.9.9.0/24</code>): gate <code>.136</code>, board1 <code>.100</code>, chronite <code>.60</code>, chronogen <code>.40</code>,
+  chronosalt <code>.50</code> (Linux mesh nodes via <code>wpa_supplicant_s1g</code>, SAE <code>rimbamesh2026</code>, TX power lowered
+  to 3 dBm, return route <code>192.168.12.0/24 via 10.9.9.136</code>). AP (<code>192.168.12.0/24</code>): gate <code>.1</code>,
+  board2 <code>.2</code> (ESP STA, IPERF console). <strong>chronium deliberately NOT used</strong> (kept as the dedicated sniffer,
+  off-air). Originators: chronite, chronogen, chronosalt (ssh <code>ping</code>), board2 (serial console <code>ping</code>);
+  gate + board1 are responders only. Harness: throwaway <code>scratchpad/matrix.py</code> + <code>stress.py</code> +
+  <code>stress2.py</code> (ssh floods + serial console).</p>
+
+  <figure>
+    <div class="diagram"><svg viewBox="0 0 660 240" role="img" aria-label="Mesh-gate two-subnet topology">
+      <!-- subnet labels -->
+      <text x="90" y="12" text-anchor="middle" fill="currentColor" font-size="12" font-weight="700">mesh · 10.9.9.0/24</text>
+      <text x="575" y="60" text-anchor="middle" fill="currentColor" font-size="12" font-weight="700">AP · 192.168.12.0/24</text>
+      <!-- links from gate -->
+      <g stroke="#888" stroke-width="1.5">
+        <line x1="270" y1="110" x2="160" y2="39"/>
+        <line x1="270" y1="110" x2="160" y2="83"/>
+        <line x1="270" y1="110" x2="160" y2="127"/>
+        <line x1="270" y1="110" x2="160" y2="171"/>
+        <line x1="400" y1="110" x2="510" y2="110" stroke="#2f6feb"/>
+      </g>
+      <!-- mesh nodes -->
+      <g font-size="11.5" fill="currentColor">
+        <rect x="20" y="20"  width="140" height="38" rx="7" fill="none" stroke="#888"/>
+        <text x="90" y="36" text-anchor="middle" font-weight="650">board1</text>
+        <text x="90" y="51" text-anchor="middle" fill="#888">.100 · relay</text>
+        <rect x="20" y="64"  width="140" height="38" rx="7" fill="none" stroke="#888"/>
+        <text x="90" y="80" text-anchor="middle" font-weight="650">chronite</text>
+        <text x="90" y="95" text-anchor="middle" fill="#888">.60</text>
+        <rect x="20" y="108" width="140" height="38" rx="7" fill="none" stroke="#888"/>
+        <text x="90" y="124" text-anchor="middle" font-weight="650">chronogen</text>
+        <text x="90" y="139" text-anchor="middle" fill="#888">.40</text>
+        <rect x="20" y="152" width="140" height="38" rx="7" fill="none" stroke="#888"/>
+        <text x="90" y="168" text-anchor="middle" font-weight="650">chronosalt</text>
+        <text x="90" y="183" text-anchor="middle" fill="#888">.50 · Pi Zero 2 W</text>
+      </g>
+      <!-- gate -->
+      <rect x="270" y="76" width="130" height="68" rx="9" fill="none" stroke="#2f6feb" stroke-width="2"/>
+      <text x="335" y="98" text-anchor="middle" fill="#2f6feb" font-size="13" font-weight="700">GATE</text>
+      <text x="335" y="114" text-anchor="middle" fill="currentColor" font-size="11">.136 mesh · .1 AP</text>
+      <text x="335" y="130" text-anchor="middle" fill="#888" font-size="11">ip_forward</text>
+      <!-- board2 -->
+      <rect x="510" y="84" width="130" height="52" rx="9" fill="none" stroke="#888"/>
+      <text x="575" y="106" text-anchor="middle" fill="currentColor" font-size="11.5" font-weight="650">board2</text>
+      <text x="575" y="122" text-anchor="middle" fill="#888" font-size="11">.2 · ESP AP-client</text>
+    </svg></div>
+    <figcaption>One MM6108 gate bridges the mesh subnet (mesh vif) and the AP subnet (AP vif) via <code>ip_forward</code>. Four mesh nodes on the left, one ESP AP-client (board2) on the right. chronium is off-air as the sniffer.</figcaption>
+  </figure>
+
+  <h2 id="results">Results</h2>
+
+  <h3>1) Sequential connectivity matrix (cold, one pair at a time) — 15/15 CONNECT</h3>
+  <p>Rig = gate, board1, chronite, chronogen mesh + board2. Every source→dest pair passes traffic; a few cells were 5/6 —
+  <strong>first-packet warmup only</strong> (ARP / HWMP path setup on a cold flow), not steady-state loss. board2 (ESP AP-client)
+  → everything was 6/6.</p>
+
+  <h3>2) Concurrent load (40 pkts/pair, 4/s, all pairs at once) — ≈0% LOSS</h3>
+  <p>Under ~11 simultaneous ping-storms: <strong>14/15 pairs 0% loss, 1 pair dropped a single packet</strong> (chronite→board1
+  39/40) = <strong>1 lost packet in 600</strong>. The gate's cross-subnet forwarding + the mesh HWMP handle concurrent
+  multi-source traffic cleanly; the sequential run's 5/6 warmup losses amortize away over 40 packets.</p>
+
+  <h3>3) Flood saturation (30 s, ~19 concurrent flood streams + board2) — 80.8% DELIVERED, GRACEFUL</h3>
+  <p>Added chronosalt (5 mesh nodes). Aggregate <strong>4158/5145 pkts delivered = 80.8% (19.2% loss)</strong>. The loss is
+  <strong>structured, and the gate is the bottleneck</strong>:</p>
+  <ul>
+    <li><strong>To/through the gate = worst:</strong> <code>→gate.mesh/gate.ap</code> 32–44%, <code>→board2</code>
+      (traverses the gate <code>ip_forward</code>) 43–62%. Expected — the gate's <em>single</em> MM6108 does mesh RX + AP TX
+      + forwarding at once and saturates first.</li>
+    <li><strong>Mesh-to-mesh (not through the gate) = robust:</strong> 3–13% loss.</li>
+    <li><strong>board2 (AP→mesh) ≈0–1%</strong> even under flood (it ran 20/s, not full flood; its packets got through).</li>
+    <li><strong>Graceful degradation:</strong> ~5× the earlier load only dropped delivery ~100%→~81%, <strong>no node crashed</strong>,
+      every path still passed traffic. A shared 1 MHz S1G medium with 6 nodes flooding is simply oversubscribed — it sheds
+      load rather than collapsing.</li>
+  </ul>
+
+  <p>Loss by path class under flood (bar width scaled to the range midpoint; the orange bars all touch the gate):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">→board2 (via gate)</span><span class="bar-track"><span class="bar-fill slow" style="width:52%"></span></span><span class="val">43–62%</span></div>
+    <div class="bar-row"><span class="lbl">→gate.mesh / gate.ap</span><span class="bar-track"><span class="bar-fill slow" style="width:38%"></span></span><span class="val">32–44%</span></div>
+    <div class="bar-row"><span class="lbl">mesh-to-mesh</span><span class="bar-track"><span class="bar-fill fast" style="width:8%"></span></span><span class="val">3–13%</span></div>
+    <div class="bar-row"><span class="lbl">board2 (AP→mesh)</span><span class="bar-track"><span class="bar-fill fast" style="width:2%"></span></span><span class="val">0–1%</span></div>
+  </div>
+
+  <p>Every cross-gate packet rides the single-radio forward chain; that chain — not any mesh hop — is where load is shed first:</p>
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">mesh node</div><div class="s">10.9.9.x</div></div>
+      <div class="node acc"><div class="t">gate: mesh RX</div><div class="s">mesh vif</div></div>
+      <div class="node acc"><div class="t">ip_forward</div><div class="s">L3 route</div></div>
+      <div class="node acc"><div class="t">gate: AP TX</div><div class="s">AP vif</div></div>
+      <div class="node ok"><div class="t">board2</div><div class="s">192.168.12.2</div></div>
+    </div>
+    <figcaption>Cross-subnet path: one MM6108 does mesh RX, <code>ip_forward</code>, and AP TX for every forwarded frame — the throughput ceiling.</figcaption>
+  </figure>
+
+  <h2 id="findings">Findings</h2>
+  <div class="callout ok">
+    <p class="ct">✓ Bottom line</p>
+    <ul style="margin:.2em 0">
+      <li><strong>Every source→destination permutation works</strong> across both subnets through the gate.</li>
+      <li><strong>The gate is the throughput ceiling</strong> (single-radio mesh+AP+forward); mesh-only traffic scales better
+        than cross-gate traffic. Not a defect — an architectural property of the all-in-one gate (the planned L2-bridge /
+        <code>#1</code> port would not change this single-radio limit).</li>
+    </ul>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">🐛 chronosalt (Pi Zero 2 W) is power-marginal</p>
+    <p>It <em>reboots</em> (browns out) intermittently when the HaLow radio (<code>wlan1</code>) is brought up — the fgh100m
+    board's radio-up current exceeds the supply margin. It recovers (~1 min) and can join, but is unreliable and sent the
+    fewest packets under flood (weakest node). Diagnosed by <code>uptime</code>/<code>/proc/uptime</code> showing a fresh boot
+    right after it dropped off the LAN; <code>vcgencmd</code> unavailable (<code>/dev/vcio</code> absent) so undervoltage
+    couldn't be confirmed directly, but the reboot-on-radio-up signature is unambiguous. Recorded in
+    <code>rimba-bench-devices.md</code>.</p>
+  </div>
+
+  <h2 id="first-attempt">First attempt (superseded, kept as a lesson)</h2>
+  <div class="callout warn">
+    <p class="ct">⚠ Linux-STA power-save downlink masqueraded as a gate bug</p>
+    <p>An earlier run used chronium (as a mesh node) + chronite as a <em>Linux STA</em> AP-client. Its matrix showed
+    <strong>everything→chronite dead</strong> while chronite→gate/board1 worked — the <strong>Linux-STA power-save downlink</strong>
+    effect (the Linux morse STA dozes, PS uncontrollable via <code>iw</code>; it receives replies to its own fast flows but not
+    cold downlink) — the same effect measured cleanly in the coverage worklog's scenario 2. The rig above avoids it by using only
+    <em>mesh</em> Linux nodes + board2 (an ESP AP-client, PS-off, awake) as the one AP endpoint.</p>
+  </div>
+
+  <h2 id="teardown">Bench teardown</h2>
+  <p>All radio-silent: ESPs <code>rimba-hello</code>, board2 off, all Linux <code>wlan1</code> down (chronium was already off-air).
+  Linux nodes left powered + idle.</p>
+  <div class="callout">
+    <p style="margin:0">NB the Pi Zeros' <em>wlan0</em> mgmt is itself run by <code>wpa_supplicant_s1g</code>, so
+    <code>killall wpa_supplicant_s1g</code> drops their LAN — only <code>wlan1</code> was downed on them. No commits (weekday hours).</p>
+  </div>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#rig">Rig</a></li>
+  <li><a href="#results">Results</a></li>
+  <li><a href="#findings">Findings</a></li>
+  <li><a href="#first-attempt">First attempt (lesson)</a></li>
+  <li><a href="#teardown">Bench teardown</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-10-mesh-gate-stress-permutation-matrix</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

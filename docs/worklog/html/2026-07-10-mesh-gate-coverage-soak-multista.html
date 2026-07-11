@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate coverage: soak + multi-STA — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-10</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-10</span>
+    <span class="badge">8 min read</span>
+    <span class="badge ok">✓ all 4 scenarios green</span>
+    <span class="badge">mesh · gate · DHCP · power-save</span>
+  </div>
+
+  <h1>Mesh-gate coverage (task&nbsp;#3): soak + multi-STA<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">all four coverage scenarios green · all-ESP L3 Mesh-gate</small></h1>
+
+  <p class="lead">Coverage testing of the all-ESP L3 Mesh-gate — the follow-up <strong>#3</strong>, after the
+  <strong>#5</strong> DHCP work landed. Outcome across the four scenarios: <strong>#1 soak PASS</strong>,
+  <strong>#3 multi-STA PASS</strong> (two concurrent STAs, Linux + ESP, distinct DHCP leases, forwarding at
+  once), <strong>#4 multi-hop PASS</strong> (STA→gate→board1(relay)→far-node, 2 hops, A/B-proven — <em>after a
+  morselib fix</em> to the forced-topology RX filter so it no longer drops the gate's AP-client frames), plus
+  a new <strong>foundation PASS</strong> (a Linux node joins the gate's SECURED <code>rimba-mesh</code>).</p>
+
+  <p><strong>#2 power-save-behind-gate — PASS for TWT doze</strong>: the gate buffers + delivers a
+  mesh-originated downlink to a TWT-dozing STA (20/20, RTT elevated ~40→260&nbsp;ms = the buffering signature);
+  deeper WNM+powerdown keeps the STA associated but too deep for timely delivery — the expected tradeoff.
+  <strong>So all four coverage scenarios are green.</strong></p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">449/450</div><div class="lbl">#1 soak · 0% loss · ttl=63</div></div>
+    <div class="stat"><div class="num acc">+32 B</div><div class="lbl">heap drift / 7.5 min — no leak</div></div>
+    <div class="stat"><div class="num ok">30/30</div><div class="lbl">#3 two concurrent STAs · 0%</div></div>
+    <div class="stat"><div class="num ok">11/12</div><div class="lbl">#4 multi-hop e2e · ttl=63</div></div>
+    <div class="stat"><div class="num ok">20/20</div><div class="lbl">#2 TWT-doze downlink · 0%</div></div>
+    <div class="stat"><div class="num ok">4 / 4</div><div class="lbl">coverage scenarios green</div></div>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Three mid-session "blocked" reports were each a mis-report — corrected on re-test</p>
+    <p>Multi-STA, multi-hop, and a #2 "forwarding gap" were each briefly written up "blocked" mid-session —
+    respectively a self-inflicted <code>pkill -f</code> bug, the allowlist bug (fixed with a morselib change),
+    and a flaky-dozing-Linux-client misread. Each was corrected on re-test; all four scenarios pass.</p>
+  </div>
+
+  <p>The core datapath under test, end-to-end, is the STA behind the AP reaching a mesh node through the gate's
+  L3 forward:</p>
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">STA (board2)</div><div class="s">behind the gate</div></div>
+      <div class="node acc"><div class="t">gate AP</div><div class="s">192.168.12.1</div></div>
+      <div class="node acc"><div class="t">ip_forward</div><div class="s">L3 route</div></div>
+      <div class="node acc"><div class="t">mesh</div><div class="s">10.9.9.136</div></div>
+      <div class="node ok"><div class="t">board1</div><div class="s">10.9.9.100 → reply</div></div>
+    </div>
+    <figcaption>End-to-end forward: STA → AP → gate <code>ip_forward</code> → mesh → board1 → reply (ttl=63).</figcaption>
+  </figure>
+
+  <h2 id="rig">Rig</h2>
+  <p>Same rig as #5, boards mapped by <strong>efuse MAC not ttyACM</strong>. Morse fw <strong>1.17.8</strong>.</p>
+  <table>
+    <thead><tr><th>Role</th><th>App</th><th>Port</th><th>efuse MAC</th><th>Addressing</th></tr></thead>
+    <tbody>
+      <tr><td>gateway</td><td><code>rimba-halow-mesh-ap</code></td><td>ACM0</td><td><code>…ef:a4</code></td><td>mesh 10.9.9.136 + AP 192.168.12.1 + DHCP server</td></tr>
+      <tr><td>relay / node</td><td><code>rimba-halow-mesh</code></td><td>ACM1</td><td><code>…f9:40</code></td><td>mesh 10.9.9.100</td></tr>
+      <tr><td>STA under test</td><td><code>rimba-halow-sta-perf</code></td><td>ACM4</td><td><code>…f0:08</code></td><td>PPK2-powered</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="soak">Scenario 1 — SOAK (PASS)</h2>
+  <p>Cold-booted the rig, then drove <code>ping -c 450 10.9.9.100</code> (~7.5&nbsp;min continuous end-to-end:
+  STA→AP→gate <code>ip_forward</code>→mesh→board1→reply) from the STA console while sampling the gateway
+  heartbeat every 30&nbsp;s. Harness <code>scratchpad/soak.py</code>; logs
+  <code>scratchpad/soak_ttyACM{0,1,4}.txt</code>. All checks green:</p>
+  <ul>
+    <li><strong>449/450 replies, 0% loss</strong> (integer; the single miss is the seq=1 cold-start warmup),
+      all <strong>ttl=63</strong>.</li>
+    <li><strong>No crash on any board</strong>; gateway <strong>uptime monotonic</strong> (no reboot).</li>
+    <li><strong>mesh_peers=1 throughout</strong> (no HWMP flap); <strong>ap_stas=1 throughout</strong> (no STA
+      disassoc); board1 <strong>estab_peers=1 throughout</strong>.</li>
+    <li><strong>Gateway heap flat: drift = +32 B over 7.5 min</strong> (91 samples, first 8&nbsp;587&nbsp;616 /
+      last 8&nbsp;587&nbsp;648 / min 8&nbsp;586&nbsp;868; band ~800 B) — <strong>no leak</strong>.</li>
+    <li>RTT min/avg/max = <strong>25 / 37 / 321 ms</strong>.</li>
+    <li>Bonus: the rig was left running afterward and re-observed at uptime ~20&nbsp;min — heap still
+      8&nbsp;587&nbsp;648, mesh_peers=1, ap_stas=1 (extra passive stability confirmation).</li>
+  </ul>
+  <div class="callout ok">
+    <p class="ct">✓ Verdict</p>
+    <p>The L3 mesh-gate is stable under sustained end-to-end traffic — no leak, flap, disassoc, or loss (bar the
+    one cold-start warmup miss). A multi-hour soak remains a separate longer run.</p>
+  </div>
+
+  <h2 id="multi-sta">Scenario 3 — MULTI-STA (PASS: two concurrent STAs, one Linux + one ESP)</h2>
+  <p>Goal: two STAs behind the gate each take a distinct DHCP lease and ping 10.9.9.100 concurrently — directly
+  exercises the #5 DHCP pool + concurrent forwarding. Only board2 is an ESP STA, so the 2nd STA is a Linux
+  HaLow node: <strong>chronite</strong> as an S1G infrastructure STA (<code>wpa_supplicant_s1g</code>, config
+  <code>scratchpad/wpa-rimba-sta.conf</code>: SSID <code>rimba-ping</code>, key_mgmt=SAE, sae_password
+  <code>rimbahalow</code>, ieee80211w=2, op_class 68/ch27, <strong><code>sae_pwe=2</code></strong>). Result:</p>
+  <ul>
+    <li><strong>chronite associates (SAE H2E):</strong> <code>wpa_state=COMPLETED</code>, bssid
+      <code>e0:72:a1:f8:ef:a4</code>, key_mgmt=SAE, pairwise=CCMP. <strong>This proves the previously-unproven
+      Linux-S1G-infra-STA → ESP(morselib)-SoftAP SAE path</strong> (the reverse dirs were already proven; this
+      direction was new). The one real requirement: <strong><code>sae_pwe=2</code></strong> (H2E) — the AP
+      advertises <code>[SAE-H2E]</code>; a default hunt-and-peck commit is rejected (<code>status_code=1</code>),
+      H2E is accepted.</li>
+    <li><strong>DHCP interop with a standard Linux client:</strong> chronite's <code>dhcpcd</code> got
+      <code>leased 192.168.12.2 from 192.168.12.1</code> (7200 s) + default route via the gate — the #5 DHCP
+      server works with a non-ESP client, not just the ESP <code>dhcpc</code>.</li>
+    <li><strong>Distinct leases from the pool:</strong> with chronite holding <strong>.2</strong>, board2 (ESP
+      STA) then leased <strong>192.168.12.3</strong> — the pool hands out distinct addresses; gateway heartbeat
+      shows <strong><code>ap_stas=2</code></strong>.</li>
+    <li><strong>Concurrent end-to-end forwarding:</strong> both STAs pinged 10.9.9.100 at the same time —
+      <strong>chronite (.2): 15/15, 0% loss (avg 34 ms); board2 (.3): 15/15, 0% loss, ttl=63</strong> →
+      <strong>30/30 total, 0% loss</strong>, both routing STA→AP→gate <code>ip_forward</code>→mesh→board1
+      concurrently.</li>
+  </ul>
+  <div class="callout bug">
+    <p class="ct">🐛 Root-cause of the mid-session "blocked" mis-report (kept as a lesson)</p>
+    <p>The first H2E retries appeared to fail because the driving ssh commands used
+    <strong><code>pkill -f wpa_supplicant_s1g</code></strong> — <code>-f</code> matches the whole command line,
+    so it matched and killed the <em>remote shell itself</em> (its cmdline contains that string) <em>before</em>
+    wpa_supplicant ever launched. So those attempts produced no output and never ran the test; it looked like an
+    association failure, and the repeated ssh attempts + a <code>-dd</code> log wedged chronite (needed a
+    power-cycle). Fix: kill by <code>killall wpa_supplicant_s1g</code> (or exact PID), never
+    <code>pkill -f &lt;string-in-your-own-cmdline&gt;</code>. Once corrected, <code>sae_pwe=2</code> associated on
+    the first try. (Same self-match class of bug also bit <code>pkill -f ppk2_hold.py</code> locally.)</p>
+  </div>
+
+  <h2 id="foundation">Foundation (for #2 &amp; #4) — Linux node joins the ESP gate's SECURED mesh — PASS</h2>
+  <p>Both scenarios need a Linux node in the gate's <code>rimba-mesh</code> (only gate+board1 are ESP mesh
+  nodes). The gate mesh is SAE+AMPE; the password is <strong><code>rimbamesh2026</code></strong> (morselib
+  <code>umac_mesh.c:81</code> <code>MESH_SAE_PASSWORD</code>, <em>"matches the Linux sae_password for
+  cross-vendor interop"</em>), mesh_id <code>rimba-mesh</code>. Config
+  <code>scratchpad/wpa-rimba-mesh.conf</code> (<code>wpa_supplicant_s1g</code>, mode=5, key_mgmt=SAE,
+  sae_password=rimbamesh2026, op_class 68/ch27, dtim_period=1, user_mpm=1). <strong>chronite (Pi5) joined and
+  peered with BOTH ESP nodes within 1 s</strong> (<code>iw station dump</code> → gate <code>e2:…:ef:a4</code> +
+  board1 <code>e2:…:f9:40</code>), mesh-ping board1 <strong>4/4</strong>. So a Linux node joining the ESP
+  mesh-gate's secured mesh works — a new capability.</p>
+  <div class="callout warn">
+    <p class="ct">⚠ Careful bring-up</p>
+    <p>Never <code>killall wpa_supplicant_s1g</code> on a node whose <em>wlan0</em> is also managed by
+    <code>wpa_supplicant_s1g</code> — it drops the LAN; a fresh node needs no kill at all.</p>
+  </div>
+
+  <h2 id="multi-hop">Scenario 4 — MULTI-HOP (STA→gate→relay→node) — PASS (after a morselib fix)</h2>
+  <p>Plan: force a 2-hop line gate→board1(relay)→far-node (chronite) so a STA behind the gate reaches the far
+  node via board1. On a close bench everything is in RF range (= 1 hop), so the topology must be <em>forced</em>;
+  the mechanism is the mesh <strong>peer allowlist</strong> (<code>mmwlan_mesh_set_peer_allowlist</code>). A test
+  toggle <code>MESH_FORCE_LINE</code> on the gate sets the allowlist to board1's mesh MAC → the gate peers ONLY
+  with board1.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">STA (board2)</div><div class="s">192.168.12.2</div></div>
+      <div class="node acc"><div class="t">gate</div><div class="s">10.9.9.136</div></div>
+      <div class="node acc"><div class="t">board1 relay</div><div class="s">allowlisted peer</div></div>
+      <div class="node ok"><div class="t">chronite</div><div class="s">10.9.9.60</div></div>
+    </div>
+    <figcaption>Forced 2-hop line — the allowlist makes the gate peer only with board1, so the far node is
+    reachable only <em>via</em> the relay.</figcaption>
+  </figure>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Bug found + fixed (the reason this was first reported blocked)</p>
+    <p>With the allowlist set, board2 (the AP-client STA) could not associate — it looped "STA connecting…",
+    <code>ap_stas=0</code>. Root cause: the forced-topology RX drop in <code>morselib umac_datapath.c</code>
+    (<code>umac_datapath_process_rx_data_frame_after_reorder</code>) was guarded by
+    <code>umac_mesh_is_active() &amp;&amp; !umac_mesh_peer_allowed(TA)</code> — always true on a mesh+AP node,
+    so it dropped <strong>every</strong> RX data frame whose TA wasn't allowlisted, including board2's EAPOL
+    4-way frames. <strong>Fix:</strong> move the check <em>after</em> <code>mesh_ctrl_present</code> is parsed
+    (the 802.11s Mesh Control bit) and gate on it:
+    <code>if (mesh_ctrl_present &amp;&amp; !umac_mesh_peer_allowed(TA)) drop;</code>. Now it filters only 802.11s
+    mesh frames, never the concurrent AP's client frames (an AP client's data has no Mesh Control header). This
+    matches the drop's own stated intent ("drop mesh data frames…") and doesn't regress mesh-only nodes
+    (<code>rimba-halow-mesh-perf</code>), whose frames all carry mesh control. (Submodule
+    <code>components/halow</code>, branch <code>feat/mesh-ap-concurrency</code>.)</p>
+  </div>
+
+  <p><strong>Verification (with the fix + allowlist active):</strong></p>
+  <ul>
+    <li><strong>Fix works:</strong> board2 associates immediately (link up, lease .2) <em>with</em>
+      <code>MESH_FORCE_LINE</code> set — previously impossible.</li>
+    <li><strong>Forced line holds:</strong> gate <code>mesh_peers=1</code> (board1 only); chronite's plink to
+      the gate stays <strong>LISTEN</strong> (never ESTAB — rejected), to board1 is <strong>ESTAB</strong>;
+      chronite reaches the gate 10.9.9.136 <strong>3/3</strong> despite no direct peer → <strong>via board1
+      (2 hops)</strong>.</li>
+    <li><strong>Multi-hop end-to-end:</strong> board2 (STA, 192.168.12.2) → gate → board1(relay) → chronite
+      (10.9.9.60) = <strong>11/12, ttl=63</strong> (1 warmup miss). <em>(chronite needs a return route
+      <code>192.168.12.0/24 via 10.9.9.136</code> — the same mesh-node return-leg config as board1's gw in #17;
+      not a bug, expected mesh routing.)</em></li>
+    <li><strong>A/B proof it's 2-hop:</strong> with the relay (board1) taken off the mesh, board2→chronite =
+      <strong>0/8, 100% loss</strong> (the gate can't reach chronite directly). Relay back = works. So the path
+      is genuinely STA→gate→relay→node.</li>
+  </ul>
+
+  <h2 id="power-save">Scenario 2 — POWER-SAVE BEHIND THE GATE — PASS (TWT doze); deep WNM+powerdown trades off downlink</h2>
+  <p>Question: does the gate's AP buffer + deliver a <strong>mesh-originated</strong> downlink to a STA that is
+  <strong>dozing</strong> behind the gate? Rig: gate + board1 mesh; <strong>chronite = mesh-side originator</strong>
+  (10.9.9.60, return route <code>192.168.12.0/24 via 10.9.9.136</code>); <strong>board2 = the STA under test</strong>
+  with a <em>controllable</em> doze (<code>rimba-doze-hold</code>, temporarily given a DHCP client so it's pingable,
+  TWT 1 s wake, 90 s holds; changes reverted after). board2 stayed <strong>ASSOCIATED throughout both doze modes</strong>
+  (0 disassoc events, gate <code>ap_stas=1</code>). chronite→board2(192.168.12.2), each mode:</p>
+
+  <table>
+    <thead><tr><th>board2 state</th><th>result</th><th>RTT</th><th>reading</th></tr></thead>
+    <tbody>
+      <tr><td><strong>awake</strong> (PS off, perf app)</td><td class="num">12/12, 0%</td><td class="num">~40 ms</td><td>baseline</td></tr>
+      <tr><td><strong>TWT doze</strong> (1 s scheduled wake)</td><td class="num">20/20, 0%</td><td class="num">avg <strong>260 ms</strong>, max 1139 ms</td><td><strong>buffered + delivered on the TWT SP</strong> ✅</td></tr>
+      <tr><td>dyn-PS (leftover, PS on)</td><td class="num">1/12</td><td class="num">~350 ms</td><td>poor</td></tr>
+      <tr><td><strong>WNM+powerdown</strong> (chip off between DTIM)</td><td class="num">0/20</td><td class="num">—</td><td>associated but too deep to receive within 3 s</td></tr>
+    </tbody>
+  </table>
+
+  <p>The elevated TWT RTT is the buffering signature — the downlink waits ~6× the awake latency for the next
+  scheduled wake:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">awake</span><span class="bar-track"><span class="bar-fill fast" style="width:15.4%"></span></span><span class="val">~40 ms</span></div>
+    <div class="bar-row"><span class="lbl">TWT doze (avg)</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">260 ms</span></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Result: PS-behind-gate WORKS for TWT</p>
+    <p>The gate's AP correctly buffers the mesh-originated downlink and delivers it on the dozing STA's TWT
+    service period (0% loss, RTT elevated ~6× to the wake interval = the buffering signature). Deeper modes
+    (WNM+chip-powerdown) keep the STA <strong>associated</strong> but the radio sleeps too deeply/irregularly for
+    timely unicast delivery (0% within a 3 s timeout) — the expected deep-sleep tradeoff, <strong>not</strong> a
+    gate defect (awake + TWT both prove the gate delivers).</p>
+  </div>
+
+  <h3 id="correction">Correction (kept for the record): the earlier "mesh→AP-client forwarding gap" was a MISDIAGNOSIS</h3>
+  <p>A first pass (chronosalt-mesh → chronite-Linux-STA) gave 0% and was wrongly written up as a gate forwarding
+  bug. Re-testing with a fresh ESP client + packet-level gate instrumentation showed the gate forwards correctly
+  (awake board2: 12/12; gate log <code>RX_MESH → AP_TX(da=board2) → RX_AP</code>). The 0% was the flaky Linux STA
+  client, which — as the doze table above now shows — was almost certainly just <strong>dozing</strong> (morse
+  Linux default PS, uncontrollable via <code>iw</code>). No gate bug; <strong>no gate code change</strong>.
+  Diagnostic instrumentation was removed; the doze-hold test tweaks were reverted.</p>
+
+  <h2 id="teardown">Bench teardown (clean)</h2>
+  <p>ESP rig radio-silenced (<code>rimba-hello</code> ×3 on ACM0/1/4); board2 powered off
+  (<code>ppk2_hold.py off</code> — ACM4 gone); chronite silenced (<code>killall wpa_supplicant_s1g</code> +
+  <code>wlan1</code> down, confirmed) and reachable. chronite was power-cycled once mid-session (safe —
+  <code>/tmp</code> is tmpfs holding only throwaway files, cf. <em>dont-reboot-linux-mesh-nodes</em>) after the
+  <code>pkill -f</code> self-match wedged it. No commits (weekday work hours); changes/docs held in the working
+  tree.</p>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#rig">Rig</a></li>
+  <li><a href="#soak">1 · Soak</a></li>
+  <li><a href="#multi-sta">3 · Multi-STA</a></li>
+  <li><a href="#foundation">Foundation · Linux joins mesh</a></li>
+  <li><a href="#multi-hop">4 · Multi-hop</a></li>
+  <li><a href="#power-save">2 · Power-save behind gate</a></li>
+  <li><a href="#correction">Correction · forwarding-gap</a></li>
+  <li><a href="#teardown">Bench teardown</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-10-mesh-gate-coverage-soak-multista</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

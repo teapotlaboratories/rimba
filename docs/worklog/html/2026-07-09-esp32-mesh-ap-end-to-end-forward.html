@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>All-ESP Mesh-gate: forward works, reply doesn't — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-09</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-09</span>
+    <span class="badge">9 min read</span>
+    <span class="badge warn">partial · reply return-leg open</span>
+    <span class="badge bug">mesh · AP · gateway</span>
+  </div>
+
+  <h1>All-ESP Mesh-gate end-to-end: forward works, reply return-leg doesn't<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">crypto / ARP / TX-build all exonerated</small></h1>
+
+  <p class="lead">On the all-ESP Mesh-gate (mesh + SoftAP co-channel on one MM6108), an ESP STA under the
+  gateway's AP still <strong>cannot</strong> complete a ping to a 2nd mesh node — <strong>but</strong> the
+  failure was narrowed all the way from a vague "forward doesn't work" down to a specific
+  <strong>reply return-leg</strong> failure. On-air captures + on-node counters this session
+  <strong>exonerated</strong> the gateway datapath TX build, lwIP <code>ip_forward</code>, ARP resolution,
+  and the <em>entire</em> CCMP crypto/decrypt path. board1 receives and decrypts the forwarded ICMP
+  perfectly; its echo-reply just never gets back to the gateway. Separately, the <code>umac_keys.c</code>
+  AP-downlink fix was confirmed <strong>non-regressive</strong> to the mesh.</p>
+
+  <p>Branch: <code>components/halow</code> → <code>feat/mesh-ap-concurrency</code> (UNCOMMITTED). This is the
+  Stage-3 on-air / Gap-E end-to-end piece deferred by
+  <code>docs/mesh-ap/rimba-mesh-ap-esp32-stage1-codemap.md</code> and
+  <code>docs/mesh-ap/rimba-mesh-ap-esp32-stage4-datapath-design.md</code>. Self-contained: every issue, the
+  bench setup, what was tried, and each result are recorded here so it can resume cold.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ On-air verification status (per the AGENTS.md two-tier bar)</p>
+    <p>The gateway→board1 forwarded unicast was captured on chronium's <code>morse0</code> monitor and decodes
+    as a correct 4-address CCMP mesh frame (matches source layout). The <strong>gold-standard live-Linux A/B is
+    BLOCKED</strong> — the only Linux mesh node (chronite) can't peer with the SAE ESP mesh (open-vs-SAE
+    mismatch, Phase 2), and the frame in question is one only a <em>forwarding gateway</em> emits, so there is
+    no live Linux gateway on this bench to diff against. Named blocker, not a skipped step.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">5 / 5</div><div class="lbl">Phase-1 mesh regression ping (0% loss)</div></div>
+    <div class="stat"><div class="num ok">8 / 8</div><div class="lbl">board1 CCMP decrypts, 0 failures</div></div>
+    <div class="stat"><div class="num err">0 / 10</div><div class="lbl">STA→board1 end-to-end ping</div></div>
+    <div class="stat"><div class="num">1 dBm</div><div class="lbl">gateway TX cap (lowest the API allows)</div></div>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">board2 · STA</div><div class="s">rimba-halow-sta-perf</div></div>
+      <div class="node acc"><div class="t">board0 · GATEWAY</div><div class="s">rimba-halow-mesh-ap · ip_forward</div></div>
+      <div class="node"><div class="t">board1 · 2nd node</div><div class="s">rimba-halow-mesh</div></div>
+    </div>
+    <figcaption>All-ESP rig: STA associates to the gateway's SoftAP (<code>192.168.12.0/24</code>) which
+    <code>ip_forward</code>s into the SAE mesh (ch27, <code>10.9.9.0/24</code>) to board1. Exact addresses below.</figcaption>
+  </figure>
+
+  <h2 id="bench">Bench setup (all-ESP topology — the reproducible rig)</h2>
+<pre><code> board2 (STA)               board0 (GATEWAY)                     board1 (2nd mesh node)
+ rimba-halow-sta-perf       rimba-halow-mesh-ap                  rimba-halow-mesh
+ /dev/ttyACM4 (PPK2)        /dev/ttyACM0                         /dev/ttyACM1
+ 192.168.12.&lt;mac[5]&gt;  --AP--&gt; AP  192.168.12.1  (SSID rimba-ping, SAE)
+ (~.51, STA mac                  BSSID e0:72:a1:f8:ef:a4
+  bc:2a:33:96:b2:33)            ip_forward (CONFIG_LWIP_IP_FORWARD=y)
+                                MESH 10.9.9.136  --mesh(ch27)--&gt;  10.9.9.100
+                                mesh mac e2:72:a1:f8:ef:a4        mesh mac e2:72:a1:f8:f9:40</code></pre>
+
+  <ul>
+    <li><strong>Gateway = board0</strong> (<code>rimba-halow-mesh-ap</code>): MESH on the primary vif + SoftAP
+      on the secondary vif, a 2nd <code>esp_netif</code> for the AP subnet, per-vif RX ext-cbs, lwIP
+      <code>ip_forward</code> between <code>10.9.9.0/24</code> and <code>192.168.12.0/24</code>. TX capped to
+      <strong>1 dBm</strong> (<code>mmwlan_override_max_tx_power(1)</code>). Mesh id <code>rimba-mesh</code>, ch27.</li>
+    <li><strong>2nd node = board1</strong> (<code>rimba-halow-mesh</code>): plain 802.11s mesh, static
+      <code>10.9.9.100</code>, responder. Default gw <code>10.9.9.1</code>; for the end-to-end return route it
+      must be <code>10.9.9.136</code> (a 1-line test edit, reverted after runs).</li>
+    <li><strong>STA = board2</strong> (<code>rimba-halow-sta-perf</code>, <code>#define IPERF 1</code>):
+      associates to <code>rimba-ping</code>, static <code>192.168.12.&lt;mac[5]&gt;</code>, gw <code>.1</code>,
+      esp_console REPL to drive <code>ping &lt;ip&gt;</code> over serial. <strong>PPK2-gated</strong>: only
+      enumerates as <code>/dev/ttyACM4</code> while <code>tools/ppk2_hold.py</code> runs.</li>
+    <li><strong>Sniffer = chronium</strong> (<code>ssh chronium</code>): <code>morse0</code> S1G monitor on
+      ch27, <code>~/halow-mon.py</code>.</li>
+    <li><strong>chronite</strong> (Linux mesh node): a DEAD-END for this test — see Phase 2.</li>
+  </ul>
+
+  <h3>The mesh is SAE-secured, not open (important)</h3>
+  <div class="callout">
+    <p class="ct">Mesh security is a compile-time choice, not the <code>mesh_args</code> passphrase</p>
+    <p><code>rimba-halow-mesh-ap</code>'s <code>mmwlan_mesh_args</code> sets no passphrase, which <em>looks</em>
+    open, but mesh security on the ESP is a <strong>compile-time</strong> choice: with
+    <code>MMWLAN_MESH_SEC_PHASE1</code> defined (<code>umac_mesh.c:606-616</code>) every peer stad gets
+    <code>MMWLAN_SAE</code> + a derived per-pair MTK at ESTAB. So the ESP mesh runs
+    <strong>SAE + AMPE + CCMP</strong>, and the <code>mesh_args</code> passphrase field is irrelevant to mesh
+    security. This is why chronite (open <code>key_mgmt=NONE</code>) can't peer with the ESPs.</p>
+  </div>
+
+  <h3>Reproducible commands</h3>
+  <ul>
+    <li><strong>pyserial only in the IDF venv:</strong>
+      <code>PY=/home/quartz/.espressif/python_env/idf5.4_py3.13_env/bin/python</code> (the system
+      <code>python3</code> has no <code>serial</code> module).</li>
+    <li><strong>Flash:</strong> <code>make flash APP=&lt;app&gt; BOARD=proto1-fgh100m PORT=/dev/ttyACMx</code>
+      (after <code>source vendor/esp-idf/export.sh</code>).</li>
+    <li><strong>Power board2:</strong> <code>nohup $PY tools/ppk2_hold.py &gt;/tmp/ppk2_hold.log 2&gt;&amp;1 &amp;</code>;
+      off with <code>$PY tools/ppk2_hold.py off</code> (kill the held instance first). board2 then appears as
+      <code>ttyACM4</code>.</li>
+    <li><strong>Sniffer:</strong> <code>ssh chronium 'sudo ip link set morse0 up'</code> then
+      <code>ssh chronium 'sudo python3 ~/halow-mon.py &lt;secs&gt; [ta_prefix_hex]'</code>. Radio already tuned
+      to <strong>915500 kHz = S1G ch27</strong> (<code>morse_cli -i wlan1 channel</code>);
+      <code>iw dev morse0 set freq</code> is rejected (-22), don't bother.</li>
+  </ul>
+
+  <h2 id="phase1">Phase 1 — Does the <code>umac_keys.c</code> AP-downlink fix break the mesh? → NO</h2>
+  <p><strong>Context.</strong> The prior fix (tasks <code>#15</code>/<code>#16</code>) scoped the mesh SW-CCMP
+  FW-offload skip in <code>umac_keys_mmdrv_install_key</code> from the global <code>umac_mesh_is_active()</code>
+  to a vif-type check (<code>key_on_mesh_vif</code>), so the concurrent AP client's key gets FW-installed while
+  mesh keys stay host-side. That touches the shared key-install path → needs a mesh regression check.</p>
+  <p><strong>Setup.</strong> Flashed board0+board1 with <code>rimba-halow-mesh-perf</code> (console build),
+  confirmed peering, drove <code>ping 10.9.9.100</code> from board0's console.</p>
+  <div class="callout ok">
+    <p class="ct">✓ PASS — board0↔board1 ping 5/5, 0% loss</p>
+    <p>Over the SAE mesh with host SW-CCMP. The fix is behaviourally identical for a pure mesh (mesh keys on the
+    mesh vif → still SW-CCMP-skipped), and empirically the mesh is intact.</p>
+  </div>
+  <p><strong>Issues hit:</strong> base <code>python3</code> lacks <code>serial</code> (use the IDF venv python);
+  <code>rimba-halow-mesh-perf</code>'s heartbeat prints <code>mesh alive, uptime=...</code> <em>without</em>
+  <code>estab_peers</code> (confirm peering via console ping); reset ESPs via DTR/RTS pulse to catch the boot
+  static-IP line (prints once, early).</p>
+
+  <h2 id="phase2">Phase 2 — End-to-end topology selection; chronite mesh dead-end</h2>
+  <ul>
+    <li><strong><code>rimba-halow-sta</code> is netif-free / zero-traffic</strong> (a triggered power-save
+      ladder) — associates at L2 but no IP netif, can't ping. The right STA is
+      <strong><code>rimba-halow-sta-perf</code></strong>.</li>
+    <li><strong>chronite cannot be the 2nd mesh node.</strong> Its
+      <code>/home/chronite/wpa-mesh.conf</code> is <code>mode=5, key_mgmt=NONE</code> (<strong>open</strong>);
+      the ESPs run <strong>SAE</strong> mesh. chronite <em>hears</em> the ESP beacons fine (<code>iw scan</code>:
+      rimba-ping -40 dBm, "Unknown S1G Compressed" mesh beacon -39 dBm, both freq 5560=ch27) but forms
+      <strong>zero plinks</strong> — a security-profile mismatch, not RF. <strong>Use board1 (ESP) as the 2nd
+      node.</strong> (Supersedes the earlier belief that "chronite's open mesh was never validated"; it's a
+      genuine open-vs-SAE mismatch.)</li>
+    <li><strong>Gateway peers fine as a RESPONDER:</strong> board0-gateway ↔ board1-plain-mesh gives
+      <code>mesh_peers=1</code> / <code>estab_peers=1</code>. The concurrent AP does not break mesh peering.
+      (The gateway app lacks the beacon→<code>peer_open</code> <em>initiator</em> wiring the standalone app has,
+      but S1G peering is driven in morselib's datapath, so it peers as a responder anyway.)</li>
+  </ul>
+  <p>Final rig = all-ESP: board0 gateway, board1 mesh node, board2 STA (PPK2-powered) — the bench's designed
+  roles (<code>docs/reference/rimba-bench-devices.md</code>).</p>
+
+  <h2 id="phase3">Phase 3 — The forward symptom + host-path exoneration</h2>
+  <p><strong>Symptom.</strong> board2 <code>ping 10.9.9.100</code> → 100% loss. Gateway counters during the
+  ping: <code>ap_rx</code> climbs (10→19), <code>ap_tx</code>+<code>mesh_rx</code> stay flat → the gateway
+  receives board2's ICMP on the AP vif but forwards nothing to the mesh.</p>
+  <p><strong>Config/code verified sound:</strong> <code>CONFIG_LWIP_IP_FORWARD=y</code> in the built sdkconfig;
+  RX path (<code>gw_ap_rx_cb → esp_netif_receive(ap_netif)</code>) hands the packet to lwIP; the gateway TX
+  datapath was read end-to-end and is correct — <code>umac_datapath_gateway_lookup</code>→
+  <code>umac_mesh_get_peer_stad(board1)</code> returns board1's peer stad,
+  <code>umac_datapath_gw_dequeue_tx_frame</code> drains mesh peer queues (<code>mesh_get_next_tx_stad</code>
+  scans common+peers), peer stads get <code>mesh_ctx.vif_id</code> (<code>umac_mesh.c:602</code>) stamped at
+  <code>umac_datapath.c:2110</code>, <code>construct_80211_data_header_mesh</code> builds a correct 4-addr, and
+  the SW-CCMP encrypt path is right.</p>
+  <p><strong>Instrument (temporary, reverted): mesh-netif TX trace</strong> —
+  <code>ESP_LOGW("MESHTX len=… dst=… etype=…")</code> in <code>mmhalow.c:halow_transmit</code>. During a ping
+  the gateway logged:</p>
+<pre><code>MESHTX len=42  dst=ff:ff:ff:ff:ff:ff  etype=0806   ← ARP request for board1 (lwIP IS forwarding)
+MESHTX len=106 dst=e2:72:a1:f8:f9:40  etype=0800   ← the ICMP, to board1's REAL mesh MAC</code></pre>
+  <p>→ <strong>lwIP <code>ip_forward</code> works</strong>: it ARPs board1, resolves it, sends the ICMP to
+  board1's correct MAC; <code>mmwlan_tx_pkt</code> returns SUCCESS.</p>
+  <p><strong>vif-tag note.</strong> <code>halow_transmit</code> builds <code>metadata = { .tid = 0 }</code> —
+  never sets <code>.vif</code>, so mesh TX egresses <code>MMWLAN_VIF_UNSPECIFIED (0)</code>, not
+  <code>MMWLAN_VIF_STA (1)</code>. Tagging <code>VIF_STA</code> (the datapath.h design-correct value) was tried
+  — the gateway lookup falls back to the same mesh path for UNSPECIFIED-unicast anyway, and it
+  <strong>did not fix</strong> the ping. Reverted; noted as design-correct but not the bug.</p>
+
+  <h2 id="phase4">Phase 4 — On-air capture: the gateway TX is CORRECT; blocker reframed to mesh ARP</h2>
+  <p>Brought up <code>morse0</code> (already on 915500 kHz=ch27) and captured during a ping. The
+  gateway→board1 unicast <strong>is on-air, well-formed, correctly encrypted</strong>:</p>
+<pre><code>DATA-4addr  TA=e2:72:a1:f8:ef:a4(gw mesh)  A1/RA=e2:72:a1:f8:f9:40(board1)
+            A3/DA=board1  A4/SA=gw  | after-hdr: 00 01 | 03 00 00 20 00 00 00 00 | …
+            → QoS mesh-present (00 01) + CCMP header (KeyID 0, PN=3)</code></pre>
+  <p>This <strong>exonerates the gateway TX datapath</strong> — it radiates exactly a correct 4-address CCMP
+  mesh unicast.</p>
+  <p><strong>Reframe #1 — the real blocker is mesh ARP resolution, and it's INTERMITTENT.</strong> Consistent
+  on-air pattern: board2→AP uplink lands every time
+  (<code>DATA-3addr toDS=1 TA=bc:2a:33:96:b2:33 A1=e0:72:a1:f8:ef:a4</code>=AP BSSID); the gateway sends only
+  <strong>one</strong> ARP-for-board1 broadcast then gives up (lwIP single-ARP-then-drop-queued-packet); board1
+  <strong>group-re-broadcasts</strong> that ARP but usually does <strong>not</strong> unicast-reply → the
+  gateway never learns board1's MAC → forwards nothing. In one capture board1 <em>did</em> reply and the whole
+  ping went through.</p>
+  <div class="callout warn">
+    <p class="ct">⚠ Contributing factor found — RX overload</p>
+    <p>board1 + board2 had <strong>no TX-power cap</strong> (~27 dBm) while the gateway caps to 1 dBm.
+    Centimeters apart that is classic RX overload (RSSI ~-3 dBm → loss/retries).</p>
+  </div>
+
+  <h2 id="phase5">Phase 5 — Lowest TX power + static-ARP isolation: ARP is NOT the root cause</h2>
+  <p><strong>Lowest TX power (answered).</strong> <code>mmwlan_override_max_tx_power(uint16_t)</code> treats
+  <strong>0 as "disable the cap"</strong> (full power), so <strong>1 dBm is the lowest cap the API allows</strong>
+  — already what all three nodes were set to. Below that needs physical separation, not the API.</p>
+  <p><strong>Static-ARP isolation.</strong> Pinned static ARP on <strong>both</strong> sides via
+  <code>etharp_add_static_entry</code> (run inside <code>esp_netif_tcpip_exec</code>; needs
+  <code>CONFIG_LWIP_DHCPS_STATIC_ENTRIES=y</code> + <code>#include "lwip/etharp.h"</code>): gateway
+  <code>10.9.9.100→board1</code>, board1 <code>10.9.9.136→gateway</code> + return route. Boot log confirmed
+  "static ARP pinned".</p>
+  <div class="callout err">
+    <p class="ct">✗ STILL 0/10 — bypassing ARP entirely did not help</p>
+    <p><code>ap_rx</code> grows, <code>ap_tx</code>+<code>mesh_rx</code> flat. <strong>The blocker is NOT ARP
+    resolution.</strong> (All static-ARP + power edits reverted.)</p>
+  </div>
+
+  <h2 id="phase6">Phase 6 — Decrypt logging: the CCMP crypto/decrypt path is FULLY EXONERATED</h2>
+  <p><strong>Code check first (no bench).</strong> The MTK is a <em>derived</em> per-pair key
+  (<code>mesh_derive_mtk</code>, <code>umac_mesh.c:1491</code>): both peers independently
+  <code>sha256_prf(PMK, "Temporal Key Derivation", min/max(nonce) || min/max(lid) || AKM || min/max(MAC))</code>,
+  using <code>mesh_ctx.mesh_mac</code> (the correct <strong>mesh</strong> MAC, symmetric min/max), so
+  gateway-board0 and plain-mesh-board0 derive the <em>same</em> MTK. Derivation is correct → deterministic key
+  bug unlikely.</p>
+  <p><strong>Instrument (temporary, reverted): board1 CCMP-RX outcome counters</strong> in
+  <code>umac_datapath_sw_ccmp_decrypt</code> (attempt/nokey/micfail/replay/ok/kid0/kidN), logged in board1's
+  heartbeat. During a ping board1 reported:</p>
+<pre><code>att=8  ok=8  kid0=4  mic=0  nokey=0  replay=0</code></pre>
+  <div class="callout ok">
+    <p class="ct">✓ board1 RECEIVES and SUCCESSFULLY DECRYPTS the forwarded ICMPs</p>
+    <p>4 of them (<code>kid0</code>=pairwise MTK, key_id 0), ZERO failures. <strong>The entire crypto path is
+    exonerated: MTK derivation, install, and decryption all work.</strong></p>
+  </div>
+
+  <h2 id="conclusion">Current conclusion — the break is board1's REPLY return-leg</h2>
+  <p>board1 gets the ping and decrypts it fine, but its ICMP <strong>echo-reply never reaches the gateway</strong>
+  (<code>mesh_rx</code> flat), even with static ARP + return route. Structural difference from the working
+  Phase-1 regression:</p>
+  <ul>
+    <li><strong>Regression:</strong> board0→board1 direct; board1 replies to an <strong>on-link</strong>
+      <code>10.9.9.x</code> dest.</li>
+    <li><strong>Gateway case:</strong> board1 must reply to an <strong>off-subnet</strong> dest
+      (<code>192.168.12.x</code> = board2) via its gateway <code>10.9.9.136</code> — a different lwIP route, and
+      a board1→gateway mesh-unicast reply that isn't arriving.</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">STA uplink</div><div class="s">board2 → AP · ap_rx↑</div></div>
+      <div class="node ok"><div class="t">ip_forward</div><div class="s">ARP + route board1</div></div>
+      <div class="node ok"><div class="t">gateway TX</div><div class="s">4-addr CCMP on-air</div></div>
+      <div class="node ok"><div class="t">board1 RX</div><div class="s">decrypt 8/8</div></div>
+      <div class="node err"><div class="t">reply return-leg</div><div class="s">never reaches gw · mesh_rx flat</div></div>
+    </div>
+    <figcaption>Every stage of the forward leg is proven (green); the break is the last hop — board1's
+    off-subnet echo-reply back to the gateway.</figcaption>
+  </figure>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Unexplained asymmetry to chase next</p>
+    <p>During the ping the gateway RECEIVES board2's AP uplinks (<code>ap_rx</code> grows) but NOT board1's mesh
+    replies (<code>mesh_rx</code> flat) — both TX at 1 dBm, same distance, so not simply RF overload. Either
+    board1 isn't actually TRANSMITTING the reply, or the gateway's mesh-vif RX drops it.</p>
+  </div>
+
+  <p><strong>Delivery note:</strong> a board1 deliver-vs-relay counter attempt was <strong>inconclusive</strong>
+  — the <code>cbnone</code> probe was placed before the fallback <code>data->rx_pkt_callback</code>, so it fired
+  for the <em>normal</em> delivery path (board1 uses the plain <code>rx_pkt_callback</code>, not the VIF_AP
+  ext-cb; mesh frames on a no-AP node demux to <code>MMWLAN_VIF_AP</code> at <code>umac_datapath.c:930</code>).
+  Redo it after both callback checks if delivery needs confirming.</p>
+
+  <h3>Next step (fresh session)</h3>
+  <p>Split "board1 doesn't send" vs "gateway doesn't receive" the reply:</p>
+  <ol>
+    <li>Add a board1 mesh-<strong>TX</strong> counter (<code>halow_transmit</code> / <code>mmwlan_tx_pkt</code>)
+      → does board1 emit the echo-reply at all?</li>
+    <li>Add the CCMP-RX counters to the <strong>gateway</strong> app (board0's morselib had them but its app
+      never logged them) → does board1's reply reach + decrypt on board0?</li>
+  </ol>
+  <p>Everything upstream is proven: lwIP <code>ip_forward</code>, the gateway 4-addr TX build, ARP (bypassed via
+  static ARP), and board1's receive + CCMP decrypt.</p>
+
+  <h2 id="gotchas">Bench gotchas encountered (reusable)</h2>
+  <ul>
+    <li><strong><code>rimba-halow-mesh-ap</code> is UNTRACKED</strong> in git. <code>git checkout &lt;file&gt;</code>
+      cannot revert its edits — and passing it alongside tracked files aborts the whole <code>git checkout</code>
+      (reverts nothing). Revert by hand.</li>
+    <li><strong>chronium's <code>morse0</code> monitor loses data capture after a down/up cycle</strong> — it
+      captures data frames only while <em>first</em> up; after <code>ip link set morse0 down</code> then up it
+      captures <strong>beacons only</strong> (confirmed: <code>ap_rx</code> proved data frames were on-air that
+      the monitor missed). Don't down morse0 mid-investigation, or reload the monitor driver (not just the
+      link).</li>
+    <li><strong>chronite <code>wpa_supplicant_s1g</code> respawns</strong> (a service restarts it after
+      <code>pkill</code>). <code>wlan1</code> DOWN is sufficient for radio-silence.</li>
+    <li><strong>board2 is PPK2-gated</strong> — <code>ttyACM4</code> exists only while
+      <code>tools/ppk2_hold.py</code> runs; killing the hold or a USB replug drops it. Power off with
+      <code>ppk2_hold.py off</code>.</li>
+    <li><strong>Resetting the gateway (board0) drops board2's AP association</strong> + board1's peering; wait
+      ~25 s + re-verify <code>mesh_peers</code>/<code>ap_stas</code>/<code>estab_peers</code> before pinging.</li>
+    <li><strong>board2's esp_console can get stuck mid-command</strong> — send <code>\r\n</code> +
+      <code>reset_input_buffer()</code> before each <code>ping</code>, or a prior <code>ping -c N</code> still
+      runs and swallows the new command.</li>
+    <li><strong>morselib <code>MMLOG</code> is NOT on the ESP UART</strong> — instrument with app-visible
+      counters + a getter the app heartbeat prints; MMLOG_WRN drops (no-key, MIC fail, "No STA record") are
+      invisible on console.</li>
+  </ul>
+
+  <h2 id="radio-silence">Radio-silence at session end (done)</h2>
+  <div class="callout ok">
+    <p class="ct">✓ Bench radio-silent + tree reverted</p>
+    <p>board0/board1/board2 flashed to <code>rimba-hello</code>; board2 powered off
+    (<code>ppk2_hold.py off</code>); chronium <code>morse0</code>+<code>wlan1</code> DOWN; chronite
+    <code>wpa_supplicant_s1g</code> killed + <code>wlan1</code> DOWN. All temporary edits reverted
+    (<code>mmhalow.c</code> MESHTX trace + VIF_STA; <code>umac_datapath.c</code> CCMP/mesh counters; board1
+    gw/tx-cap + static ARP; both apps' <code>CONFIG_LWIP_DHCPS_STATIC_ENTRIES</code>). Tree back to just the
+    validated <code>umac_keys.c</code> fix (+16/−5) on the feature branch.</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#bench">Bench setup (rig)</a></li>
+    <li><a href="#phase1">Phase 1 · Mesh regression → NO</a></li>
+    <li><a href="#phase2">Phase 2 · Topology / chronite dead-end</a></li>
+    <li><a href="#phase3">Phase 3 · Forward symptom + host-path</a></li>
+    <li><a href="#phase4">Phase 4 · On-air: gateway TX correct</a></li>
+    <li><a href="#phase5">Phase 5 · Static-ARP → not ARP</a></li>
+    <li><a href="#phase6">Phase 6 · Crypto exonerated</a></li>
+    <li><a href="#conclusion">Conclusion · reply return-leg</a></li>
+    <li><a href="#gotchas">Bench gotchas</a></li>
+    <li><a href="#radio-silence">Radio-silence</a></li>
+  </ul>
+</div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-09-esp32-mesh-ap-end-to-end-forward</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

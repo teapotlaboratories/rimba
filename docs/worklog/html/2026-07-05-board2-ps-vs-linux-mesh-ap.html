@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>board2 PS vs a Linux Mesh+AP gateway — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-05</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-05</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ concurrency works</span>
+    <span class="badge">power-save · mesh · AP</span>
+  </div>
+
+  <h1>board2 STA power-save vs a Linux Mesh+AP gateway<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">mesh + AP concurrent on one MM6108 · the STA routes through the mesh</small></h1>
+
+  <p class="lead">Measure board2's full PS ladder against a Linux node running <strong>mesh + AP concurrently</strong> on one
+  MM6108, with the mesh actually peering and board2's traffic routing <strong>through</strong> the mesh. Author: Aldwin
+ .</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ This worklog was rewritten (2026-07-05, later)</p>
+    <p>The first draft framed everything around a "1.17.8 → 1.17.9 concurrency regression" that required downgrading
+    the gateway. <strong>That framing was wrong</strong> — the mesh-gate works on stock 1.17.8, and every "it's broken"
+    symptom during the original debugging was a self-inflicted test error, not a driver regression. The corrections
+    are called out below; the PS-ladder measurements (taken against a genuinely-working Mesh+AP) still stand.</p>
+  </div>
+
+  <h2 id="result">Result</h2>
+
+  <div class="callout ok">
+    <p class="ct">✓ Mesh + AP concurrency on one MM6108 works (stock 1.17.8)</p>
+    <p>Role assignment: <strong>mesh on the primary vif (<code>wlan1</code>), AP on a secondary vif (<code>ap0</code>)</strong>.
+    An ESP32 STA under the AP routes <strong>through</strong> the mesh to a second mesh node. Verified end-to-end:
+    <strong>board1 → chronite AP → ip_forward → HaLow mesh → chronosalt = 8/8 pings</strong>; board2 the same path =
+    6/8 (some close-node RF loss). Full copy-paste recipe now lives in
+    <code>mesh-ap/rimba-mesh-ap-milestones.md §A3</code>.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">board2</div><div class="s">ESP STA · .12.2</div></div>
+      <div class="node"><div class="t">chronite AP</div><div class="s">ap0 · .12.1</div></div>
+      <div class="node"><div class="t">ip_forward</div><div class="s">gateway</div></div>
+      <div class="node"><div class="t">HaLow mesh</div><div class="s">wlan1 · 10.9.9.3</div></div>
+      <div class="node ok"><div class="t">chronosalt</div><div class="s">peer · 10.9.9.4</div></div>
+    </div>
+    <figcaption>The routed path: STA under the AP → ip_forward → the HaLow mesh → a second mesh node. board1 = 8/8, board2 = 6/8 (close-node RF loss).</figcaption>
+  </figure>
+
+  <p><strong>PS ladder measured</strong> (below). <em>(An initial "a Mesh+AP raises the STA's doze floors" claim was
+  later DISPROVED by a same-gateway mesh-on/off A/B — the mesh has no measurable PS effect; see the retraction.)</em></p>
+
+  <h2 id="corrections">Corrections — the "regression" was self-inflicted</h2>
+  <p>Read before trusting old notes. The original debugging chased a deterministic "1.17.9 broke concurrency" cause
+  for what were actually <strong>three separate test-harness bugs</strong>. None is a driver regression:</p>
+
+  <ol>
+    <li><strong>The mesh IP was never on <code>wlan1</code>.</strong> The bring-up scripts used an escaped
+      <code>\$IP</code> that expanded to empty on the remote node, so <code>ip addr add /24 dev wlan1</code> silently
+      did nothing. With no mesh IP, <code>ip route get &lt;peer&gt;</code> resolved out the <strong>management
+      interface <code>wlan0</code></strong> via the default route — pings never hit the mesh radio
+      (<code>tx_packets</code> delta = 0), the mpath stayed empty, and it looked exactly like a forwarding/HWMP bug.
+      It is <strong>not</strong>. Always check <code>ip route get &lt;peer&gt;</code> + <code>ip -4 addr show wlan1</code> first.</li>
+    <li><strong>Chip-wedge from churn.</strong> Rapid <code>wpa_supplicant_s1g</code> restarts wedge the MM6108
+      (mesh stuck <code>SCANNING</code>). The docs already warn "bring it up once and leave it"; the repeated
+      restarts manufactured the flakiness.</li>
+    <li><strong>Broken ESP console capture.</strong> A <code>grep | head</code> pipe on the live tty swallowed board
+      output, which read as a "dead board" / "AP can't route" — an invented hardware limitation. Capturing to a
+      <strong>file</strong> (<code>cat /dev/ttyACMx &gt; /tmp/log</code>) showed the STA connecting, taking its IP,
+      and pinging fine all along.</li>
+  </ol>
+
+  <div class="callout err">
+    <p class="ct">✗ Retracted isolation table</p>
+    <p><strong>So:</strong> the plain mesh forwards, the AP+mesh concurrency works, and the STA routes through — all
+    on stock 1.17.8. The original "root cause: 1.17.9 driver, not firmware" isolation table is <strong>retracted</strong>
+    (it was built on the confounded symptoms above); whether 1.17.9 differs at all is now <strong>unverified</strong> —
+    re-test cleanly before believing it. The recipe itself is version-agnostic.</p>
+  </div>
+
+  <h2 id="pi5-reset">Bonus finding — Pi 5 MM6108 reset bug (fixed)</h2>
+  <p>While chasing the (self-inflicted) wedges, found a <strong>real</strong> driver bug: on the <strong>Pi 5</strong>
+  nodes (chronium/chronite), stock <code>morse_hw_reset()</code> never actually resets the chip on a warm driver
+  reload — it uses the legacy int-GPIO API (fails on the RP1 controller) and floats the pin to release (the Wio HAT's
+  <code>RESET_N</code> has no pull-up). So a driver reload wedged the chip (<code>cfg_detect_and_init -5</code>) and
+  only a reboot recovered it.</p>
+  <div class="callout ok">
+    <p class="ct">✓ Fix — gpiod API + drive-high release</p>
+    <p><code>docs/reference/patches/morse-driver-pi5-reset-gpiod.patch</code> — built + deployed to chronite and
+    chronium, verified: <code>modprobe -r morse; modprobe morse</code> now resets the chip and re-probes in ~6 s,
+    no reboot. (Pi Zero nodes were never affected — their GPIO5 reset works stock.) Full root-cause in the patch README.</p>
+  </div>
+
+  <h2 id="topology">Topology</h2>
+  <p>All S1G ch27 / 915.5 MHz, 1 MHz.</p>
+  <pre><code> board2 (ESP STA, PPK2)  --HaLow AP--&gt;  chronite (Mesh+AP GATEWAY)  --HaLow mesh--&gt;  chronosalt (peer)
+   192.168.12.2                          ap0 = AP    192.168.12.1                     wlan1 = mesh 10.9.9.4
+   gw .12.1                              wlan1 = mesh 10.9.9.3  (ip_forward=1)         route .12.0/24 via .3</code></pre>
+  <p>Gateway bring-up per §A3: mesh on <code>wlan1</code> first (COMPLETED, IP set), then AP on <code>ap0</code>
+  (<code>iw phy phy1 interface add ap0 type __ap</code>; first <code>hostapd_s1g</code> start often needs one retry
+  to reach AP-ENABLED), <code>ip_forward=1</code>; peer runs the mesh + a return route.</p>
+
+  <h2 id="ps-ladder">PS ladder — board2 @ 5.00 V, associated to the Mesh+AP gateway</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num">64.8 mA</div><div class="lbl">No PS · 324 mW</div></div>
+    <div class="stat"><div class="num acc">21.8 mA</div><div class="lbl">Dynamic PS · 109 mW</div></div>
+    <div class="stat"><div class="num acc">23.4 mA</div><div class="lbl">TWT 10 s SP · 117 mW</div></div>
+    <div class="stat"><div class="num ok">15.0 mA</div><div class="lbl">WNM + powerdown · 75 mW</div></div>
+  </div>
+
+  <table>
+    <thead><tr><th>Mode</th><th class="num">Current</th><th class="num">Power</th><th>vs a plain AP (matched-1.17.9 doc)</th></tr></thead>
+    <tbody>
+      <tr><td>No PS</td><td class="num">64.8 mA</td><td class="num">324 mW</td><td>≈ (65)</td></tr>
+      <tr><td>Dynamic PS</td><td class="num">21.8 mA (floor 21)</td><td class="num">109 mW</td><td><strong>higher</strong> (was ~14.5)</td></tr>
+      <tr><td>TWT, 10 s SP</td><td class="num">23.4 mA (floor 20)</td><td class="num">117 mW</td><td>≈ dyn-PS — mid-session TWT not engaged (like the plain Linux AP)</td></tr>
+      <tr><td>WNM + chip powerdown</td><td class="num">15.0 mA (floor 14)</td><td class="num">75 mW</td><td><strong>much higher</strong> (was ~4.0)</td></tr>
+    </tbody>
+  </table>
+
+  <p>The ladder to scale (bars = current draw; lower is deeper doze):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">No PS</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">64.8 mA</span></div>
+    <div class="bar-row"><span class="lbl">Dynamic PS</span><span class="bar-track"><span class="bar-fill" style="width:33.6%"></span></span><span class="val">21.8 mA</span></div>
+    <div class="bar-row"><span class="lbl">TWT 10 s SP</span><span class="bar-track"><span class="bar-fill" style="width:36.1%"></span></span><span class="val">23.4 mA</span></div>
+    <div class="bar-row"><span class="lbl">WNM + powerdown</span><span class="bar-track"><span class="bar-fill fast" style="width:23.1%"></span></span><span class="val">15.0 mA</span></div>
+  </div>
+
+  <div class="callout err">
+    <p class="ct">✗ Key finding RETRACTED — "a Mesh+AP raises the STA's PS floors" is WRONG</p>
+    <p>I claimed the higher doze tiers (esp. WNM ~16 vs ~4 mA) were the mesh's airtime tax. A
+    <strong>same-gateway mesh-on/off A/B</strong> (measure board2 against the SAME AP <code>ap0</code>, only toggling
+    the mesh vif) <strong>disproves it</strong>: No-PS 66/68, Dyn-PS ~31/36, <strong>WNM+powerdown 15.9 (mesh on) /
+    16.9 (mesh off) mA</strong> — the mesh changes nothing (WNM-first ladder, enter ret=0, so not the after-TWT hang
+    either). The elevated tiers vs the plain-AP doc are a <strong>confounded comparison</strong> (this setup: AP on
+    the secondary vif <code>ap0</code> + 1.17.8 + TX-cap; the doc: primary-vif AP + 1.17.9 + full TX).
+    <strong>The ~16 mA WNM is a setup artifact — most likely the secondary-vif AP not letting board2 reach the deep
+    powerdown — NOT the mesh.</strong> Which of {secondary-vif AP, 1.17.8, TX-cap} causes it is open. TWT read
+    ≈ dynamic PS (<code>hostapd_s1g</code> doesn't engage the mid-session responder — same as the plain AP). Relates
+    to <code>reference/rimba-halow-ps-esp32-vs-linux-ap.md</code>.</p>
+  </div>
+
+  <h2 id="state">State + caveats</h2>
+  <ul>
+    <li><strong>Bench:</strong> stock <strong>1.17.8</strong> on all four Linux nodes (Pi 5 nodes carry the reset
+      patch); radio-silenced after. board2 back to <code>rimba-hello</code>.</li>
+  </ul>
+
+  <h3>Fresh clean re-measure (2026-07-05, final all-1.17.8 bench) — DONE, and it corrected a wrong theory</h3>
+  <p>The first re-run read a flat <strong>~14 mA</strong> in the No-PS phase with <strong>0/8</strong> routing. I
+  wrongly blamed a PPK2 "USB back-feed" — but the PPK2 is in <strong>ampere-meter mode</strong> (in series, measures
+  the <em>full</em> current, no back-feed path). The ~14 mA was real: board2 was <strong>dozing, not full-on</strong>.
+  Root cause: <strong>RX overload</strong> — board2 sits right against the gateway, so at full ESP TX the gateway's
+  receiver saw it at <strong>−8 dBm</strong>, too hot; the link was too marginal for the STA to hold No-PS, so it fell
+  to a dynamic-doze (station dump: stays <em>associated</em>, but inactive-time grows to 13 s, radio only spikes to
+  66 mA on active TX).</p>
+  <p><strong>Confirmed by A/B:</strong> adding <code>mmwlan_override_max_tx_power(1)</code> (cap ESP TX to 1 dBm)
+  dropped the gateway's RX to <strong>−28 dBm</strong> (healthy), and <strong>No-PS jumped ~14 → ~56 mA</strong>,
+  routing went <strong>0/8 → 8/8</strong> through the mesh-gate.</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">RX overload (−8 dBm)</span><span class="bar-track"><span class="bar-fill slow" style="width:25%"></span></span><span class="val">~14 mA · 0/8</span></div>
+    <div class="bar-row"><span class="lbl">TX-capped (−28 dBm)</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">~56 mA · 8/8</span></div>
+  </div>
+  <p>Clean ladder vs the Mesh+AP at −28 dBm: <strong>No-PS ~56, Dyn-PS 20.4, TWT 20.4 (≈dyn — no mid-session TWT),
+  WNM+powerdown 16.3 mA</strong> — consistent with the earlier run (doze tiers match; No-PS lower because the TX cap
+  reduces PA current).</p>
+  <div class="callout warn">
+    <p class="ct">⚠ Bench lesson</p>
+    <p>On this close bench, a board2 PS measurement is only valid with the TX capped (or the boards physically
+    separated) — otherwise RX overload makes every doze tier read artificially low.</p>
+  </div>
+
+  <h3>R3 downlink-while-dozing through the mesh-gate — VERIFIED</h3>
+  <div class="callout ok">
+    <p class="ct">✓ 28/28, 0% loss — gateway buffers downlink for the dozing leaf</p>
+    <p>chronosalt (mesh peer) pinged the dozing leaf at 1 Hz across the full path <code>chronosalt → mesh →
+    chronite(gateway) → ip_forward → AP → dozing board2</code>: <strong>28/28, 0% loss</strong> in <strong>both</strong>
+    dyn-PS and TWT phases, RTT 31/87/261 ms (DTIM buffering + mesh hop), STA ~30 mA. So the gateway's AP buffers
+    downlink for the dozing leaf and flushes at DTIM even when the traffic comes from the far side of the mesh — no
+    drops. TWT shows no deep-doze/burst (Linux <code>hostapd_s1g</code> doesn't engage mid-session TWT, so board2 stays
+    dyn-PS-like). Deep-sleep + host-light-sleep vs the Mesh+AP are reasoned in
+    <code>reference/rimba-halow-ps-esp32-vs-linux-ap.md §3a′</code> (deep tiers are radio-off → AP-independent; host
+    light sleep backfires harder under the mesh's extra beacon/peering IRQs).</p>
+  </div>
+
+  <h3>Bench gotcha (cost real time) — a mesh peer that won't come up</h3>
+  <div class="callout bug">
+    <p class="ct">🐛 wpa_supplicant_s1g starts but wpa_cli can't reach it</p>
+    <p>Symptom: <code>wpa_supplicant_s1g -B</code> starts but <code>wpa_cli</code> can't reach it (empty/<code>unreachable</code>
+    state, 2 zombie wpa processes, no ctrl socket). Two causes, both must be cleared:</p>
+    <ol style="margin:.3em 0">
+      <li>A stuck <code>wpa_supplicant_s1g</code> from a prior run holding <code>wlan1</code> (survives <code>pkill</code>)
+        → <strong>reboot</strong> the node.</li>
+      <li><strong>NetworkManager is managing <code>wlan1</code></strong> and sits in <code>DISCONNECTED</code>
+        (actively scanning), fighting the mesh instance → <code>sudo nmcli device set wlan1 managed no</code> before
+        starting the mesh. (A node whose NM shows <code>wlan1</code> <code>INACTIVE</code> — no saved network — meshes
+        without the release; one in <code>DISCONNECTED</code> does not.)</li>
+    </ol>
+    <p>Reboot <strong>+</strong> NM-release together fixed it; either alone did not. Worth making the NM exclusion
+    persistent in the node setup.</p>
+  </div>
+
+  <ul>
+    <li>The temporary route-check block added to <code>rimba-halow-sta</code> for this test (<code>sta_ip_and_route</code>
+      + <code>ping_mesh_dst</code>) should be reverted before shipping.</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#result">Result</a></li>
+  <li><a href="#corrections">Corrections</a></li>
+  <li><a href="#pi5-reset">Pi 5 reset bug (fixed)</a></li>
+  <li><a href="#topology">Topology</a></li>
+  <li><a href="#ps-ladder">PS ladder</a></li>
+  <li><a href="#state">State + caveats</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-05-board2-ps-vs-linux-mesh-ap</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

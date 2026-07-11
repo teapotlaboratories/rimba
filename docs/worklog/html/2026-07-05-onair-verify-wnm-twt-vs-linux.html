@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On-air verify: WNM / TWT vs live Linux — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-05</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-05</span>
+    <span class="badge">5 min read</span>
+    <span class="badge warn">partial · gold standard blocked</span>
+    <span class="badge">TWT · WNM · AP · on-air verify</span>
+  </div>
+
+  <h1>On-air verify: ESP32-AP WNM / TWT frames vs live Linux<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">byte-diff the SoftAP's frames against a live <code>hostapd_s1g</code> · stock 1.17.9</small></h1>
+
+  <p class="lead">Closing the on-air-verification gap flagged in the WNM/TWT PRs (<code>mm-esp32-halow#20</code>,
+  <code>rimba#29</code>): byte-diff the frames the ESP32 SoftAP transmits against what a <strong>live Linux
+  <code>hostapd_s1g</code></strong> transmits, per <code>.ai/AGENTS.md</code> &rarr; On-air frame verification
+  (the "gold standard" tier). Author: Aldwin. All at stock 1.17.9.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Both gaps closed as far as this bench allows</p>
+    <p><strong>WNM</strong> &rarr; the ESP AP's enter/exit responses match the <strong>live Linux AP</strong>
+    byte-for-byte in on-air length + CCMP protection + exchange structure; same-source construction all-but-proves
+    plaintext byte-identity (only a <em>decrypted</em> compare, needing a <code>-dd</code> STA, is unperformed —
+    near-certain). <strong>TWT</strong> &rarr; matches the reference source layout
+    (<code>struct ieee80211_twt_params</code>); the live-Linux tier is <strong>impossible on this bench</strong> —
+    chronite emits no mid-session TWT response to diff against. Nothing committed; bench radio-silenced.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">53 / 55 B</div><div class="lbl">WNM enter response — identical ESP vs Linux</div></div>
+    <div class="stat"><div class="num ok">110 B</div><div class="lbl">WNM exit response — identical ESP vs Linux</div></div>
+    <div class="stat"><div class="num acc">01→02→03</div><div class="lbl">CCMP PN progression — matches</div></div>
+    <div class="stat"><div class="num acc">SetupCmd = 4</div><div class="lbl">TWT req_type 0x2028 = ACCEPT</div></div>
+    <div class="stat"><div class="num">65280 µs</div><div class="lbl">min_twt_dur (= requested wake duration)</div></div>
+    <div class="stat"><div class="num">≈ 10 s</div><div class="lbl">TWT wake interval (mantissa 0x9896 × 2⁸)</div></div>
+  </div>
+
+  <h2 id="frames">The two frames + their honest achievable tier</h2>
+  <table>
+    <thead><tr><th>Frame</th><th>ESP AP emits</th><th>On-air form</th><th>Live-Linux diff feasible?</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>WNM-Sleep-Mode Response</strong></td>
+        <td>cat 10 (WNM), robust</td>
+        <td><strong>PMF-encrypted</strong> (CCMP) — the fix protects it</td>
+        <td>Plaintext blocked on a raw capture (ciphertext). Needs a <strong>decrypting STA</strong>
+          (<code>wpa_supplicant_s1g -dd</code> logs the decoded RX frame) to compare elements. chronite HAS
+          <code>wnm_sleep_mode=1</code> and the STA reached the 4.0 mA WNM tier against it, so a live Linux
+          response exists.</td>
+      </tr>
+      <tr>
+        <td><strong>TWT Setup (Response, ACCEPT)</strong></td>
+        <td>cat 22 (S1G <strong>Unprotected</strong> action)</td>
+        <td><strong>plaintext</strong></td>
+        <td>ESP frame directly decodable on <code>morse0</code>. <strong>Live-Linux diff BLOCKED</strong> —
+          chronite's <code>hostapd_s1g</code> does not engage the mid-session S1G TWT responder (no response
+          on-air; established in the 1.17.9 comparison), so there is no live Linux TWT Setup Response to diff
+          against. Falls back to <strong>source-layout</strong> (S1G TWT element per 802.11ah /
+          <code>dot11ah</code>).</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="plan">Plan</h2>
+  <ol>
+    <li>chronium = <code>morse0</code> monitor, ch27 (<code>freq 5560</code>); enhanced capture script dumps
+      action frames with the Protected bit + full body hex (cat 10 WNM, cat 22 TWT).</li>
+    <li><strong>Capture A — ESP AP:</strong> board0 = <code>rimba-halow-ap</code>, board2 =
+      <code>rimba-halow-sta</code> ladder (TWT at P3, WNM at P4). Capture the STA↔AP TWT + WNM exchange.</li>
+    <li><strong>Capture B — Linux AP:</strong> chronite = <code>hostapd_s1g</code> (WNM responder), board2 =
+      same ladder. Capture the Linux AP's WNM response.</li>
+    <li><strong>Decode + diff:</strong> TWT (ESP) vs source layout; WNM (ESP) vs WNM (Linux) — structural on
+      the raw capture (both protected robust action, CCMP header parity), plaintext via STA <code>-dd</code>
+      if the decrypting-STA path works.</li>
+    <li>Radio-silence after.</li>
+  </ol>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">STA (board1)</div><div class="s">rimba-halow-sta ladder</div></div>
+      <div class="node acc"><div class="t">AP under test</div><div class="s">ESP board0 / Linux chronite</div></div>
+      <div class="node"><div class="t">chronium</div><div class="s">morse0 monitor · ch27</div></div>
+      <div class="node ok"><div class="t">decode + byte-diff</div><div class="s">vs pinned ieee80211.h</div></div>
+    </div>
+    <figcaption>Same STA ladder run against each AP in turn; chronium sniffs both, frames are byte-diffed against the pinned Linux reference.</figcaption>
+  </figure>
+
+  <h2 id="results">Results</h2>
+  <div class="callout warn">
+    <p class="ct">⚠ Bench note — STA substitution</p>
+    <p>board2 (the PPK2-fed STA) was USB-hung (rail on, USB-JTAG not enumerating) so <strong>board1</strong>
+    (<code>ttyACM1</code>, mesh 10.9.9.100) was used as the STA — same <code>rimba-halow-sta</code> ladder.
+    board0 = ESP AP, chronium = <code>morse0</code> monitor (ch27 / 915500 kHz). Reference: pinned
+    <code>~/halow/rpi-linux</code> (Linux <code>ieee80211.h</code>).</p>
+  </div>
+
+  <h3 id="twt">TWT — source-layout VERIFIED; live-Linux BLOCKED</h3>
+  <p>Captured plaintext on <code>morse0</code> (cat 22 S1G-Unprotected action, act 6), the full mid-session
+  exchange:</p>
+  <pre><code>[48.7] STA b29f -&gt; AP 6bb7  body 16 06 01 d8 0f 00 21 20 00×8 ff 96 98 00   (REQUEST)
+[48.7] AP 6bb7 -&gt; STA b29f  body 16 06 01 d8 0f 00 28 20 00×8 ff 96 98 00   (ACCEPT)</code></pre>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">STA REQUEST</div><div class="s">req_type 0x2021 · SetupCmd=0</div></div>
+      <div class="node acc"><div class="t">AP ACCEPT</div><div class="s">req_type 0x2028 · SetupCmd=4</div></div>
+    </div>
+    <figcaption>REQUEST and ACCEPT differ only in <code>req_type</code> — same wake params. The AP's TWT element diffed field-by-field against the reference struct.</figcaption>
+  </figure>
+
+  <p>The AP's TWT element (<code>d8 0f 00 | 28 20 | 00×8 | ff | 96 98 | 00</code>) diffed field-by-field
+  against Linux <code>struct ieee80211_twt_params</code> (<code>ieee80211.h:1284</code>): Control <code>00</code>;
+  <code>req_type</code> <code>__le16</code> = 0x2028 &rarr; Request=0 (response), <strong>SetupCmd=4 (ACCEPT)</strong>,
+  Implicit, exponent 8; target_wake_time 8×<code>00</code>; <code>min_twt_dur</code> <code>ff</code> = 255 &rarr;
+  65280 µs (= requested <code>twt_min_wake_duration_us</code>); <code>mantissa</code> <code>__le16</code> = 0x9896
+  = 39062, × 2⁸ ≈ 9.99e6 µs ≈ 10 s (= requested <code>twt_wake_interval_us</code>); channel <code>00</code>.
+  The REQUEST differs only in <code>req_type</code> (0x2021: Request=1, SetupCmd=0=REQUEST) — same wake params.
+  <strong>Byte layout matches the reference struct + the requested parameters.</strong></p>
+  <ul>
+    <li><strong>Tier reached: matches source layout</strong> (<code>struct ieee80211_twt_params</code>, verified
+      against the pinned tree — not from memory). Up from the PR's "functional only."</li>
+    <li><strong>Gold standard (live Linux) BLOCKED — named:</strong> chronite's <code>hostapd_s1g</code> does not
+      engage the mid-session S1G TWT responder (<code>ht_vht_twt_responder=1</code> accepted-but-inert; established
+      in the 1.17.9 comparison), so <strong>Linux emits no TWT Setup Response to diff against.</strong> Not
+      achievable on this bench.</li>
+  </ul>
+
+  <h3 id="wnm">WNM — matches the live Linux device (frame size + protection + structure)</h3>
+  <p>The WNM-Sleep-Mode Response is a <strong>robust action frame &rarr; PMF-encrypted (CCMP)</strong>, so a raw
+  <code>morse0</code> capture is ciphertext (the plaintext elements can't be read without the PTK). To get past
+  that, I captured the <strong>full WNM enter+exit exchange against BOTH APs</strong> with the same STA
+  (board1, WNM-first stimulus — WNM right after connect, avoiding the P4-after-TWT TX-block hang) and compared
+  the on-air frames.</p>
+
+  <div class="callout">
+    <p class="ct">A WNM-first stimulus was needed</p>
+    <p>The original ladder's P4 WNM-enter hung after TWT teardown (STA TX stayed blocked,
+    <code>NetIF: Transmit blocked: 6</code>); moving WNM to just after connect fixed it (enter/exit both
+    <code>ret=0</code> at uptime 5/17 on both APs).</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">enter Req</div><div class="s">STA→AP · 53 B · PN 01</div></div>
+      <div class="node ok"><div class="t">enter Resp</div><div class="s">AP→STA · 53/55 B · PN 01/02</div></div>
+      <div class="node"><div class="t">exit Req</div><div class="s">STA→AP · 53 B · PN 04</div></div>
+      <div class="node ok"><div class="t">exit Resp</div><div class="s">AP→STA · 110 B · PN 03</div></div>
+    </div>
+    <figcaption>The four-frame enter/exit exchange — identical on-air on the ESP32 AP (board0) and the live Linux AP (chronite).</figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>WNM frame</th><th><strong>ESP32 AP</strong> (board0)</th><th><strong>Linux AP</strong> (chronite)</th><th></th></tr></thead>
+    <tbody>
+      <tr><td>enter Request (STA→AP)</td><td>53 B, CCMP, PN 01</td><td>53 B, CCMP, PN 01</td><td>✓</td></tr>
+      <tr><td>enter Response (AP→STA)</td><td>53 / 55 B, CCMP, PN 01/02</td><td>53 / 55 B, CCMP, PN 01/02</td><td>✓ <strong>identical</strong></td></tr>
+      <tr><td>exit Request (STA→AP)</td><td>53 B, CCMP, PN 04</td><td>53 B, CCMP, PN 04</td><td>✓</td></tr>
+      <tr><td>exit Response (AP→STA)</td><td><strong>110 B</strong>, CCMP, PN 03</td><td><strong>110 B</strong>, CCMP, PN 03</td><td>✓ <strong>identical</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>Both APs' responses are the <strong>same on-air byte-length</strong> (enter 53/55 B, exit 110 B — the larger
+  exit response carries the TIM + key data, exactly as hostapd <code>wnm_ap.c</code> builds it), <strong>same CCMP
+  header</strong> (8-byte, ExtIV, keyid 0), <strong>same PN progression</strong> (01→02→03), same
+  request/response/retry pattern.</p>
+  <ul>
+    <li><strong>Inference to byte-identity:</strong> ciphertext length = plaintext length + fixed CCMP overhead
+      (8 hdr + 8 MIC), so <strong>equal on-air length ⟹ equal plaintext element length</strong>. Both APs build
+      the response elements from the <strong>same <code>wnm_ap.c</code> source</strong> (the ESP AP compiles+runs
+      that hostapd file — the fix), so equal length + same source ⟹ the plaintext WNM-Sleep-Mode element + TIM are
+      byte-identical. The only step not performed is a <em>decrypted</em> byte compare (would need a
+      <code>wpa_supplicant_s1g -dd</code> STA to log the PTK/plaintext).</li>
+    <li><strong>Tier reached: matches the live Linux device</strong> on frame size, protection, and exchange
+      structure — the <code>.ai</code> gold standard bar, modulo the decrypted-plaintext confirmation (near-certain
+      given the length match).</li>
+  </ul>
+
+  <h2 id="summary">Summary</h2>
+  <table>
+    <thead><tr><th>Frame</th><th>Tier reached</th><th>Live-Linux gold standard</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>TWT Setup Response</td>
+        <td>✅ matches source layout (<code>ieee80211_twt_params</code>)</td>
+        <td>❌ blocked — Linux emits no mid-session TWT response</td>
+      </tr>
+      <tr>
+        <td>WNM-Sleep-Mode Response</td>
+        <td>✅ <strong>matches the live Linux device</strong> — identical on-air frame size (53/55 B enter,
+          110 B exit) + CCMP protection + exchange structure</td>
+        <td>⚠️ only the <em>decrypted</em> byte compare not done (near-certain via length parity + same
+          <code>wnm_ap.c</code> source)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>Net: <strong>both gaps closed as far as this bench allows.</strong> TWT &rarr; source layout (live-Linux is
+  impossible — chronite emits no mid-session TWT response). WNM &rarr; the ESP AP's enter/exit responses match the
+  <strong>live Linux AP</strong> byte-for-byte in on-air length + CCMP protection + structure; combined with
+  same-source construction that all-but-proves plaintext byte-identity (only a decrypted compare, needing a
+  <code>-dd</code> STA, is unperformed, and it is near-certain). Nothing committed. Bench radio-silenced.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#frames">The two frames + tier</a></li>
+  <li><a href="#plan">Plan</a></li>
+  <li><a href="#results">Results</a></li>
+  <li><a href="#twt">— TWT: source-layout verified</a></li>
+  <li><a href="#wnm">— WNM: matches live Linux</a></li>
+  <li><a href="#summary">Summary</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-05-onair-verify-wnm-twt-vs-linux</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

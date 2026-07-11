@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>All-ESP Mesh-gate end-to-end — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-10</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-10</span>
+    <span class="badge">9 min read</span>
+    <span class="badge ok">✓ task #17 done</span>
+    <span class="badge bug">mesh-gate · lwIP · datapath</span>
+  </div>
+
+  <h1>All-ESP Mesh-gate END-TO-END WORKS<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">return-leg fix (board1 gw) + forward-leg fix (RX-pbuf copy)</small></h1>
+
+  <p class="lead"><strong>Task <code>#17</code> is COMPLETE</strong> — the all-ESP Mesh-gate end-to-end route
+  (<code>STA → AP → ip_forward → mesh → board1 → reply → back</code>) works <strong>10/10, 0% loss, ttl=63</strong>,
+  deterministic across two runs. Two distinct bugs were root-caused and fixed this session: the reply
+  <strong>return-leg</strong> (board1's default gateway was a phantom address) and the <strong>forward
+  direction</strong> (the mesh netif silently dropped every forwarded frame).</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">board2 STA</div><div class="s">192.168.12.x</div></div>
+      <div class="node acc"><div class="t">board0 AP</div><div class="s">192.168.12.1</div></div>
+      <div class="node acc"><div class="t">ip_forward</div><div class="s">lwIP, fw=10</div></div>
+      <div class="node acc"><div class="t">mesh gate</div><div class="s">10.9.9.136</div></div>
+      <div class="node ok"><div class="t">board1</div><div class="s">10.9.9.100</div></div>
+    </div>
+    <figcaption>The end-to-end route now forwards in both directions: request STA→AP→<code>ip_forward</code>→mesh→board1, and echo-reply all the way back. 10/10, ttl=63 (one gateway hop).</figcaption>
+  </figure>
+
+  <div class="callout ok">
+    <p class="ct">✓ Two fixes, both keepers in the tree</p>
+    <ol style="margin:.2em 0">
+      <li><strong>Reply return-leg:</strong> board1's default gateway was hard-coded to a <em>phantom</em> address
+        (<code>10.9.9.1</code>), so its echo-reply to an off-subnet STA could never be routed. Fix = set it to the
+        gate's mesh IP (<code>10.9.9.136</code>).</li>
+      <li><strong>Forward direction</strong> (the deeper, pre-existing bug the 2026-07-09 "ip_forward works
+        (exonerated)" note had masked): lwIP <code>ip4_forward</code> forwards <em>every</em> frame
+        (<code>ip.fw=10</code>), but the forwarded frame is dropped before the mesh netif's linkoutput because the
+        esp_netif zero-copy RX pbuf is a <strong>non-contiguous <code>PBUF_REF</code></strong>, and lwIP's
+        <code>pbuf_add_header</code> (non-forced) <em>refuses</em> to prepend an L2 header onto a non-contiguous pbuf
+        (regardless of headroom) — so <code>ethernet_output</code> can't add the mesh L2 header. Fix = in the
+        gateway's <code>gw_rx_deliver</code>, copy RX into a <strong>contiguous <code>PBUF_LINK</code>/<code>PBUF_RAM</code></strong>
+        and inject it via <code>netif-&gt;input</code> (never handing the mmpkt to esp_netif → clean single free).</li>
+    </ol>
+    <p style="margin:.3em 0 0">All diagnostic instrumentation was reverted; the bench was returned radio-silent.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">10/10</div><div class="lbl">packets, 0% loss (×2 runs)</div></div>
+    <div class="stat"><div class="num acc">ttl=63</div><div class="lbl">one gateway hop</div></div>
+    <div class="stat"><div class="num acc">2</div><div class="lbl">bugs root-caused + fixed</div></div>
+    <div class="stat"><div class="num">30–97 ms</div><div class="lbl">RTT across the gate</div></div>
+  </div>
+
+  <p>Branch: <code>components/halow</code> → <code>feat/mesh-ap-concurrency</code> (UNCOMMITTED).
+  Supersedes/continues <code>docs/worklog/2026-07-09-esp32-mesh-ap-end-to-end-forward.md</code> and memory
+  <code>gateway-e2e-forward-mesh-unicast-gap</code>. Self-contained: rig, method, every counter reading, both root
+  causes, and the remaining fix are recorded here so it can resume cold.</p>
+
+  <h2 id="rig">Bench setup — all-ESP topology (the reproducible rig)</h2>
+
+  <pre><code> board2 (STA)               board0 (GATEWAY)                     board1 (2nd mesh node)
+ rimba-halow-sta-perf       rimba-halow-mesh-ap                  rimba-halow-mesh
+ /dev/ttyACM4 (PPK2)        /dev/ttyACM0                         /dev/ttyACM1
+ 192.168.12.&lt;mac[5]&gt; --AP--&gt; AP 192.168.12.1 (SSID rimba-ping, SAE, PSK rimbahalow)
+   gw .1                     BSSID e0:72:a1:f8:ef:a4
+                            ip_forward (CONFIG_LWIP_IP_FORWARD=y)
+                            MESH 10.9.9.136 --mesh(ch27,SAE)--&gt; 10.9.9.100  gw 10.9.9.136
+                            mesh mac e2:72:a1:f8:ef:a4         mesh mac e2:72:a1:f8:f9:40</code></pre>
+
+  <ul>
+    <li><strong>Device→board map is by MAC, not by ttyACM</strong> (they re-enumerate). Verified this session:
+      ttyACM0 = board0 (<code>e0:72:a1:f8:ef:a4</code>), ttyACM1 = board1 (<code>e0:72:a1:f8:f9:40</code>), board2
+      (<code>e0:72:a1:f8:f0:08</code>) = ttyACM4 <strong>only while <code>tools/ppk2_hold.py</code> runs</strong>.
+      <strong>ttyACM2 + ttyACM3 are the Nordic PPK2 (<code>1915:c00a</code>) — NOT boards; never flash them.</strong>
+      ttyUSB0 = the C6 harness (not a HaLow board). Identify with <code>esptool.py --port … read_mac</code>
+      (Espressif VID <code>303a</code>).</li>
+    <li><strong>Reproducible commands</strong> (unchanged from 2026-07-09): IDF venv python
+      <code>PY=/home/quartz/.espressif/python_env/idf5.4_py3.13_env/bin/python</code>; build/flash
+      <code>make {build,flash} APP=&lt;app&gt; BOARD=proto1-fgh100m PORT=/dev/ttyACMx</code>; power board2
+      <code>nohup $PY tools/ppk2_hold.py …</code> / off with <code>$PY tools/ppk2_hold.py off</code>.</li>
+  </ul>
+
+  <h3>Method — concurrent serial capture (<code>scratchpad/bench_capture.py</code>, reusable pattern)</h3>
+  <p>Opens board0/board1/board2 serial handles <strong>ONCE each</strong> (a single open-time reset is tolerated —
+  the ESP32-S3 USB-JTAG resets on port open; the boards re-associate in ~13 s), reads board0/board1 heartbeats in
+  threads, waits for bring-up (<code>mesh_peers&gt;=1 &amp;&amp; ap_stas&gt;=1</code>), then drives
+  <code>ping 10.9.9.100 -c 10 -i 1</code> on board2 <strong>via the same STA handle</strong> (opening board2 a second
+  time resets it mid-test — the bug that invalidated the first attempt), and reports the before/after counter deltas.
+  All observability is <strong>app-visible counters printed by the heartbeat</strong> — morselib <code>MMLOG</code>
+  is not on the ESP UART.</p>
+
+  <h2 id="return-leg">Part 1 — Reply return-leg: ROOT-CAUSED + FIXED</h2>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Root cause (code)</p>
+    <p><code>firmware/rimba-halow-mesh/main/app_main.c</code> <code>mesh_net_task</code> hard-coded the mesh netif
+    default gateway to <strong><code>10.9.9.1</code></strong> — a host that does not exist on this bench. lwIP has no
+    general routing table for a single netif, so an off-subnet destination (the STA's <code>192.168.12.x</code>,
+    reached by board1's echo-reply) is routed <strong>only</strong> via the netif's default gw. With gw
+    <code>10.9.9.1</code>, board1 ARPs a phantom, never resolves, and the reply is dropped in lwIP <strong>before</strong>
+    <code>halow_transmit</code>. On-link replies (the working mesh-only regression) never hit this path — hence the
+    on-link-works / off-subnet-fails asymmetry, and why the 2026-07-09 static-ARP-for-<code>.136</code> experiment
+    didn't help (a static ARP for <code>.136</code> does not fix a route that points at <code>.1</code>).</p>
+  </div>
+
+  <p><strong>Instrumentation (temporary, reverted):</strong> board1 mesh-TX counters in
+  <code>mmhalow.c halow_transmit</code> split by ethertype/proto (<code>total/ipv4/icmp/arp</code>) + an RX-deliver
+  counter in <code>halow_rx</code>; gateway SW-CCMP RX outcome counters
+  (<code>att/ok/kid0/kidN/mic/nokey/replay</code>) re-added in <code>umac_datapath_sw_ccmp_decrypt</code>.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Symbol-mangler gotcha</p>
+    <p>morselib runs <code>librarymangler.py</code> over <code>libmorse.a</code>, prefixing every symbol not matching
+    <code>protected_syms.txt</code> (<code>mmwlan*</code>, <code>mmhal*</code>, <code>mmpkt*</code>, …) with
+    <code>mmint_</code>. An unprefixed <code>umac_*</code> getter is therefore <strong>un-linkable from the app</strong>
+    (undefined reference to <code>umac_datapath_get_ccmp_rx_stats</code>). Fix: name exported diagnostic getters
+    <code>mmwlan_*</code> (e.g. <code>mmwlan_diag_get_ccmp_rx_stats</code>) so they ride the protected pattern.
+    (<code>mmhalow.c</code> is in the <code>halow</code> component — NOT mangled — so its getters link as-is.)</p>
+  </div>
+
+  <p><strong>Hardware evidence — the counter deltas over a 10-ping run:</strong></p>
+
+  <table>
+    <thead>
+      <tr><th>signal</th><th>Run 1 (gw = 10.9.9.1)</th><th>Run 2 (gw = 10.9.9.136)</th><th>meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>board1 <code>rxDeliver</code></td><td>+2</td><td>+2</td><td>board1 receives the forwarded request either way</td></tr>
+      <tr><td>board1 <code>meshTX icmp</code></td><td><strong>+0</strong></td><td><strong>+1</strong></td><td>with a valid gw, board1 finally TRANSMITS the reply</td></tr>
+      <tr><td>board1 <code>meshTX arp</code></td><td><strong>+6</strong> (futile, dead gw)</td><td>+1 (resolves <code>.136</code>)</td><td>phantom gw → endless ARP-for-<code>10.9.9.1</code></td></tr>
+      <tr><td>gw <code>ccmpRX kid0</code> (pairwise)</td><td>+3</td><td><strong>+4</strong></td><td>gateway decrypts board1's unicast reply</td></tr>
+      <tr><td>gw <code>ap_tx</code> (→ STA)</td><td>0</td><td><strong>+1</strong></td><td>gateway forwards a reply back toward board2</td></tr>
+    </tbody>
+  </table>
+
+  <p>So the gw fix makes the entire return path fire for the packet(s) that make it through: board1 sends →
+  gateway RX + CCMP-decrypts (pairwise MTK, key_id 0) → <code>ip_forward</code> → AP vif. <strong>Fix kept in the
+  tree:</strong> <code>ip.gw.addr = esp_ip4addr_aton("10.9.9.136")</code> in <code>rimba-halow-mesh</code>
+  <code>mesh_net_task</code> (a mesh leaf's default gw = the Mesh-gate's mesh IP). Everything the 2026-07-09 session
+  exonerated (gateway 4-addr TX build, ARP-as-such, the whole CCMP/decrypt path) stays exonerated.</p>
+
+  <h2 id="forward-leg">Part 2 — Forward direction: a separate bug, ROOT-CAUSED + FIXED</h2>
+
+  <p>Even with the return-leg fixed, the STA ping stays <strong>0/10</strong>. The forward direction
+  (<code>STA request → AP → ip_forward → mesh → board1</code>) delivers only the <strong>first</strong> request, then
+  stalls. Isolated with layered counters on the gateway:</p>
+
+  <ul>
+    <li><strong>RX is fine:</strong> <code>apRX icmp=10 deliverFail=0</code> — lwIP successfully receives all 10 ICMP
+      requests from the STA (not an RX / mailbox / tcpip-thread-stall problem).</li>
+    <li><strong>ip4_forward is fine:</strong> with <code>CONFIG_LWIP_STATS=y</code>,
+      <code>ip.recv=14 fw=10 drop=0 rterr=0</code>, and <code>mesh_netif up=1 linkup=1</code>. lwIP forwards
+      <strong>every</strong> packet with zero routing errors and zero drops.</li>
+    <li><strong>…but the mesh netif never transmits them:</strong> <code>meshTX icmp</code> = <strong>1</strong>
+      (dynamic ARP) or <strong>0</strong> (static ARP), while <code>meshTX arp</code> DOES climb. So forwarded frames
+      vanish <strong>between <code>ip4_forward</code> (success) and the mesh netif's <code>linkoutput</code> =
+      <code>halow_transmit</code>.</strong></li>
+  </ul>
+
+  <p><strong>The fingerprint → root cause.</strong> Only frames that lwIP <em>owns a copy of</em> egress: ARP frames
+  (lwIP-generated) and, in the dynamic case, the single request lwIP <strong>copied into the ARP pending-queue</strong>
+  while ARP was resolving (flushed on resolve → <code>meshTX icmp=1</code>). A <strong>static</strong> ARP entry
+  removes that copy path → <code>meshTX icmp=0</code> (static ARP made it <em>worse</em>, which is the tell). The
+  forwarded request itself is the <strong>esp_netif zero-copy RX pbuf</strong>:
+  <code>gw_ap_rx_cb → esp_netif_receive(…, eb=mmpktview)</code> → <code>wlanif.c:168 esp_pbuf_allocate()</code>
+  builds a <strong>reference pbuf with no L2 TX headroom</strong> (and even the <code>CONFIG_LWIP_L2_TO_L3_COPY</code>
+  path at <code>wlanif.c:160</code> uses <code>PBUF_RAW</code>, also headroom-less). When <code>ip4_forward</code>
+  re-outputs it on the mesh netif, <code>ethernet_output</code>'s <code>pbuf_add_header(SIZEOF_ETH_HDR)</code>
+  <strong>fails on the headroom-less pbuf</strong> → drop before <code>linkoutput</code>. lwIP-owned copies have
+  headroom, so they go out; the forwarded RX pbuf does not.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ This reframes the 2026-07-09 "ip_forward works (exonerated)" note</p>
+    <p><code>ip_forward</code> <em>decides</em> to forward correctly (<code>fw=10</code>), but the forwarded RX pbuf
+    can't be re-transmitted. The earlier single-packet "1 ARP + 1 ICMP forwarded" observation was exactly the
+    ARP-queue-copy artifact, not steady forwarding.</p>
+  </div>
+
+  <h3>The precise root cause (verified in lwIP source)</h3>
+  <p><code>pbuf_add_header_impl</code> (<code>vendor/esp-idf/.../lwip/src/core/pbuf.c:476</code>, gate at
+  <code>:499/:511</code>): for a pbuf WITHOUT <code>PBUF_TYPE_FLAG_STRUCT_DATA_CONTIGUOUS</code> (i.e. a
+  <code>PBUF_REF</code>) and <code>force==0</code>, it <strong>returns fail unconditionally</strong> ("cannot expand
+  payload to front") — <em>headroom is irrelevant</em>. <code>ethernet_output</code>
+  (<code>.../lwip/src/netif/ethernet.c:302</code>) uses the non-forced variant, so a forwarded <code>PBUF_REF</code>
+  always hits <code>pbuf_header_failed → ERR_BUF → drop</code>. The esp_netif zero-copy RX pbuf is exactly a
+  <code>PBUF_REF</code> (<code>esp_pbuf_ref.c:59 pbuf_alloced_custom(PBUF_RAW, len, PBUF_REF, …)</code>). A contiguous
+  <code>PBUF_RAM</code> copy takes the <code>:499</code> branch and succeeds.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">RX pbuf</div><div class="s">PBUF_REF, no headroom</div></div>
+      <div class="node acc"><div class="t">ip4_forward</div><div class="s">fw=10, success</div></div>
+      <div class="node err"><div class="t">pbuf_add_header</div><div class="s">refuses non-contiguous</div></div>
+      <div class="node err"><div class="t">ERR_BUF</div><div class="s">drop before linkoutput</div></div>
+    </div>
+    <figcaption>Before the fix: <code>ip4_forward</code> succeeds, but <code>ethernet_output</code> can't prepend the mesh L2 header onto the non-contiguous <code>PBUF_REF</code>, so the frame is dropped before <code>halow_transmit</code>.</figcaption>
+  </figure>
+
+  <h3>The fix (APPLIED + VERIFIED) — <code>firmware/rimba-halow-mesh-ap/main/app_main.c</code> <code>gw_rx_deliver</code></h3>
+  <p>Replaced the zero-copy <code>esp_netif_receive(…, eb=mmpktview)</code> with: copy the Ethernet frame into
+  <code>pbuf_alloc(PBUF_LINK, len, PBUF_RAM)</code> (contiguous + 14 B link headroom — note <code>PBUF_RAW_TX</code>
+  reserves only <code>PBUF_LINK_ENCAPSULATION_HLEN</code>, which is <strong>0</strong> in this build, so
+  <code>PBUF_LINK</code> is the correct layer), <code>mmpkt_close</code>+<code>mmpkt_release</code> the mmpkt exactly
+  once (we own it — never handed to esp_netif, so no double-free against the <code>PBUF_REF</code> custom-free path),
+  then <code>esp_netif_get_netif_impl()</code>→<code>netif-&gt;input(p, netif)</code> with <code>pbuf_free(p)</code>
+  on <code>!ERR_OK</code>. <strong>One edit fixes BOTH directions</strong> — <code>gw_ap_rx_cb</code> (AP→mesh forward)
+  and <code>gw_mesh_rx_cb</code> (mesh→AP reply) both funnel through <code>gw_rx_deliver</code>. board1
+  (<code>rimba-halow-mesh</code>) is untouched (it uses the shared <code>mmhalow.c halow_rx</code>, has a single netif,
+  does not forward). Ownership contract verified: <code>esp_netif_receive</code>/<code>wlanif_input</code> owns the eb
+  in EVERY path (the old caller's <code>free-on-!=ESP_OK</code> branch was dead code — <code>esp_netif_receive</code>
+  is compiled to always return <code>ESP_OK</code> here), so bypassing it and owning the mmpkt ourselves is the clean,
+  contract-safe design.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Verification (<code>bench_capture.py</code>, two runs)</p>
+    <p><code>10 packets transmitted, 10 received, 0% loss</code>, <code>ttl=63</code> (one gateway hop), RTT 30–97 ms.
+    Gateway heartbeat during the ping: <code>ap_rx=13 ap_tx=11 mesh_rx=13</code> — the gate now forwards ~10 requests
+    INTO the mesh (<code>mesh_rx</code> climbs) AND ~10 replies back to the STA (<code>ap_tx</code> climbs), vs the
+    pre-fix <code>ap_tx=1 mesh_rx=2</code>.</p>
+  </div>
+
+  <p>Gateway forward counters, pre-fix vs post-fix (bars to scale, max = 13):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">mesh_rx · pre</span><span class="bar-track"><span class="bar-fill slow" style="width:15.4%"></span></span><span class="val">2</span></div>
+    <div class="bar-row"><span class="lbl">mesh_rx · post</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">13</span></div>
+    <div class="bar-row"><span class="lbl">ap_tx · pre</span><span class="bar-track"><span class="bar-fill slow" style="width:7.7%"></span></span><span class="val">1</span></div>
+    <div class="bar-row"><span class="lbl">ap_tx · post</span><span class="bar-track"><span class="bar-fill fast" style="width:84.6%"></span></span><span class="val">11</span></div>
+  </div>
+
+  <h2 id="fixed">What is fixed (task #17 COMPLETE)</h2>
+  <ul>
+    <li><strong>board1 (<code>rimba-halow-mesh</code>) default gw <code>10.9.9.1 → 10.9.9.136</code></strong> — the
+      reply return-leg.</li>
+    <li><strong>gateway (<code>rimba-halow-mesh-ap</code>) <code>gw_rx_deliver</code> copy-into-PBUF_RAM + inject</strong>
+      — the forward-leg RX-pbuf drop. Both directions.</li>
+  </ul>
+  <p>Both are keepers in the tree. End-to-end STA↔2nd-mesh-node ping is 10/10. No known remaining blocker for the
+  basic route. (Follow-ups if desired: throughput/iperf across the gate; more STAs / more mesh hops; the extra
+  full-frame copy in <code>gw_rx_deliver</code> is the intended cost of forwardability.)</p>
+
+  <h2 id="stress">Stress + throughput testing — the per-packet copy is NOT a bottleneck</h2>
+  <p>The forward-leg fix adds a full-frame <code>memcpy</code> + <code>pbuf_alloc(PBUF_RAM)</code> on every RX frame the
+  gateway routes. Stress-tested (<code>scratchpad/bench_flood.py</code>, <code>scratchpad/bench_iperf.py</code>; board1
+  ran <code>rimba-halow-mesh-perf</code> <code>iperf -s</code> with a TEST-ONLY gw=10.9.9.136 hack, since reverted):</p>
+  <ul>
+    <li><strong>Large-frame ping flood</strong> (1400 B payload ≈ 1442 B frames, ~25 pps, 200 pkts): 171 replies at
+      ttl=63, ~3.5 % loss (first 1–2 = ARP warmup, rest = close-bench RF at 1 dBm). <strong>Heap stable — no
+      leak</strong> (dipped under load, recovered + flat); <strong>uptime monotonic — no crash</strong>; board1
+      stayed peered.</li>
+    <li><strong>UDP iperf across the gate</strong>: client offered 3 Mbit, sent ~0.36 Mbit/s; server received
+      ~0.3 Mbit/s. Gateway forwarded 313 UDP frames; heap fluctuated ±5 KB with no monotonic decline; no crash.</li>
+    <li><strong>TCP iperf across the gate</strong>: the 3-way handshake COMPLETES across the gate (client "Successfully
+      connected" + server "accept: 192.168.12.51"); goodput is poor (~0.03–0.25 Mbit, 9 s of slow-start then a burst)
+      — that's <strong>TCP on a ~130 ms-RTT lossy HaLow link</strong>, not a gate/copy issue.</li>
+  </ul>
+
+  <div class="callout">
+    <p class="ct">Verdict</p>
+    <p>The ~0.3 Mbit/s ceiling is radio-limited (HaLow 1 MHz BW + host SW-CCMP mesh + close bench); a ~1 µs frame copy
+    at ≤~50 pps is ~4 orders of magnitude below the airtime — the copy cannot be the bottleneck, and it neither leaks
+    nor crashes under sustained ICMP/UDP/TCP forwarding in both directions. Truly avoiding the copy is not possible
+    (lwIP won't prepend an L2 header onto a non-contiguous <code>PBUF_REF</code>; ESP-IDF's own
+    <code>CONFIG_LWIP_L2_TO_L3_COPY</code> does the same copy). A modest optimization exists — copy only forwarded
+    frames, keep zero-copy for locally-delivered ones (peek dst IP in the RX cb) — but for a gateway most traffic
+    forwards, so the ROI is low.</p>
+  </div>
+
+  <h2 id="coverage">Coverage testing (2026-07-10) — no failures surfaced (single STA / single hop)</h2>
+  <p>Ran the cheap, high-value coverage after the fix, to surface real failures before investing in generality
+  (<code>scratchpad/bench_soak.py</code>, <code>scratchpad/bench_concurrent.py</code>):</p>
+  <ul>
+    <li><strong>Soak — PASS.</strong> 3-minute sustained ping (3000 × 500 B, ~17 pps): <strong>3000/3000, 0% loss</strong>;
+      gateway forwarded ~3000 frames each way; <strong>heap flat</strong> (oscillates in a ~7 KB in-flight band, last
+      sample matches early samples — no leak; the −4.5 B/s "slope" is noise within one oscillation); <strong>uptime
+      monotonic to 200 s — no crash</strong>; mesh+AP stayed up. Rules out a slow leak in the per-packet copy.</li>
+    <li><strong>Concurrent independent bidirectional — PASS.</strong> board1 (mesh-perf, TEST-ONLY gw=10.9.9.136 +
+      auto-ping the STA, since reverted) pinging the STA <em>while</em> the STA pings board1: <strong>STA→board1
+      150/150 (0%)</strong>; <strong>board1→STA reverse flow works</strong> (25 replies / 6 timeouts — the ~19% is
+      airtime contention from the fast flow saturating the shared 1 MHz mesh link + close-bench RF, not a datapath
+      fault); gateway forwarded both directions simultaneously; no crash/corruption. <strong>This downgrades the
+      Stage-4 "mixed-flow / global-<code>ops</code> last-writer-wins" caution</strong> — simultaneous AP-downlink +
+      mesh-uplink flows are framed correctly here.</li>
+    <li><strong>Not yet exercised (need multi-node setup — next session):</strong> multiple STAs under the AP (needs a
+      2nd STA, e.g. a Linux AP client), multi-hop (STA→gate→relay→2nd-hop node; needs a 3rd mesh node + forced
+      topology), and power-save-behind-gate (STA dozing while the gate buffers downlink).</li>
+  </ul>
+
+  <h2 id="gotchas">Bench gotchas encountered (reusable)</h2>
+  <ul>
+    <li><strong>Opening an ESP32-S3 USB-JTAG serial port resets the board</strong> (all three reset at t≈0 when the
+      reader opens them; they re-associate in ~13 s). <strong>Opening board2 a SECOND time</strong> (separate read +
+      write handles) resets it mid-test and silently voids the run — open each port once and share the handle.</li>
+    <li><strong><code>sdkconfig.defaults</code> edits don't always merge into an existing generated
+      <code>sdkconfig</code></strong> — <code># CONFIG_X is not set</code> persisted despite adding
+      <code>CONFIG_X=y</code> to defaults. Fix: <code>rm build/&lt;app&gt;/&lt;board&gt;/sdkconfig</code> and rebuild
+      to regenerate from defaults.</li>
+    <li><strong>morselib symbol mangler:</strong> exported diagnostic getters in morselib must be named to match
+      <code>protected_syms.txt</code> (<code>mmwlan*</code>/<code>mmhal*</code>/…) or they're renamed
+      <code>mmint_*</code> and won't link from the app.</li>
+    <li><strong><code>make flash</code> rebuilds first</strong> (idf.py flash = build+flash); a full reconfigure
+      rebuild can exceed a 2-minute shell timeout mid-write (leaves the app half-written but re-flashable) or OOM
+      (exit 137). Build as a separate step first, then flash.</li>
+    <li>The <strong>PPK2-hold must be a durable background process</strong>; if it dies, board2 (ttyACM4)
+      disappears.</li>
+  </ul>
+
+  <h2 id="silence">Radio-silence at session end (done)</h2>
+  <p>board0/board1/board2 flashed to <code>rimba-hello</code>; board2 powered off (<code>ppk2_hold.py off</code>,
+  ttyACM4 gone). No Linux nodes (chronium/chronite) were brought up this session. All temporary instrumentation
+  reverted (<code>mmhalow.c/.h</code> via <code>git checkout</code>; <code>umac_datapath.c</code> CCMP counters by
+  hand; both apps' heartbeat prints, the gateway AP-RX/deliver-fail/IP-stats/static-ARP code + its includes + the
+  sdkconfig <code>STATS</code>/<code>DHCPS_STATIC</code> lines). Both apps build clean. Tree retains only the KEEPER
+  fixes on the feature branch: the prior <code>umac_keys.c</code> AP-downlink fix, the new board1 gw fix
+  (<code>rimba-halow-mesh</code>), and the new gateway forward-path fix (<code>rimba-halow-mesh-ap</code>
+  <code>gw_rx_deliver</code> copy-into-PBUF_RAM + <code>netif-&gt;input</code>, with its
+  <code>lwip/pbuf.h</code>/<code>lwip/netif.h</code>/<code>esp_netif_net_stack.h</code> includes). Diagnostic captures
+  live in <code>scratchpad/bench_capture.py</code> (the concurrent 3-board serial harness).</p>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#rig">Bench setup — the rig</a></li>
+    <li><a href="#return-leg">Part 1 — Return-leg fix</a></li>
+    <li><a href="#forward-leg">Part 2 — Forward-leg fix</a></li>
+    <li><a href="#fixed">What is fixed (#17 done)</a></li>
+    <li><a href="#stress">Stress + throughput</a></li>
+    <li><a href="#coverage">Coverage testing</a></li>
+    <li><a href="#gotchas">Bench gotchas</a></li>
+    <li><a href="#silence">Radio-silence</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-10-esp32-mesh-gate-returnleg-fixed-forward-rootcaused</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh single-hop / leaf toggle — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-30</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-30</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ implemented + on-air verified</span>
+    <span class="badge">mesh · HWMP</span>
+  </div>
+
+  <h1>Mesh single-hop / leaf toggle<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">disable multi-hop forwarding + HWMP at runtime</small></h1>
+
+  <p class="lead">Give a mesh node a runtime switch to opt out of multi-hop entirely and behave as a pure
+  single-hop <strong>leaf</strong>: it still forms direct 1-hop peer links, but it never relays other nodes'
+  traffic and never participates in path selection. Useful for an endpoint device that should not spend
+  CPU / airtime / power forwarding for the mesh.</p>
+
+  <p><strong>Area:</strong> 802.11s mesh (morselib <code>umac/mesh</code>). <strong>Status:</strong> implemented +
+  on-air verified (chronium <code>morse0</code>), committed on <code>feature/mesh-forwarding-toggle</code>
+  (independent of the SAE-hardening branch).</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">37 → 0</div><div class="lbl">4-addr DATA forwards (relay → leaf)</div></div>
+    <div class="stat"><div class="num acc">PREQ → 0</div><div class="lbl">HWMP frames from board0</div></div>
+    <div class="stat"><div class="num ok">0% → 100%</div><div class="lbl">board1→board2 ping loss</div></div>
+    <div class="stat"><div class="num">820</div><div class="lbl">board0 beacons while leaf (alive + peered)</div></div>
+    <div class="stat"><div class="num">6</div><div class="lbl">gates off one bool</div></div>
+  </div>
+
+  <h2 id="api">API</h2>
+  <pre><code>/* umac/mesh/umac_mesh.h:152 */
+void mmwlan_mesh_set_multihop(bool enabled);   /* default enabled (= unchanged behaviour) */</code></pre>
+  <p><code>mmwlan_mesh_set_multihop(false)</code> turns the node into a leaf. The flag is a file-static bool
+  (<code>g_mesh_multihop</code>, <code>umac_mesh.c:521</code>) kept <strong>outside</strong> <code>mesh_ctx</code>
+  (which is <code>memset</code> to 0 on every <code>mmwlan_mesh_start</code>), so it is settable <strong>before or
+  after</strong> start and survives a mesh restart. Default <code>true</code> — every gate below is a precise
+  no-op when enabled, so existing multi-hop behaviour is byte-for-byte unchanged.</p>
+
+  <h2 id="black-hole">Why gating the data relay alone is NOT enough (the black-hole trap)</h2>
+  <div class="callout err">
+    <p class="ct">⚠ The black-hole trap</p>
+    <p>The obvious fix — "stop relaying data" — is wrong on its own. If the node stops forwarding data but keeps
+    answering / forwarding HWMP, it still <strong>advertises itself as a usable relay</strong>: peers install paths
+    whose next hop is this node and then unicast their multi-hop traffic <em>to</em> it — which it now silently
+    drops. That is a routing <strong>black hole</strong> that breaks exactly the routes that should have detoured
+    around it — worse than not participating at all.</p>
+  </div>
+  <p>So a correct leaf must ALSO be invisible to HWMP path selection (emit no PREQ / PREP / PERR), so peers never
+  choose it as a next hop in the first place. Group / multicast re-broadcast is a third, separate data path that
+  no HWMP gate covers and must be disabled on its own.</p>
+
+  <h2 id="code-map">Code map — six gates off one bool</h2>
+  <p>All in <code>components/halow/.../morselib/src/umac/mesh/umac_mesh.c</code>:</p>
+  <table>
+    <thead><tr><th>Gate</th><th class="num">Line</th><th>Function</th><th>Effect when leaf (false)</th></tr></thead>
+    <tbody>
+      <tr><td>unicast relay</td><td class="num">2261</td><td><code>umac_mesh_forward_data</code></td><td>early <code>return false</code> → never relay another node's unicast (RX caller drops)</td></tr>
+      <tr><td>group relay</td><td class="num">2394</td><td><code>umac_mesh_handle_group_data</code></td><td>skip the re-broadcast block → never re-broadcast others' multicast (still delivers locally)</td></tr>
+      <tr><td>own next hop</td><td class="num">1809</td><td><code>umac_mesh_lookup_next_hop</code></td><td>early <code>return false</code> → own TX always goes direct, never via a multi-hop path</td></tr>
+      <tr><td>HWMP TX</td><td class="num">1903</td><td><code>umac_mesh_tx_hwmp</code></td><td>early return → emits no PREQ / PREP (originated <strong>or</strong> forwarded — the sole TX chokepoint for both)</td></tr>
+      <tr><td>PERR TX</td><td class="num">2014</td><td><code>umac_mesh_tx_perr</code></td><td>early return → emits no PERR (on peer loss or propagated)</td></tr>
+      <tr><td>discovery</td><td class="num">1941</td><td><code>umac_mesh_start_discovery</code></td><td>early return → never originates path discovery</td></tr>
+    </tbody>
+  </table>
+  <p><code>tx_hwmp</code> (1903) and <code>tx_perr</code> (2014) are the <em>only</em> two TX chokepoints through
+  which any PREQ / PREP / PERR leaves the node — originated (<code>start_discovery</code>, PREP-as-target) or
+  forwarded (intermediate PREQ flood, PREP forward, PERR propagate). Gating them makes the node fully HWMP-silent.
+  Verified by an adversarial leak-hunt: no forwarded DATA or HWMP frame has any egress path that bypasses these
+  gates; there is no RANN / root-announce / proactive HWMP.</p>
+  <div class="callout ok">
+    <p class="ct">✓ Direct 1-hop traffic untouched</p>
+    <p>A frame addressed to us (mesh-DA == our MAC) never reaches <code>forward_data</code> — it takes the
+    local-delivery path — and MPM peering / SAE / AMPE are not gated at all.</p>
+  </div>
+
+  <h2 id="linux">Linux analogue</h2>
+  <p>Mirrors the <em>intent</em> of Linux <code>dot11MeshForwarding</code> (<code>mesh_fwding</code>) but is
+  <strong>stricter</strong>: <code>mesh_fwding=0</code> only stops forwarding-for-others (the node still does path
+  selection for its own traffic), whereas this toggle also disables the node's own multi-hop use and all HWMP
+  origination — a true single-hop-only node. Not a line-by-line port (the HWMP here is morselib's own hand-rolled
+  implementation, not <code>net/mac80211/mesh_hwmp.c</code>); it is an original gate set with a Linux conceptual
+  analogue.</p>
+
+  <h2 id="onair">On-air verification (chronium <code>morse0</code>, 2026-06-30)</h2>
+  <p><strong>Bench:</strong> 3 ESP boards in the forced-line topology (<code>MESH_LINE_RELAY_DEMO</code>: the peer
+  allowlist blocks board1↔board2 direct, so board1↔board2 traffic must traverse board0). board1 auto-pings board2
+  (10.9.9.108). chronium sniffs <code>morse0</code>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">board1</div><div class="s">endpoint · 10.9.9.100<br>f9:40</div></div>
+      <div class="node acc"><div class="t">board0</div><div class="s">relay · 10.9.9.136<br>ef:a4</div></div>
+      <div class="node"><div class="t">board2</div><div class="s">endpoint · 10.9.9.108<br>f0:08</div></div>
+    </div>
+    <figcaption>Forced-line topology: the allowlist blocks board1↔board2 direct, so board1→board2 traffic must traverse the board0 relay.</figcaption>
+  </figure>
+
+  <p>Monitor recipe (chronium): <code>sudo iw dev wlan1 set type monitor</code> + <code>set freq 5560</code>
+  (S1G ch27), then <code>sudo python3 ~/halow-mon.py &lt;secs&gt; e272a1f8efa4</code> (filter to board0's TA).</p>
+
+  <table>
+    <thead><tr><th>Metric (board0 = <code>ef:a4</code>)</th><th>Test A — relay (multihop ON)</th><th>Test B — leaf (multihop OFF)</th></tr></thead>
+    <tbody>
+      <tr><td>DATA-4addr forwarded (board0 TA)</td><td>37 / 18 s</td><td><strong>0</strong> / 30 s</td></tr>
+      <tr><td>HWMP (PREQ / PREP) from board0</td><td>originating PREQs</td><td><strong>0</strong></td></tr>
+      <tr><td>board0 beacons</td><td>yes (alive)</td><td>yes — 820 beacons (alive + peered)</td></tr>
+      <tr><td>board1 → board2 ping</td><td><strong>0% loss</strong> (replies 46–72 ms)</td><td><strong>100% loss</strong> (34/34 timeouts)</td></tr>
+      <tr><td>board1 ↔ board0 direct link</td><td>up</td><td>up (re-peered, got mesh IP)</td></tr>
+    </tbody>
+  </table>
+
+  <p>The instant board0 became a leaf it stopped forwarding 4-addr data AND went HWMP-silent, while still beaconing
+  and holding its direct peer links. board1 could no longer reach board2 (100% loss) but stayed directly peered
+  with board0 — exactly a pure leaf.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Reachability tradeoff observed live</p>
+    <p>A leaf is HWMP-invisible, so when board0 dropped out as a relay, board1 fell back to trying board2
+    <em>directly</em> (datapath direct-fallback, seen as <code>TA=f9:40 A1=f0:08</code> in the capture). Since the
+    allowlist never peered board1↔board2, board2 dropped those → the 100% loss.</p>
+    <p><strong>Consequence for interop:</strong> a peer that resolves <em>all</em> unicast via HWMP (e.g. Linux
+    <code>mac80211</code>, which queues unicast behind path resolution) may be unable to reach a leaf even directly.
+    ESP peers reach it fine (they direct-fallback on a path-lookup miss). If a leaf must stay HWMP-reachable, a
+    softer variant would keep only the PREP-as-target reply un-gated (answers "I'm here" without ever forwarding
+    for others).</p>
+  </div>
+
+  <h2 id="files">Files / commits</h2>
+  <ul>
+    <li>Submodule <code>feat/mesh-forwarding-toggle</code> (off <code>894dcd9f</code>, the merged secured-mesh base):
+      <code>fe2ac1ef</code> — <code>umac_mesh.c</code> (+46/−5), <code>umac_mesh.h</code> (+8).</li>
+    <li>Parent <code>feature/mesh-forwarding-toggle</code> (off <code>main</code>): app demo hook
+      (<code>MESH_LEAF_NODE</code>, default-off) + this worklog + milestones / code-map updates + submodule gitlink bump.</li>
+  </ul>
+  <p>Independent of the SAE-hardening branch (different functions; branched off the pre-SAE base).</p>
+
+  <h2 id="verification">Verification status</h2>
+  <ul>
+    <li><strong>Build:</strong> green on the pre-SAE base (<code>rimba-halow-mesh</code>, proto1-fgh100m).</li>
+    <li><strong>On-air:</strong> gold-standard is N/A — this feature adds no new on-air frame to byte-diff against
+      Linux; it <em>suppresses</em> existing frames. Verified instead by the A/B <em>absence</em> capture above
+      (board0 emits 37→0 forwards, PREQ→0) plus end-to-end ping (0%→100% loss).</li>
+  </ul>
+
+  <h2 id="followups">Follow-ups</h2>
+  <ul>
+    <li>App wiring: currently a default-off <code>MESH_LEAF_NODE</code> bench demo hook in
+      <code>rimba-halow-mesh</code> (matching the existing demo-macro convention). Decide final surface (console
+      command vs demo macro vs API-only).</li>
+    <li>Optional "reachable leaf" mode (keep PREP-as-target) if Linux peers must reach a leaf.</li>
+  </ul>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#api">API</a></li>
+  <li><a href="#black-hole">The black-hole trap</a></li>
+  <li><a href="#code-map">Code map — six gates</a></li>
+  <li><a href="#linux">Linux analogue</a></li>
+  <li><a href="#onair">On-air verification</a></li>
+  <li><a href="#files">Files / commits</a></li>
+  <li><a href="#verification">Verification status</a></li>
+  <li><a href="#followups">Follow-ups</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-30-mesh-leaf-single-hop-toggle</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

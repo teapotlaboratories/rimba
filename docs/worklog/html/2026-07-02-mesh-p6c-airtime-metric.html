@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P6c: mesh airtime link metric — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-02</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-02</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ hw-verified</span>
+    <span class="badge">mesh · HWMP · airtime metric</span>
+  </div>
+
+  <h1>P6c: mesh airtime link metric<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">port of net/mac80211 <code>airtime_link_metric_get</code> · rate-derived HWMP cost</small></h1>
+
+  <p class="lead">Replaces morselib's fixed per-hop HWMP cost (<code>MESH_PATH_LINK_METRIC = 100</code>) with a
+  rate-derived airtime metric ported line-for-line from <code>net/mac80211 airtime_link_metric_get</code>, so HWMP
+  prefers higher-quality paths instead of merely fewer hops. Implemented + builds + formula-unit-verified; the on-air
+  routing test is the remaining (bench-heavy) verification.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">2731</div><div class="lbl">per-hop · MCS7 (≥ −70 dBm)</div></div>
+    <div class="stat"><div class="num acc">6827</div><div class="lbl">per-hop · MCS3 (≥ −85 dBm)</div></div>
+    <div class="stat"><div class="num">27307</div><div class="lbl">per-hop · MCS0 (weak)</div></div>
+    <div class="stat"><div class="num acc">5462</div><div class="lbl">Run 1 · 2 strong hops (2×2731)</div></div>
+    <div class="stat"><div class="num acc">30038</div><div class="lbl">Run 2 · weak+strong (27307+2731)</div></div>
+    <div class="stat"><div class="num">+100 → airtime</div><div class="lbl">replaced fixed per-hop cost</div></div>
+  </div>
+
+  <h2 id="what-ships">What ships</h2>
+  <ul>
+    <li>The <strong>exact</strong> mac80211 fixed-point ETT formula, re-verified byte-for-byte on chronite's pinned
+      <code>rpi-linux</code> (<code>mesh_hwmp.c:338-381</code>; constants <code>TEST_FRAME_LEN=8192</code> /
+      <code>MAX_METRIC=0xffffffff</code> / <code>ARITH_SHIFT=8</code> at <code>:14-16</code>).</li>
+    <li>Its rate input <strong>approximated</strong> from the peer's last RX RSSI (mesh has no per-peer rate control —
+      see below), on the <em>same metric scale</em> as a live Linux node's airtime, so a mixed ESP/Linux mesh
+      accumulates comparably.</li>
+    <li>Integrated at the two HWMP accumulation sites (PREQ + PREP) with the mac80211 overflow clamp.</li>
+  </ul>
+
+  <h2 id="formula">The formula (verified on both trees)</h2>
+  <p><code>airtime_link_metric_get</code> re-grepped on chronite:</p>
+  <pre><code>rate           = DIV_ROUND_UP(sta_get_expected_throughput, 100)
+tx_time        = device_constant + 10 * test_frame_len / rate
+estimated_retx = (1 &lt;&lt; 16) / (s_unit - err)
+result         = (tx_time * estimated_retx) &gt;&gt; 16
+                 ESTAB-gate → MAX_METRIC</code></pre>
+  <p>Ported verbatim at <code>umac_mesh.c:2153</code> (<code>mesh_airtime_from_thr_kbps</code>).
+  <strong>Unit-checked</strong> standalone: thr {300, 1200, 3000} Kbps → metric
+  <strong>{27307, 6827, 2731}</strong> — matches the hand-computed Linux output.</p>
+
+  <div class="callout ok"><p class="ct">✓ Unit check</p><p><code>{300, 1200, 3000}</code> Kbps →
+  <code>{27307, 6827, 2731}</code> == hand-computed Linux <code>airtime_link_metric_get</code>. Lower metric = better
+  link; a weaker link costs proportionally more airtime.</p></div>
+
+  <h2 id="rate-input">The rate input — deliberate approximation</h2>
+  <p>mac80211 feeds the mmrc <em>learned</em> best-throughput rate (<code>sta_get_expected_throughput</code> →
+  <code>morse_get_expected_throughput</code>). morselib <strong>never starts rate control for mesh peer stads</strong>
+  (mmrc's <code>reference_table</code> stays NULL), so no learned rate exists. Instead
+  (<code>mesh_thr_kbps_from_rssi</code>, <code>umac_mesh.c:2170</code>) we seed the rate from the peer's RSSI using
+  mmrc's <em>own</em> cold-start tiers (<code>mmrc_init_rates</code>, <code>mmrc.c:1287</code>: ≥ −70 → MCS7, ≥ −85 →
+  MCS3, else MCS0) and run it through the <em>same</em> <code>mmrc_calculate_theoretical_throughput</code>
+  (<code>mmrc.c:482</code>) morse's driver op uses, at the mesh operating point (1 MHz / long GI / single stream) →
+  3000/1200/300 Kbps → per-hop <strong>2731 / 6827 / 27307</strong>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">peer RX RSSI</div><div class="s">sampled on PREQ/PREP</div></div>
+      <div class="node acc"><div class="t">mmrc tier</div><div class="s">−70/−85 → MCS7/3/0</div></div>
+      <div class="node acc"><div class="t">theoretical thr</div><div class="s">1 MHz · LGI · 1ss</div></div>
+      <div class="node acc"><div class="t">airtime metric</div><div class="s">ETT fixed-point</div></div>
+      <div class="node ok"><div class="t">per-hop cost</div><div class="s">2731 / 6827 / 27307</div></div>
+    </div>
+    <figcaption>No mesh rate control exists, so the rate is seeded from the peer's last RX RSSI through mmrc's own
+    cold-start tiers — the estimate is derived exactly as morse would at cold-start.</figcaption>
+  </figure>
+
+  <p>Every per-hop cost is &gt; 0, so adding a hop strictly increases the metric (monotonic / loop-free, as HWMP
+  requires). Per-frame RSSI is sampled onto the sender's peer from the very PREQ/PREP that traversed the link
+  (<code>umac_mesh_handle_action</code>, <code>umac_mesh.c:2588</code>), mirroring IBSS
+  <code>umac_ibss_record_peer_rx</code>.</p>
+
+  <p>The metric grows as the link weakens — a weak MCS0 hop costs ~10× a strong MCS7 hop:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">MCS7 · ≥ −70</span><span class="bar-track"><span class="bar-fill fast" style="width:10.1%"></span></span><span class="val">2731</span></div>
+    <div class="bar-row"><span class="lbl">MCS3 · ≥ −85</span><span class="bar-track"><span class="bar-fill" style="width:25%"></span></span><span class="val">6827</span></div>
+    <div class="bar-row"><span class="lbl">MCS0 · weak</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">27307</span></div>
+  </div>
+
+  <h3>Divergences (each deliberate)</h3>
+  <ol>
+    <li><strong>RSSI-seeded rate, not learned airtime</strong> — no mesh RC; coarse 3-tier. Reuses mmrc's own
+      cold-start seed so the estimate is derived exactly as morse would at cold-start.</li>
+    <li><strong><code>err</code> / <code>fail_avg</code> structurally 0</strong> — no per-peer PER/retry in morselib;
+      the fail-ratio fallback (<code>mesh_hwmp.c:361-372</code>) never runs (we always synthesize rate &gt; 0).</li>
+    <li><strong>Fixed 1 MHz BW</strong> — mesh is single-channel; BW uniformly scales all metrics, cannot change path
+      ordering.</li>
+    <li><strong>RSSI sampled at RX, not a TX-status EWMA</strong> — no per-peer TX-status callback in morselib mesh;
+      the 3-tier quantization gives natural hysteresis (metric only re-evaluated at discovery).</li>
+  </ol>
+
+  <h2 id="integration">Integration (what changed, <code>umac_mesh.c</code>)</h2>
+  <ul>
+    <li><code>:2232</code> (PREQ) + <code>:2289</code> (PREP): <code>new_metric = metric + mesh_last_hop_metric(frame_sa)</code>
+      + overflow clamp <code>if (new_metric &lt; metric) new_metric = MESH_METRIC_MAX</code> (<code>mesh_hwmp.c:480</code>
+      — previously absent; the constant +100 couldn't overflow, airtime hops can).</li>
+    <li>New per-peer <code>int16_t last_rssi_dbm</code> (<code>:447</code>), init <code>MESH_RSSI_NONE</code>
+      (<code>:575</code>), recorded from the HWMP frame (<code>:2588</code>).</li>
+    <li><code>mesh_last_hop_metric</code> (<code>:2187</code>): ESTAB gate → RSSI → airtime, keyed by the immediate
+      transmitter.</li>
+    <li><code>mesh_path_update</code> fresh-info compare (<code>:1859</code>, <code>sn == p-&gt;sn &amp;&amp; metric &lt; p-&gt;metric</code>)
+      <strong>unchanged</strong> — lower-is-better already fits airtime; it's what the verification exercises.</li>
+    <li>Removed <code>MESH_PATH_LINK_METRIC</code>; added constants <code>MESH_METRIC_*</code> + RSSI tiers
+      (<code>:369-378</code>); added <code>#include "mmrc.h"</code>.</li>
+  </ul>
+
+  <h2 id="verification">Verification</h2>
+  <ul>
+    <li><strong>Formula (unit):</strong> standalone C → {27307, 6827, 2731} == hand-computed Linux
+      <code>airtime_link_metric_get</code>. ✓</li>
+    <li><strong>Build:</strong> <code>make build APP=rimba-halow-mesh BOARD=proto1-fgh100m</code> —
+      <code>umac_mesh.c</code> compiles, links (<code>mmrc_calculate_theoretical_throughput</code> resolved),
+      esp32s3 image created. ✓</li>
+  </ul>
+
+  <p><strong>Hardware (3-board line, no RF arrangement, 2026-07-02): ✓</strong> flashed board1 — board0(relay) —
+  board2 (<code>MESH_LINE_RELAY_DEMO</code> allowlist; board1 pings board2 forced 2-hop via board0). board1's resolved
+  path metric was read off the console via a TEMP <code>printf</code> (morselib <code>MMLOG</code> isn't on the UART):</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">board1</div><div class="s">origin · ping src</div></div>
+      <div class="node acc"><div class="t">board0</div><div class="s">relay</div></div>
+      <div class="node ok"><div class="t">board2</div><div class="s">target</div></div>
+    </div>
+    <figcaption>Forced 2-hop line: board1 → board0 (relay) → board2. Each hop contributes its own airtime cost, so
+    the resolved path metric = sum of the two link metrics.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Run 1 (real RSSI, both links strong):</strong> <code>P6C-PATH to board2 via board0 metric=5462</code>
+      = 2×2731 (both MCS7) — the true airtime metric, <strong>not</strong> the old fixed 200. Confirms real RSSI is
+      sampled → tier → airtime and accumulated across 2 hops. Ping 0% loss (~45 ms).</li>
+    <li><strong>Run 2 (board0↔board2 forced weak, −90 dBm via a TEMP override):</strong> <code>metric=30038</code>
+      = 27307 (MCS0 weak hop) + 2731 (MCS7 strong hop) — the metric <strong>responds to per-link quality</strong>
+      with correct asymmetric accumulation. Ping stayed 0% loss.</li>
+  </ul>
+  <p>Deterministic, no antenna/attenuator work (the override forces RSSI in software). TEMP scaffolding
+  (<code>printf</code>, <code>&lt;stdio.h&gt;</code>, the override, the app's <code>MESH_IPERF</code>→line-demo toggle)
+  reverted after.</p>
+
+  <p><strong>Full-RF routing-decision test (future, optional):</strong> a 4th node giving two competing multi-hop
+  paths so airtime picks a <em>different next-hop</em> than the fixed metric would. Not required to validate the new
+  code — the fresh-info selection it exercises (<code>mesh_path_update:1859</code>, lower-metric-wins) is unchanged
+  existing logic; P6c only changed the metric <em>value</em>, now hardware-verified above.</p>
+
+  <h2 id="triangle">Routing-decision test (triangle) — surfaced a pre-existing HWMP bug</h2>
+  <p>Beyond the single-path metric-value tests above, I ran the "gold-standard" decision test: a 3-board triangle
+  (all peered), override forcing the <strong>direct</strong> board1↔board2 link weak (−90 → 27307) while the
+  board1→board0→board2 relay stays strong (2731+2731 = 5462). Airtime <em>should</em> route board1→board2 via board0
+  despite board2 being a direct peer.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 520 250" role="img" aria-label="Triangle topology: weak direct link vs strong relay path">
+      <!-- edges -->
+      <line x1="110" y1="60" x2="410" y2="60" stroke="#888" stroke-width="2" stroke-dasharray="7 6"/>
+      <line x1="105" y1="80" x2="245" y2="185" stroke="#2f6feb" stroke-width="2.5"/>
+      <line x1="415" y1="80" x2="275" y2="185" stroke="#2f6feb" stroke-width="2.5"/>
+      <!-- edge labels -->
+      <text x="260" y="48" text-anchor="middle" fill="#888" font-size="13" font-family="monospace">direct −90 dBm · 27307 (loses)</text>
+      <text x="120" y="140" text-anchor="middle" fill="#2f6feb" font-size="13" font-family="monospace">2731</text>
+      <text x="400" y="140" text-anchor="middle" fill="#2f6feb" font-size="13" font-family="monospace">2731</text>
+      <text x="260" y="228" text-anchor="middle" fill="#2f6feb" font-size="12.5" font-family="monospace">relay total 5462 (should win)</text>
+      <!-- nodes -->
+      <g>
+        <rect x="55" y="42" width="110" height="38" rx="9" fill="var(--card)" stroke="currentColor" stroke-width="1.5"/>
+        <text x="110" y="66" text-anchor="middle" fill="currentColor" font-size="14" font-weight="700">board1</text>
+      </g>
+      <g>
+        <rect x="355" y="42" width="110" height="38" rx="9" fill="var(--card)" stroke="currentColor" stroke-width="1.5"/>
+        <text x="410" y="66" text-anchor="middle" fill="currentColor" font-size="14" font-weight="700">board2</text>
+      </g>
+      <g>
+        <rect x="205" y="182" width="110" height="38" rx="9" fill="var(--soft)" stroke="#2f6feb" stroke-width="1.5"/>
+        <text x="260" y="206" text-anchor="middle" fill="currentColor" font-size="14" font-weight="700">board0 · relay</text>
+      </g>
+    </svg>
+    <figcaption>All three peered. The direct board1↔board2 link is forced weak (27307); the relay via board0 is strong
+    (2731+2731 = 5462). Airtime should pick the relay — but the installed path <strong>flapped</strong>.</figcaption>
+  </div>
+
+  <p><strong>Result:</strong> the relay path <strong>is</strong> discovered + installed (via board0, 5462), but the
+  installed path <strong>flaps</strong> direct(27307)↔relay(5462) across discovery rounds (4 direct : 2 relay installs
+  in a 40 s window). Root cause is <strong>HWMP-layer, not the metric</strong>: <code>umac_mesh.c:2264</code> replies to
+  a PREQ with <code>target_sn = ++mesh_hwmp_sn</code> (per-reply SN increment) and there is <strong>no received-PREQ
+  reply-dedup</strong> — so in a multi-path topology board2 replies to <em>both</em> the direct PREQ and the relayed
+  PREQ, each with a different, incrementing SN. board1's fresh-info rule (<code>mesh_path_update:1872</code>) then
+  selects by <strong>newer SN, short-circuiting the <code>metric &lt;</code> compare</strong> → flapping, and selection
+  is SN-arrival-order-dependent rather than metric-dependent.</p>
+
+  <p>mac80211 avoids this: a target replies <strong>once</strong> per discovery (a duplicate PREQ — same orig_sn — is
+  stale and not re-replied via <code>hwmp_route_info_get</code>). morselib lacks that dedup. <strong>This is separate
+  from P6c</strong> — the airtime metric itself is correct (values verified above); it simply can't cleanly
+  <em>decide</em> a multi-path route until HWMP reply-dedup lands. Filed as the backlog item <strong>"HWMP multi-path
+  reply-dedup / per-reply SN"</strong>. This finding is exactly what the decision test existed to catch — the
+  single-path tests could not have surfaced it.</p>
+
+  <div class="callout ok"><p class="ct">✓ Update (same day): the HWMP bug was FIXED</p><p>Per worklog
+  <code>2026-07-02-mesh-hwmp-multipath-dedup-sn.md</code> (following mac80211's time-gated target SN + freshness gate).
+  Re-running this exact triangle, board1→board2 now <strong>settles on the relay (via board0, 5462)</strong> each
+  discovery and holds stable ~20 s with no flapping — so the airtime routing <em>decision</em> is now
+  hardware-verified end-to-end, not just the metric values.</p></div>
+
+  <h2 id="interop">Interop / rollout</h2>
+  <div class="callout warn"><p class="ct">⚠ Flash all mesh nodes together</p><p>All morselib mesh nodes must be flashed
+  <strong>together</strong> — a not-yet-upgraded node still emits +100/hop (incomparable scale). Linux nodes already
+  emit compatible stock airtime.</p></div>
+  <p>Note: morselib's preemptive path refresh is <em>time-based</em> (<code>MESH_PATH_REFRESH_MS</code>), not the
+  metric-threshold <code>hwmp_is_mpath_optimal</code> <code>253</code> path, so airtime doesn't collide with it today;
+  if that metric-based check is ever ported, <code>253</code> (min single-hop ~280 for airtime) must be re-derived.</p>
+
+  <h2 id="code-map">Code-map</h2>
+  <p>Rows in <code>docs/mesh-ap/rimba-mesh-80211s-code-map.md</code> (P6c section); Linux refs re-grepped on
+  chronite's pinned <code>rpi-linux</code> / <code>morse_driver</code>.</p>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#what-ships">What ships</a></li>
+  <li><a href="#formula">The formula</a></li>
+  <li><a href="#rate-input">The rate input</a></li>
+  <li><a href="#integration">Integration</a></li>
+  <li><a href="#verification">Verification</a></li>
+  <li><a href="#triangle">Triangle — HWMP bug</a></li>
+  <li><a href="#interop">Interop / rollout</a></li>
+  <li><a href="#code-map">Code-map</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-02-mesh-p6c-airtime-metric</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

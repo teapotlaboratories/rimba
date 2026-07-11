@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh vs AP↔STA performance — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-26</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-26</span>
+    <span class="badge">3 min read</span>
+    <span class="badge ok">✓ characterised</span>
+    <span class="badge">mesh · AP · perf</span>
+  </div>
+
+  <h1>Mesh vs AP↔STA performance: iperf throughput + ping latency<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">1 MHz S1G channel (ch27 / 915.5 MHz, US) · Linux &amp; ESP32</small></h1>
+
+  <p class="lead">Characterised the HaLow link throughput (iperf) and latency (ping) across <strong>link type</strong>
+  (802.11s mesh vs AP↔STA) and <strong>node pair</strong> (Linux↔Linux, Linux↔ESP32, ESP32↔ESP32) on the 1 MHz S1G
+  channel. Status table lives in <code>docs/mesh-ap/rimba-mesh-ap-milestones.md</code>; this worklog is the standalone
+  record.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">~5×</div><div class="lbl">AP↔STA over mesh (1-hop goodput)</div></div>
+    <div class="stat"><div class="num">0.13–0.20</div><div class="lbl">mesh 1-hop Mbit/s</div></div>
+    <div class="stat"><div class="num acc">0.79–1.10</div><div class="lbl">AP↔STA Mbit/s</div></div>
+    <div class="stat"><div class="num">~0.04</div><div class="lbl">mesh 2-hop Mbit/s</div></div>
+    <div class="stat"><div class="num acc">15–50 ms</div><div class="lbl">ping RTT range</div></div>
+    <div class="stat"><div class="num">72 Mbit/s</div><div class="lbl">PHY (VHT-MCS7) vs sub-Mbps real</div></div>
+  </div>
+
+  <div class="callout"><p class="ct">Bottom line</p><p>Everything is <strong>sub-Mbps and ~15–50 ms</strong> on this
+  1 MHz link. AP↔STA single-hop runs ~5× the mesh single-hop; the second mesh hop roughly quarters throughput and
+  doubles RTT. Within any node-pair row the host type barely matters — <strong>channel airtime is the cap, not the
+  radio or the stack</strong>.</p></div>
+
+  <h2 id="firmware">Dedicated performance firmware</h2>
+  <p>So the production apps stay clean (no <code>IPERF</code>/<code>MESH_IPERF</code> toggles), the perf test runs on
+  separate firmware: <strong><code>firmware/rimba-halow-{mesh,ap,sta}-perf</code></strong>. Each is the matching
+  production app's link bring-up (<code>rimba-halow-mesh</code>/<code>-ap</code>/<code>-sta</code>) plus an
+  <strong><code>esp_console</code> UART REPL</strong> that registers two console commands:</p>
+  <ul>
+    <li><strong><code>iperf</code></strong> — <code>espressif/iperf-cmd</code> (iperf <strong>v2</strong>, port 5001;
+      NOT iperf3-compatible).</li>
+    <li><strong><code>ping</code></strong> — <code>esp-qa/ping-cmd</code>.</li>
+  </ul>
+  <p>Auto-ping / the STA TWT test are disabled in the perf builds; the static IP is still pinned.
+  <code>rimba-halow-ap-perf</code> needs a <strong>custom 2 MB app partition</strong> (<code>partitions.csv</code>) —
+  hostapd + the two cmd components push the binary to ~1.54 MB, over the default ~1 MB / SINGLE_APP_LARGE 1.5 MB slots
+  (16 MB flash, so room to spare). The production <code>mesh</code>/<code>ap</code>/<code>sta</code> apps were reverted
+  to clean.</p>
+  <p>Drive over serial: <code>iperf -s</code> one end, <code>iperf -c &lt;ip&gt;</code> the other (or
+  <code>ping &lt;ip&gt; -c N</code>). Two gotchas baked into the drivers:</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Driver gotchas</p>
+    <ul style="margin:.2em 0">
+      <li><strong>Ping first to warm up ARP/HWMP, then iperf.</strong> With no auto-ping, the first TCP connect fails
+        <code>errno 118</code> (EHOSTUNREACH) until ARP + the mesh path resolve; a ping (or a couple of connect
+        retries) primes them.</li>
+      <li><strong>Multi-hop needs all 3 boards reset together</strong> — resetting some while others hold stale peer
+        state breaks the forced line (board1↔board2 only via board0 via the peer allowlist).</li>
+      <li>Opening a board's USB serial <strong>resets it</strong>, so every ESP measurement pays a ~40–50 s
+        boot+peer settle.</li>
+    </ul>
+  </div>
+
+  <h2 id="iperf">iperf — TCP goodput (Mbit/s)</h2>
+  <table>
+    <thead><tr><th></th><th class="num">Linux↔Linux</th><th class="num">Linux↔ESP32</th><th class="num">ESP32↔ESP32</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Mesh</strong> (1 hop)</td><td class="num">0.20</td><td class="num">0.13</td><td class="num">0.16</td></tr>
+      <tr><td><strong>AP↔STA</strong></td><td class="num">0.79</td><td class="num">1.10</td><td class="num">0.84</td></tr>
+      <tr><td><strong>Mesh multi-hop</strong> (2 hops)</td><td class="num">—</td><td class="num">—</td><td class="num">~0.03–0.06</td></tr>
+    </tbody>
+  </table>
+
+  <p>Goodput to scale (max = 1.10, Linux↔ESP32 AP↔STA). Amber = mesh, green = AP↔STA:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">2-hop ESP↔ESP</span><span class="bar-track"><span class="bar-fill slow" style="width:4%"></span></span><span class="val">~0.03–0.06</span></div>
+    <div class="bar-row"><span class="lbl">mesh L↔ESP</span><span class="bar-track"><span class="bar-fill slow" style="width:12%"></span></span><span class="val">0.13</span></div>
+    <div class="bar-row"><span class="lbl">mesh ESP↔ESP</span><span class="bar-track"><span class="bar-fill slow" style="width:15%"></span></span><span class="val">0.16</span></div>
+    <div class="bar-row"><span class="lbl">mesh L↔L</span><span class="bar-track"><span class="bar-fill slow" style="width:18%"></span></span><span class="val">0.20</span></div>
+    <div class="bar-row"><span class="lbl">AP L↔L</span><span class="bar-track"><span class="bar-fill fast" style="width:72%"></span></span><span class="val">0.79</span></div>
+    <div class="bar-row"><span class="lbl">AP ESP↔ESP</span><span class="bar-track"><span class="bar-fill fast" style="width:76%"></span></span><span class="val">0.84</span></div>
+    <div class="bar-row"><span class="lbl">AP L↔ESP</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">1.10</span></div>
+  </div>
+
+  <p>L↔L used <code>iperf3</code>; ESP cells use the ESP's iperf v2 (so <code>iperf</code> v2.2.1 was installed on
+  chronite/chronium too). ESP↔Linux + Linux-AP↔ESP-STA confirmed at both ends (server saw the client's bytes). The
+  5 Mbit/s default UDP offered rate overran the link (70% loss); 500 kbit/s was clean — keep offered UDP under the
+  ceiling. PHY rate was 72 Mbit/s VHT-MCS7 at −21 dBm, but real goodput is sub-Mbps —
+  <strong>1 MHz channel airtime is the cap, not the radio</strong>.</p>
+
+  <h2 id="ping">ping — RTT (median)</h2>
+  <table>
+    <thead><tr><th></th><th class="num">Linux↔Linux</th><th class="num">Linux↔ESP32</th><th class="num">ESP32↔ESP32</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Mesh</strong> (1 hop)</td><td class="num">~25 ms</td><td class="num">~11–20 ms</td><td class="num">~18 ms (0% loss)</td></tr>
+      <tr><td><strong>AP↔STA</strong></td><td class="num">~14 ms</td><td class="num">~10–15 ms</td><td class="num">~15 ms (0% loss)</td></tr>
+      <tr><td><strong>Mesh multi-hop</strong> (2 hops)</td><td class="num">—</td><td class="num">—</td><td class="num">~50 ms median (35–59 ms, occasional ~850 ms spike, ~8% loss)</td></tr>
+    </tbody>
+  </table>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">board1</div><div class="s">source</div></div>
+      <div class="node acc"><div class="t">board0</div><div class="s">relay (store-fwd)</div></div>
+      <div class="node"><div class="t">board2</div><div class="s">destination</div></div>
+    </div>
+    <figcaption>The forced 2-hop line — board1↔board2 only through board0 via the peer allowlist. The relay
+    store-and-forwards on the <em>same</em> shared 1 MHz channel, so the second hop roughly quarters throughput and
+    doubles RTT.</figcaption>
+  </figure>
+
+  <h2 id="findings">Findings</h2>
+  <ol>
+    <li><strong>AP↔STA single-hop (~0.8–1.1 Mbps) is ~5× the mesh single-hop (~0.13–0.20 Mbps).</strong> The mesh's
+      4-address header + Mesh Control + HWMP cost real airtime on a 1 MHz channel; the AP↔STA path is leaner.</li>
+    <li><strong>The second mesh hop roughly quarters throughput</strong> (0.16 → ~0.04) <strong>and doubles RTT</strong>
+      (~18 → ~50 ms), with added loss/spikes — the relay store-and-forwards on the same shared channel, and the 30 s
+      path lifetime triggers re-discovery stalls under load.</li>
+    <li><strong>Within a row, node type barely matters</strong> (Linux vs ESP) — channel airtime dominates, not the
+      host stack. Latency tracks <strong>hop count, not link type</strong>.</li>
+    <li>Everything is <strong>sub-Mbps and ~15–50 ms</strong> on this 1 MHz link — sets realistic expectations for the
+      Mesh-gate vs a flat AP↔STA topology.</li>
+  </ol>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#firmware">Dedicated performance firmware</a></li>
+  <li><a href="#iperf">iperf — TCP goodput</a></li>
+  <li><a href="#ping">ping — RTT (median)</a></li>
+  <li><a href="#findings">Findings</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-26-mesh-ap-perf-iperf-ping</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-node HW test: ESP32 AP + 3 STAs, TWT — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-06-23</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-23</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ core goals PASS</span>
+    <span class="badge">AP · TWT · power-save</span>
+  </div>
+
+  <h1>Multi-node HW test: ESP32 AP + 2 ESP32 STA + Linux STA, TWT<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">on-air validation of the cap=100 / PSRAM AP rebuild · 3 concurrent STAs · Linux interop</small></h1>
+
+  <p class="lead">On-air validation that the rebuilt ESP32 HaLow AP (two-block S1G TIM, <code>MAX_SUPPORTED_AID</code> 128,
+  per-STA state + TWT table in PSRAM — see
+  <a href="2026-06-23-ap-sta-ceiling-100-psram.html">2026-06-23-ap-sta-ceiling-100-psram</a>) still associates
+  multiple STAs and drives TWT power-save, and that a Linux <code>morse_driver</code> STA interoperates with it.
+  Author: Aldwin.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Status — PASS for the core goals</p>
+    <p>3 STAs concurrent (2 ESP32 + 1 Linux), TWT power-save confirmed on the ESP32 STA. Linux-STA-<em>as-TWT-requester</em>
+    not achieved (a separate Morse-driver requester-role setup; follow-up noted). The two-block-TIM / PSRAM rebuild did
+    <strong>not</strong> regress multi-STA association or TWT.</p>
+  </div>
+
+  <figure>
+    <div class="diagram">
+    <svg viewBox="0 0 660 250" role="img" aria-label="Star topology: one ESP32 AP with three associated STAs">
+      <line x1="200" y1="125" x2="430" y2="47"  stroke="#888" stroke-width="1.5"/>
+      <line x1="200" y1="125" x2="430" y2="125" stroke="#888" stroke-width="1.5"/>
+      <line x1="200" y1="125" x2="430" y2="203" stroke="#888" stroke-width="1.5"/>
+      <rect x="20" y="93" width="180" height="64" rx="10" fill="none" stroke="#2f6feb" stroke-width="2"/>
+      <text x="110" y="116" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">AP · ESP32-S3 + FGH100M</text>
+      <text x="110" y="132" text-anchor="middle" font-size="10.5" fill="#888">6a:24:99:44:6b:b7</text>
+      <text x="110" y="147" text-anchor="middle" font-size="10.5" fill="#888">192.168.12.1 · SSID rimba-ping</text>
+      <rect x="430" y="19" width="210" height="56" rx="10" fill="none" stroke="#2f6feb" stroke-width="1.5"/>
+      <text x="535" y="40" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">ESP32 STA #1 · TWT req</text>
+      <text x="535" y="56" text-anchor="middle" font-size="10.5" fill="#888">bc:2a:33:96:b2:9f · .2</text>
+      <text x="535" y="69" text-anchor="middle" font-size="10" fill="#888">1 s interval / 65 ms wake</text>
+      <rect x="430" y="97" width="210" height="56" rx="10" fill="none" stroke="#888" stroke-width="1.5"/>
+      <text x="535" y="120" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">ESP32 STA #2</text>
+      <text x="535" y="137" text-anchor="middle" font-size="10.5" fill="#888">68:24:99:44:6a:56 · .3</text>
+      <rect x="430" y="175" width="210" height="56" rx="10" fill="none" stroke="#888" stroke-width="1.5"/>
+      <text x="535" y="196" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">chronium · Linux STA</text>
+      <text x="535" y="212" text-anchor="middle" font-size="10.5" fill="#888">3c:22:7f:37:50:42 · .50 static</text>
+      <text x="535" y="225" text-anchor="middle" font-size="10" fill="#888">non-TWT</text>
+    </svg>
+    </div>
+    <figcaption>Star topology on SSID <code>rimba-ping</code>, WPA3-SAE, S1G ch27 / 915.5 MHz / 1 MHz / op-class 68 / US; HaLow subnet 192.168.12.0/24. The AP's MM6108 HaLow MAC differs from the board's ESP32-S3 Wi-Fi MAC <code>e0:72:a1:f8:ef:a4</code> — different radios.</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">3</div><div class="lbl">concurrent STAs (2 ESP32 + 1 Linux)</div></div>
+    <div class="stat"><div class="num acc">~122 ms</div><div class="lbl">avg TWT AP→STA RTT (dozing)</div></div>
+    <div class="stat"><div class="num acc">~7–8 ms</div><div class="lbl">non-TWT Linux STA RTT (flat)</div></div>
+    <div class="stat"><div class="num acc">128</div><div class="lbl"><code>MAX_SUPPORTED_AID</code> (rebuild capacity)</div></div>
+  </div>
+
+  <h2 id="rig">Rig &amp; network</h2>
+  <p>Self-contained record. All three boards identical: ESP32-S3 (rev v0.2), 8 MB octal PSRAM.</p>
+  <ul>
+    <li><strong>AP</strong> — XIAO ESP32-S3 + FGH100M on <code>/dev/ttyACM0</code>, firmware <code>rimba-halow-ap</code>
+      <code>BOARD=proto1-fgh100m</code> (the cap=100 + <code>CONFIG_HALOW_STA_DATA_IN_PSRAM=y</code> build,
+      morselib fw <strong>1.17.6</strong>). HaLow MAC <code>6a:24:99:44:6b:b7</code>.</li>
+    <li><strong>ESP32 STAs</strong> — two identical boards on ACM1 / ACM2 running <code>rimba-halow-sta</code>
+      (TWT requester, 1 s interval / 65 ms wake). MACs <code>bc:2a:33:96:b2:9f</code> and
+      <code>68:24:99:44:6a:56</code>.</li>
+    <li><strong>Linux STA</strong> — chronium (Raspberry Pi 5 + Wio-WM6180 MM6108, <code>wlan1</code>, morse
+      driver/fw/cli <strong>1.17.8</strong>, 192.168.7.187 mgmt). <code>wlan1</code> MAC
+      <code>3c:22:7f:37:50:42</code>.</li>
+    <li><strong>Network</strong> — SSID <code>rimba-ping</code>, WPA3-SAE (PSK <code>rimbahalow</code>), S1G ch27 /
+      915.5 MHz / 1 MHz / op-class 68 / US; HaLow subnet 192.168.12.0/24 (AP .1, ESP32 STAs .2/.3 via DHCP,
+      chronium static .50).</li>
+  </ul>
+
+  <h2 id="flashing">1 · Flashing + roles</h2>
+  <ul>
+    <li>ACM0 ← <code>rimba-halow-ap</code> (cap=100 / PSRAM build). 1.48 MB image, hash-verified.</li>
+    <li>ACM1, ACM2 ← <code>rimba-halow-sta</code> (built once, flashed to both; shared build dir → sequential).</li>
+    <li>All three boards identical: ESP32-S3 (rev v0.2), 8 MB octal PSRAM.</li>
+  </ul>
+  <div class="callout warn">
+    <p class="ct">⚠ Caveat learned — reset pulse kills log capture</p>
+    <p>Pulsing reset with <code>esptool … read_mac</code> re-enumerates the native USB-CDC, which kills any concurrent
+    <code>cat /dev/ttyACMx</code> log capture — so STA boot banners were missed. Not a firmware fault; the AP log +
+    association state confirm the STAs run the new firmware.</p>
+  </div>
+
+  <h2 id="association">2 · Association — PASS (3 STAs, SAE)</h2>
+  <p>The freshly-flashed AP came up and immediately re-admitted the two ESP32 STAs (they auto-associate to SSID
+  <code>rimba-ping</code>). After reflashing both STAs to the current build, the AP's periodic monitor
+  (<code>=== authorized STAs: N (max 4) ===</code>) showed a steady <strong>2</strong>, then <strong>3</strong> once
+  chronium joined:</p>
+  <pre><code>=== authorized STAs: 3 (max 4) ===
+    sta[0] 68:24:99:44:6a:56      (ESP32 STA #2)
+    sta[1] bc:2a:33:96:b2:9f      (ESP32 STA #1)
+    sta[2] 3c:22:7f:37:50:42      (chronium / Linux STA)</code></pre>
+  <p>So the two-block-TIM / PSRAM rebuild did <strong>not</strong> regress multi-STA association.</p>
+
+  <h2 id="interop">3 · Linux STA interop — PASS</h2>
+  <p>chronium had <strong>no documented infrastructure-STA recipe</strong> (prior docs only cover it as AP or IBSS
+  peer), so this is new. Working <code>wpa_supplicant_s1g</code> STA config:</p>
+  <pre><code>ctrl_interface=/var/run/wpa_supplicant_s1g
+country=US
+sae_pwe=2                      # GLOBAL field in this fork, NOT per-network
+network={
+    ssid="rimba-ping"
+    key_mgmt=SAE
+    sae_password="rimbahalow"
+    ieee80211w=2
+    scan_freq=5560             # S1G ch27 is represented to nl80211 as the 5 GHz-MODEL freq 5560,
+    freq_list=5560             # NOT 915500 (parser max is 70200; 915500 fails to parse)
+}</code></pre>
+  <pre><code>sudo iw reg set US; sudo nmcli dev set wlan1 managed no
+sudo iw dev wlan1 set type managed; sudo ip link set wlan1 up
+sudo wpa_supplicant_s1g -D nl80211 -i wlan1 -c /tmp/wpa-rimba-sta.conf &amp;
+sudo ip addr add 192.168.12.50/24 dev wlan1</code></pre>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">scan → assoc</div><div class="s">5560 MHz</div></div>
+      <div class="node acc"><div class="t">SAE H2E</div><div class="s">pmf=2</div></div>
+      <div class="node acc"><div class="t">4-way</div><div class="s">CCMP</div></div>
+      <div class="node ok"><div class="t">CONNECTED</div><div class="s">wpa_state=COMPLETED</div></div>
+    </div>
+    <figcaption>chronium (Linux <code>morse_driver</code>) associating to the ESP32 AP: full SAE (H2E) + 4-way handshake, <code>CTRL-EVENT-CONNECTED</code> to BSSID <code>6a:24:99:44:6b:b7</code> (<code>nl80211: Associated on 5560 MHz (5 GHz mapped)</code>).</figcaption>
+  </figure>
+
+  <p>Result: full SAE (H2E) + 4-way handshake, <code>CTRL-EVENT-CONNECTED</code> to BSSID
+  <code>6a:24:99:44:6b:b7</code>, <code>wpa_state=COMPLETED</code>, pmf=2, CCMP. Data path both ways: chronium → AP
+  ping 7/8 then 5/5, RTT ~7–280 ms.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Two config gotchas worth remembering</p>
+    <ul style="margin:.2em 0">
+      <li><code>sae_pwe</code> is <strong>global</strong> (per-network → "unknown network field").</li>
+      <li>The S1G channel is the <strong>5 GHz-model freq 5560</strong>, not the on-air 915500 (which exceeds the
+        parser's 70200 cap).</li>
+      <li><code>iw</code> is in <code>/usr/sbin</code> — not on the non-interactive SSH PATH.</li>
+    </ul>
+  </div>
+
+  <h2 id="twt">4 · TWT power-save — PASS (ESP32 STA)</h2>
+  <p>The AP app pings only its hardcoded <code>STA_IP = 192.168.12.2</code> (ESP32 STA #1). AP→STA RTT:</p>
+  <ul>
+    <li>Window A: 115–148 ms steady (avg 122 ms over 30 samples), with a 1220 ms spike in an earlier window.</li>
+    <li>The dozing signature: buffered downlink delivered at the STA's ~1 s TWT service period → RTT rises toward the
+      wake interval, vs the <strong>flat ~10 ms</strong> measured before the AP-side power-save fix (see
+      <a href="2026-06-22-mesh-ap-twt.html">2026-06-22-mesh-ap-twt</a>).</li>
+  </ul>
+  <p>Independent corroboration from the same test: the <strong>non-TWT</strong> Linux STA pinged the AP at a flat
+  ~7–8 ms (it doesn't request TWT), while the <strong>TWT-requesting</strong> ESP32 STA sat at 120 ms+. That latency
+  gap is the TWT buffering, observed directly side-by-side. So TWT power-save still works after moving the agreement
+  table to PSRAM — no regression.</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">ESP32 STA · TWT</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">~122 ms</span></div>
+    <div class="bar-row"><span class="lbl">pre-fix · no PS</span><span class="bar-track"><span class="bar-fill fast" style="width:8.2%"></span></span><span class="val">~10 ms</span></div>
+    <div class="bar-row"><span class="lbl">Linux STA · non-TWT</span><span class="bar-track"><span class="bar-fill fast" style="width:6.1%"></span></span><span class="val">~7.5 ms</span></div>
+  </div>
+  <p style="font-size:13px;color:var(--muted);margin-top:-.4em">The tall bar is the <em>desired</em> dozing signature:
+  a TWT STA now buffers downlink and delivers it at its wake interval, so RTT climbs toward ~1 s. Non-TWT paths (Linux,
+  and the AP before the power-save fix) stay flat.</p>
+
+  <h2 id="twt-requester">5 · NOT achieved — Linux STA as TWT <em>requester</em> (follow-up)</h2>
+  <p>Tried to make chronium a TWT requester against the ESP32 AP responder (the strongest interop test). The morse
+  driver rejected it: <code>morse_spi: TWT non-requester trying to send request</code>, and
+  <code>morse_cli -i wlan1 twt conf -w … -d … -c 1</code> returned -1. Findings:</p>
+  <ul>
+    <li><code>twt_requester=1</code> is a <strong>global</strong> <code>wpa_supplicant</code> option
+      (<code>config.c</code>: <code>BOOL(twt_requester)</code>), not per-network. Setting it did not by itself flip the
+      driver's requester role in my attempts.</li>
+    <li><code>morse_cli twt conf</code> wants <code>-d</code> (min wake duration) <strong>≤ 65280 µs</strong> (65536 is
+      out of range).</li>
+    <li>The morse driver exposes AP/responder tables at
+      <code>/sys/kernel/debug/ieee80211/phy1/morse/{twt_sta_agreements,twt_wi_tree}</code> (both empty on a STA).</li>
+    <li>The requester role is almost certainly negotiated <strong>at association</strong> from the supplicant
+      capability, with <code>morse_cli twt conf</code> being the wrong/secondary path — needs the correct Morse-stack
+      requester bring-up sequence, which isn't documented here yet.</li>
+  </ul>
+  <div class="callout">
+    <p style="margin:0">This is a Linux-side enablement detail, <strong>orthogonal to validating the ESP32 AP</strong>
+    (whose TWT responder is already proven against the ESP32 requester). Deferred.</p>
+  </div>
+  <div class="callout warn">
+    <p class="ct">⚠ Side effect during the attempt</p>
+    <p>Restarting the supplicant + a failed <code>twt conf</code> left <code>wlan1</code> DOWN and dropped chronium
+    (AP fell to 2 STAs); restoring the clean SAE config above reconnected it (<code>wpa_state=COMPLETED</code>, 5/5
+    ping) and the AP returned to 3 STAs. <strong>Left state:</strong> all three STAs associated; chronium
+    <code>wlan1</code> is now a connected STA (was not before this session).</p>
+  </div>
+
+  <h2 id="coverage">6 · Coverage / limits</h2>
+  <ul>
+    <li>High AID path (AID ≥ 64, the new second TIM block) still <strong>NOT</strong> exercised — needs 64+
+      associations; this test ran 3 STAs (low AIDs, first TIM block only).</li>
+    <li>TWT RTT measured for one ESP32 STA only (AP app pings a single hardcoded IP).</li>
+    <li>No µA current measurement (no host power-enable line / meter).</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#rig">Rig &amp; network</a></li>
+    <li><a href="#flashing">1 · Flashing + roles</a></li>
+    <li><a href="#association">2 · Association (3 STAs, SAE)</a></li>
+    <li><a href="#interop">3 · Linux STA interop</a></li>
+    <li><a href="#twt">4 · TWT power-save</a></li>
+    <li><a href="#twt-requester">5 · Not achieved: Linux TWT requester</a></li>
+    <li><a href="#coverage">6 · Coverage / limits</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-06-23-ap-multinode-twt-hwtest</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

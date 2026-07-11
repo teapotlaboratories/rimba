@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1.17.9 userspace + PS retest — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-08</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-08</span>
+    <span class="badge">5 min read</span>
+    <span class="badge warn">⚠ conclusions retracted</span>
+    <span class="badge">power-save · TWT · bring-up</span>
+  </div>
+
+  <h1>1.17.9 userspace build + matched-1.17.9 STA power-save retest<br><small style="font-weight:600;color:var(--muted);font-size:1.05rem">two self-contained pieces: build+deploy the Linux userspace, then re-run the STA doze ladder at true matched 1.17.9</small></h1>
+
+  <p class="lead">Two pieces of work, both self-contained: (1) built + deployed the <strong>1.17.9 Linux
+  userspace</strong> to all four nodes — the bench was NOT actually matched before (userspace was still 1.17.8
+  while the docs claimed 1.17.9); (2) re-ran the STA power-save ladder against both APs at <strong>true matched
+  1.17.9</strong> using the C6-harness triggered-ladder rig.</p>
+
+  <div class="callout err">
+    <p class="ct">⚠ RETRACTION (same day, later) — the CONCLUSIONS in this worklog are WRONG</p>
+    <p>The <strong>§3–§6 claims</strong> ("TWT doesn't engage / the 6.8 mA is a mislabel / all doze tiers cluster
+    at a ~15 mA host floor / the APs are power-save peers") were measured on a bench that turned out to be
+    <strong>1.17.9-regressed</strong>. Reverting to 1.17.8 showed the doze current there is <strong>~2× lower</strong>
+    (Dyn-PS 9 vs 20, WNM 5 vs 17.5) and the original 1.17.8 figures are REAL. The correct result —
+    <strong>1.17.9 regresses STA power-save; 1.17.8 is the good baseline</strong> — is in
+    <code>2026-07-08-1178-ps-baseline-and-deepsleep.md</code>.</p>
+    <p>The <strong>build/deploy mechanics in §1–§2</strong> below (how the 1.17.9 userspace was built, the
+    ABI / one-build-for-all-nodes finding, the bench-scripting gotchas) are still accurate and reusable; only the
+    power <em>conclusions</em> are retracted.</p>
+  </div>
+
+  <h2 id="build">1 · Userspace 1.17.9 build (the bench was version-skewed)</h2>
+  <p>Investigating "is everything 1.17.9 on Linux?" found a split: the kernel side (<code>morse.ko</code> /
+  <code>dot11ah.ko</code> / mm6108 fw) was <code>rel_1_17_9_2026_Apr_20</code>, but the <strong>userspace
+  (<code>hostapd_s1g</code> / <code>wpa_supplicant_s1g</code> / <code>morse_cli</code>) was still
+  <code>rel_1_17_8</code></strong> on all four nodes. So <code>rimba-linux-node-setup.md</code>'s "ALL components
+  1.17.9 (2026-07-07)" was an over-claim, and the PS comparison doc's "matched 1.17.9" 2026-07-05 numbers were
+  taken with a <strong>1.17.8 userspace</strong> (hostapd AP = 1.17.8).</p>
+
+  <p>Build (on chronium, Pi 5 native):</p>
+  <ul>
+    <li><code>~/halow/hostap</code> — the tree carries the <strong>SAE-injector patches</strong>
+      (<code>sae.c</code> / <code>ieee802_11.c</code> / <code>mesh_*</code>). Saved them to
+      <code>~/hostap_sae_injector_1178.patch</code> + <code>git stash</code>, then <code>git checkout 1.17.9</code>
+      (<code>beed5f8c8</code>). Reused the existing <code>hostapd/.config</code> + <code>wpa_supplicant/.config</code>.
+      <code>make</code> → <code>hostapd_s1g</code> + <code>wpa_supplicant_s1g</code> <code>rel_1_17_9</code>
+      (0 errors; same byte-size as 1.17.8 → the change is tiny).</li>
+    <li><code>~/halow/morse_cli</code> — the <strong>1.17.9 tag points at the same commit as 1.17.8</strong>
+      (<code>8f06222</code>); morse_cli is unchanged between the two, so the running <code>rel_1_17_8</code> binary
+      IS the 1.17.9 source (cosmetic version string only). No rebuild needed.</li>
+    <li><strong>One build serves all four nodes</strong>: chronium/chronite (Pi 5) and chronosalt/chronogen
+      (Pi Zero 2 W) are ALL aarch64 / Debian 13 trixie / glibc 2.41 / libnl-3 so.200 / libssl so.3 → identical ABI,
+      so the Pi 5 binaries run as-is on the Pi Zeros (no cross-build). Deployed via <code>rm</code>+<code>cp</code>
+      (avoids ETXTBSY on a live hostapd), 1.17.8 backed up to <code>/root/us_1178_rollback/</code> on each node.</li>
+    <li>Restarted chronite's hostapd so the running AP is the 1.17.9 binary (a live process keeps its old inode
+      through <code>rm</code>+<code>cp</code> — must restart).</li>
+  </ul>
+
+  <div class="callout ok">
+    <p class="ct">✓ Result — genuinely matched for the first time</p>
+    <p><strong>All four nodes fully <code>rel_1_17_9</code></strong> (driver + fw + dot11ah + hostapd_s1g +
+    wpa_supplicant_s1g; morse_cli = shared 1.17.9 commit). Combined with the ESPs' mm6108.bin 481040 (1.17.9)
+    the whole bench is genuinely matched for the first time.</p>
+  </div>
+
+  <h2 id="rig">2 · The clean retest rig</h2>
+  <p>board2 STA (XIAO ESP32-S3 + FGH100M), TX-capped 1 dBm, on the PPK2 (5 V, 1 s avg).
+  <code>firmware/rimba-halow-sta</code> triggered ladder: boots host-AWAKE, connects, then on each C6 GPIO20→D5
+  trigger runs a fixed 4-tier ladder (18 s each), marking each phase entry on D5 + a timestamped
+  <code>ESP_LOGW</code> on the console. Because it never self-sleeps host-awake, the console stays enumerated →
+  phase markers align cleanly to the PPK2 epoch trace. The <code>HOST_LIGHT_SLEEP</code> compile flag adds
+  <code>esp_pm_configure(160/40, light_sleep_enable=true)</code> for §3c (PM_ENABLE + tickless already in
+  sdkconfig).</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">P1 No-PS</div><div class="s">18 s</div></div>
+      <div class="node"><div class="t">P2 Dyn-PS</div><div class="s">18 s</div></div>
+      <div class="node acc"><div class="t">P3 TWT</div><div class="s">10 s SP · 18 s</div></div>
+      <div class="node"><div class="t">P4 WNM+pd</div><div class="s">chip-powerdown · 18 s</div></div>
+    </div>
+    <figcaption>The fixed 4-tier triggered ladder — one C6 GPIO trigger advances each phase, marked on D5 + a timestamped console log.</figcaption>
+  </figure>
+
+  <div class="callout warn">
+    <p class="ct">⚠ TX cap on the AP too, or the TWT handshake wedges</p>
+    <p>Also added a <strong>TX cap to <code>firmware/rimba-halow-ap</code></strong>
+    (<code>mmwlan_override_max_tx_power(1)</code>): without it, board0 at full power into a very close board2
+    overloads board2's RX and the TWT handshake/teardown WEDGES board2 ("Transmit blocked: 6" forever). With both
+    sides capped the ladder completes.</p>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Bench-scripting gotcha (cost real time)</p>
+    <p><code>reflash_and_flash.py</code> self-kills via <code>pgrep -f reflash_and_flash.py</code>, which also
+    matches the launching bash shell's command line → the shell dies silently. Fix: run it under a different
+    basename (<code>rf_run.py</code>). Same trap bit <code>stop_bench.py</code> (kept "rf_run.py" out of the
+    launcher cmdline).</p>
+  </div>
+
+  <h2 id="awake">3 · Results — host AWAKE (§3a), both APs, matched 1.17.9, 2 ladders each</h2>
+  <table>
+    <thead><tr><th>Mode</th><th class="num">Linux AP (chronite)</th><th class="num">ESP AP (board0)</th></tr></thead>
+    <tbody>
+      <tr><td>No-PS</td><td class="num">53.8 mA</td><td class="num">50.5 mA</td></tr>
+      <tr><td>Dyn-PS</td><td class="num">20.2 mA</td><td class="num">16.7 mA</td></tr>
+      <tr><td>TWT (10s)</td><td class="num">20.5 mA</td><td class="num">~15 mA</td></tr>
+      <tr><td>WNM+pd</td><td class="num">17.5 mA</td><td class="num">14.5 mA</td></tr>
+    </tbody>
+  </table>
+  <p>(No-PS is TX-capped here; the doc's 65 mA was full-TX.) <strong>Every doze tier clusters at the ~15–20 mA
+  host-awake floor on BOTH APs.</strong> TWT is at most marginally below Dyn-PS — NOT the doc's 6.8 mA. This is
+  physically required: with the ESP32 host awake at 160 MHz the CPU alone is ~15 mA, so nothing radio-side can
+  pull the whole board below that. The doc already corrected its WNM "4–5 mA host-awake" rows as mislabeled
+  host-light-sleep; the <strong>TWT 6.8 mA "host awake" row is the same class of mislabel</strong> (6.8 &lt; 15 mA
+  floor).</p>
+
+  <h2 id="lightsleep">4 · Results — + host LIGHT SLEEP (§3c) vs the ESP AP</h2>
+  <p>One clean LS ladder captured (LS flaps the USB console — the §3c fragility; markers survived the phase
+  entries, PPK2 plateaus are unambiguous):</p>
+
+  <table>
+    <thead><tr><th>Mode (+ host LS)</th><th class="num">ESP AP</th><th>reading</th></tr></thead>
+    <tbody>
+      <tr><td>No-PS+LS</td><td class="num">31.2 mA</td><td>backfire (radio always on, constant light-sleep exits)</td></tr>
+      <tr><td>Dyn-PS+LS</td><td class="num">30.8 mA</td><td>backfire (per-DTIM wakes)</td></tr>
+      <tr><td><strong>TWT+LS</strong></td><td class="num"><strong>30.8 mA</strong></td><td><strong>BACKFIRE — identical to Dyn-PS+LS</strong></td></tr>
+      <tr><td>WNM+pd+LS</td><td class="num"><strong>3.0 mA</strong></td><td>WIN (radio off → host sleeps long; AP-independent)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">No-PS+LS</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">31.2 mA</span></div>
+    <div class="bar-row"><span class="lbl">Dyn-PS+LS</span><span class="bar-track"><span class="bar-fill slow" style="width:98.7%"></span></span><span class="val">30.8 mA</span></div>
+    <div class="bar-row"><span class="lbl">TWT+LS</span><span class="bar-track"><span class="bar-fill slow" style="width:98.7%"></span></span><span class="val">30.8 mA</span></div>
+    <div class="bar-row"><span class="lbl">WNM+pd+LS</span><span class="bar-track"><span class="bar-fill fast" style="width:9.6%"></span></span><span class="val">3.0 mA</span></div>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚠ TWT+LS = 30.8 mA is the smoking gun</p>
+    <p>If TWT installed a 10 s SP schedule, wakes would be rare and host LS would net ~3 mA (as WNM does). Instead
+    it backfires exactly like Dyn-PS → <strong>board2 is waking at DTIM cadence, i.e. TWT is NOT engaging.</strong>
+    The doc's headline "TWT + host LS = 3–4 mA against the ESP AP, the key divergence" does not reproduce.</p>
+  </div>
+
+  <p>Since TWT doesn't engage on either AP and WNM+LS is radio-off (AP-independent), the Linux-AP LS profile is
+  the same shape (all backfire except WNM+LS ≈ 3 mA) — the doc's Linux §3c column already reads that way.</p>
+
+  <h2 id="onair">5 · On-air (inconclusive, consistent)</h2>
+  <p>chronium morse0 monitor on ch27, scanning for the TWT element (EID 216) across a P3: <strong>983 frames,
+  0 decodable TWT setup exchange.</strong> board2's TX-capped (1 dBm) request is likely under-captured and S1G
+  action-frame decode is unreliable with the ad-hoc tooling, so this neither confirms nor denies board0's response
+  at the frame level — but it is consistent with the power evidence (no engagement, no schedule).</p>
+
+  <h2 id="verdict">6 · Verdict / doc impact</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">4 nodes</div><div class="lbl">genuinely matched 1.17.9 (built + deployed today)</div></div>
+    <div class="stat"><div class="num acc">3.0 mA</div><div class="lbl">WNM+pd+host-LS — deepest <em>associated</em> leaf (radio-off, AP-indep.)</div></div>
+    <div class="stat"><div class="num">~0.6 mA</div><div class="lbl">deep-sleep floor (RESET_N-low, separate rig)</div></div>
+  </div>
+
+  <ul>
+    <li>Bench is now <strong>genuinely matched 1.17.9</strong> (userspace built+deployed today; docs were
+      over-claiming).</li>
+    <li><strong>Host-awake:</strong> all doze tiers ~15–20 mA on both APs — AP-independent; the host CPU floor
+      dominates.</li>
+    <li><strong>The ESP-AP mid-session-TWT advantage does NOT reproduce at matched 1.17.9.</strong> Host-awake
+      TWT ≈ Dyn-PS; TWT+host-LS backfires (31 mA) instead of the claimed 3–4 mA. The doc's 6.8 mA "host-awake"
+      TWT was a mislabeled/artefactual light-sleep number below the physical host-awake floor.</li>
+    <li><strong>WNM+powerdown+host-LS ≈ 3.0 mA</strong> on both APs (radio-off, AP-independent) — the real deepest
+      <em>associated</em> low-power leaf. Deep-sleep floor is ~0.6 mA (RESET_N-low, separate rig).</li>
+  </ul>
+
+  <p>Still TODO for the "full retest": §3b downlink-while-dozing and §3a′ Mesh+AP at matched 1.17.9.</p>
+
+  <div class="callout err">
+    <p style="margin:0">Reminder — per the retraction above, the §3–§6 power <em>conclusions</em> were later
+    disproven on a 1.17.8 revert (1.17.9 was the regressed bench). The build/deploy mechanics (§1–§2) remain
+    valid; the corrected power result lives in <code>2026-07-08-1178-ps-baseline-and-deepsleep.md</code>.</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#build">1 · Userspace 1.17.9 build</a></li>
+    <li><a href="#rig">2 · The clean retest rig</a></li>
+    <li><a href="#awake">3 · Results — host AWAKE</a></li>
+    <li><a href="#lightsleep">4 · Results — + host LIGHT SLEEP</a></li>
+    <li><a href="#onair">5 · On-air</a></li>
+    <li><a href="#verdict">6 · Verdict / doc impact</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-08-userspace-1179-and-ps-retest</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

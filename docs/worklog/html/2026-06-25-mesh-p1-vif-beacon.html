@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>802.11s mesh P1: vif up + periodic beacon — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-25</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-25</span>
+    <span class="badge">11 min read</span>
+    <span class="badge">mesh · bring-up · beacon</span>
+    <span class="badge ok">✓ P1 done</span>
+  </div>
+
+  <h1>802.11s mesh P1: vif up + periodic beacon<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">mesh vif up + firmware beaconing periodically, stable · on-air CONFIRMED</small></h1>
+
+  <p class="lead">P1 of the 802.11s mesh port: bring a mesh vif up and self-beacon a mesh beacon, following
+  <code>morse_driver</code>'s mesh BSS config flow exactly. <strong>Done.</strong> On HW the firmware fires beacon IRQs
+  at the configured rate (measured <strong>~9.8 beacons/s</strong> at a 100 TU / 102.4 ms interval — 50 beacons every
+  ~5.1 s), the host serves each one, and the node runs indefinitely with no crash and no command-channel backup. A
+  second ESP mesh node then <strong>received the <code>rimba-mesh</code> beacons on air</strong>, and (after a
+  same-day MAC-source fix) so did a Linux <code>morse0</code> monitor.</p>
+
+  <p style="color:var(--muted);font-size:14px;margin-top:-.6em">Author: Aldwin</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">~9.8 /s</div><div class="lbl">firmware beacon-IRQ cadence</div></div>
+    <div class="stat"><div class="num acc">102.4 ms</div><div class="lbl">TBTT interval (100 TU)</div></div>
+    <div class="stat"><div class="num">~2 s</div><div class="lbl">MBSS TBTT-selection scan before rc=0</div></div>
+    <div class="stat"><div class="num ok">−27 dBm</div><div class="lbl">ESP IBSS seen by chronium (control)</div></div>
+  </div>
+
+  <h2 id="bringup">1 · Working bring-up sequence (follows <code>morse_driver</code>)</h2>
+  <p><code>mmwlan_mesh_start</code> (<code>umac/mesh/umac_mesh.c</code>):</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">ADD_INTERFACE</div><div class="s">MESH</div></div>
+      <div class="node"><div class="t">SET_CHANNEL</div></div>
+      <div class="node"><div class="t">BSS_CONFIG</div><div class="s">0x0006</div></div>
+      <div class="node"><div class="t">BSSID_SET</div><div class="s">0x0052 · own MAC</div></div>
+      <div class="node"><div class="t">BSS_BEACON_CONFIG</div><div class="s">0x003D · enable</div></div>
+      <div class="node"><div class="t">host beacon engine</div><div class="s">start_beaconing</div></div>
+      <div class="node acc"><div class="t">MESH_CONFIG</div><div class="s">0x0039 · START · enable_beaconing=1 · MBCA defaults</div></div>
+    </div>
+    <figcaption><code>start_beaconing</code> arms <code>mesh_ctx</code> so <code>umac_mesh_get_beacon</code> is ready before
+    <code>MESH_CONFIG(START)</code>. The mesh beacon (zero-len SSID + Mesh ID IE 114 + Mesh Config IE 113) is host-built
+    and served on each beacon IRQ — same host-served model as morselib AP/IBSS.</figcaption>
+  </figure>
+
+  <h2 id="rootcause">2 · The root cause and the fix (the whole story)</h2>
+  <p>The single hard blocker was that <code>MESH_CONFIG</code>(0x0039) with <code>enable_beaconing=1</code>
+  <strong>wedged the firmware</strong>: it never responded, drained the command-page pool ("command page
+  exhaustion"), and then every subsequent command (even health-check 0x19) timed out → reboot. Symptoms were
+  identical across many sequencings, timeouts (up to 15 s), and resp-buffer variants, so it looked like a firmware
+  wall.</p>
+
+  <p>Things that were ruled out along the way:</p>
+  <ul>
+    <li><strong>Not a host/driver-task deadlock.</strong> Traced morselib's driver task: beacon-IRQ serving
+      (<code>morse_beacon_work_</code> → <code>mmdrv_host_get_beacon</code>) and command-response processing both run
+      on the single <code>"drv"</code> task, but a <em>foreign</em> task is what blocks in <code>morse_cmd_tx</code>,
+      so the driver task stays free to serve beacons. No mutex deadlock.</li>
+    <li><strong>Not a missing beacon template.</strong> Pre-pushing a beacon (via <code>start_beaconing</code> serving
+      beacon #1) before <code>enable_beaconing=1</code> did <strong>not</strong> stop the wedge.</li>
+    <li><strong><code>enable_beaconing=0</code> is accepted</strong> and puts the vif in mesh mode, but then the
+      firmware fires only <strong>one</strong> beacon IRQ — confirming <code>enable_beaconing=1</code> (which the
+      0x0039 doc says makes "firmware start to generate interrupts") is the real periodic trigger.</li>
+    <li><strong>AP-type-vif workaround fails</strong> (Interrupt-WDT crash — AP datapath expects <code>umac_ap</code>
+      state mesh lacks), and <strong>SDK 2.11.2 has no reference WLAN mesh</strong> (only BLE mesh).</li>
+  </ul>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Actual cause — MBCA mismatch</p>
+    <p>Pulled Morse's real <code>morse_driver</code> source (github.com/MorseMicro/morse_driver) and compared
+    <code>morse_cmd_cfg_mesh</code> against ours. The 0x0039 wire struct order was correct, but I was sending
+    <code>mbca_config = 0</code> and zero scan/gap/tbtt fields. In the driver, <strong><code>mbca_config == 0</code>
+    means <em>beaconless</em> mode</strong> (<code>if (mesh_beaconless_mode) mbca.config = 0</code>), so
+    <code>mbca_config=0</code> + <code>enable_beaconing=1</code> is contradictory, and the zero
+    <code>mbss_start_scan_duration_ms</code> gave the firmware a 0 ms MBSS scan → wedge.</p>
+  </div>
+
+  <p>The driver enables beaconing with MBCA on and real defaults (<code>mesh.h</code>):</p>
+  <table>
+    <thead><tr><th>Field</th><th>Constant</th><th class="num">Value</th></tr></thead>
+    <tbody>
+      <tr><td><code>mbca_config</code></td><td><code>MESH_MBCA_CFG_TBTT_SEL_ENABLE</code> = <code>BIT(0)</code></td><td class="num">1</td></tr>
+      <tr><td><code>min_beacon_gap_ms</code></td><td><code>DEFAULT_MBCA_MIN_BEACON_GAP_MS</code></td><td class="num">25</td></tr>
+      <tr><td><code>mbss_start_scan_duration_ms</code></td><td><code>DEFAULT_MBSS_START_SCAN_DURATION_MS</code></td><td class="num">2048</td></tr>
+      <tr><td><code>tbtt_adj_timer_interval_ms</code></td><td><code>DEFAULT_TBTT_ADJ_INTERVAL_MSEC</code></td><td class="num">60000</td></tr>
+    </tbody>
+  </table>
+
+  <p>With these set in <code>mmdrv_cfg_mesh</code> (only when <code>enable_beaconing</code>, mirroring the driver's
+  <code>if (mesh_beaconing)</code> block), 0x0039 now <strong>responds rc=0</strong> after a ~2 s MBSS TBTT-selection
+  scan and the firmware fires periodic beacon IRQs. <code>morse_cmd_tx</code> uses a 5 s timeout to cover the scan.
+  Constants added to <code>common/morse_commands.h</code> as <code>MORSE_MESH_MBCA_CFG_*</code> /
+  <code>MORSE_MESH_DEFAULT_*</code>.</p>
+
+  <p>Two earlier fixes that were also required:</p>
+  <ul>
+    <li><strong><code>BSS_BEACON_CONFIG</code>(0x003D)</strong> returned <code>-32768</code> with <code>resp=NULL</code>;
+      Linux passes a response buffer — added the response struct + pass it.</li>
+    <li><strong>Removed the link-up signal.</strong> An earlier <code>LoadProhibited</code> crash was lwIP TX'ing
+      (IPv6/mDNS) through the mesh vif before its 4-addr data path exists (P4) — not the beacon.</li>
+  </ul>
+
+  <h2 id="onair">3 · On-air verification attempt — partial; receiver-side blocked</h2>
+  <p>Tried to independently confirm the beacon radiates. Outcome: <strong>TX cadence reconfirmed, channel match
+  proven, one real beacon-content bug fixed — but no clean raw capture yet.</strong></p>
+  <ul>
+    <li><strong>Fixed: Mesh Configuration sync method.</strong> The beacon advertised Synchronization Method =
+      <code>0x00</code> (none); mac80211's default is <strong>neighbour-offset <code>0x01</code></strong>. A Linux
+      mesh node <em>silently ignores</em> beacons whose path-proto/metric/congestion/sync/auth don't match its own,
+      so <code>0x00</code> made us invisible to a default Linux mesh. Changed to <code>0x01</code>
+      (<code>mesh_build_config_ie</code>, <code>umac_mesh.c</code>) — follows mac80211, not a workaround.</li>
+    <li><strong>Channel/BW match confirmed.</strong> Brought chronium up as a Linux mesh point
+      (<code>iw dev wlan1 set type mp; mesh join rimba-mesh freq 5560</code>). <code>morse_cli -i wlan1 channel</code>
+      reports <strong>Primary BW 1 MHz, Primary Channel Index 0</strong> = exactly the ESP's S1G ch27 — so tuning is
+      correct (the <code>iw</code> "20 MHz" is just the 5 GHz dot11ah model).</li>
+    <li><strong>Per-board unique MAC.</strong> The MM6108 modules share a factory MAC
+      (<code>bc:2a:33:96:b2:9f</code> on both), so a receiver drops the sender's frames as self. The mesh app now
+      derives a locally-administered MAC from the ESP32 efuse MAC (<code>esp_read_mac</code> + LA bit) — unique per
+      board. Added a peer-beacon RX sniffer to the mesh app (basis for P2).</li>
+  </ul>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Receiver-side blockers (the wall)</p>
+    <ul style="margin:.2em 0">
+      <li>morse <strong>monitor mode</strong> won't tune to 5560 (DFS-rejected) and delivers ~0 frames — dead end here.</li>
+      <li>The Linux <strong>mesh node</strong> is correctly tuned + sync-matched but still creates no station — needs
+        full S1G mesh compatibility (rates / S1G operation), which is P2-level peering, and it can't report bare reception.</li>
+      <li><code>iw … ibss join</code> reliably wedges chronium's morse driver (SSH dies, needs power-cycle);
+        <code>mesh join</code> does <em>not</em> wedge.</li>
+      <li>The ESP raw-RX hook (<code>mmwlan_register_rx_frame_cb</code>) delivers no beacons in any app.</li>
+    </ul>
+    <p>Underlying cause across chronium failures: the unresolved <strong>RPi5 undervoltage</strong> (wants a 5V/5A PD
+    supply; 30/45/60 W chargers negotiate 5V/3A and still under-volt).</p>
+  </div>
+
+  <p><strong>Verdict:</strong> the ~9.8 beacons/s firmware-IRQ cadence is strong evidence the TX loop runs, but a clean
+  independent on-air capture is still outstanding, blocked by receiver tooling, not by the mesh code.</p>
+
+  <h2 id="powerfix">4 · Update — after the RPi5 power fix: bench proven, gap narrowed to P2</h2>
+  <p>The undervoltage is fixed (<code>dmesg | grep -c undervoltage</code> = 0; was 4) and chronium is stable. With that:</p>
+  <ul>
+    <li><strong>IBSS interop works → bench + ESP beacon TX are confirmed good.</strong> chronium in IBSS mode
+      (<code>iw dev wlan1 ibss join rimba-ibss 5560 fixed-freq 02:12:34:56:78:9a</code>) sees the ESP IBSS node:
+      <code>Station bc:2a:33:96:b2:9f, signal -27 dBm</code>. So the ESP <strong>does radiate beacons on air</strong>
+      via the umac beacon path, chronium's normal RX path works, and <code>ibss join</code> no longer wedges (the
+      wedge was undervoltage-driven). This is the key positive control.</li>
+    <li><strong>morse monitor mode is broken (not our bug).</strong> With mon0 correctly tuned to S1G ch27
+      (<code>morse_cli -i mon0 channel</code> → 915500 kHz / 1 MHz), a raw AF_PACKET sniffer captured <strong>0 frames
+      even while the known-good ESP IBSS was beaconing</strong>. morse delivers RX frames to the managed/IBSS/mesh vif
+      processing but not to a monitor vif — so every "0 in monitor" result is meaningless, and a raw on-air capture
+      isn't available on this stack.</li>
+    <li><strong>The mesh beacon is a superset of the proven IBSS beacon</strong> (identical header / SSID /
+      S1G-capabilities / S1G-operation, plus Mesh ID + Mesh Config IEs), built and TX'd on the <em>same</em> path,
+      and the firmware requests one beacon per 102.4 ms TBTT (steady 9.8/s) — i.e. it is on its beacon schedule and
+      transmitting, same as IBSS. So the mesh beacon is on air.</li>
+    <li><strong>Remaining gap is mesh peering, not P1 beaconing.</strong> chronium-mesh
+      (<code>set type mp; mesh join rimba-mesh freq 5560</code>, confirmed 915500 kHz / 1 MHz, sync matched) forms
+      <strong>no station</strong> for the ESP. A mac80211 mesh node only creates a station for a beacon that passes
+      <code>mesh_matches_local</code> (mesh-id + path-proto/metric/congestion/sync/auth + basic rates + S1G params);
+      a mismatch is dropped silently. Pinning down <em>which</em> field still mismatches needs RX visibility we don't
+      have here (monitor dead; kernel has no dynamic-debug). That diagnosis + fix is <strong>P2 (peering)</strong>.</li>
+  </ul>
+
+  <div class="callout ok">
+    <p class="ct">✓ Bottom line for P1</p>
+    <p>mesh vif up + firmware beaconing periodically on air — <strong>done</strong>, with the IBSS positive control
+    proving the TX path radiates. Direct mesh-beacon interop capture is deferred into P2, where the peering
+    compatibility gets worked out.</p>
+  </div>
+
+  <h2 id="update2">5 · Update 2 — on-air CONFIRMED + ESP monitor built</h2>
+  <p>The external-receiver dead end was resolved by capturing <strong>on the MM6108 itself</strong>.</p>
+  <ul>
+    <li><strong>✅ Mesh beacon CONFIRMED on air.</strong> A second ESP mesh node receives the <code>rimba-mesh</code>
+      beacons at the per-node rate, Mesh ID intact. No more inference — the beacon radiates.</li>
+    <li><strong>The firmware DOES surface peer beacons</strong> (reversing the earlier "it doesn't"). They arrive as
+      <strong>legacy MGMT/Beacon</strong> frames (type 0 / subtype 8), <em>not</em> S1G-beacon (EXT/1) — the firmware
+      converts S1G→legacy on the way up. Every earlier search missed them because it looked for S1G-beacon frames or
+      hooked <code>rx_frame_cb</code> (which is <em>after</em> the BSSID drop).</li>
+    <li><strong>They arrive with zeroed source addresses (A2/A3 = 00).</strong> The S1G beacon is single-address and
+      compressed; the firmware's S1G→legacy RX conversion doesn't repopulate A2/A3. Body (TSF, interval, capability,
+      IEs incl. Mesh ID) is intact. So <strong>a node cannot identify a peer from a beacon</strong> on this firmware —
+      matching the documented data-driven discovery.</li>
+    <li><strong>Beacon surfacing is gated by the local vif mode.</strong> A <em>mesh</em>-mode vif surfaces mesh
+      beacons (any Mesh ID — verified), but <strong>not</strong> IBSS or AP beacons (verified with live IBSS/AP nodes
+      on-channel). There is no promiscuous firmware mode.</li>
+  </ul>
+
+  <div class="callout">
+    <p class="ct">🔧 Built: <code>mmwlan_register_monitor_cb()</code> + <code>firmware/rimba-halow-monitor</code></p>
+    <p>New morselib hook (<code>umac_datapath_rx_frame_filter</code> tap, before the BSSID filter) + a monitor app
+    that prints every delivered frame (type, A2/A3, SSID/Mesh ID, RSSI, freq). Validated: captures mesh beacons across
+    Mesh IDs. README documents the firmware-gated capability matrix. This is the sniffer that all further mesh work
+    uses (the morse-Linux monitor delivers nothing here).</p>
+  </div>
+
+  <h2 id="p2">6 · P2 — peering / MPM + the mesh mgmt-frame TX path</h2>
+  <p>Beacons can't identify peers here (zeroed addresses), so ESP mesh peering must be
+  <strong>data/action-frame-driven</strong> (the same shape the IBSS port used: discover peer MACs from frames that
+  carry a real TA, not beacons). MPM = Mesh Peering Open/Confirm/Close <strong>action</strong> frames, per
+  <code>net/mac80211/mesh_plink.c</code> + <code>morse_driver</code>.</p>
+
+  <p><strong>Built: the mesh mgmt-frame TX path.</strong> The mesh vif previously had only the host-served beacon TX
+  path; it had no datapath ops, so any mgmt TX (<code>umac_datapath_tx_mgmt_frame_ap</code>) crashed
+  (LoadProhibited, NULL ops). Mesh is association-less and self-beaconing like IBSS, and the datapath plumbing has no
+  Linux equivalent (morselib replaces mac80211), so this mirrors morselib's <strong>IBSS</strong> datapath:</p>
+  <ul>
+    <li><strong><code>umac_datapath_configure_mesh_mode()</code> + <code>datapath_ops_mesh</code></strong>
+      (<code>umac_datapath.c</code>) — shares the generic IBSS/STA helpers (get_state, enqueue, pause, data-header);
+      mesh-specific bits are the common-stad lookups, <code>tx_dequeue_frame_mesh</code>, and
+      <code>process_rx_mgmt_frame_mesh</code> (routes ACTION frames to MPM). <code>frames_allowed_pre_association_mesh</code>
+      allows S1G beacons + ACTION frames.</li>
+    <li><strong>Mesh "common" stad</strong> (the MBSS, for broadcast/mgmt TX), allocated in
+      <code>mmwlan_mesh_start</code> exactly like <code>umac_ibss_start</code>. <code>umac_mesh_get_common_stad()</code>
+      backs the datapath ops.</li>
+    <li><strong><code>mmwlan_mesh_send_test_action()</code></strong> uses
+      <code>umac_datapath_tx_mgmt_frame(common_stad, …)</code> (the non-<code>_ap</code> variant — the <code>_ap</code>
+      one assumed AP context the mesh vif lacks).</li>
+  </ul>
+  <p>Result on HW: action frames TX cleanly (status 0, <strong>no crash</strong>), and the mesh-monitor receives them
+  (len 28). <strong>Key finding:</strong> received ACTION frames have <strong>zeroed source addresses (A2/A3 = 0),
+  exactly like beacons</strong> — so the firmware strips the source MAC on RX for <em>management</em> frames generally,
+  not just beacons. (Data frames keep their TA — that's how the IBSS port did discovery.) <strong>Consequence for
+  MPM:</strong> an ESP can't learn a peer's address from a received beacon <em>or</em> action frame, so ESP-side
+  peering must use <strong>provisioned peer MACs</strong> rather than discovery.</p>
+
+  <div class="callout warn"><p style="margin:0">…that conclusion turned out to be wrong. See the next section.</p></div>
+
+  <h2 id="zeroed">7 · Root cause of the "zeroed source address" — it was OUR bug, not the firmware</h2>
+  <div class="callout err">
+    <p class="ct">✗ The "firmware strips the source MAC" conclusion was wrong</p>
+    <p>The "firmware strips the source MAC / firmware wall / must use provisioned peer MACs" conclusion was
+    <strong>wrong</strong>. The mesh bring-up set <code>mesh_ctx.mesh_mac</code> via
+    <code>umac_interface_get_vif_mac_addr()</code>, which only resolves the <strong>STA/AP roles</strong> and returns
+    <strong>zero</strong> for a mesh vif. So <code>mesh_mac = 00:00:…:00</code>, and every mesh beacon + action frame
+    was <strong>built with a <code>00:00</code> source address</strong> (A2 = A3 = 0). Everyone correctly saw the
+    zeros we transmitted — the ESP monitor, and (verified by rebuilding <code>morse_driver</code> with
+    <code>CONFIG_MORSE_MONITOR</code> and capturing on <code>morse0</code>) <strong>Linux too</strong>.</p>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Fix (<code>umac_mesh.c</code>)</p>
+    <p>Set <code>mesh_ctx.mesh_mac</code> from the address the vif was actually created with — the app's
+    <code>if_addr</code>, or <code>umac_interface_get_device_mac_addr()</code> for the factory MAC — not the
+    role-based getter. <strong>Confirmed on Linux <code>morse0</code>:</strong> beacons now carry the real per-node MAC
+    (<code>SA = BSSID = e2:72:…</code>).</p>
+  </div>
+
+  <p><strong>Consequences:</strong> normal <strong>beacon-based mesh discovery is viable</strong> (the peer's identity
+  is in the beacon, since a mesh node's BSSID = its own MAC) — <strong>no provisioned-peer workaround needed.</strong>
+  The action-frame TX path work still stands (it's needed for MPM regardless).</p>
+
+  <p><strong>Tooling win:</strong> chronium's <code>morse_driver</code> rebuilt with <code>CONFIG_MORSE_MONITOR=y</code>
+  (it was off — the reason every prior Linux monitor attempt delivered nothing). The <code>morse0</code> raw-monitor
+  netdev now works and is the reference sniffer (build cmd in <code>reference/rimba-linux-node-setup.md</code> +
+  <code>CONFIG_MORSE_MONITOR=y</code>; backup of the old module at <code>~/morse.ko.bak</code>).</p>
+
+  <h2 id="next">8 · Next</h2>
+  <ol>
+    <li><strong>mac80211 still forms no mesh peer</strong> even with the real address → the remaining gap is
+      <strong>mesh compatibility</strong> (<code>mesh_matches_local</code>: S1G basic rates / mesh-config fields). This
+      is now the genuine P2 blocker — diagnosable with the working <code>morse0</code> monitor + the ESP mesh-monitor.
+      Follow <code>net/mac80211/mesh.c</code> / <code>mesh_plink.c</code>.</li>
+    <li>Then MPM Open/Confirm/Close, and the 4-addr data path (P4).</li>
+    <li>Reflash board2 (<code>rimba-halow-mesh-monitor</code>) with the MAC fix; remove the debug action probe.</li>
+  </ol>
+  <p>Bench: board0 = mesh + 1 Hz action probe, board1 = mesh, board2 = <code>rimba-halow-mesh-monitor</code> (old
+  build), chronium = Linux mesh node + working <code>morse0</code> monitor.</p>
+
+  <h2 id="earlier">9 · Earlier-session notes (superseded by the summary above)</h2>
+  <p style="color:var(--muted)">Kept for the record — the incremental path that led to the MBCA fix above. Hardware:
+  XIAO ESP32-S3 + FGH100M (<code>/dev/ttyACM0</code>), MM6108 fw <strong>1.17.9</strong> (generated from
+  <code>vendor/morse-firmware</code>). morselib 2.10.4 + local patches.</p>
+
+  <h3>What was implemented (mirrors <code>umac/ibss</code>, follows <code>morse_driver</code>)</h3>
+  <p><strong>morselib (halow fork):</strong></p>
+  <ul>
+    <li><strong>Interface plumbing:</strong> <code>MMDRV_INTERFACE_TYPE_MESH=5</code> (<code>mmdrv.h</code>),
+      <code>UMAC_INTERFACE_MESH=32</code> (<code>umac_interface.h</code>) + the umac→driver type map and the
+      MESH-is-exclusive compatibility rule (<code>umac_interface.c</code>); <code>MORSE_CMD_INTERFACE_TYPE_MESH</code>
+      already existed.</li>
+    <li><strong>Firmware-command defs</strong> (byte-compatible with morse_driver): <code>MESH_CONFIG=0x0039</code>,
+      <code>SET_MESH_CONFIG=0xA018</code>, opcodes START=0/STOP=1, <code>MORSE_CMD_MESH_ID_LEN_MAX=32</code>, and the
+      two request structs (<code>common/morse_commands.h</code>).</li>
+    <li><strong>Driver wrappers</strong> (<code>driver.c</code>): <code>mmdrv_cfg_mesh</code> (MESH_CONFIG) and
+      <code>mmdrv_set_mesh_config</code> (SET_MESH_CONFIG); MESH case in <code>mmdrv_add_if</code>.</li>
+    <li><strong><code>umac/mesh/umac_mesh.{c,h}</code></strong> — new module mirroring <code>umac/ibss</code>: mesh
+      context, <code>umac_mesh_is_active()</code>, <code>umac_mesh_get_beacon()</code> + a mesh beacon builder
+      (zero-length SSID + Mesh ID IE 114 + Mesh Configuration IE 113, open HWMP/airtime), and the public
+      <code>mmwlan_mesh_start()</code> / <code>mmwlan_mesh_stop()</code> + <code>struct mmwlan_mesh_args</code>.</li>
+    <li><strong>Beacon routing:</strong> <code>mmdrv_host_get_beacon()</code> routes to
+      <code>umac_mesh_get_beacon()</code> when a mesh vif is active (<code>umac_mmdrv_shim.c</code>).</li>
+    <li>Registered <code>umac_mesh.c</code> in <code>components/morselib/CMakeLists.txt</code>.</li>
+  </ul>
+  <p><strong>App:</strong> <code>firmware/rimba-halow-mesh</code> rewritten from the P0 probe into a mesh bring-up
+  (<code>mmwlan_mesh_start</code>, self-beacon, heartbeat). Builds + links clean.</p>
+
+  <h3>Hardware findings (the useful part)</h3>
+  <p>Bring-up sequence tried: <code>ADD_INTERFACE(MESH)</code> → <code>SET_CHANNEL</code> → <code>BSS_CONFIG</code> →
+  <code>MESH_CONFIG(START)</code> (+ host beacon engine).</p>
+  <ol>
+    <li><strong><code>ADD_INTERFACE(MESH=5)</code>, <code>SET_CHANNEL</code>, <code>BSS_CONFIG</code> — all accepted.</strong>
+      (P0 already proved the interface type; the channel/BSS configure cleanly.)</li>
+    <li><strong><code>SET_MESH_CONFIG</code> (0xA018) is a HOST/driver command, not a firmware command.</strong> First
+      attempt sent it to the firmware → rejected <code>-22</code>. Reading morse_driver (<code>command.c</code> switch
+      → <code>morse_cmd_set_mesh_config</code> in <code>mesh.c</code>) shows the 0xA0xx range is handled
+      <em>driver-side</em>: it just stores mesh ID / max_plinks in the driver's own state (to build the beacon) and
+      then sends the firmware <code>MESH_CONFIG</code>. morselib <em>is</em> the host and builds its own beacon, so it
+      must <strong>not</strong> send 0xA018 — removed it.</li>
+    <li><strong><code>MESH_CONFIG</code> (0x0039) hangs the chip.</strong> With the corrected sequence it never
+      responds: <code>Command 39 timed out</code> (fw_status -116), <code>command page exhaustion</code>, then a
+      watchdog reboot / <code>xQueueSemaphoreTake</code> assert. Tried both orders (host beacon engine before/after)
+      and <code>enable_beaconing</code> on/off — all hang or reboot.</li>
+  </ol>
+
+  <h3>Investigation — NOT a firmware wall; my sequence is wrong</h3>
+  <p>The firmware is fine: same 1.17.9 <code>.mbin</code> (converted from <code>vendor/morse-firmware</code>), and
+  others have reported working ESP32 802.11s. The errors I saw (<code>MESH_CONFIG</code> hang,
+  <code>BSS_BEACON_CONFIG</code> -32768) are from sending the <strong>wrong commands / wrong order / wrong
+  preconditions</strong> — because I reverse-engineered the sequence from <code>morse_driver</code> in isolation and
+  guessed, instead of following Morse's <strong>actual</strong> mesh flow, which is driven by their <strong>patched
+  mac80211</strong> (kernel patch — confirmed: <code>rpi-linux/net/mac80211/mesh.c</code> carries the Morse commit
+  <em>"mac80211: return RX_QUEUED in 6.6+ to resolve multi-hop failures"</em>).</p>
+
+  <h4>Source-derived firmware command sequence (<code>morse_driver</code> <code>mac.c</code> <code>bss_info_changed</code>)</h4>
+  <p>On a mesh vif coming up, mac80211 fires <code>bss_info_changed</code> with multiple flags; the driver sends, in
+  order (by flag):</p>
+  <ol>
+    <li><code>morse_cmd_config_beacon_timer</code> → <strong>BSS_BEACON_CONFIG (0x003D)</strong> — on <code>BEACON_ENABLED</code></li>
+    <li><code>morse_cmd_set_bssid</code> → <strong>SET_BSSID</strong> — on <code>BSSID</code> ← <strong>morselib mesh does NOT send this</strong></li>
+    <li><code>morse_cmd_cfg_bss</code> → <strong>BSS_CONFIG (0x0006)</strong> — on beacon info</li>
+    <li>mesh start itself: <code>morse_cmd_set_mesh_config</code> (the 0xA018 HOST handler) internally calls
+      <code>morse_cmd_cfg_mesh_bss</code> → <strong>MESH_CONFIG (0x0039)</strong>. So the host SET_MESH_CONFIG
+      <em>logic</em> is what triggers the firmware MESH_CONFIG (I correctly drop the 0xA018 <em>wire</em> command, but
+      the trigger logic — call MESH_CONFIG — must remain).</li>
+  </ol>
+
+  <h4>Concrete gaps in my morselib bring-up</h4>
+  <ul>
+    <li><strong>SET_BSSID — added, accepted.</strong> Implemented <code>BSSID_SET</code> (0x0052) +
+      <code>mmdrv_set_bssid</code> and send it (mesh node's own MAC) after BSS_CONFIG. The firmware accepts it. But
+      <code>MESH_CONFIG</code> (0x0039) <strong>still hangs</strong> the same way, so SET_BSSID was a correct addition
+      but not sufficient.</li>
+    <li><strong><code>config_beacon_timer</code> (0x003D)</strong> returned -32768 from my call — likely wrong vif
+      state/order, not "unsupported".</li>
+    <li><strong>Order / remaining commands.</strong> With ADD_INTERFACE(MESH) + SET_CHANNEL + BSS_CONFIG + SET_BSSID
+      all accepted, MESH_CONFIG still times out (command-page exhaustion → reboot), and the exhaustion correlates with
+      <code>start_beaconing</code>. Still missing something the Linux mesh-start path does (another command and/or the
+      exact order, and possibly the beacon must not start until the firmware is in mesh mode). <strong>Incremental
+      guessing has hit its limit — the next move must be the ground-truth command sequence, not more guesses.</strong></li>
+  </ul>
+
+  <h3>Live-capture attempt — blocked by chronium hardware</h3>
+  <p>Tried to capture the ground-truth command sequence on chronium (<code>debug_mask=0xffffffff</code> +
+  <code>iw … mesh join</code>). Two problems made it unusable:</p>
+  <ul>
+    <li>The morse driver <strong>leaks netdev resources</strong> on repeated <code>iw interface add/del</code> — after
+      a few cycles, <code>interface add</code> fails <code>-23 ENFILE</code> (not real fd exhaustion:
+      <code>file-nr</code> ~800). A <code>modprobe -r</code> left the SPI device unbound → <code>bind</code> returns
+      I/O error → needs a reboot.</li>
+    <li>chronium logs <strong>undervoltage</strong> events — the MM6108 appears unresponsive at times (commands return
+      rc=0 but the iface never joins and dmesg stays empty).</li>
+  </ul>
+  <p>Recovered chronium twice via reboot (authorized); <code>wlan1</code> comes up clean on boot. The capture needs a
+  <strong>single, careful</strong> mesh-up (one <code>iw mesh join</code>, no add/del churn) and ideally chronium's
+  power issue addressed.</p>
+
+  <h3>Next steps (earlier session)</h3>
+  <ol>
+    <li><strong>Add SET_BSSID</strong> to the mesh bring-up (find the 802.11s mesh BSSID value morse uses;
+      <code>morse_cmd_set_bssid</code> / the existing <code>mmdrv</code> BSSID path) and re-test — strongest single
+      candidate for the <code>MESH_CONFIG</code> hang.</li>
+    <li><strong>Get the exact order</strong> from one clean chronium capture (no churn) or by reading the mac80211
+      mesh-start path (<code>ieee80211_start_mesh</code> → the <code>BSS_CHANGED_*</code> flag set) + the morse_driver
+      handlers; replicate command-for-command.</li>
+    <li>Re-test the beacon (detect with <code>rimba-halow-scan</code> on a 2nd board or chronium).</li>
+  </ol>
+
+  <h3>State (earlier session)</h3>
+  <p>On branch <code>feature/mesh-p0-fw-probe</code> (rebased onto current <code>main</code>). All code compiles +
+  links; bring-up reaches <code>MESH_CONFIG</code> and stops. Nothing committed for P1. The
+  <code>BSS_BEACON_CONFIG</code>/<code>mmdrv_config_beacon_timer</code> defs are kept but the call is removed (see
+  <code>umac_mesh.c</code> comment). <code>SET_MESH_CONFIG</code> (0xA018) wrapper kept, not sent (host-side).</p>
+
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#bringup">1 · Bring-up sequence</a></li>
+  <li><a href="#rootcause">2 · Root cause + fix</a></li>
+  <li><a href="#onair">3 · On-air attempt</a></li>
+  <li><a href="#powerfix">4 · After the power fix</a></li>
+  <li><a href="#update2">5 · On-air CONFIRMED</a></li>
+  <li><a href="#p2">6 · P2 peering / MPM</a></li>
+  <li><a href="#zeroed">7 · Zeroed-MAC: our bug</a></li>
+  <li><a href="#next">8 · Next</a></li>
+  <li><a href="#earlier">9 · Earlier-session notes</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-25-mesh-p1-vif-beacon</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

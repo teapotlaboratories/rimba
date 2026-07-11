@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux secured 802.11s mesh reference — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-06-27</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-27</span>
+    <span class="badge">4 min read</span>
+    <span class="badge ok">✓ reference captured</span>
+    <span class="badge">mesh · security · SAE+AMPE</span>
+  </div>
+
+  <h1>Linux SECURED (SAE+AMPE) 802.11s mesh: working reference<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">Phase 0 — the gold-standard reference the ESP morselib mesh-security port must match</small></h1>
+
+  <p class="lead">Brought up two Linux morse nodes as a <strong>secured</strong> 802.11s HaLow mesh — SAE
+  authentication + AMPE-encrypted peering + CCMP data — and confirmed they peer and pass
+  <strong>encrypted</strong> IP traffic. This is the gold-standard reference the ESP (morselib)
+  mesh-security port must match.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Pivotal question, empirically settled</p>
+    <p>Encrypted mesh <strong>works</strong> on the MM6108 firmware — so the <strong>−116
+    station-handle wall</strong> that blocks IBSS/ADHOC CCMP does <strong>not</strong> block the MESH
+    vif. Linux creates a per-peer station handle (<code>NEW_STATION</code>) and installs keys against
+    it.</p>
+  </div>
+
+  <p><strong>Bench:</strong> <strong>chronium</strong> <code>192.168.7.187</code> (MAC
+  <code>3c:22:7f:37:50:42</code>) and <strong>chronite</strong> <code>192.168.7.191</code> (MAC
+  <code>3c:22:7f:37:51:38</code>), both RPi5 + MM6108, 1.17.8 morse stack, kernel
+  <code>6.12.21-v8-16k+</code>. S1G channel 27 → 5 GHz-model ch112 / <code>freq 5560</code> (915.5 MHz,
+  1 MHz BW, US). <code>wpa_supplicant_s1g</code> on both is built with <code>CONFIG_SAE=y</code>.</p>
+
+  <h2 id="result">Result</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">5/5</div><div class="lbl">encrypted ping replies</div></div>
+    <div class="stat"><div class="num ok">0%</div><div class="lbl">packet loss</div></div>
+    <div class="stat"><div class="num acc">ESTAB</div><div class="lbl">mesh plink state</div></div>
+    <div class="stat"><div class="num">−18 dBm</div><div class="lbl">peer signal</div></div>
+  </div>
+
+  <pre><code># chronium: iw dev wlan1 station dump        # chronite log
+Station 3c:22:7f:37:51:38 (on wlan1)         SAE: Selecting supported ECC group 19
+    signal: -18 dBm                          SAE: State Confirmed -&gt; Accepted (peer ...:50:42)
+    mesh plink: ESTAB                         RSN: Cache PMK from SAE (len=32)
+                                              wlan1: MESH-PEER-CONNECTED 3c:22:7f:37:50:42
+# encrypted ping 10.9.9.2 -&gt; 10.9.9.1: 5/5 received, 0% loss (first pkt slow = HWMP + SAE)</code></pre>
+
+  <h2 id="config">Config — the secured delta</h2>
+  <p>Identical to the open-mesh recipe (<code>2026-06-26-linux-mesh-reference.md</code>) except
+  <strong>two lines</strong>: <code>key_mgmt=NONE</code> → <code>key_mgmt=SAE</code>, and add
+  <code>sae_password="…"</code>. <code>user_mpm=1</code> stays (the kernel forces user-MPM when
+  AMPE/secure is set anyway — <code>nl80211.c:8655</code> <code>if (is_secure) user_mpm=true</code>).
+  Full config saved at <code>docs/reference/captures/wpa-smesh.conf</code>; bring-up is the same
+  recipe:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">mesh leave</div></div>
+      <div class="node"><div class="t">pkill -9 -x</div><div class="s">wpa_supplicant_s1g</div></div>
+      <div class="node"><div class="t">clear ctrl socket</div></div>
+      <div class="node"><div class="t">set type managed</div></div>
+      <div class="node"><div class="t">up</div></div>
+      <div class="node acc"><div class="t">wpa_supplicant_s1g</div><div class="s">-c … -dd</div></div>
+    </div>
+    <figcaption>The bring-up recipe (same as the open mesh), driven over <code>-D nl80211 -i wlan1</code>.</figcaption>
+  </figure>
+
+  <div class="callout warn">
+    <p class="ct">⚠ pkill gotcha</p>
+    <p>Use <code>pkill -x</code> (exact name) — <code>pkill -f</code> matches the launching ssh
+    command line and self-kills.</p>
+  </div>
+
+  <h2 id="handshake">The secured handshake, observed on-air</h2>
+  <p>Ordered sequence from the <code>-dd</code> logs (sanitized extract at
+  <code>docs/reference/captures/secured-mesh-sequence.txt</code>). Each step is what morselib must
+  reproduce — this is the gold standard for the port.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">SAE</div><div class="s">auth → PMK 32 B</div></div>
+      <div class="node acc"><div class="t">AMPE</div><div class="s">peering + group keys</div></div>
+      <div class="node acc"><div class="t">Key install</div><div class="s">per-peer sta + keys</div></div>
+      <div class="node ok"><div class="t">Encrypted mesh</div><div class="s">CCMP data · 0% loss</div></div>
+    </div>
+    <figcaption>SAE produces the PMK → AMPE protects peering and carries MGTK/IGTK → the per-peer station + keys are installed → encrypted CCMP data flows.</figcaption>
+  </figure>
+
+  <h3>1. SAE (auth) — produces the PMK</h3>
+  <ul>
+    <li><code>SAE: Selecting supported ECC group 19</code> — <strong>group 19 = NIST P-256</strong>
+      (default). Configurable via <code>sae_groups</code>; group-19-only lets the port drop
+      <code>dh_groups.c</code> (FFC/MODP).</li>
+    <li>Commit (<code>auth_alg=3 auth_transaction=1</code>, IE len <strong>98</strong>): <code>own
+      commit-scalar</code>(32) + <code>commit-element x</code>(32) + <code>commit-element y</code>(32).
+      Confirm (<code>auth_transaction=2</code>).</li>
+    <li><code>State Nothing → Committed → Confirmed → Accepted</code>; out = <strong>PMK (32 B)</strong>
+      + PMKID (16 B), cached.</li>
+    <li>Crypto to port: EC point ops on P-256, dragonfly hash-to-element, SHA-256 / HMAC-KDF,
+      const-time. Map onto mbedTLS <code>mbedtls_ecp_*</code>. (~3.8k LOC in hostap; the dominant cost.)</li>
+  </ul>
+
+  <h3>2. AMPE — protects peering + carries group keys</h3>
+  <ul>
+    <li><code>Initializing AMPE, Peering Start</code>. Plaintext AMPE element <strong>98 B</strong> →
+      encrypted <strong>114 B</strong>: AES-SIV adds the 16 B MIC (<code>mesh_rsn_protect_frame</code>,
+      <code>mesh_rsn.c:553</code>; <code>aes_siv_encrypt</code> over the AMPE IE keyed by <code>AEK</code>).
+      AAD = <code>{own_addr, peer_addr, cat..}</code>.</li>
+    <li><strong>GTKdata present in the Open frame only</strong> (98 B): <code>MGTK</code>(16) +
+      <code>Key RSC</code>(8, zeros) + <code>GTKExpirationTime = 4294967295</code> (0xffffffff).
+      Confirm AMPE is 70 B (no GTKdata) → encrypted 86 B.</li>
+    <li>Keys: <strong>AEK</strong> = <code>sha256_prf(PMK,"AEK Derivation",AKM‖min(MAC)‖max(MAC))</code>
+      (32 B); <strong>MTK</strong> = <code>sha256_prf(PMK,"Temporal Key Derivation",min/max nonce‖min/max
+      LID‖AKM‖min/max MAC)</code> (16 B, CCMP). <strong>MGTK/IGTK are generated locally (random) and
+      exchanged in the AMPE IE</strong>, not derived. The <code>min/max</code> (<code>os_memcmp</code>)
+      ordering is load-bearing — port byte-exact.</li>
+  </ul>
+
+  <h3>3. Key install — the firmware boundary (Phase-1 target)</h3>
+  <p>After <code>mesh plink … established</code>, the per-peer station + keys are pushed (key-flag
+  decode: <code>DEFAULT=0x02 RX=0x04 TX=0x08 GROUP=0x10 PAIRWISE=0x20</code>):</p>
+
+  <table>
+    <thead><tr><th>Step</th><th>nl80211 call</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>sta_add</td><td><code>NL80211_CMD_NEW_STATION</code> peer MAC, Flags:2</td><td>create per-peer handle, move to ASSOC/AUTHORIZED</td></tr>
+      <tr><td>MTK</td><td><code>set_key key_idx=0 set_tx=0 len=16 flag=0x2c</code></td><td>pairwise MTK, RX+TX (alg=3 CCMP)</td></tr>
+      <tr><td>MGTK rx</td><td><code>set_key key_idx=1 set_tx=0 len=16 flag=0x14</code></td><td>peer's group key, RX</td></tr>
+      <tr><td>MGTK tx</td><td><code>set_key key_idx=1 set_tx=1 len=16 flag=0x1a</code></td><td>own group key, TX default</td></tr>
+      <tr><td>IGTK</td><td><code>set_key key_idx=4 / 5 flag=0x10</code></td><td>MFP/BIP protected-mgmt keys</td></tr>
+      <tr><td>defaults</td><td><code>key_idx=0/1/2/3 flag=0x10/0x20 len=0</code></td><td>default key selection</td></tr>
+    </tbody>
+  </table>
+
+  <p>In morselib these map to <code>SET_STA_STATE (0x14)</code> + <code>INSTALL_KEY (0x0A)</code> driven
+  the <strong>mesh</strong> way (sta_add → ASSOC → install), the order <code>key.c:160-161</code> (sta
+  must be <code>uploaded</code>) and <code>cfg.c:524</code> (sta must be ASSOC) require. This is Phase 1
+  of the port.</p>
+
+  <h2 id="phases">Port implication (Phases 1–4)</h2>
+  <p>The reference is now captured and reproducible. Mapping to the planned phases:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">Phase 1</div><div class="s">key plumbing · static keys</div></div>
+      <div class="node"><div class="t">Phase 2</div><div class="s">AMPE</div></div>
+      <div class="node"><div class="t">Phase 3</div><div class="s">SAE</div></div>
+      <div class="node ok"><div class="t">Phase 4</div><div class="s">MFP/IGTK + integration</div></div>
+    </div>
+    <figcaption>The staged port — each phase adds one layer, validated on-air against this reference.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Phase 1 — key plumbing:</strong> replicate the §3 table with <em>static</em>
+      MTK/MGTK to prove the firmware boundary (the −116 question) in isolation.</li>
+    <li><strong>Phase 2 — AMPE:</strong> §2 (AMPE IE + AES-SIV MIC + MTK/AEK derive + MGTK/IGTK
+      exchange) on a static PMK.</li>
+    <li><strong>Phase 3 — SAE:</strong> §1, replacing the static PMK (mbedTLS P-256 + dragonfly).</li>
+    <li><strong>Phase 4 — MFP/IGTK + integration:</strong> full on-air A/B against this reference.</li>
+  </ul>
+
+  <h2 id="state">State at end of session</h2>
+  <ul>
+    <li>chronium + chronite: running <code>wpa_supplicant_s1g</code> <strong>secured</strong> mesh
+      <code>rimba-smesh</code>, plink <strong>ESTAB</strong>, IPs <code>10.9.9.1</code> /
+      <code>10.9.9.2</code>, encrypted ping 0% loss. Runtime only — re-run the recipe after reboot.</li>
+    <li>Artifacts: <code>docs/reference/captures/wpa-smesh.conf</code>,
+      <code>…/secured-mesh-sequence.txt</code>.</li>
+  </ul>
+
+  <div class="callout warn">
+    <p class="ct">⚠ On-air byte-capture deferred</p>
+    <p>chronosalt (the would-be 3rd node / on-air monitor) is powered off pending an MM6108 power fix —
+    the byte-level on-air monitor capture of the secured peering is deferred until it (or an ESP
+    monitor) is available; the <code>-dd</code> logs cover protocol structure in the meantime.</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#result">Result</a></li>
+    <li><a href="#config">Config — the secured delta</a></li>
+    <li><a href="#handshake">The secured handshake</a></li>
+    <li><a href="#phases">Port implication (Phases 1–4)</a></li>
+    <li><a href="#state">State at end of session</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-06-27-linux-secured-mesh-reference</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

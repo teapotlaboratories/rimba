@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#20: A4≠TA HW-crypto withhold is a firmware limitation — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-11</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-11</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ #20 closed</span>
+    <span class="badge bug">mesh · security · HW-crypto</span>
+  </div>
+
+  <h1><code>#20</code> RESOLVED: the A4≠TA HW-crypto withhold is a universal MM6108 firmware limitation<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">Linux withholds too — not a morselib bug</small></h1>
+
+  <p class="lead">Bench session (full all-ESP + Linux access) that finally <strong>resolves</strong> backlog item
+  <code>#20</code> — "in HW-crypto mode the MM6108 firmware withholds from the host a forwarded 4-address 802.11s
+  mesh data frame whose A4 (mesh-SA) ≠ TA (immediate transmitter)". The whole prior investigation framed this as a
+  <em>morselib</em> difference from Linux (<code>morse_driver</code> supposedly delivers the forward; morselib
+  withholds it). <strong>That premise is false.</strong> A direct bench test proves <strong>Linux
+  <code>morse_driver</code> withholds the identical forward</strong>, so <code>#20</code> is a property of the
+  <strong>firmware</strong>, present on both stacks. morselib was following Linux correctly all along.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Resolution — <code>#20</code> is a firmware limitation, not a morselib bug</p>
+    <p>The MM6108 firmware, on <em>both</em> the ESP and Linux host stacks, applies a post-HW-decrypt gate: the
+    frame's SA (A4) must equal the key-owner (TA). A relayed forward has A4 (originator) ≠ TA (relay), so the
+    firmware decrypts it and then <strong>withholds it from the host</strong>. SW-CCMP (no FW mesh key → raw
+    delivery, host decrypts keyed by TA) is the permanent, universal answer.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">4-addr forward</div><div class="s">TA=relay, SA(A4)=origin</div></div>
+      <div class="node acc"><div class="t">HW-decrypt</div><div class="s">key = TA</div></div>
+      <div class="node err"><div class="t">A4 ≠ TA gate</div><div class="s">SA ≠ key-owner</div></div>
+      <div class="node err"><div class="t">withheld</div><div class="s">host gets 0</div></div>
+    </div>
+    <figcaption>The firmware's post-decrypt gate — SA(A4) must equal the key-owner (TA) — drops every relayed
+    forward. Identical on the ESP and on Linux <code>morse_driver</code>.</figcaption>
+  </figure>
+
+  <h2 id="bottom-line">Bottom line</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">61/61</div><div class="lbl">SW-CCMP board1→board2 multi-hop (shipping)</div></div>
+    <div class="stat"><div class="num err">0/76</div><div class="lbl">HW-crypto board1→board2 (only crypto flipped)</div></div>
+    <div class="stat"><div class="num err">0/70</div><div class="lbl">reorder cmds to match Linux (still fails)</div></div>
+    <div class="stat"><div class="num acc">40/40</div><div class="lbl">chronite↔board0 direct (positive control)</div></div>
+    <div class="stat"><div class="num">10 → 0</div><div class="lbl">board0 forwards on-air → chronite kernel got</div></div>
+  </div>
+
+  <ol>
+    <li><strong><code>#20</code> reproduces with a REAL multi-hop forward</strong> (not just the 2026-07-02 synthetic
+      one): a 3-ESP forced line delivers <code>board1→board2</code> end-to-end <strong>61/61</strong> under SW-CCMP
+      and <strong>0/76</strong> under HW-crypto — same rig, only <code>g_mesh_sw_crypto</code> flipped. Peering,
+      key-install, and the direct (A4==TA) links all work in HW-crypto (relay <code>estab_peers=2</code>); ONLY the
+      relayed A4≠TA forward fails.</li>
+    <li><strong>The command interface is fully exonerated — empirically.</strong> morselib's on-wire command stream
+      was captured; it sends <code>BSS_CONFIG → BSSID_SET → BSS_BEACON_CONFIG → MESH_CONFIG(START)</code> (BSS
+      before MESH, the one ordering difference vs Linux). <strong>Reordering morselib to emit
+      <code>MESH_CONFIG(START)</code> first (matching Linux) did NOT fix it</strong> — still 0/70. Command
+      <em>content</em> was already byte-identical (prior sessions), so content <strong>and</strong> order are both
+      ruled out.</li>
+    <li><strong>DECISIVE: Linux withholds the A4≠TA forward too.</strong> Mixed forced-topology rig
+      <code>board1(ESP) → board0(ESP relay) → chronite(LINUX endpoint, morse_driver, HW-crypto)</code>. On-air,
+      board0 transmitted <strong>10</strong> A4≠TA forwards to chronite (<code>TA=board0 RA=chronite SA=board1</code>);
+      chronite's kernel received <strong>0</strong> of them — while chronite↔board0 <strong>direct</strong> ping ran
+      <strong>40/40, 0% loss</strong>. Linux's firmware withholds identically to the ESP's.</li>
+    <li><strong>Therefore SW-CCMP is the permanent, universal answer.</strong> With no FW mesh key installed the
+      firmware delivers protected mesh frames raw and the host decrypts (keyed by TA), bypassing the A4 gate for
+      all origins — the shipping morselib default (<code>g_mesh_sw_crypto = true</code>). HW-crypto (FW-offloaded
+      CCMP) mesh <strong>multi-hop</strong> is impossible on this firmware, on Linux as well as the ESP. This
+      corrects the <code>2026-06-27-mesh-security-phase3-sae.md</code> §25 claim that "the same FW HW-decrypts +
+      delivers the A4≠TA forward on Linux" — that must have been a non-forced topology where the nodes were direct
+      peers (so the "forward" was actually A4==TA).</li>
+  </ol>
+
+  <h2 id="premise">1 · Premise validation — <code>#20</code> with a real forward (all-ESP)</h2>
+  <p>App <code>firmware/rimba-halow-mesh-perf</code> in <code>MESH_LINE_RELAY_DEMO</code>: forced 3-ESP line via the
+  peer allowlist (<code>mmwlan_mesh_set_peer_allowlist</code>) — board0 = relay (allowlist {board1, board2}); board1
+  = pinger (allowlist {board0}) → pings board2 (10.9.9.108); board2 = responder (allowlist {board0}). Both ping legs
+  are A4≠TA forwards through board0. Secured mesh (<code>MMWLAN_MESH_SEC_PHASE1=1</code>, SAE+AMPE+CCMP). Boards by
+  efuse MAC: board0 <code>…ef:a4</code> (ttyACM0), board1 <code>…f9:40</code> (ttyACM1), board2 <code>…f0:08</code>
+  (ttyACM4, PPK2-powered). Morse fw 1.17.8.</p>
+
+  <table>
+    <thead><tr><th>crypto mode (<code>umac_mesh.c:146</code>)</th><th>board1→board2 multi-hop</th></tr></thead>
+    <tbody>
+      <tr><td>SW-CCMP (<code>g_mesh_sw_crypto=true</code>, shipping)</td><td><strong>61/61 replies</strong>, ~40 ms</td></tr>
+      <tr><td>HW-crypto (<code>g_mesh_sw_crypto=false</code>)</td><td><strong>0 replies / 76 timeouts</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>Control (HW-crypto): relay board0 <code>estab_peers=2</code> (both endpoints), board1
+  <code>estab_peers=1</code> — peering + key-install + direct A4==TA links all succeed; only the relayed A4≠TA
+  forward fails. The synthetic-frame concern from 2026-07-02 is closed: a genuine relayed forward is withheld.</p>
+
+  <h2 id="reorder">2 · Command-order capture + reorder experiment (REFUTED)</h2>
+  <p>Instrumented <code>morse_cmd_tx</code> (<code>driver/morse_driver/command.c</code>) with an
+  <code>esp_rom_printf</code> per command (a raw <code>printf</code> there STACK-OVERFLOWS morselib's task ctx →
+  boot loop; <code>esp_rom_printf</code> is stack-safe — declare
+  <code>extern int esp_rom_printf(const char*,...)</code> ABOVE the <code>#ifdef ENABLE_DRVCMD_TRACE</code>).
+  Captured board1 from reset (ESP32-S3 native USB: pyserial open does NOT reset — pulse RTS
+  <code>setDTR(False);setRTS(True); sleep;setRTS(False)</code>):</p>
+
+  <pre><code>SET_CHANNEL → ADD_INTERFACE → GET_CAPABILITIES → … → BSS_CONFIG(0x0006) → BSSID_SET(0x0052) →
+ BSS_BEACON_CONFIG(0x003d) → MESH_CONFIG(0x0039) → CONFIG_PS</code></pre>
+
+  <p>So morselib sends BSS_CONFIG/BSSID <strong>before</strong> MESH_CONFIG(START); Linux sends MESH_CONFIG(START)
+  first (via <code>ieee80211_start_mesh</code>), then BSS/BSSID via <code>bss_info_changed</code>. Patched
+  <code>mmwlan_mesh_start</code> to move BSS_CONFIG + BSSID_SET to AFTER MESH_CONFIG(START); new order confirmed
+  on-wire (<code>BSS_BEACON_CFG → MESH_CONFIG → BSS_CONFIG → BSSID_SET</code>). <strong>Result: still 0/70, peering
+  still fine.</strong> The one genuine host difference (order) is not the cause.</p>
+
+  <h2 id="linux-test">3 · The decisive Linux-endpoint test</h2>
+  <p>To ask "does Linux deliver an A4≠TA forward in HW-crypto?" without needing Linux forced-topology support, use
+  ESP allowlists to force a mixed line:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">board1 (ESP)</div><div class="s">pinger · allowlist {board0}</div></div>
+      <div class="node acc"><div class="t">board0 (ESP)</div><div class="s">relay · {board1, chronite}</div></div>
+      <div class="node err"><div class="t">chronite (Linux)</div><div class="s">morse_driver · HW-crypto</div></div>
+    </div>
+    <figcaption>Forced mixed line: board1 rejects a direct peer with chronite (allowlist {board0} only), so
+    <code>board1→chronite</code> MUST relay via board0. Static ARP (10.9.9.50 → chronite MAC) makes the ping unicast
+    immediately. board1 pings chronite 10.9.9.50.</figcaption>
+  </figure>
+
+  <ul>
+    <li>board0 (ESP relay): allowlist {board1, <strong>chronite</strong> <code>3c:22:7f:37:51:38</code>}.</li>
+    <li>board1 (ESP pinger): allowlist {board0} ONLY → board1 <strong>rejects</strong> a direct peering with
+      chronite, so <code>board1→chronite</code> MUST relay via board0. Static ARP (10.9.9.50 → chronite MAC) makes
+      the ping unicast immediately (no broadcast-ARP confound). board1 pings chronite 10.9.9.50.</li>
+    <li>chronite: joined the ESP secured mesh <code>rimba-mesh</code> (SAE <code>rimbamesh2026</code>, ch27) via
+      <code>wpa_supplicant_s1g</code> (<code>ssid="rimba-mesh"</code>, else =
+      <code>docs/reference/captures/wpa-smesh.conf</code>), IP 10.9.9.50. Default <code>morse_driver</code> =
+      <strong>HW-crypto</strong> (offloads CCMP keys).</li>
+  </ul>
+
+  <p>Forced topology verified on chronite: <code>iw station dump</code> → board0 <strong>ESTAB</strong>, board1
+  <strong>BLOCKED</strong>; <code>mpath dump</code> → board1 reachable via next-hop board0, <strong>HOP_COUNT
+  2</strong>.</p>
+
+  <p><strong>Observable = chronite's own reception</strong> (a raw <code>AF_PACKET</code> socket on wlan1 — tcpdump
+  isn't installed on chronite; needs <code>sudo</code>). A mesh vif presents decapsulated 802.3 frames, so the
+  sniffer sees exactly what the firmware hands to the kernel:</p>
+
+  <ul>
+    <li><strong>Positive control:</strong> chronite → board0 (direct peer, A4==TA) ping = <strong>40/40, 0%
+      loss</strong>; the sniffer saw all 39 of board0's echo replies (10.9.9.136) → sniffer works, board0↔chronite
+      MTK + HW-crypto path work.</li>
+    <li><strong>board1 (10.9.9.100) forwards: 0 IP frames</strong> reached chronite's kernel in 20 s.</li>
+    <li><strong>On-air (chronium monitor, <code>morse0</code>):</strong> board1→board0 first-hop x12
+      (<code>TA=board1 RA=board0 SA=board1</code>, A4==TA) <strong>and board0→chronite x10
+      (<code>TA=board0 RA=chronite SA=board1</code>, A4≠TA)</strong> — board0 IS transmitting the forward. So the
+      frames are on air, chronite hears board0 (direct works), yet its kernel gets none.</li>
+  </ul>
+
+  <div class="callout err">
+    <p class="ct">⇒ chronite's firmware withholds the A4≠TA forward after HW-decrypt — the same behavior as the ESP</p>
+    <p>Because a SW-crypto Linux node would deliver it (raw, host-decrypt), chronite withholding also confirms it was
+    genuinely in HW-crypto. The gate is the firmware's post-decrypt "SA(A4) must equal the key-owner (TA)" behavior,
+    and it is identical on both host stacks.</p>
+  </div>
+
+  <h2 id="method">4 · Method / reproduction + bench-safety notes</h2>
+  <ul>
+    <li>morselib TEMP (all reverted): <code>g_mesh_sw_crypto=false</code>; <code>esp_rom_printf</code> cmd trace in
+      <code>morse_cmd_tx</code>; the <code>mmwlan_mesh_start</code> reorder. App TEMP (reverted):
+      <code>MESH_LINE_RELAY_DEMO</code> retargeted to a chronite endpoint + static ARP + peer-count heartbeat.</li>
+    <li>Boards identified by efuse MAC via IDF esptool (ports re-enumerate); board2 powered via
+      <code>tools/ppk2_hold.py</code>. Build/flash:
+      <code>make {build,flash} APP=rimba-halow-mesh-perf BOARD=proto1-fgh100m PORT=/dev/ttyACMx</code>.</li>
+    <li>chronium (Pi5 sniffer) is power-marginal on the monitor-mode switch under load — browned out+rebooted once
+      early, then stable; keep captures short. morse0 S1G frames: parse radiotap len at bytes[2:4], then the
+      standard 802.11 MAC header (4-addr when toDS&&fromDS: A1@4 A2@10 A3@16 A4@24).</li>
+    <li>Radio-silence restored after: all 3 ESPs reflashed to <code>rimba-hello</code>; chronite mesh-leave +
+      <code>wlan1 down</code>; chronium <code>morse0</code>/<code>wlan1 down</code>. All temp code git-reverted;
+      <code>g_mesh_sw_crypto</code> back to <code>true</code>.</li>
+  </ul>
+
+  <h2 id="disposition">5 · Disposition</h2>
+  <div class="callout ok">
+    <p class="ct">✓ <code>#20</code> is CLOSED as a firmware limitation</p>
+    <p>No morselib change can make HW-crypto mesh multi-hop work; SW-CCMP is the shipping and permanent answer for
+    the ESP, and Linux mesh multi-hop is subject to the same limitation under HW-crypto. Stop investigating
+    <code>#20</code> as a morselib/command/BCF/ordering difference (all byte-identical + reorder empirically
+    refuted). The move from HW→SW CCMP is not a regression to fix but the required design for multi-hop on this
+    firmware.</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#bottom-line">Bottom line</a></li>
+    <li><a href="#premise">1 · Premise validation (all-ESP)</a></li>
+    <li><a href="#reorder">2 · Command-order reorder (refuted)</a></li>
+    <li><a href="#linux-test">3 · The decisive Linux-endpoint test</a></li>
+    <li><a href="#method">4 · Method / bench-safety</a></li>
+    <li><a href="#disposition">5 · Disposition</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-11-mesh-20-linux-also-withholds-fw-limitation</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

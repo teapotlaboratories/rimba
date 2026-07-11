@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh security Phase 2 (AMPE) — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-06-27</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-27</span>
+    <span class="badge">12 min read</span>
+    <span class="badge ok">✓ P2a–P2d done</span>
+    <span class="badge">mesh · security · AMPE</span>
+  </div>
+
+  <h1>Mesh security Phase 2 (AMPE)<br><small style="font-weight:600;color:var(--muted);font-size:1.05rem">per-peer-stad TX → derived MTK → per-node MGTK → real AES-SIV AMPE element</small></h1>
+
+  <p class="lead">Phase 2 replaces Phase-1's static/shared keys with the real AMPE key hierarchy: a
+  <strong>per-pair MTK</strong> derived from a PMK + exchanged nonces, plus a <strong>per-node MGTK</strong>
+  exchanged in an <strong>AES-SIV-protected AMPE element</strong> — following hostap
+  <code>wpa_supplicant/mesh_rsn.c</code> + <code>mesh_mpm.c</code> line by line.</p>
+
+  <h2 id="increments">The four increments</h2>
+  <p>It is split into four independently on-air-verifiable increments — all DONE:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">P2a</div><div class="s">per-peer-stad TX</div></div>
+      <div class="node ok"><div class="t">P2b</div><div class="s">derived MTK + nonces</div></div>
+      <div class="node ok"><div class="t">P2c</div><div class="s">per-node MGTK</div></div>
+      <div class="node ok"><div class="t">P2d</div><div class="s">AES-SIV AMPE elem</div></div>
+    </div>
+    <figcaption>Each increment is verified on-air before the next builds on it; P2a is de-risked with static keys, then the crypto is layered in.</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">P2a–P2d</div><div class="lbl">all DONE + on-air verified</div></div>
+    <div class="stat"><div class="num acc">0</div><div class="lbl">crypto ported (all reused via <code>mmint_*</code>)</div></div>
+    <div class="stat"><div class="num ok">0%</div><div class="lbl">ping loss on every on-air test</div></div>
+    <div class="stat"><div class="num acc">byte-exact</div><div class="lbl">vs live Linux AMPE element</div></div>
+  </div>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 700 200" role="img" aria-label="P2 AMPE key hierarchy">
+      <defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L9,4 L0,8 z" fill="#888"></path></marker></defs>
+      <!-- inputs -->
+      <rect x="10" y="30" width="160" height="50" rx="8" fill="none" stroke="#888" stroke-width="1.5"></rect>
+      <text x="90" y="52" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">PMK[32]</text>
+      <text x="90" y="69" text-anchor="middle" fill="#888" font-size="10.5">static · SAE-derived in P3</text>
+      <rect x="10" y="122" width="160" height="46" rx="8" fill="none" stroke="#888" stroke-width="1.5"></rect>
+      <text x="90" y="143" text-anchor="middle" fill="currentColor" font-size="12.5" font-weight="600">crypto_get_random</text>
+      <text x="90" y="159" text-anchor="middle" fill="#888" font-size="10.5">per-node random</text>
+      <!-- outputs -->
+      <rect x="470" y="8" width="220" height="44" rx="8" fill="none" stroke="#2f6feb" stroke-width="1.6"></rect>
+      <text x="580" y="28" text-anchor="middle" fill="currentColor" font-size="13.5" font-weight="600">MTK[16]</text>
+      <text x="580" y="43" text-anchor="middle" fill="#888" font-size="10.5">per-pair · unicast CCMP</text>
+      <rect x="470" y="64" width="220" height="44" rx="8" fill="none" stroke="#2f6feb" stroke-width="1.6"></rect>
+      <text x="580" y="84" text-anchor="middle" fill="currentColor" font-size="13.5" font-weight="600">AEK[32]</text>
+      <text x="580" y="99" text-anchor="middle" fill="#888" font-size="10.5">per-pair · AES-SIV AMPE</text>
+      <rect x="470" y="122" width="220" height="44" rx="8" fill="none" stroke="#2f6feb" stroke-width="1.6"></rect>
+      <text x="580" y="142" text-anchor="middle" fill="currentColor" font-size="13.5" font-weight="600">MGTK[16]</text>
+      <text x="580" y="157" text-anchor="middle" fill="#888" font-size="10.5">per-node · group CCMP</text>
+      <!-- connectors -->
+      <line x1="170" y1="52" x2="462" y2="30" stroke="#888" stroke-width="1.6" marker-end="url(#ah)"></line>
+      <line x1="170" y1="56" x2="462" y2="86" stroke="#888" stroke-width="1.6" marker-end="url(#ah)"></line>
+      <line x1="170" y1="145" x2="462" y2="144" stroke="#888" stroke-width="1.6" marker-end="url(#ah)"></line>
+      <text x="316" y="20" text-anchor="middle" fill="#888" font-size="10.5">sha256_prf · nonces+LID+AKM+MAC</text>
+      <text x="316" y="33" text-anchor="middle" fill="#888" font-size="10.5">key len 32</text>
+      <text x="316" y="70" text-anchor="middle" fill="#888" font-size="10.5">sha256_prf · MACs</text>
+      <text x="316" y="83" text-anchor="middle" fill="#888" font-size="10.5">key = PMK‖0×32 (len 64)</text>
+    </svg>
+    <figcaption>The P2 key hierarchy: a static PMK yields the per-pair MTK (unicast) and AEK (AMPE SIV) via <code>sha256_prf</code>; each node's MGTK (group) is fresh random. A real SAE-derived PMK arrives in P3.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>P2a — per-peer-stad TX</strong> (DONE): drive unicast mesh TX from the <em>per-peer</em> stad
+      (queue + dequeue per peer, like the AP datapath) instead of the single common stad. Prerequisite for
+      per-pair keys; verified with the existing static keys so the TX-architecture change is de-risked from the
+      crypto.</li>
+    <li><strong>P2b — derived per-pair MTK + nonce exchange</strong> (DONE):
+      <code>MTK = sha256_prf(PMK, "Temporal Key Derivation", min/max nonce ‖ LID ‖ AKM ‖ MAC)</code> on a static
+      PMK; nonces in a throwaway IE.</li>
+    <li><strong>P2c — per-node MGTK exchange</strong> (DONE): each node generates its own MGTK and ships it to
+      each peer.</li>
+    <li><strong>P2d — real AES-SIV AMPE element</strong> (P2d.2 DONE): the standard AMPE element (139) + MIC IE
+      (140) SIV-encrypted under the AEK, replacing the P2b/P2c <code>'RIM'</code> scaffolding. Remaining
+      sub-steps: P2d.3 RSN-IE/PMKID (Linux interop only), P2d.4 own-MGTK-at-start, P2d.5 gold-standard byte-diff
+      vs Linux.</li>
+  </ul>
+
+  <h2 id="design-finding">Pivotal design finding: P2 is integration, not crypto authorship</h2>
+
+  <div class="callout ok">
+    <p class="ct">✓ The ESP build already links all the crypto P2/P3 need</p>
+    <p>Confirmed in the bundled hostap (<code>framework/src/hostap</code>) — the whole point of P2 is
+    <em>integration</em>, not writing crypto:</p>
+    <ul style="margin:.3em 0 0">
+      <li><code>sha256_prf</code> — KDF for MTK/AEK</li>
+      <li><code>aes_siv_encrypt</code> / <code>aes_siv_decrypt</code> — the AMPE MIC (RFC 5297, the original
+        Cozybit 802.11s primitive)</li>
+      <li><code>aes-omac1</code> / <code>aes-ctr</code> — SIV deps</li>
+      <li><code>crypto_get_random</code> — nonce/MGTK</li>
+      <li><code>sae.c</code> — for P3</li>
+    </ul>
+  </div>
+
+  <p>They are exported to morselib through the <code>mmint_*</code> ABI (<code>hostap_morse_common.h</code>
+  mangles e.g. <code>#define sha256_prf mmint_sha256_prf</code>, <code>crypto_get_random →
+  mmint_crypto_get_random</code>). So P2b/P2c call <code>mmint_sha256_prf</code> +
+  <code>mmint_crypto_get_random</code> via a small morselib-local <code>extern</code> shim (avoids pulling
+  hostap <code>src/crypto/*.h</code> into morselib and its <code>utils/common.h</code> type clashes). The
+  <strong>only</strong> net-new build change in all of P2 is P2d adding <code>aes-siv.c</code> +
+  <code>aes-ctr.c</code> to the hostap CMake SRCS (upstream verbatim) and exporting <code>mmint_aes_siv_*</code>
+  via <code>hostap_morse_common.h</code>.</p>
+
+  <h2 id="p2a">P2a — per-peer-stad TX</h2>
+
+  <p>Phase-1's decisive gotcha was that mesh TX is <strong>common-stad-driven</strong>: every mesh frame
+  dequeues from the one common (MBSS) stad, so a single shared MTK on the common stad is what encrypts unicast.
+  That works only because the P1 keys are static/shared. P2's per-pair MTK means unicast to peer B must be
+  encrypted under the B-specific key, i.e. queued on and dequeued from <strong>B's per-peer stad</strong>. P2a
+  makes that switch (keys still static, so the result is observably identical — this isolates the TX change):</p>
+
+  <p><strong><code>umac/datapath/umac_datapath.c</code></strong></p>
+  <ul>
+    <li><code>umac_datapath_lookup_stad_by_tx_dest_addr_mesh</code> (the TX enqueue lookup) now returns the
+      <strong>per-peer stad</strong> for a unicast dest (<code>umac_mesh_get_peer_stad(addr)</code>), falling
+      back to the common stad for broadcast/multicast/zero or an unknown/not-yet-ESTAB dest. Previously it
+      always returned the common stad. Mirrors the existing RX lookup and the AP per-STA model. (Single-hop:
+      dest == next hop; the MTK is per <em>link</em>, so HWMP multi-hop needs a next-hop resolve here too — a
+      later step.)</li>
+    <li><code>umac_datapath_tx_dequeue_frame_mesh</code> rewritten from a common-stad-only pop into an AP-style
+      scheduler: a new pure helper <code>mesh_get_next_tx_stad()</code> returns the common stad first
+      (broadcast/mgmt + group MGTK), then the first established peer stad with queued traffic — mirroring
+      <code>umac_ap_get_next_sta_for_tx</code> walking <code>data-&gt;stas[]</code>. The dequeue scans + pops +
+      recomputes <code>has_more</code> under one critical section; <code>has_more</code> is an aggregate re-scan
+      (mesh has no single queued-frame counter like the AP's <code>num_pkts_queued</code>), so the other peers'
+      queues never stall.</li>
+  </ul>
+
+  <p><strong><code>umac/mesh/umac_mesh.{c,h}</code></strong></p>
+  <ul>
+    <li><code>umac_mesh_peer_stad_at(size_t index)</code> — enumerates peer slot <code>index</code>'s stad, but
+      only when that slot is <code>used &amp;&amp; state == MESH_PLINK_ESTAB</code> (else NULL), letting the
+      scheduler iterate established peers without exposing <code>mesh_peers[]</code>.</li>
+    <li><code>UMAC_MESH_MAX_PEERS</code> lifted into the header as the single source of truth; the .c's
+      <code>MESH_MAX_PEERS</code> now derives from it (the datapath loop and the peer table agree by
+      construction).</li>
+  </ul>
+
+  <h3>On-air proof (2026-06-27, board0 + board1, ch27 clear, chronium <code>morse0</code> monitor)</h3>
+  <p>2-board direct test (board1 → board0, both on the P2a build). Linux mesh stopped (ch27 clear); the third
+  ESP (board2) was on a PPK2 power-profiling rig with older fw, so a 2-node direct ping was used — board1's ping
+  target was temporarily pointed at board0 (<code>10.9.9.136</code>) for this.</p>
+
+  <pre><code>board1 console:  54 replies, 0 timeouts  (seq 54..93 unbroken)  -&gt; 0% loss
+chronium morse0 pcap (694 frames, tshark):
+  QoS-Data Protected tally:
+    board0 (e2:72:a1:f8:ef:a4):  28 Protected=1,  0 plaintext
+    board1 (e2:72:a1:f8:f9:40):  29 Protected=1   (all 28 unicast-&gt;board0 + 1 broadcast)
+                                  1 plaintext = a startup broadcast gratuitous ARP (10.9.9.100),
+                                  common-stad path, in the window before the group key went active
+                                  — benign, identical to P1, NOT on the unicast path P2a changed.
+  unicast board1-&gt;board0 frame:  Protected=1, RA=board0 / TA=board1,
+                                  CCMP Ext-IV present, Key Index = 0  (pairwise MTK, per-peer stad)</code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ 0% loss is the decisive functional proof</p>
+    <p>If the per-peer enqueue and the new scheduler dequeue were inconsistent, unicast frames would stick on
+    the per-peer queue and never TX (exactly the regression hit mid-P1 when only the enqueue was moved to the
+    per-peer stad). They drain cleanly, and the CCMP <strong>Key Index 0</strong> confirms the encrypting key is
+    the <strong>pairwise MTK selected from the per-peer stad</strong>, not the group key — the per-peer-stad TX
+    path is correct end to end. This is the foundation P2b's per-pair derived MTK installs onto.</p>
+  </div>
+
+  <p>Multi-peer drain (one relay node with two established peers) is verified by construction — the scheduler
+  loops over all peer slots — and is deferred to a later 3-node on-air run once board2 is free of the profiling
+  rig.</p>
+
+  <h2 id="p2b">P2b — derived per-pair MTK + nonce exchange</h2>
+
+  <p>Replaces Phase-1's shared <code>mesh_p1_mtk</code> with a per-pair MTK derived from a static PMK + the
+  peering nonces, byte-exact with hostap <code>mesh_rsn_derive_mtk</code>/<code>mesh_rsn_derive_aek</code>
+  (verified against the bundled <code>wpa_supplicant/mesh_rsn.c</code>, not from memory). All crypto is reused
+  via the <code>mmint_*</code> ABI — no crypto ported.</p>
+
+  <p><strong><code>umac/mesh/umac_mesh.c</code></strong></p>
+  <ul>
+    <li><code>extern int mmint_sha256_prf(...)</code> + <code>extern int mmint_crypto_get_random(...)</code> — a
+      morselib-local shim onto the mangled hostap crypto (avoids pulling <code>src/crypto/*.h</code> and its
+      <code>utils/common.h</code> type clashes). Confirmed at link time: no undefined references, so morselib
+      resolves the mangled hostap symbols — the linkage assumption behind all of P2 (incl. P2d's
+      <code>aes_siv</code>).</li>
+    <li><code>struct mesh_peer</code>: <code>my_nonce[32]</code>, <code>peer_nonce[32]</code>,
+      <code>peer_nonce_valid</code>, <code>mtk[16]</code>, <code>aek[32]</code>.</li>
+    <li><code>mesh_peer_alloc</code>: <code>mmint_crypto_get_random(my_nonce, 32)</code> — a fresh local nonce
+      per (re)alloc (the <code>memset(p,0,...)</code> clears <code>peer_nonce_valid</code>, so a re-peer can't
+      reuse a stale MTK).</li>
+    <li>Constants: <code>mesh_p2_pmk[32]</code> (the static PMK, identical on every node) +
+      <code>mesh_ampe_akm_sae[4]</code> = <code>00 0f ac 08</code> (SAE, big-endian like
+      <code>RSN_SELECTOR_PUT</code>).</li>
+    <li><code>mesh_derive_mtk(peer)</code>: <code>ctx[84]</code> = <code>min/max(myNonce,peerNonce)</code> ‖
+      <code>min/max LID</code> (LE16, <strong>numeric</strong> order) ‖ <code>AKM</code> ‖
+      <code>min/max(myMAC,peerMAC)</code>; <code>sha256_prf(PMK,32,"Temporal Key
+      Derivation",ctx,84,mtk,16)</code>. Nonces/MACs ordered by <code>memcmp</code>.</li>
+    <li><code>mesh_derive_aek(peer)</code>: <code>ctx[16]</code> = <code>AKM</code> ‖ <code>min/max MAC</code>;
+      <strong>key = PMK(32)‖32 zeros, length 64</strong> (mirrors hostap's
+      <code>sizeof(sae-&gt;pmk)=SAE_MAX_PMK_LEN</code>; the MTK uses len 32 — mixing the two is the #1
+      byte-exactness break). Derived in P2b to validate the 64-byte path; consumed by P2d's AES-SIV.</li>
+    <li><code>umac_mesh_peer_secure_estab</code>: derive MTK+AEK, then install <code>peer-&gt;mtk</code> (was
+      <code>mesh_p1_mtk</code>) on the per-peer stad. The peer/own MGTK stays static (<code>mesh_p1_mgtk</code>)
+      until P2c.</li>
+    <li>Nonce exchange (throwaway scaffolding, replaced by the real AMPE element in P2d): a vendor IE (221,
+      marker <code>'RIM'</code>/type 1) carrying the 32-byte local nonce on Open + Confirm;
+      <code>mesh_parse_peering_ie</code> extended to also return the peer nonce, stored into
+      <code>peer-&gt;peer_nonce</code> before ESTAB.</li>
+  </ul>
+
+  <h3>On-air proof (2026-06-27, board0 + board1, chronium <code>morse0</code> monitor)</h3>
+  <pre><code>board1 console:  MESH-SEC derive aid=1 nonce_ok=1 mtk=477aa0b3 aek=3702c4a2   ; 55 replies, 0 timeouts
+board0 console:  MESH-SEC derive aid=2 nonce_ok=1 mtk=477aa0b3 aek=3702c4a2   ; (ping responder)
+chronium pcap:   board1&lt;-&gt;board0 unicast QoS-Data ALL Protected=1 / CCMP (28 + 30 frames)</code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ Both ends independently derived the IDENTICAL MTK + AEK</p>
+    <p>The MTK is <strong>derived</strong> (<code>477aa0b3</code>), not the static <code>00 11 22 33…</code>;
+    board0 and board1 independently derived the identical MTK <strong>and</strong> AEK (<code>3702c4a2</code>) —
+    proof the min/max byte order (memcmp nonces/MACs, numeric LIDs) is correct on both ends;
+    <code>nonce_ok=1</code> confirms the nonce carrier worked; and 0% loss proves the derived key actually
+    encrypts and decrypts.</p>
+  </div>
+
+  <p>board0 also had board2 (older fw, no nonce IE) allocated as a peer slot but it never reached ESTAB, so it
+  stayed isolated from the secured board0↔board1 link. Each pair derives a distinct MTK by construction
+  (different nonces/MACs per pair); the explicit 3-node A↔B ≠ A↔C demonstration and the Linux byte-diff are
+  deferred to a 3-new-fw-node run / the P2d gold standard.</p>
+
+  <h2 id="p2c">P2c — per-node MGTK exchange</h2>
+
+  <p>Replaces P2b's still-static MGTK with a per-node group key: each node generates its own MGTK once at mesh
+  start, advertises it to each peer in its Open, and installs the peer's MGTK as a group-RX key so the peer's
+  broadcast/multicast decrypts under the peer's own key (mac80211 <code>__mesh_rsn_auth_init</code> +
+  <code>mesh_mpm_plink_estab</code>). The static <code>mesh_p1_mgtk</code> is removed.</p>
+
+  <p><strong><code>umac/mesh/umac_mesh.c</code></strong></p>
+  <ul>
+    <li><code>struct umac_mesh_context.own_mgtk[16]</code>: generated once at mesh start
+      (<code>mmint_crypto_get_random</code>), before any Open carries it. Install onto the common stad
+      (group-TX, key_idx 1) stays deferred to first ESTAB (a group key at start breaks OPEN peering — the P1
+      gotcha; moves to start only in P2d).</li>
+    <li><code>struct mesh_peer.peer_mgtk[16]/peer_mgtk_rsc[8]/peer_mgtk_valid</code>: the peer's own MGTK,
+      learned from its Open, installed as our group-RX key for that peer at ESTAB.</li>
+    <li>Carrier IE extended: the <code>'RIM'</code> vendor IE now has type 1 (nonce only, Confirm) and type 2
+      (nonce + 16-byte MGTK + 8-byte RSC, Open). <code>mesh_parse_peering_ie</code> returns the peer MGTK;
+      stored pre-ESTAB.</li>
+    <li>RSC advertised as 0 (own MGTK PN starts at 0 when sent in the Open, before group TX); applying a
+      non-zero RSC is deferred to P2d. (<code>umac_key.rx_seq</code> is a uint64 replay-counter array, not the
+      RSC bytes — left zeroed.)</li>
+    <li>No RX change needed: a received group frame already resolves to the <strong>transmitter's</strong>
+      per-peer stad (<code>lookup_stad_by_peer_addr_mesh</code> is called with the frame's TA,
+      <code>umac_datapath.c:1460/1643</code>), which is exactly where that originator's MGTK lives. The P2a
+      per-peer-stad model already routes it.</li>
+  </ul>
+
+  <h3>On-air proof (2026-06-27, board0 + board1, chronium <code>morse0</code> monitor)</h3>
+  <pre><code>board0 console:  own MGTK (group TX) = 12a33130 ; installs peer MGTK (group RX) = 65529a3e
+board1 console:  own MGTK (group TX) = 65529a3e ; installs peer MGTK (group RX) = 12a33130
+  -&gt; board0-own == board1-installed, board1-own == board0-installed, and 12a33130 != 65529a3e
+     (each node's MGTK is distinct and exchanged correctly).
+board1 broadcasts on-air: QoS-Data, Protected=1, CCMP Key Index 1 (group MGTK), PN increments.
+ping board1-&gt;board0: 0% loss.</code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ Decryption proved on-air (stronger than planned)</p>
+    <p>The monitor caught board0 <strong>re-broadcasting</strong> board1's DHCP-Discover / ARP content with
+    <strong>TA=board0, SA=board1</strong> — board0 could only emit that plaintext content by first
+    <strong>decrypting board1's keyid-1 broadcast with board1's per-node MGTK</strong> (installed as group-RX on
+    board0's per-peer stad for board1). So the full path works: board1 originates a group frame encrypted under
+    its own MGTK, board0 decrypts it under the same key. The MTK also changed vs P2b (<code>9f1d7647</code> vs
+    <code>477aa0b3</code>) because nonces are fresh per peering, while the AEK stayed <code>3702c4a2</code> (no
+    nonce input) — a nice consistency check.</p>
+  </div>
+
+  <h3>Finding (pre-existing, NOT a P2c regression) — FIXED: forwarded group frames were plaintext</h3>
+
+  <div class="callout bug">
+    <p class="ct">🐛 A forwarded multicast leaked in plaintext</p>
+    <p>The P2c capture showed board0's <strong>re-broadcast</strong> (group-forward) of board1's frame going out
+    in the clear (DHCP/ARP content visible, TA=board0). The mesh group-forward path
+    (<code>umac_mesh_build_rebcast</code> → <code>umac_datapath_tx_mgmt_frame</code>, from <code>c16e9a8a</code>,
+    the original mesh data plane — predates all security work) re-emits via the
+    <strong>management-frame TX path, which only encrypts robust <em>management</em> frames</strong>
+    (PMF/pairwise) and overwrites the tx metadata, so a forwarded <em>data</em> frame goes out unencrypted.
+    Linux re-encrypts a forwarded mesh group frame with the local MGTK on re-TX; the ESP forward did not.
+    Orthogonal to P2c's key exchange (it concerns <em>re-transmitting others'</em> frames), but a real
+    secured-mesh gap.</p>
+  </div>
+
+  <p><strong>Fix:</strong> a dedicated <code>umac_datapath_tx_mesh_group_frame(stad, txbuf)</code>
+  (<code>umac_datapath.c</code>) applies the <em>data-path</em> rule to the pre-built re-broadcast: when the
+  stad's security != OPEN, encrypt under the <strong>GROUP</strong> key
+  (<code>umac_keys_get_active_key_id(stad, GROUP)</code> = the forwarder's own MGTK on the common stad), set the
+  Protected bit + <code>MMDRV_TX_FLAG_HW_ENC</code> + key_idx + increment the PN. The mesh group-forward
+  (<code>umac_mesh_handle_group_data</code>) now calls it instead of <code>umac_datapath_tx_mgmt_frame</code>,
+  so a forwarded multicast is CCMP-protected on every hop. <strong>Verified on-air:</strong> board0's forwarded
+  frames (TA=board0, SA=board1, group DA) are now all Protected=1 / CCMP <strong>Key Index 1</strong> (board0's
+  own MGTK), PN incrementing — the DHCP/ARP plaintext is gone. Unicast steady-state ping 0% loss (one boot-time
+  transient timeout during peering churn). The same gap on the <em>unicast</em> relay forward
+  (<code>umac_mesh_forward_data</code>, which needs the next-hop <strong>pairwise</strong> MTK, not the group
+  key) remains a separate follow-up.</p>
+
+  <h2 id="p2d2">P2d.2 — real AES-SIV-protected AMPE element</h2>
+
+  <p>Replaces the throwaway <code>'RIM'</code> carrier IE with the standard AMPE element
+  (<code>WLAN_EID_AMPE</code>=139) wrapped in a <code>WLAN_EID_MIC</code>=140 element, AES-SIV-encrypted under
+  the <strong>AEK</strong> — the real 802.11s AMPE, byte-exact with hostap <code>mesh_rsn_protect_frame</code> /
+  <code>mesh_rsn_process_ampe</code> (this Morse <code>CONFIG_IEEE80211AH=1</code> build → the
+  <strong>fixed-6 AAD</strong> variant). All crypto reused.</p>
+
+  <p><strong>Build integration (P2d.1):</strong> <code>components/hostap/CMakeLists.txt</code> adds
+  <code>aes-ctr.c</code> + <code>aes-siv.c</code> to SRCS (<code>omac1</code>/<code>aes_encrypt</code> already
+  provided by <code>crypto_mbedtls_mm.c</code>); <code>hostap_morse_common.h</code> mangles
+  <code>aes_siv_encrypt/decrypt → mmint_aes_siv_*</code>. morselib calls them through <code>extern int
+  mmint_aes_siv_*</code> shims — links clean (the same <code>mmint_*</code> mechanism proven for
+  <code>sha256_prf</code> in P2b).</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">AEK derive</div><div class="s">MACs+PMK, at alloc</div></div>
+      <div class="node"><div class="t">Open</div><div class="s">AMPE elem · SIV/AEK</div></div>
+      <div class="node"><div class="t">Confirm</div><div class="s">AMPE elem · SIV/AEK</div></div>
+      <div class="node acc"><div class="t">MTK derive</div><div class="s">from nonces, at ESTAB</div></div>
+      <div class="node ok"><div class="t">ESTAB</div><div class="s">encrypted unicast</div></div>
+    </div>
+    <figcaption>AEK is ready before the first Open (so it can verify the incoming AMPE element); the exchanged nonces then yield the per-pair MTK at ESTAB.</figcaption>
+  </figure>
+
+  <p><strong><code>umac/mesh/umac_mesh.c</code></strong></p>
+  <ul>
+    <li>AEK is derived at <strong><code>mesh_peer_alloc</code></strong> (not ESTAB) + <code>aek_valid</code>
+      flag — it depends only on the MACs + PMK, and must be ready to verify the very first incoming Open (whose
+      AMPE element carries the peer's nonce). MTK still derives at ESTAB (needs the exchanged nonces).</li>
+    <li><strong>TX</strong> (<code>umac_mesh_build_peering</code>): build the plaintext AMPE element —
+      <code>[139][len]</code>, <code>selected_pairwise_suite = CCMP 00 0f ac 04</code> (<strong>not</strong> the
+      SAE AKM), <code>local_nonce[32]</code>, <code>peer_nonce[32]</code>, and on <strong>Open</strong> the
+      GTKdata (<code>MGTK[16] ‖ RSC[8] ‖ GTKExpiry=0xffffffff</code>); len 68 (Confirm) / 96 (Open). Append
+      <code>[140][16]</code> then <code>aes_siv_encrypt(AEK, key_len=32, ampe_element, num_elem=3, AAD={TA=us,
+      RA=peer, first-6-body}, lens={6,6,6})</code>: the 16-byte SIV IV is the MIC IE body, the ciphertext spills
+      past it. Two-pass consbuf — encrypt only on the fill pass; the 6-byte AAD is read from <code>(uint8_t*)hdr
+      + sizeof(*hdr)</code> (the category byte) once the body is final.</li>
+    <li><strong>RX</strong> (<code>mesh_parse_peering_ie</code> + <code>mesh_process_ampe</code>): the parser
+      locates the MPM IE (117) link ids and the MIC IE (140), stopping at 140 (the ciphertext is not valid TLV).
+      <code>mesh_process_ampe</code> <code>aes_siv_decrypt(AEK, 32, IV‖ciphertext, AAD SWAPPED {TA=peer, RA=us,
+      first-6}, {6,6,6})</code>; on success checks <code>eid==139</code>, the peer_nonce echo (zero or == our
+      nonce), learns the peer's local_nonce → <code>peer-&gt;peer_nonce</code>, and (Open) the MGTK →
+      <code>peer-&gt;peer_mgtk</code>. A verify failure drops the frame without advancing the FSM.</li>
+  </ul>
+
+  <h3>On-air proof (2026-06-27, board0 + board1, chronium <code>morse0</code> monitor)</h3>
+  <pre><code>both consoles:  MESH-SEC ampe rx action=1 (Open)    verify=0 eid=139   (crypt_len 114 = 16 + 98)
+                MESH-SEC ampe rx action=2 (Confirm)  verify=0 eid=139   (crypt_len  86 = 16 + 70)
+                estab nonce_ok=1 mgtk_ok=1 ; board0 mtk == board1 mtk (identical, e.g. 77b9090d)
+ping board1-&gt;board0:  43 replies, 0 timeouts ; 78 unicast frames all Protected=1.
+Open frame IEs on-air: 217, 114, 113, 117, 140  — NO vendor IE (221); the 'RIM' carrier is gone, and
+                no plaintext AMPE(139) tag appears (it is the encrypted ciphertext after the MIC IE).</code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ AES-SIV verify succeeds on both Open and Confirm; both nodes derive the identical MTK</p>
+    <p>Both nodes independently derive the <strong>IDENTICAL per-pair MTK</strong> from the AMPE-exchanged
+    nonces — any wrong byte (AAD order/length, the 32-byte AEK key length, the nonce offsets, the CCMP-vs-SAE
+    suite) would fail the verify or mismatch the MTK. Then encrypted unicast pings at 0% loss. The on-air wire
+    format matches <code>mesh_rsn_protect_frame</code> (MPM IE then
+    <code>[140][16][SIV-IV][ciphertext]</code>). The AMPE port is functionally complete for ESP↔ESP.</p>
+  </div>
+
+  <h3>Remaining P2d sub-steps (all now DONE)</h3>
+  <ul>
+    <li><strong>P2d.3 — Linux-shaped peering wrapper: DONE.</strong> <code>umac_mesh_build_peering</code> now
+      emits the RSN IE (48, the exact live-Linux bytes
+      <code>30 14 01 00 00 0f ac 04 01 00 00 0f ac 04 01 00 00 0f ac 08 00 00</code>), the
+      <strong>PRIVACY capability</strong> (<code>10 00</code>), and the MPM IE with <strong><code>protocol=1</code>
+      + a 16-byte PMKID</strong> (a placeholder — the real cross-vendor PMKID needs <strong>P3 (SAE)</strong>).
+      The parser excludes the trailing PMKID from its plid-present check (else an Open's PMKID is misread as a
+      plid) and skips the RSN IE. The PRIVACY cap is inside the 6-byte AMPE AAD window, but both ESP ends change
+      together so the SIV still verifies. <strong>Verified on-air + byte-diffed vs the live Linux frame:</strong>
+      both nodes AMPE verify=0 on Open+Confirm + netif up; the ESP Open's IE tags are now
+      <code>217, 48, 114, 113, 117, 140</code> (security tail <code>48,114,113,117,140</code> matches Linux),
+      and the raw bytes are byte-identical — RSN IE
+      <code>30 14 01 00 00 0f ac 04 01 00 00 0f ac 04 01 00 00 0f ac 08 00 00</code>, MPM IE
+      <code>75 14 01 00 …</code> (protocol=1), MIC IE <code>8c 10 …</code> — the ONLY difference is the PMKID
+      value (placeholder vs SAE-derived, which P3 supplies). (Beacon RSN IE deferred — only a Linux node
+      <em>initiating</em> to the ESP needs it, which also needs P3.)</li>
+    <li><strong>P2d.4 — own-MGTK install moved from first-ESTAB back to mesh start: DONE.</strong>
+      <code>umac_mesh_install_common_keys()</code> now runs in <code>mmwlan_mesh_start</code> (after
+      <code>own_mgtk</code> is generated + the common stad is set up), matching hostap
+      <code>__mesh_rsn_auth_init</code>; the first-ESTAB install + deferral comment are removed. The P1 gotcha
+      (firmware dropping the unprotected peering frames once a group key is installed) <strong>does NOT
+      recur</strong> now peering is AMPE-protected — <strong>verified on bench:</strong> with the MGTK installed
+      at start, both nodes still AMPE verify=0 on Open+Confirm and reach netif-up. Bonus: this closes the P2c
+      startup plaintext-broadcast window (the group key is live before netif-up).</li>
+    <li><strong>P2d.5 — gold-standard byte-diff vs a live Linux secured-mesh node: DONE, see below.</strong></li>
+  </ul>
+
+  <h2 id="p2d5">P2d.5 — gold-standard byte-diff vs a live Linux secured mesh</h2>
+
+  <p>Stood up the real Linux SAE+AMPE mesh (<code>wpa_supplicant_s1g -dd -K</code> on chronosalt + chronogen,
+  the AH-patched 1.17.8 morse build → the same fixed-6 AAD; <code>rimba-smesh</code>, SAE), peered them (plink
+  ESTAB), and pulled a live node's <strong>un-redacted plaintext AMPE element</strong> plus the on-air frame, to
+  byte-diff against the ESP's P2d.2 output. (The PMKs differ — Linux SAE vs ESP static — so the
+  <em>encrypted</em> bytes and the random nonces/MGTK necessarily differ; the comparison is the element layout +
+  the fixed fields + the sizes + the on-air framing.)</p>
+
+  <p>Live Linux plaintext AMPE element, Open (<code>wpa-K.log</code>, len=98):</p>
+  <pre><code>8b 60 | 00 0f ac 04 | &lt;32B local_nonce&gt; | &lt;32B peer_nonce = 00…00&gt; | &lt;16B MGTK&gt; | &lt;8B RSC = 00…00&gt; | ff ff ff ff</code></pre>
+
+  <p>Field-for-field vs what the ESP <code>umac_mesh_build_peering</code> emits — <strong>every fixed field is
+  identical</strong>:</p>
+
+  <table>
+    <thead><tr><th>field</th><th>live Linux</th><th>ESP P2d.2</th></tr></thead>
+    <tbody>
+      <tr><td>EID / len</td><td><code>8b 60</code> (139 / 96)</td><td><code>8b 60</code> (139 / 96)</td></tr>
+      <tr><td>selected_pairwise_suite</td><td><code>00 0f ac 04</code> (CCMP)</td><td><code>00 0f ac 04</code> (CCMP)</td></tr>
+      <tr><td>local_nonce(32) ‖ peer_nonce(32)</td><td>nonce ‖ <strong>all-zero on the first Open</strong></td><td>nonce ‖ <strong>all-zero until peer heard</strong></td></tr>
+      <tr><td>GTKdata (Open)</td><td>MGTK(16) ‖ <strong>RSC=0</strong>(8) ‖ <strong><code>ff ff ff ff</code></strong></td><td>MGTK(16) ‖ <strong>RSC=0</strong>(8) ‖ <strong><code>ff ff ff ff</code></strong></td></tr>
+      <tr><td>encrypted size</td><td><strong>114</strong> (Open) / <strong>86</strong> (Confirm)</td><td><strong>114</strong> (Open) / <strong>86</strong> (Confirm)</td></tr>
+    </tbody>
+  </table>
+
+  <p>On-air (chronium <code>morse0</code>), the Linux Open's IE tags are <code>221, 217, 232, 48, 114, 113, 117,
+  140</code>; the ESP's are <code>217, 114, 113, 117, 140</code>. The <strong>security-relevant tail
+  <code>…114, 113, 117, 140</code></strong> (Mesh ID, Mesh Config, MPM IE, then the <strong>MIC IE 140</strong>
+  with the encrypted AMPE spilling past it) is <strong>identical</strong>. The Linux-only extras are precisely
+  the deferred <strong>P2d.3</strong> items: the <strong>RSN IE (48)</strong>, the MPM IE with
+  <strong><code>protocol=1</code> + a 16-byte PMKID</strong> (<code>75 14 01 00 …</code>), and the
+  <strong>PRIVACY capability</strong> (<code>10 00</code>). The remaining tag diffs (<code>221</code>/<code>232</code>
+  vendor + S1G-operation IEs) are PHY-layer, from the morse 5 GHz-model representation, not AMPE.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Conclusion — byte-exact with a live Linux Morse device</p>
+    <p>The ESP's AMPE element is byte-exact with a live Linux Morse device — same EID/len, CCMP suite, nonce +
+    GTKdata layout, RSC, expiry, and encrypted sizes — and it sits in the same on-air IE position. The only gap
+    to a strict Linux peer is the RSN-IE/PMKID/PRIVACY wrapper (P2d.3), and a real cross-vendor PMKID needs
+    <strong>P3 (SAE)</strong>. The Linux mesh was stopped afterward (bench restored).</p>
+  </div>
+
+  <h2 id="bench-note">Bench note</h2>
+  <p>While freeing a serial port for flashing, a <code>fuser -k</code> on <code>/dev/ttyACM2</code> killed
+  <code>/tmp/ppk2_hold.py</code> (the PPK2 power-hold for board2 — the USB ports had re-enumerated, so ACM2 was
+  the PPK2, not board2's console). That cut board2's 5 V DUT power. Restored by re-running
+  <code>/tmp/ppk2_hold.py</code> with the IDF python (which has <code>ppk2_api</code>): board2 re-enumerated and
+  power is held again (ampere-meter, DUT ON).</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Lesson</p>
+    <p>Identify each <code>/dev/ttyACM*</code> by USB VID:PID (Espressif <code>303a:1001</code> vs Nordic PPK2
+    <code>1915:c00a</code>) before assuming a port is a board console — USB re-enumeration shuffles the ACM
+    numbers.</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#increments">The four increments</a></li>
+    <li><a href="#design-finding">Integration, not crypto authorship</a></li>
+    <li><a href="#p2a">P2a · per-peer-stad TX</a></li>
+    <li><a href="#p2b">P2b · derived MTK + nonces</a></li>
+    <li><a href="#p2c">P2c · per-node MGTK</a></li>
+    <li><a href="#p2d2">P2d.2 · AES-SIV AMPE element</a></li>
+    <li><a href="#p2d5">P2d.5 · byte-diff vs Linux</a></li>
+    <li><a href="#bench-note">Bench note</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-06-27-mesh-security-phase2-ampe</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

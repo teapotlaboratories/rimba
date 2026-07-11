@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 1 bring-up start — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-17</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-17</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ build/flash PASS</span>
+    <span class="badge bug">bring-up · ESP32 · HaLow</span>
+  </div>
+
+  <h1>Phase 1 bring-up start<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">Phase 1 — IBSS Foundation (blocking) · first firmware on real hardware</small></h1>
+
+  <p class="lead">Stand up the firmware project, the ESP-IDF toolchain, and build + flash a first example
+  firmware to the real hardware — a deliberately radio-free sanity build that proves the toolchain / flash /
+  console pipeline and validates what can be validated before the HaLow radio is up.</p>
+
+  <p style="color:var(--muted);font-size:.95rem;margin-top:-.6em">Author: Aldwin.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Superseded same day (session 2)</p>
+    <p>Morse Micro <em>does</em> publish a maintained ESP32 port on the ESP Component Registry
+    (<code>morsemicro/halow</code> + <code>morsemicro/firmware</code>). We consume that as a managed dependency —
+    <strong>no HAL port needed.</strong> See
+    <a href="2026-06-17-mm6108-halow-bringup.html"><code>2026-06-17-mm6108-halow-bringup</code></a>. The
+    KEY&nbsp;FINDING below is kept for history: it was correct that <em>the maintained <code>mm-iot-sdk</code> repo</em>
+    has no ESP32 port; what it missed is the separately-published component.</p>
+  </div>
+
+  <h2 id="hardware">Hardware / host environment</h2>
+  <table>
+    <thead><tr><th>Item</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Host</td><td>aarch64 Linux SBC (RK-series), 6 cores, 3.8 GB RAM, 53 GB free</td></tr>
+      <tr><td>Board</td><td>Seeed Studio <strong>XIAO ESP32-S3 Plus</strong> (ESP32-S3R8: 16 MB flash, 8 MB octal PSRAM)</td></tr>
+      <tr><td>Radio</td><td>Seeed <strong>Wi-Fi HaLow</strong> transceiver (Morse Micro <strong>MM6108</strong>) on the XIAO, SPI</td></tr>
+      <tr><td>Port</td><td><code>/dev/ttyACM0</code> — board's <strong>native USB-Serial-JTAG</strong> (flash + console)</td></tr>
+      <tr><td>User</td><td>in <code>dialout</code> group → port accessible without sudo</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="toolchain">Toolchain installed (out-of-tree, not committed)</h2>
+  <ul>
+    <li><strong>ESP-IDF v5.2.3</strong> at <code>~/esp/esp-idf</code> (<code>install.sh esp32s3</code>).</li>
+    <li>ESP-IDF does <strong>not</strong> bundle <code>cmake</code>/<code>ninja</code> on Linux. No passwordless sudo
+      here, so instead of <code>apt install</code> they were installed into the IDF python env:
+      <code>~/.espressif/python_env/idf5.2_py3.13_env/bin/pip install "cmake==3.30.5" ninja</code>.
+      <ul>
+        <li><strong>cmake pinned to 3.30.5 on purpose</strong> — pip's latest is cmake 4.x, which drops pre-3.5
+          policy compatibility and breaks some ESP-IDF 5.2 component builds. Anyone reproducing this must avoid
+          cmake 4.x with IDF 5.2.</li>
+      </ul></li>
+    <li>The repo's own Python venv (<code>~/Developments/venv/rimba</code>) is <strong>not</strong> used for the
+      firmware build — ESP-IDF manages its own env.</li>
+  </ul>
+
+  <h2 id="key-finding">KEY FINDING — no supported ESP32 path for morselib</h2>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Superseded (see banner above)</p>
+    <p>Morse Micro <em>does</em> publish a maintained ESP32 port on the ESP Component Registry
+    (<code>morsemicro/halow</code> + <code>morsemicro/firmware</code>) — consumed as a managed dependency, no HAL
+    port needed. The analysis below is kept for history; it was correct that the maintained <code>mm-iot-sdk</code>
+    repo has no ESP32 port, but it missed the separately-published component.</p>
+  </div>
+
+  <p>This is the most important outcome of the session and it reshapes the Phase 1 plan, so it is recorded in full.
+  The development plan (Risk-01) assumes we drive the MM6108 from ESP32 via <code>morselib</code> from
+  <strong><code>mm-iot-sdk</code></strong>. On inspection:</p>
+
+  <ul>
+    <li><strong><code>mm-iot-sdk</code> (v2.11.2)</strong> — the current, maintained SDK — targets Morse Micro's own
+      <strong>STM32 reference boards only</strong>. Its build platforms are <code>mm-ekh08-h753</code> (STM32H7),
+      <code>u575</code>/<code>wb55</code> (STM32U5/WB), <code>mm6108-ekh05</code>, <code>mm8108-ekh05</code>. It
+      bundles its own FreeRTOS, lwIP, mbedTLS. <strong>There is no ESP32 port in it.</strong></li>
+    <li>morselib is portable: it talks to the host through a <strong>HAL</strong> — <code>mmhal_wlan.h</code>
+      (SPI/SDIO transport to the chip), <code>mmhal_os.h</code>, <code>mmhal_flash.h</code>, <code>mmosal.h</code>,
+      etc. Porting to ESP32 means implementing these against ESP-IDF.</li>
+    <li>The only ESP32 implementation of that HAL is the <strong>deprecated</strong>
+      <strong><code>mm-iot-esp32</code></strong> repo (the user said: read it, don't depend on it). It is an
+      "alpha port" of <strong>mm-iot-sdk 2.10.4</strong> to <strong>ESP-IDF v5.1.1</strong>, and it contains exactly
+      the missing glue under <code>framework/mm_shims/</code>: <code>mmhal_wlan.c</code>, <code>mmhal_os.c</code>,
+      <code>mmhal_core.c</code>, <code>mmosal_shim_freertos_esp32.c</code>, <code>mmhal_wlan_binaries.c</code>,
+      <code>crypto_mbedtls_mm.c</code>, plus a <code>CMakeLists.txt</code> / <code>idf_component.yml</code> wrapping
+      morselib + firmware blobs as an IDF component.</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">morselib</div><div class="s">mm-iot-sdk 2.11.2</div></div>
+      <div class="node acc"><div class="t">HAL interface</div><div class="s">mmhal_wlan/os/flash · mmosal</div></div>
+      <div class="node err"><div class="t">ESP-IDF port</div><div class="s">mm_shims — we write</div></div>
+    </div>
+    <figcaption>morselib talks to the host only through a HAL. The sole existing ESP-IDF implementation of it is
+    the deprecated <code>mm-iot-esp32</code> alpha (mm-iot-sdk 2.10.4 / IDF 5.1.1) — the plan is to rehost its
+    <code>mm_shims</code> onto the current morselib 2.11.2 + IDF 5.2.3.</figcaption>
+  </figure>
+
+  <div class="callout">
+    <p class="ct">Implication for Phase 1 task 1.1</p>
+    <p>"Set up ESP-IDF + morselib build" is <strong>not</strong> a one-day off-the-shelf step. Before any IBSS work
+    (Risk-01) we must <strong>port the morselib HAL to ESP-IDF ourselves</strong>, using
+    <code>mm-iot-esp32/framework/mm_shims</code> as the reference but rehosting it on the current
+    <code>mm-iot-sdk</code> morselib (2.11.2) and a current ESP-IDF (5.2.3). New, real work the plan under-scoped.
+    It does <strong>not</strong> change anything above L2 — the DTN/BPv7/mule/routing stack is link-agnostic (see
+    plan §RISK-01 fallback).</p>
+  </div>
+
+  <h3>Firmware blobs needed for the eventual port (present in mm-iot-sdk)</h3>
+  <ul>
+    <li><code>framework/morsefirmware/mm6108.mbin</code> — MM6108 firmware.</li>
+    <li><code>framework/morsefirmware/mm6108/bcfs/*.mbin</code> — Board Config Files. The Seeed HaLow module's
+      correct BCF still needs to be identified (candidates include <code>bcf_mf08651_us.mbin</code> and
+      <code>bcf_sx_sdmah.mbin</code>; <strong>TBD — verify against the Seeed module before RF bring-up</strong>,
+      US 902–928 regulatory).</li>
+  </ul>
+
+  <h2 id="built">What was actually built this session</h2>
+  <p><code>firmware/rimba-hello/</code> — a deliberately radio-free Phase-1 sanity firmware that proves the
+  toolchain + flash + console pipeline and validates what we <em>can</em> validate without the HaLow port:</p>
+  <ul>
+    <li>Chip identity, cores, silicon revision, flash size, IDF version.</li>
+    <li><strong>PSRAM presence + 1 MiB read/write test</strong> → covers <strong>RISK-04 / task 1.8</strong>
+      (8 MB octal PSRAM is mandatory for the bundle store / routing table).</li>
+    <li>Internal SRAM free / min-ever headroom → Phase-1 gate "&gt; 50 KB SRAM free".</li>
+    <li>5 s heartbeat with uptime + heap.</li>
+  </ul>
+
+  <p>Project structure created:</p>
+  <pre><code>Makefile                   # (repo root) idf.py wrapper: build / flash / monitor / size / ...
+firmware/
+  README.md
+  rimba-hello/
+    CMakeLists.txt, sdkconfig.defaults[.esp32s3]
+    main/{rimba_hello.c, CMakeLists.txt}
+vendor/mm-iot-sdk          # pinned submodule @ b61d4548 (v2.11.2)
+docs/worklog/              # this log
+.gitignore</code></pre>
+
+  <div class="callout">
+    <p class="ct">Update (same session) — Makefile moved to repo root</p>
+    <p>The <code>Makefile</code> was moved from <code>firmware/</code> to the <strong>repo root</strong> at Aldwin's
+    request (<code>APP_DIR := firmware/$(APP)</code>), so <code>make build/flash/monitor</code> now run from the repo
+    root. The root <code>README.md</code> gained a "Building the firmware" section (full from-scratch compile steps)
+    and a "Two separate SDKs" table clarifying ESP-IDF (ESP32-S3 host MCU, mandatory) vs <code>mm-iot-sdk</code>
+    (MM6108 radio, not yet used). No firmware source changed.</p>
+    <p class="ct" style="margin-top:.6em">Update 2 (same session) — out-of-source builds</p>
+    <p>Builds are now <strong>out-of-source</strong>. The Makefile passes
+    <code>idf.py -B &lt;repo-root&gt;/build/$(APP)</code>, so output goes to <code>build/rimba-hello/</code>
+    (gitignored) instead of <code>firmware/rimba-hello/build/</code>. The stale in-app build dir was removed.</p>
+  </div>
+
+  <p>Key sdkconfig choices for the XIAO ESP32-S3 Plus: <code>ESP32S3</code> target, 16 MB QIO flash,
+  <strong>octal PSRAM</strong> (<code>SPIRAM_MODE_OCT</code>), console on <strong>USB-Serial-JTAG</strong> (that's
+  what <code>/dev/ttyACM0</code> is — no external UART bridge).</p>
+
+  <h3 id="results">Build / flash results — PASS</h3>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">8 MB</div><div class="lbl">octal PSRAM validated (RISK-04 / 1.8), 1024 KB r/w test PASSED</div></div>
+    <div class="stat"><div class="num ok">374 KB</div><div class="lbl">SRAM free / min-ever (gate: &gt;50 KB)</div></div>
+    <div class="stat"><div class="num acc">~200 KB</div><div class="lbl">app binary (0x314f0) — 81% partition free</div></div>
+    <div class="stat"><div class="num">16 MB</div><div class="lbl">QIO flash</div></div>
+  </div>
+
+  <ul>
+    <li><code>make build</code> → OK (<code>rimba_hello.bin</code> 0x314f0 = ~200 KB, 81% app partition free).</li>
+    <li><code>make flash</code> over <code>/dev/ttyACM0</code> → OK.</li>
+    <li>esptool on connect independently confirmed: <code>ESP32-S3 (QFN56) rev v0.2</code>,
+      <code>Embedded PSRAM 8MB</code>, <code>USB mode: USB-Serial/JTAG</code>, MAC
+      <code>e0:72:a1:f8:ef:a4</code>.</li>
+    <li>Console (captured from USB-Serial-JTAG):</li>
+  </ul>
+
+  <pre><code>rimba-hello: chip      : esp32s3, 2 core(s), rev v0.2
+rimba-hello: flash     : 16 MB
+rimba-hello: idf       : v5.2.3
+rimba-hello: PSRAM    : initialized, 8 MB total, 8189 KB free heap
+rimba-hello: PSRAM    : 1024 KB read/write test PASSED
+rimba-hello: SRAM     : 374 KB free, 374 KB min-ever  (Phase-1 gate: &gt;50 KB)
+rimba-hello: PSRAM (RISK-04 / task 1.8): OK
+rimba-hello: heartbeat 0  (uptime 1 s, heap 8532 KB)</code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ Phase-1 items cleared this session</p>
+    <p>Toolchain / build / flash / console pipeline working on real hardware; <strong>RISK-04 / task 1.8
+    (PSRAM)</strong> validated in silicon and software; SRAM headroom gate (&gt;50 KB) passed (374 KB free).</p>
+  </div>
+
+  <h2 id="next-steps">Next steps (recommended order)</h2>
+  <ol>
+    <li><del>Confirm <code>rimba-hello</code> runs on hardware</del> — <strong>DONE.</strong> Flashed and verified
+      live on the board (re-confirmed after the Makefile move; binary unchanged). PSRAM test PASSED, SRAM 374 KB
+      free. Closes RISK-04 / task 1.8 empirically.</li>
+    <li><strong>Decide the morselib port strategy</strong> (see KEY FINDING). Proposed: create
+      <code>firmware/components/morselib/</code> as an ESP-IDF component that pulls morselib source from
+      <code>vendor/mm-iot-sdk</code>, and <code>firmware/components/mm_shims/</code> holding our ESP-IDF HAL port
+      (seeded from the deprecated <code>mm-iot-esp32</code> shims, updated to morselib 2.11.2 + IDF 5.2.3).</li>
+    <li><strong>Bring up the SPI link to the MM6108</strong> and load <code>mm6108.mbin</code> + the correct Seeed
+      BCF — first milestone is <code>mmwlan</code> init + a scan, mirroring the <code>mm-iot-esp32</code>
+      <code>scan</code> example (then STA, then the ADHOC/IBSS reverse-engineering of Risk-01 task 1.3).</li>
+    <li>Only after a frame round-trips (task 1.7) do we measure IBSS boot time (Risk-02 / task 1.4).</li>
+  </ol>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">mmwlan init</div><div class="s">load mm6108.mbin + BCF</div></div>
+      <div class="node acc"><div class="t">scan</div><div class="s">mm-iot-esp32 example</div></div>
+      <div class="node"><div class="t">STA</div></div>
+      <div class="node"><div class="t">ADHOC / IBSS</div><div class="s">Risk-01 task 1.3</div></div>
+      <div class="node"><div class="t">frame round-trip</div><div class="s">task 1.7</div></div>
+      <div class="node ok"><div class="t">IBSS boot time</div><div class="s">Risk-02 / task 1.4</div></div>
+    </div>
+    <figcaption>The staged radio bring-up sequence after the HAL port lands.</figcaption>
+  </figure>
+
+  <h2 id="open-questions">Open questions for Aldwin</h2>
+  <ul>
+    <li><strong>Port scope:</strong> OK to spend the up-front effort porting the morselib HAL to ESP-IDF (rehosting
+      <code>mm-iot-esp32</code> shims onto mm-iot-sdk 2.11.2), vs. pinning to the older 2.10.4 that the deprecated
+      ESP32 port already matches? Newer = more work but supported; older = faster but matches a deprecated
+      alpha.</li>
+    <li><strong>BCF:</strong> which exact Seeed HaLow module variant is this (to pick the right
+      <code>bcf_*.mbin</code> and confirm US regulatory)?</li>
+  </ul>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#hardware">Hardware / host environment</a></li>
+  <li><a href="#toolchain">Toolchain installed</a></li>
+  <li><a href="#key-finding">KEY FINDING — no ESP32 morselib path</a></li>
+  <li><a href="#built">What was built this session</a></li>
+  <li><a href="#results">Build / flash results — PASS</a></li>
+  <li><a href="#next-steps">Next steps</a></li>
+  <li><a href="#open-questions">Open questions</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-17-phase1-bringup</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

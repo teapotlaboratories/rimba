@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh security — SAE hardening — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-06-30</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-30</span>
+    <span class="badge">9 min read</span>
+    <span class="badge bug">mesh · security · SAE</span>
+    <span class="badge ok">✓ GAP-C + #14 A/B-proven</span>
+  </div>
+
+  <h1>Mesh security — SAE hardening<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">GAP-C / #14 / #15 · three hostap-parity fixes on the SAE state machine</small></h1>
+
+  <p class="lead">Phase-2 of the secured 802.11s mesh: three hostap-parity hardening fixes on the SAE state
+  machine, derived line-by-line from <code>hostap/src/ap/ieee802_11.c</code> + <code>src/common/sae.c</code> +
+  <code>wpa_supplicant/mesh_mpm.c</code>. Follows the <code>#13</code> SAE re-sync deadlock fix; every edit is
+  <strong>txn-disjoint</strong> from the <code>#13</code> genuine-restart recovery (the txn==1 Commit teardown +
+  beacon re-discovery), which is left byte-for-byte unchanged. Code-map:
+  <code>rimba-mesh-security-codemap.md</code> §"SAE hardening — GAP-C / #14 / #15".</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">3</div><div class="lbl">gaps closed (GAP-C / #14 / #15)</div></div>
+    <div class="stat"><div class="num">7</div><div class="lbl">edits</div></div>
+    <div class="stat"><div class="num ok">+83 / −5</div><div class="lbl">lines across 2 files</div></div>
+    <div class="stat"><div class="num ok">5 → 0</div><div class="lbl">GAP-C: forged Commits vs teardowns (hardened)</div></div>
+  </div>
+
+  <h2 id="gaps">The three gaps</h2>
+  <p>Recon + adversarial verify, all <code>gapIsReal=true</code>, high confidence.</p>
+
+  <div class="callout bug">
+    <p class="ct">🐛 GAP-C — crafted/malformed-Commit reauth teardown (DoS)</p>
+    <p>The <code>#13</code> ACCEPTED-state reauth gate (<code>umac_mesh.c:1021-1031</code>) freed a live secure link
+    on a Commit that passed only structural checks (length + group-id + non-reflection) <strong>without</strong>
+    running SAE crypto validation. A forged Commit (spoofed peer MAC, <code>status==0</code>, right length/group,
+    non-reflected, but a scalar outside [1,r-1] or an element off the P-256 curve) triggered
+    <code>mesh_sae_reauth_free</code> → link flap — a remotely-triggerable, repeatable teardown by an
+    unauthenticated attacker. hostap rejects exactly that frame and keeps the link (<code>sae_parse_commit</code>
+    runs at <code>ieee802_11.c:1502</code> <em>before</em> <code>sae_sm_step</code>; a parse failure →
+    <code>:1538</code> reply, never reaching the <code>:1140</code> teardown).</p>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">🐛 #14 — ACCEPTED+Confirm has no anti-replay</p>
+    <p>The txn==2 <code>MESH_SAE_ACCEPTED</code> branch (<code>:1093-1100</code>) resent the cached Confirm
+    <strong>unconditionally</strong> for every inbound Confirm; <code>struct mesh_peer</code> had no <code>rc</code>
+    field. A captured Confirm replayed in a flood amplifies into reflected Confirms / a big-sync lockout. hostap
+    silently ignores a Confirm whose send-confirm counter ≤ <code>rc</code> or <code>== 0xffff</code>
+    (<code>ieee802_11.c:1596-1605</code>) and rate-limits the resend behind big_sync (<code>:1160-1167</code>).</p>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">🐛 #15 — unsolicited MPM Open starts a full SAE</p>
+    <p>The inbound-peering path (<code>umac_mesh.c:2434-2442</code>) unconditionally allocated a peer + ran a full
+    Dragonfly SAE from any non-CLOSE peering frame from an unknown (allowlisted) MAC. hostap
+    (<code>mesh_mpm.c:1262-1266</code>) adds a peer from an Open in a secure AMPE mesh <strong>only</strong> with a
+    cached PMKSA.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">Forged Commit</div><div class="s">spoofed MAC · status=0</div></div>
+      <div class="node"><div class="t">structural checks</div><div class="s">len · group · non-reflect ✓</div></div>
+      <div class="node err"><div class="t">mesh_sae_reauth_free</div><div class="s">no crypto validation</div></div>
+      <div class="node err"><div class="t">link TORN DOWN</div><div class="s">remote DoS</div></div>
+    </div>
+    <div class="flow">
+      <div class="node"><div class="t">Forged Commit</div><div class="s">spoofed MAC · status=0</div></div>
+      <div class="node acc"><div class="t">mesh_sae_validate_commit</div><div class="s">throwaway sae_parse_commit</div></div>
+      <div class="node acc"><div class="t">crypto-invalid → reject</div><div class="s">scalar ∉ [1,r-1] / off-curve</div></div>
+      <div class="node ok"><div class="t">link HELD</div><div class="s">hostap parity</div></div>
+    </div>
+    <figcaption>GAP-C: the same crafted Commit against the <code>#13</code> reauth gate.
+    <strong>Top (baseline):</strong> structural checks pass, the live secure link is freed.
+    <strong>Bottom (hardened):</strong> the ported validate gate runs SAE crypto on a throwaway state, rejects the
+    frame, and keeps the link — exactly what hostap does.</figcaption>
+  </figure>
+
+  <h2 id="fixes">The fixes (7 edits, +83/−5 across 2 files)</h2>
+
+  <p><strong>GAP-C</strong></p>
+  <ol>
+    <li><code>mesh_sae.c</code> new <code>mesh_sae_validate_commit(body, len)</code> — validates on a
+      <strong>throwaway</strong> <code>sae_data</code> (<code>os_zalloc</code> → <code>sae_set_group(19)</code> →
+      <code>sae_parse_commit</code> with the <strong>exact</strong> proven args <code>{19,0}</code> / <code>H2E</code>
+      / <code>&amp;ie_offset</code> → <code>sae_clear_data</code> + <code>os_free</code>), returns 0 iff crypto-valid.
+      Never touches <code>peer-&gt;sae</code>.</li>
+    <li><code>umac_mesh.c</code> extern decl.</li>
+    <li><code>umac_mesh.c:1027</code> — append <code>|| mesh_sae_validate_commit(body,len) != 0</code> as the
+      <strong>last</strong> term of the txn==1 ACCEPTED reauth gate, so <code>mesh_sae_reauth_free</code> fires only
+      post-validation.</li>
+  </ol>
+
+  <p><strong>#14</strong></p>
+  <ol start="4">
+    <li><code>umac_mesh.c:452</code> — add <code>uint16_t sae_rc</code> (== hostap <code>sae-&gt;rc</code>,
+      <code>sae.h:120</code>).</li>
+    <li><code>umac_mesh.c</code> txn==2 CONFIRMED — record <code>sae_rc = LE16(body)</code> after
+      <code>mesh_sae_check_confirm</code> succeeds (== <code>ieee802_11.c:1613</code>).</li>
+    <li><code>umac_mesh.c</code> txn==2 ACCEPTED — gate the resend:
+      <code>if (psc &lt;= sae_rc || psc == 0xffff) break;</code> then <code>mesh_sae_check_big_sync</code> +
+      <code>sae_sync++</code> + the cached-Confirm resend.</li>
+  </ol>
+
+  <p><strong>#15</strong></p>
+  <ol start="7">
+    <li><code>umac_mesh.c:2434</code> — <code>#if MMWLAN_MESH_SEC_PHASE1</code> drop the unsolicited peering frame +
+      await beacon; <code>#else</code> keeps open-mesh behaviour. Deliberate divergence: ESP keeps no PMKSA cache, so
+      hostap's <code>(!(security &amp; SEC_AMPE) || wpa_auth_pmksa_get(...))</code> reduces to "don't add" — drop ALL
+      unknown-peer peering frames and rely on the beacon path (both points beacon continuously).</li>
+  </ol>
+
+  <h2 id="source-verify">Source verification (against the live <code>sae.c</code> on chronite, not memory)</h2>
+  <p>The validate shim's key assumption — that a fresh scratch <code>sae_data</code> + <code>sae_set_group</code> is
+  sufficient for <code>sae_parse_commit</code> with no PWE — was confirmed in source:</p>
+  <ul>
+    <li><code>sae_parse_commit</code> calls <code>sae_group_allowed</code> (<code>sae.c:2178</code>), which calls
+      <code>sae_set_group</code> internally (allocs <code>tmp</code> + the EC group); it derefs <code>sae-&gt;tmp</code>
+      (<code>:2210</code>) so <code>tmp</code> must exist — and it does after <code>sae_group_allowed</code>.</li>
+    <li><code>sae_parse_commit_scalar</code> (<code>:1892</code>) does the 1&lt;scalar&lt;r check using only
+      <code>tmp-&gt;order</code>; its reflection branch is gated on
+      <code>state == SAE_ACCEPTED &amp;&amp; peer_commit_scalar_accepted</code> — a fresh scratch (state NOTHING)
+      <strong>skips</strong> it, so <strong>no <code>own_commit_scalar</code> deref</strong> (which is why the gate
+      keeps its manual non-reflection memcmp).</li>
+    <li><code>sae_parse_commit_element_ecc</code> (<code>:1945</code>) does coords&lt;p + valid-point + on-curve using
+      only <code>tmp-&gt;prime/ec</code> — <strong>no <code>pwe</code> deref</strong>.</li>
+  </ul>
+
+  <h2 id="build">Build</h2>
+  <div class="callout ok">
+    <p class="ct">✓ Compiles + links clean</p>
+    <p><code>make build APP=rimba-halow-mesh BOARD=proto1-fgh100m</code> — <code>mmhostap</code> + <code>morselib</code>
+    compile and link clean (binary 0x160630 B, 6% partition free). No warnings on the changed files.</p>
+  </div>
+
+  <h2 id="onair">On-air verification</h2>
+  <p>chronite = live Linux secured-mesh peer; board0/board1 hardened firmware.</p>
+
+  <div class="callout">
+    <p class="ct">Note — why byte-capture isn't the primary check here</p>
+    <p>For these edits the on-air <em>byte-capture</em> gold standard is not the primary check — GAP-C/#14 change how
+    board0 <strong>processes</strong> received SAE frames (not the bytes it transmits) and #15 makes it
+    <strong>drop</strong> a frame, so the verification is behavioural (endpoint state + recovery), confirmed against a
+    live Linux peer.</p>
+  </div>
+
+  <ul>
+    <li><strong>No runtime regression.</strong> Both boards boot and run steady-state with zero crashes/asserts.</li>
+    <li><strong>Secured peering works.</strong> With chronite's secured mesh up (<code>wpa_supplicant_s1g</code> +
+      <code>~/wpa-interop.conf</code>: rimba-mesh / SAE / <code>rimbamesh2026</code> / dtim_period=1, S1G chan 27),
+      board0 (<code>e2:72:a1:f8:ef:a4</code>) and board1 (<code>…f9:40</code>) both reach <strong>plink ESTAB</strong>
+      — full SAE→AMPE→established with the hardened firmware. → GAP-C/#14/#15 do <strong>not</strong> regress real
+      secured peering.</li>
+    <li><strong>Genuine-restart recovery.</strong> After a clean restart of chronite's mesh, both boards
+      <strong>re-ESTAB</strong>. → the GAP-C validate gate does <strong>not</strong> block recovery (the
+      <code>#1</code> risk). Consistent with the code-level guarantee that the shim uses the exact proven
+      <code>sae_parse_commit</code> args, so any Commit the normal SAE path accepts also passes the shim.</li>
+    <li><strong>Edits exonerated for the two peer issues below</strong> — the pre-edit <strong>baseline</strong>
+      firmware shows identical ESP↔ESP behaviour, and the data path is untouched by GAP-C/#14/#15.</li>
+  </ul>
+
+  <h3 id="injector">Injector attack tests — GAP-C validated end-to-end (2026-07-01)</h3>
+  <p>The active-defense tests were <strong>completable</strong> by building the injector as a <strong>malicious mesh
+  peer</strong> (a patched <code>wpa_supplicant_s1g</code>) instead of the originally-planned scapy <code>morse0</code>
+  monitor injection (research-grade — a monitor vif is RX-only). Key realization: <strong>none of the 3 attacks need
+  src-MAC spoofing</strong> — a misbehaving peer emits them from its own MAC — so the normal nl80211 mgmt-tx path
+  suffices.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">chronogen</div><div class="s">patched wpa_supplicant_s1g</div></div>
+      <div class="node acc"><div class="t">MESH_ATTACK</div><div class="s">from its own MAC · no spoof</div></div>
+      <div class="node"><div class="t">board0</div><div class="s">hardened ESP · victim</div></div>
+    </div>
+    <figcaption>The injector is a misbehaving mesh peer, not a monitor-mode injector — it emits the malformed frames
+    from its own MAC over the normal nl80211 mgmt-tx path. Control victim = chronite (hostap reference).</figcaption>
+  </figure>
+
+  <p><strong>Injector</strong> — chronium <code>~/halow/hostap</code> (Morse hostap fork, git <code>1.17.8</code>),
+  5 edits under <code>CONFIG_TESTING_OPTIONS</code> (already <code>=y</code>): a
+  <code>MESH_ATTACK malformed-commit &lt;MAC&gt; [--scalar-zero|--scalar-ge-r|--elem-offcurve]</code> ctrl-iface
+  command (<code>ctrl_iface.c</code>). Handler <code>mesh_attack_send_commit</code> (<code>mesh_rsn.c</code>) rebuilds
+  a fresh commit (<code>mesh_rsn_build_sae_commit</code>) then re-inits SAE (<code>auth_sae_init_committed</code>) with
+  a <code>sae-&gt;test_corrupt_commit</code> flag set, so <code>sae_write_commit</code> (<code>sae.c:1688-1699</code>)
+  corrupts the scalar (<code>0xff..</code> ≥ r) or element (off-curve) — structurally valid, crypto-invalid. The flag
+  is <strong>persistent</strong> (retransmits stay corrupt → no valid retransmit to confound the test). Reached via a
+  small python <code>wpa_ctrl</code> DGRAM client (<code>wpa_cli</code> rejects commands not in its builtin table).
+  Rebuild: <code>cd ~/halow/hostap/wpa_supplicant &amp;&amp; make wpa_supplicant_s1g</code> (native aarch64). Harness:
+  injector = <strong>chronogen</strong>, victim = <strong>board0</strong> (hardened ESP) / <strong>chronite</strong>
+  (hostap reference), in the live 4-node secured mesh (rimba-mesh / SAE / ch27).</p>
+
+  <p><strong>GAP-C — crafted-Commit keep-link — PASS (definitive A/B).</strong></p>
+  <ul>
+    <li><strong>Reference (chronite, hostap):</strong> 5 malformed Commits (scalar ≥ r) → all logged
+      <code>SAE: Invalid peer scalar</code> + replied <code>resp=1</code>, <strong>0</strong>
+      <code>remove the STA ... reauthentication</code>, plink stayed ESTAB. hostap rejects the crypto-invalid Commit
+      without freeing the link — the exact behaviour the ESP port mirrors.</li>
+    <li><strong>ESP port A/B (board0):</strong> instrumented the mesh heartbeat with an ESTAB-peer probe (temporary
+      public <code>mmwlan_mesh_peer_is_estab()</code> wrapper over the internal <code>mesh_peer_find</code> —
+      <code>umac_*</code> symbols aren't exported to the app; reverted after). Same attack, only the fix toggled:</li>
+  </ul>
+
+  <table>
+    <thead>
+      <tr><th>firmware</th><th><code>chronogen_estab</code> (attacked)</th><th><code>chronite_estab</code> (control)</th><th>verdict</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>HARDENED</strong></td>
+        <td>1 → 1 (held through 5 Commits)</td>
+        <td>1 → 1</td>
+        <td>defense holds ✅</td>
+      </tr>
+      <tr>
+        <td><strong>BASELINE</strong> (<code>umac_mesh.c:1064</code> validate term neutralised → <code>0</code>)</td>
+        <td><strong>1 → 0</strong> (<code>mesh_sae_reauth_free</code>)</td>
+        <td>1 → 1</td>
+        <td>vulnerable</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>→ the malformed Commit <strong>is</strong> a real, remotely-triggerable teardown (baseline drops the attacker's
+  plink), the ported <code>mesh_sae_validate_commit</code> gate is exactly what prevents it (hardened holds), and the
+  effect is specific to the attacked peer (control untouched). Board0 restored to clean hardened firmware after; tree
+  left clean.</p>
+
+  <p><strong>#14 (Confirm-replay → no-resend) — VALIDATED (2026-07-01).</strong> <code>MESH_ATTACK confirm-replay
+  &lt;MAC&gt;</code>. The first implementation (rebuild the Confirm via <code>auth_sae_send_confirm</code>)
+  <strong>segfaulted the injector</strong> — <code>sae_accept_sta</code> NULLs <code>sae-&gt;peer_commit_scalar</code>
+  at ESTAB, so <code>sae_write_confirm</code>'s hash (<code>sae_cn_confirm_ecc</code>) derefs freed data (a
+  <code>tmp!=NULL</code> guard doesn't help — the NULLed field is top-level, not in <code>tmp</code>). This
+  independently confirms the firmware's own note (<code>umac_mesh.c:1151</code>, "tmp is gone, so replay the cached
+  bytes"). Re-implemented as <strong>cache-and-replay</strong>: cache the first Confirm's serialized bytes on the
+  normal peering path, resend verbatim (original <code>sc=1</code>, ≤ the victim's Rc) — no <code>sae_write_confirm</code>
+  on the attack path; no crash. A/B on board0, observed at the injector (board0's Confirms coming back):
+  <strong>HARDENED = 5 replays → 0 resends</strong> (the <code>sae_rc</code> anti-replay gate at
+  <code>umac_mesh.c:1143</code> ignores the stale-sc Confirm); <strong>BASELINE</strong> (gate → <code>if(0)</code>)
+  <strong>= 5 replays → 4 resends</strong> (the amplification vuln).</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">baseline · resends</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">4 / 5 replays</span></div>
+    <div class="bar-row"><span class="lbl">hardened · resends</span><span class="bar-track"><span class="bar-fill fast" style="width:2%"></span></span><span class="val">0 / 5 replays</span></div>
+  </div>
+
+  <p><strong>#15 (unsolicited-Open → drop) — injector built; clean empirical A/B NOT achievable on this bench.</strong>
+  <code>MESH_ATTACK unsolicited-open &lt;MAC&gt;</code> emits a plaintext (<code>ampe=0</code>, no-PMKID) Open with no
+  crash. But the #15 defense (<code>umac_mesh.c:2503-2528</code>: an Open from an <strong>untracked</strong> peer,
+  <code>peer==NULL</code>, is dropped in a secured build) only fires when the sender isn't already a tracked peer —
+  and this live-beaconing mesh <strong>auto-peers any beaconing node</strong> (board0 SAE-completes with the injector
+  before any Open arrives, so the Open is never "unknown"). Every attempt to present an unknown-MAC Open failed: a
+  fresh MAC gets SAE'd (<code>no_auto_peer</code> only stops the <em>injector</em> initiating, not the victim);
+  disabling board0's beacon-peer-open in <strong>both</strong> the app cb AND morselib (<code>umac_mesh.c:1352</code>,
+  verified compiled via a clean rebuild) STILL left board0 peering chronosalt/chronogen via a peer-creation path not
+  isolable without on-device tracing. A clean test needs src-spoofed raw injection (research-grade) or victim-side
+  peering suppression that resisted the disable. <strong>#15 stays source-verified</strong> (adversarial recon
+  <code>gapIsReal=true</code>; the defense is a simple untracked-peer drop). The <code>unsolicited-open</code> mode is
+  in the committed injector patch for a future focused attempt.</p>
+
+  <h3 id="evidence">Raw evidence + reproduction</h3>
+  <p><strong>Injector patch:</strong> <a href="../artifacts/sae-injector.patch"><code>artifacts/sae-injector.patch</code></a>
+  — the exact 5-file / +73-line diff on the Morse hostap 1.17.8 fork (not committable to this repo — it's an external
+  tree). Reproduce: <code>git apply</code> onto a clean <code>hostap</code> 1.17.8 →
+  <code>cd wpa_supplicant &amp;&amp; make wpa_supplicant_s1g</code> → install on an injector node → join the mesh →
+  fire <code>MESH_ATTACK malformed-commit &lt;victim-MAC&gt;</code> over the wpa_ctrl socket (python DGRAM client —
+  <code>wpa_cli</code> refuses commands not in its builtin table).</p>
+
+  <p><strong>ESP A/B — raw board0 heartbeat</strong> (attacker = chronogen; <code>estab</code> = attacker-plink state,
+  <code>ctl</code> = chronite control):</p>
+  <pre><code>HARDENED (defends)                     BASELINE (validate gate disabled -&gt; vulnerable)
+uptime=105s estab=1 ctl=1              uptime=55s estab=1 ctl=1     (before attack)
+uptime=110s estab=1 ctl=1              uptime=60s estab=1 ctl=1     (before attack)
+uptime=115s estab=1 ctl=1              uptime=65s estab=0 ctl=1     &lt;- malformed Commit -&gt; plink TORN DOWN
+uptime=120s estab=1 ctl=1              uptime=70s estab=0 ctl=1
+uptime=125s estab=1 ctl=1              uptime=75s estab=0 ctl=1
+uptime=130s estab=1 ctl=1              uptime=85s estab=0 ctl=1
+  5 Commits sent, plink HELD             attacker plink stays down; control unaffected</code></pre>
+
+  <p><strong>hostap reference (chronite):</strong> the same 5 malformed Commits → 5× <code>SAE: Invalid peer scalar</code>
+  + <code>resp=1</code> reply, <strong>0×</strong> <code>remove the STA ... reauthentication</code>, plink ESTAB
+  throughout — the behaviour the ESP port mirrors.</p>
+
+  <h2 id="todos">Findings filed as TODOs</h2>
+  <p>Separate from these edits — see <code>rimba-mesh-ap-milestones.md</code>.</p>
+
+  <div class="callout">
+    <p class="ct">ESP↔ESP-direct peering needs a Linux mesh anchor</p>
+    <p>Two ESP nodes alone both beacon but never peer (no SAE/discovery either way); once chronite anchors the mesh,
+    both peer fine. The baseline firmware shows the same → <strong>not</strong> a regression. Hypothesis:
+    independently-started ESP mesh BSSs don't converge (TSF/beacon-sync).</p>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Mesh data path — RESOLVED (missing source-node mesh IP, not a forwarding bug)</p>
+    <p>The symptom <em>looked</em> bench-wide (secured plinks ESTAB but empty mpath + 100% ping loss, even
+    Linux↔Linux), but the root cause was a <strong>test artifact</strong>: repeated <code>wpa_supplicant_s1g</code>
+    restarts during debugging cleared chronite's manually-set mesh IP (<code>10.9.9.2</code>), so pings <em>from</em>
+    chronite had no source → no data sent → no HWMP path demand → empty mpath. With the IP restored:
+    <strong>chronite→chronogen (Linux↔Linux) 0% loss + 3 mpaths</strong>, <strong>chronite→board0 (ESP) 0% loss</strong>,
+    and <strong>chronite→board1 via board0 (multi-hop relay) works</strong> — the full secured SAE+AMPE+CCMP data path
+    (single- and multi-hop) is verified on the Phase-2 firmware. (<code>mesh_config -2</code> is benign — mac80211 does
+    the forwarding.)</p>
+    <p><strong>Bench gotcha:</strong> per-node mesh IPs are NOT persistent across a wpa restart — re-assign after.
+    Also: a transient morse SPI <code>-19</code> hang on chronogen cleared with a real reboot (no HW/SW difference from
+    chronosalt — identical fw md5 + driver srcversion); an abrupt power-cut left chronosalt unbootable (check SD).</p>
+  </div>
+
+  <h2 id="deferred">Deferred backlog</h2>
+  <div class="callout warn">
+    <p class="ct">⚠ Well-formed-forged-Commit reauth DoS residual</p>
+    <p>GAP-C reaches hostap parity (closes the <em>malformed</em>-Commit teardown), but a <em>valid</em> forged Commit
+    still tears a live link down — hostap itself reaches <code>ap_free_sta</code> for any such frame. Fully closing it
+    needs a <strong>non-hostap rate-limit on ACCEPTED-state reauth</strong> — a deliberate divergence from the
+    line-by-line port, deferred to a later phase.</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#gaps">The three gaps</a></li>
+    <li><a href="#fixes">The fixes (7 edits)</a></li>
+    <li><a href="#source-verify">Source verification</a></li>
+    <li><a href="#build">Build</a></li>
+    <li><a href="#onair">On-air verification</a></li>
+    <li><a href="#todos">Findings filed as TODOs</a></li>
+    <li><a href="#deferred">Deferred backlog</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-06-30-mesh-security-sae-hardening</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

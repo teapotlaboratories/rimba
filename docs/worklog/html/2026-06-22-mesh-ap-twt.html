@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh+AP concurrency + TWT leaf power-save — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-22</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-22</span>
+    <span class="badge">11 min read</span>
+    <span class="badge ok">✓ done (all 3 on hardware)</span>
+    <span class="badge">mesh · TWT · AP · power-save</span>
+  </div>
+
+  <h1>Mesh+AP concurrency + TWT leaf power-save<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">HaLow AP/STA · an L2 architecture alternative to IBSS</small></h1>
+
+  <p class="lead">Verify the MM6108 can run <strong>802.11s mesh + AP concurrently</strong>, get a real
+  <strong>TWT</strong> (Target Wake Time) power-save agreement to an ESP32 STA, and rebuild
+  <code>wpa_supplicant_s1g</code> with mesh. All three done on hardware — chronium ran AP + mesh-point + a
+  TWT'ing ESP32 STA all at once.</p>
+
+  <p><strong>Author:</strong> Aldwin. <strong>Phase:</strong> exploring an L2 architecture
+  alternative to IBSS for Rimba leaves/relays. Self-contained record. <strong>Hardware:</strong> chronium =
+  Raspberry Pi 5 + Seeed Wio-WM6180 (MM6108, <code>wlan1</code>), morse kernel 6.12.21 / driver+fw+cli 1.17.8.
+  ESP32 = XIAO ESP32-S3 + FGH100M (<code>BOARD=proto1-fgh100m</code>), morselib fw 1.17.6.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">&le;2 vifs</div><div class="lbl">AP + mesh-point on one MM6108, co-channel</div></div>
+    <div class="stat"><div class="num">5 s / 65 ms</div><div class="lbl">TWT service period / wake window</div></div>
+    <div class="stat"><div class="num ok">&asymp;42 µA</div><div class="lbl">datasheet Snooze — expected dozing draw</div></div>
+    <div class="stat"><div class="num ok">18&ndash;23 / 0</div><div class="lbl">replies / timeouts — ESP32-AP TWT (§4d)</div></div>
+    <div class="stat"><div class="num ok">~7-line</div><div class="lbl">host-side AP-TWT flush-on-wake fix</div></div>
+    <div class="stat"><div class="num">0xffff8000</div><div class="lbl">fw AP-vif TWT-install gate return (§4b)</div></div>
+  </div>
+
+  <h2 id="why-matters">Why this matters (the architecture signal)</h2>
+  <p>The IBSS power-save analysis (<code>../design-specification/rimba-mm6108-powersave-analysis.md</code>)
+  showed IBSS leaves have <strong>no good chip power-save</strong>: no TWT, no ATIM, no AP to buffer downlink —
+  so the only sub-µA path was an <strong>RTC cold-boot</strong> every wake (&asymp;1.39 s rejoin tax, measured —
+  see <code>2026-06-21-phase1-validation-complete.md</code> / dev-plan RISK-02).</p>
+
+  <p>This session shows that dead-end <strong>dissolves if leaves are STAs under a relay-AP</strong>: TWT gives
+  scheduled wake with the <strong>AP buffering downlink</strong>, so the leaf dozes <em>and</em> doesn't miss
+  traffic. Relays mesh together via 802.11s. That's the <strong>Mesh+AP "gateway" topology</strong> — RISK-01
+  <em>Fallback A</em> in the dev plan, here shown doing what IBSS structurally cannot.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">Leaf STA</div><div class="s">TWT doze</div></div>
+      <div class="node acc"><div class="t">Relay-AP</div><div class="s">buffers downlink</div></div>
+      <div class="node"><div class="t">802.11s mesh</div><div class="s">relay ↔ relay</div></div>
+      <div class="node acc"><div class="t">Relay-AP</div><div class="s">buffers downlink</div></div>
+      <div class="node ok"><div class="t">Leaf STA</div><div class="s">TWT doze</div></div>
+    </div>
+    <figcaption>Mesh+AP gateway topology — leaves are STAs under an always-on relay-AP (TWT + downlink buffering); relays mesh via 802.11s. RISK-01 Fallback A.</figcaption>
+  </figure>
+
+  <p><strong>Trade-off:</strong> leaves now depend on an always-on relay-AP in range (vs symmetric IBSS peers),
+  and it's a larger departure from the current IBSS foundation. Not a decision — a signal.</p>
+
+  <h2 id="concurrency">1 · Mesh + AP run concurrently on one MM6108 (chronium)</h2>
+  <p>The loaded morse driver advertises the combination directly:</p>
+  <pre><code>valid interface combinations:
+   * #{ managed, AP, mesh point } &lt;= 2, total &lt;= 2, #channels &lt;= 1</code></pre>
+  <p>So one radio can hold <strong>AP + mesh-point</strong> (&le;2 vifs), but <strong>only co-channel</strong>
+  (<code>#channels&lt;=1</code>). Verified live: <code>wlan1</code> = AP (<code>rimba-ping</code>, SAE, ch27 /
+  915500 kHz / 1 MHz) <strong>and</strong> <code>mesh0</code> = 802.11s mesh point (<code>rimba-mesh</code>),
+  both on <code>phy#1</code>, chip held on 915500 / 1 MHz.</p>
+
+  <h3>Recipe + the gotchas that cost iterations</h3>
+  <ol>
+    <li><strong>AP first</strong> via <code>hostapd_s1g</code> (S1G channel config sets ch27); assign AP IP.</li>
+    <li><code>iw … interface add mesh0 type mp</code> <strong>silently creates it as <code>managed</code></strong> —
+      you must then <code>ip link set mesh0 down; iw dev mesh0 set type mp</code> to actually get a mesh point.</li>
+    <li>Give <code>mesh0</code> a <strong>distinct locally-administered MAC</strong> (<code>3e:22:7f:…</code> vs
+      wlan1's <code>3c:22:7f:…</code>) or <code>ip link set up</code> fails with <em>"Name not unique on network."</em></li>
+    <li><code>iw dev mesh0 mesh join rimba-mesh freq 5560</code> — <strong>bare <code>freq</code>, NO
+      <code>HT20</code>.</strong> <code>HT20</code> forces a 2 MHz S1G width &rarr; the shared radio jumps to
+      919000 / 2 MHz (<code>#channels&lt;=1</code>), <strong>killing the AP</strong>. Bare <code>freq 5560</code> =
+      1 MHz, co-channel with the AP. (5560 = S1G ch27 in the morse 5 GHz model; on-air 915.5 MHz — same mapping the
+      IBSS join used.)</li>
+  </ol>
+
+  <div class="callout warn">
+    <p class="ct">⚠ The co-channel trap that killed the AP</p>
+    <p>The two vifs must share <strong>one channel</strong> (<code>#channels&lt;=1</code>). Passing <code>HT20</code>
+    on the mesh join widens it to a 2 MHz S1G channel, dragging the whole radio to 919000 / 2 MHz and dropping the
+    1 MHz AP. Join with a <strong>bare <code>freq</code></strong> (1 MHz) to stay co-channel.</p>
+  </div>
+
+  <p>A peerless mesh point shows <code>NO-CARRIER</code> / <code>DORMANT</code> (normal — carrier comes up on the
+  first peer link); <code>iw dev mesh0 mpath dump</code> returns the path table, confirming it's a live mesh iface.
+  A second mesh node wasn't available (only chronium has a Linux MM6108; ESP32s can't mesh — morselib has only the
+  bare <code>MORSE_CMD_INTERFACE_TYPE_MESH=5</code> enum, no 802.11s code).</p>
+
+  <h2 id="twt-sta">2 · TWT power-save to an ESP32 STA — WORKING</h2>
+  <p>Modified <code>firmware/rimba-halow-sta</code> to request TWT before associating (morselib requires it before
+  <code>mmwlan_sta_enable</code>):</p>
+  <pre><code>struct mmwlan_twt_config_args twt = MMWLAN_TWT_CONFIG_ARGS_INIT;
+twt.twt_mode = MMWLAN_TWT_REQUESTER;
+twt.twt_wake_interval_us = 5000000;     /* 5 s service period */
+twt.twt_min_wake_duration_us = 65536;   /* ~65 ms wake */
+twt.twt_setup_command = MMWLAN_TWT_SETUP_REQUEST;
+mmwlan_twt_add_configuration(&amp;twt);     /* before mmhalow_connect */</code></pre>
+
+  <p><strong>AP side needed no change</strong> — <code>enable_twt</code> is a morse driver module param defaulting
+  to <strong>true</strong> (and <code>morse.conf</code> doesn't disable it), so the AP already advertises the S1G
+  TWT responder (<code>S1G_CAP8_TWT_RESPOND</code>, set in <code>morse_driver/mac.c</code> when
+  <code>enable_twt</code>). hostapd's <code>he_twt_responder</code> is the 11ax field — <em>not</em> the S1G path;
+  left unset.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Evidence the agreement is live (the ping cadence is the proof)</p>
+    <ul style="margin:.2em 0">
+      <li>ESP32: <code>TWT add_configuration (requester, 5s/65ms) -&gt; 0 (0=OK)</code>, then STA link up + IP.</li>
+      <li>Replies <strong>cluster in ~5 s bursts</strong> with timeouts between — the STA dozes, the AP buffers
+        downlink, and each wake window delivers the held ICMP replies together:
+        <ul>
+          <li>first reply seq=9 @ <strong>126 ms</strong> (buffered-delivery latency on wake),</li>
+          <li>burst seq 12&ndash;16 within ~50 ms @ t&asymp;28.5 s,</li>
+          <li>burst seq 19&ndash;23 @ t&asymp;33.5 s — <strong>exactly 5 s later</strong> = the TWT service period.</li>
+        </ul>
+        In-window RTT ~9&ndash;13 ms; pings issued mid-doze (1 s ping vs 5 s wake, 2 s timeout) expire.</li>
+      <li>AP side: STA <code>68:24:99:44:6b:b7</code> <code>authorized</code>, &minus;39 dBm, rx/tx counters
+        advancing; <code>morse_cli -i wlan1 twt {conf|remove}</code> exists.</li>
+    </ul>
+  </div>
+
+  <p>This is the chip-managed leaf power-save IBSS can't provide. (No radio-rail current measured this round —
+  datasheet Snooze &asymp;42 µA is the expected dozing draw; timing/behaviour confirmed.)</p>
+
+  <h2 id="wpa-rebuild">3 · <code>wpa_supplicant_s1g</code> rebuilt with mesh</h2>
+  <p>chronium's <code>wpa_supplicant_s1g</code> had never been built (§6 of
+  <code>../reference/rimba-linux-node-setup.md</code>: deferred — DPP hit an OpenSSL-3 <code>EC_KEY</code>
+  deprecation-as-error). Rebuilt it: enabled <code>CONFIG_MESH=y</code>, <strong>disabled
+  <code>CONFIG_DPP/DPP2/DPP3</code></strong> to dodge that error. Clean build, <strong>55 mesh symbols</strong>,
+  installed to <code>/usr/local/bin/wpa_supplicant_s1g</code>. Secured (SAE) 802.11s mesh is now possible (the §1
+  mesh above used open <code>iw</code> mesh; SAE mesh needs this binary).</p>
+
+  <h2 id="twt-two-esp32">4 · TWT between two ESP32s (one AP, one STA) — does NOT work; here's why + how to fix</h2>
+  <p><strong>Test (2026-06-22):</strong> chronium radio stopped; ACM1 = ESP32 AP (<code>rimba-halow-ap</code>,
+  <code>rimba-ping</code>), ACM0 = ESP32 STA (TWT requester). The STA associated and requested TWT
+  (<code>add_configuration -&gt; 0</code>), but the <strong>ping pattern was flat — every 1 s, ~10&ndash;20 ms, no
+  5 s bursts, no dozing</strong> (contrast the chronium-AP run's 5 s reply-clusters). So <strong>no TWT agreement
+  formed: the ESP32 AP is not a TWT responder.</strong> It degrades gracefully — the request is silently
+  unanswered, the link works, just with no power-save.</p>
+
+  <p><strong>Root cause (morselib host stack, requester-only):</strong></p>
+  <ul>
+    <li><code>umac/twt/umac_twt.c</code> <code>umac_twt_init_vif()</code> hardcodes
+      <code>data-&gt;requester = true; data-&gt;responder = false;</code></li>
+    <li><code>umac/ies/twt_ie.c:16</code> builds the TWT IE <strong>only</strong> for
+      <code>MMWLAN_TWT_REQUESTER</code> (early-returns otherwise) — no responder IE.</li>
+    <li>The agreement-install path (<code>umac_twt_install_pending_agreements</code>) is driven from the
+      <strong>STA connection</strong> path (<code>umac_connection.c</code>); there is no AP-side handler for an
+      incoming TWT setup-request action frame, and no responder response/install path.</li>
+  </ul>
+
+  <p><strong>This is NOT a silicon limit — the firmware supports responder TWT.</strong> The ESP32 firmware command
+  surface has <code>MORSE_CMD_ID_TWT_AGREEMENT_INSTALL = 0x0026</code> (+ <code>_REMOVE 0x0027</code>,
+  <code>_VALIDATE 0x0036</code>) with <code>struct morse_cmd_req_twt_agreement_install</code> — <strong>the same
+  command the Linux <code>morse_driver</code> uses</strong> (<code>command.c: morse_cmd_twt_agreement_install_req</code>
+  &rarr; <code>MORSE_CMD_ID_TWT_AGREEMENT_INSTALL</code>). The firmware does the heavy lifting (downlink buffering +
+  service-period scheduling) once an agreement is installed.</p>
+
+  <p><strong>How to make the ESP32 AP a TWT responder (a morselib patch, "follow Linux"):</strong> mirror the Linux
+  driver's responder path (same chip) —</p>
+  <ol>
+    <li><strong>Advertise the capability:</strong> set <code>S1G_CAP8_TWT_RESPOND</code> in the AP's S1G
+      Capabilities IE (beacon/probe-resp/assoc-resp), as the Linux driver does at
+      <code>morse_driver/mac.c:1275-1276</code> gated on the <code>TWT_RESPONDER</code> capability. Without this the
+      STA won't even ask the AP.</li>
+    <li><strong>Set <code>responder = true</code></strong> for the AP vif in <code>umac_twt_init_vif</code> (today
+      hardcoded false).</li>
+    <li><strong>Handle the incoming TWT setup REQUEST</strong> action frame on the AP vif (parse via the existing
+      <code>umac_twt_process_ie</code>), decide the agreement params, and <strong>send a TWT setup RESPONSE</strong>
+      action frame — add a responder branch to <code>twt_ie.c</code> (mirror Linux
+      <code>morse_mac_send_twt_action_frame</code>, <code>twt.c:367</code>).</li>
+    <li><strong>Install the agreement to the firmware</strong> via
+      <code>MORSE_CMD_ID_TWT_AGREEMENT_INSTALL (0x0026)</code> with the negotiated params + the STA's AID/MAC.
+      Derive the 20-byte agreement-blob format from the Linux driver (<code>morse_driver/command.c:2179</code>
+      <code>morse_cmd_twt_agreement_req</code>). The firmware then buffers downlink for the dozing STA and schedules
+      the service period.</li>
+  </ol>
+
+  <p><strong>Effort:</strong> a bounded morselib patch (the requester plumbing + IE parsing exist; the responder is
+  the mirror image, and the firmware install command is already present). Risk is mostly getting the
+  agreement-blob format + action-frame exchange right — both readable in the Linux driver source on chronium
+  (<code>~/halow/morse_driver/twt.c</code>, <code>command.c</code>). Not attempted this session.</p>
+
+  <p><strong>Implication:</strong> for the Mesh+AP architecture, <strong>TWT leaf power-save works only when the AP
+  is a Linux node</strong> (or a TWT-responder-patched ESP32). An all-ESP32 AP+STA pair gets association + data but
+  <strong>no TWT</strong> until the responder role is ported. If relays are Linux (Pi-class) gateways anyway, this
+  is moot; if relays must be ESP32, the responder patch is the unlock.</p>
+
+  <h3 id="s4a">4a · ESP32 AP TWT-responder implementation (in progress, strictly follows morse_driver)</h3>
+  <p>morselib has no AP-side mgmt MLME (the bundled hostapd builds assoc-resp); the Linux driver does the whole TWT
+  responder in the <em>driver</em> — parses the STA's TWT IE from the assoc-req RX hook (<code>mac.c:6405</code>
+  &rarr; <code>morse_mac_process_rx_twt_mgmt</code>), splices the accept IE into the assoc-resp on TX
+  (<code>mac.c:1861</code>), and installs the agreement to firmware on STA-authorized (<code>mac.c:5024</code>).
+  The faithful port keeps it all in morselib's driver layer. Five pieces:</p>
+
+  <p><strong>DONE (compiles, low-risk foundation):</strong></p>
+  <ol>
+    <li><strong>Advertise responder cap</strong> — <code>umac/ies/s1g_capabilities.c</code>
+      <code>ie_s1g_capabilities_build_ap</code>: set <code>DOT11_S1G_CAP_INFO_8_SET_TWT_RESPONDER_SUPPORT</code>
+      when <code>MORSE_CAP_SUPPORTED(…, TWT_RESPONDER)</code> (mirrors <code>morse_driver/mac.c:1275</code>). So a
+      requesting STA now includes its TWT IE in the assoc-req.</li>
+    <li><strong>Enable responder for AP vif</strong> — <code>umac_twt_init_vif()</code> gained an
+      <code>is_responder</code> arg (<code>requester = !is_responder</code>); <code>umac_interface.c</code> now
+      calls it for <code>UMAC_INTERFACE_AP</code> with <code>true</code> (gated on the fw responder cap), and
+      <code>false</code> for STA. Mirrors <code>morse_twt_init_vif</code>.</li>
+  </ol>
+
+  <p><strong>REMAINING (the negotiation core — larger, AP-path, needs test iteration):</strong></p>
+  <ol start="3">
+    <li><strong>Parse + accept policy</strong> — in the AP assoc-req handler
+      (<code>umac_connection_process_assoc_req</code>, <code>supplicant_shim/driver.c:697</code>), find the STA's
+      <code>dot11_ie_twt</code>; run the Linux policy (REQUEST/SUGGEST &rarr; accept, DEMAND/GROUPING &rarr; reject,
+      dup flow_id &rarr; reject); build an accept agreement (params as-is, <code>setup_cmd = ACCEPT(4)</code>, clear
+      request bit, recompute mantissa, optional non-overlap target wake time). New responder routine mirroring
+      <code>morse_twt_send_accept</code>.</li>
+    <li><strong>Splice accept IE into the assoc-resp</strong> — in <code>umac_datapath_tx_mgmt_frame_ap</code>
+      (<code>supplicant_shim/driver_ap.c:449</code>), the <code>mac.c:1861</code> equivalent: detect assoc-resp to
+      the STA and insert the responder TWT IE. (morselib lacks a clean extra-IE hook, so this is buffer surgery on
+      the outgoing mgmt frame — the trickiest part.)</li>
+    <li><strong>Install to firmware on authorized</strong> — reuse <code>umac_twt_install_agreement</code> &rarr;
+      <code>mmdrv_twt_agreement_install_req</code> (<code>MORSE_CMD_ID_TWT_AGREEMENT_INSTALL = 0x0026</code>,
+      present in the ESP32 fw). The fw then buffers downlink + schedules the service period.</li>
+  </ol>
+
+  <h3 id="s4b">4b · IMPLEMENTED — and BLOCKED by a firmware gate in mm6108.mbin 1.17.6</h3>
+  <p>All five pieces were implemented in morselib (capability advertise in <code>s1g_capabilities.c</code>;
+  responder enable in <code>umac_twt_init_vif</code>/<code>umac_interface.c</code>; RX parse+accept, TX response-IE
+  build, and firmware install in <code>umac_twt.c</code>; RX hook in <code>supplicant_core.c</code>; TX-splice +
+  install hooks in <code>driver_ap.c</code>). Built clean and <strong>the negotiation works end-to-end on a 2-ESP32
+  bench</strong>:</p>
+  <ul>
+    <li>AP log: <code>accepted agreement for 68:24:99:44:6b:b7</code> &rarr;
+      <code>inserting accept IE into assoc-resp</code> &rarr; install hook fires
+      (<code>state=2 peermatch=1</code>).</li>
+    <li>STA: gets the ACCEPT and <strong>dozes</strong> (pings go from steady-1 s to timeouts — it sleeps).</li>
+  </ul>
+
+  <p><strong>But the firmware rejects the agreement install on the AP vif.</strong> Raw return = <code>-32768</code>
+  (<code>0xffff8000</code>). Decompiling mm6108.mbin 1.17.6 (the dispatcher case <code>0x26</code> =
+  <code>MORSE_CMD_ID_TWT_AGREEMENT_INSTALL</code>) shows the cause:</p>
+  <pre><code>case 0x26:                                   // TWT_AGREEMENT_INSTALL
+  if (vif_id &lt; 2) {
+    if (vif[vif_id].interface_type == 1) {   // *** STA only ***
+      ... link state, then twt_agreement_install(...) ...
+    } else { iVar20 = -0x8000; }             // AP/ADHOC/etc -&gt; 0xffff8000
+  }</code></pre>
+
+  <p>The firmware <strong>hardcodes TWT-agreement-install to <code>interface_type == STA(1)</code></strong>; an AP
+  vif (type 2) returns <code>0xffff8000</code>. The chip <em>advertises</em> <code>TWT_RESPONDER</code> capability
+  (<code>TWTCAP resp=1</code>) but the install handler won't honor it for an AP. So the responder negotiates fine
+  (the STA dozes) but the firmware never schedules the service period &rarr; the dozing STA's downlink is never
+  delivered &rarr; all-timeouts.</p>
+
+  <div class="callout err">
+    <p class="ct">✗ Conclusion — a firmware-level gate, independent of host code</p>
+    <p>TWT <em>responder</em> is <strong>not possible on the ESP32 with firmware 1.17.6</strong>. This is exactly why
+    ESP32-STA ↔ <strong>chronium</strong>-AP TWT works (chronium runs fw <strong>1.17.8</strong>, whose driver does
+    AP TWT responder) but ESP32-AP ↔ ESP32-STA cannot. <strong>To make it work:</strong> an ESP32 mm6108 firmware
+    that allows AP-vif TWT install (&ge;1.17.8 if it lifts the gate — needs validation against morselib
+    <code>2.10.4</code>), or keep the AP on a Linux node. The host-side responder is complete and Linux-faithful,
+    and will work as-is on a firmware that permits the AP install.</p>
+  </div>
+
+  <div class="callout">
+    <p class="ct">Caveat (host)</p>
+    <p>morselib's <code>umac_twt_data</code> holds a <em>single</em> per-vif agreement
+    (<code>UMAC_TWT_NUM_AGREEMENTS = 1</code>), not Linux's per-STA list — fine for the 1-STA bench, but a multi-STA
+    responder needs per-STA agreement storage.</p>
+  </div>
+
+  <h3 id="s4c">4c · Firmware investigation — newer fw exists but does NOT lift the gate (DEFINITIVE)</h3>
+  <p>Corrected an earlier wrong claim: a newer <strong>embedded MBIN</strong> firmware <em>does</em> exist.</p>
+  <ul>
+    <li><strong>mm-iot-sdk 2.11.2</strong> (GitHub <code>main</code>, 2026-05-01) bundles
+      <code>framework/morsefirmware/mm6108.mbin</code> = <strong><code>rel_1_17_8</code></strong> (MBIN format,
+      <code>MMFW</code> magic, 399796 B). The ESP component registry (<code>morsemicro/halow</code>) just lags at
+      2.10.4-esp32-2 / 1.17.6. (1.17.9 exists only as a Linux ELF <code>.bin</code> — no MBIN.)</li>
+  </ul>
+  <p><strong>Swapped 1.17.8 <code>.mbin</code> onto the ESP32 AP and re-tested — the install STILL returns
+  <code>0xffff8000</code>.</strong> So the embedded firmware gates <code>TWT_AGREEMENT_INSTALL</code> (cmd 0x26) to
+  <code>interface_type==STA</code> in <strong>both 1.17.6 and 1.17.8</strong>. Newer embedded firmware does not
+  help. (Also: fw 1.17.8 + our forked morselib <strong>2.10.4</strong> is ABI-unstable — association degraded badly
+  — because 1.17.8 pairs with morselib <strong>2.11.2</strong>; restored to 1.17.6.)</p>
+
+  <div class="callout bug">
+    <p class="ct">The firmware is NOT the differentiator — proven byte-identical</p>
+    <p>Compared chronium's Linux <code>mm6108.bin</code> (ELF) against the embedded <code>mm6108.mbin</code> (MBIN),
+    both <code>rel_1_17_8_2026_Mar_24</code>: <code>host_imem</code> and <code>mac_imem</code> (the MAC code that
+    <em>contains</em> the 0x26 TWT handler + STA gate) and <code>uphy_imem</code> are <strong>byte-identical</strong>
+    (sha256 match; only <code>mac_rodmem</code>/<code>lphy_imem</code> data/PHY-cal differ). So the Linux
+    <code>.bin</code> is the <strong>same firmware image</strong> as the embedded <code>.mbin</code>, just a
+    different container (ELF vs MBIN). chronium's firmware therefore <em>also</em> gates the AP-vif TWT install
+    (<code>0xffff8000</code>) — yet chronium serves TWT.</p>
+    <p><strong>Conclusion:</strong> chronium does AP TWT responder entirely in the <strong>HOST</strong> (Linux
+    <code>mac80211</code>/<code>morse_driver</code> AP power-save — buffer the dozing STA's downlink, deliver at its
+    service period via host timers), NOT via a firmware install. That host machinery is what morselib lacks, matching
+    Morse staff: AP power-save is <strong>Linux-driver-only, "not in the MM-IoT-SDK," "not on the roadmap"</strong>
+    (community.morsemicro.com t/1638, t/1667).</p>
+  </div>
+
+  <p><strong>Can the Linux <code>.bin</code> be loaded on the ESP32?</strong> No useful path: (1) format — ESP32
+  needs MBIN (<code>MMFW</code>), <code>.bin</code> is ELF; (2) even converted ELF&rarr;MBIN it's the <strong>same
+  gated firmware bytes</strong>, so it changes nothing. The firmware-install step in this responder is a <strong>red
+  herring</strong> — Linux's install is gated too; Linux serves in the host.</p>
+
+  <p><strong>CONCLUSION (superseded by §4d — IT WORKS):</strong> the gap is host-side AP-TWT serving in morselib.
+  That turned out to be a small, specific fix, not a big SP-scheduler port — see §4d.</p>
+
+  <h3 id="s4d">4d · ✅ BREAKTHROUGH — ESP32 AP TWT responder WORKS (host-side, stock 1.17.6 fw)</h3>
+  <p>The "host-side AP-TWT serving" was a <strong>~7-line gap</strong>, not a major feature. Diagnosis (a temp PM-bit
+  trace at <code>umac_datapath.c:1528</code>): a dozing TWT STA behaves correctly — it bursts frames at its SP (PM=0
+  awake &rarr; … &rarr; PM=1 doze), and the AP <strong>does</strong> buffer its downlink (the umac_ap PS path) and
+  tracks sleep state from the PM bit. The bug: <code>umac_ap_set_stad_sleep_state()</code> cleared the STA's TIM bit
+  on wake but <strong>never kicked the TX loop</strong>, so buffered downlink waited for the next beacon/DTIM instead
+  of being delivered during the STA's (short) open SP &rarr; the STA timed out.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">STA wakes</div><div class="s">PM=0 at SP</div></div>
+      <div class="node"><div class="t">AP clears TIM</div><div class="s">STA marked awake</div></div>
+      <div class="node acc"><div class="t">umac_core_evt_wake()</div><div class="s">FIX: flush now</div></div>
+      <div class="node ok"><div class="t">downlink delivered</div><div class="s">in the open SP</div></div>
+    </div>
+    <figcaption>The ~7-line fix in <code>umac_ap_set_stad_sleep_state</code>: on asleep&rarr;awake with queued frames, kick the TX loop instead of waiting for the next beacon/DTIM.</figcaption>
+  </figure>
+
+  <p><strong>Fix (<code>umac_ap.c</code>, in <code>umac_ap_set_stad_sleep_state</code>):</strong> when a STA
+  transitions asleep&rarr;awake and has queued frames, call <code>umac_core_evt_wake(umacd)</code> to flush its
+  buffered downlink NOW — mirroring the group-addressed release in <code>umac_ap_get_beacon()</code>. (The normal TX
+  path already wakes the loop at <code>umac_datapath.c:1978</code>; the PS-wake path was the one place it was
+  missing.)</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Result — TWT leaf power-save works end-to-end on the ESP32 AP, stock fw 1.17.6, no firmware change</p>
+    <p>STA dozes (TWT), AP buffers downlink, delivers at the SP. Test (1 s TWT interval, 2 s ping timeout):
+    <strong>18&ndash;23 replies, 0 timeouts, ~15 ms RTT.</strong> At longer intervals the downlink latency = the
+    interval (the inherent TWT trade-off; fine for a leaf that wakes every N minutes).</p>
+  </div>
+
+  <p><strong>The firmware-install gate (cmd 0x26 &rarr; STA-only) is a red herring.</strong> The install fails on the
+  AP vif but is <strong>unnecessary</strong> — host-side buffering+flush delivers the SP traffic. (This mirrors
+  Linux, whose firmware install is gated the same way and which also serves host-side.)
+  <code>umac_twt_responder_install</code> now treats the gated install as expected/harmless.</p>
+
+  <p><strong>So: ESP32-as-TWT-responder-relay IS achievable.</strong> A relay-AP can give its leaf STAs TWT
+  power-save with the morselib responder (§4a) + this flush-on-wake fix — no firmware change, no Linux node required.
+  (Caveats still open: single-STA agreement slot — multi-STA needs the per-STA list; current is verified only on the
+  bench with a ping workload; the STA's TWT interval is app config.)</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Side effect of the responder code on the gated firmware</p>
+    <p>Because the ESP32 AP now <em>advertises</em> TWT responder and <em>accepts</em> requests, a requesting STA
+    <strong>dozes</strong> but the AP can't serve it (install gated) &rarr; the STA's traffic is degraded vs a plain
+    AP. So the responder code should be <strong>reverted or its capability-advertise disabled</strong> until an
+    embedded firmware supports AP install.</p>
+    <p style="margin-top:.5em"><em>Note:</em> this side effect is the pre-§4d state; §4d's host-side flush is what
+    actually makes the ESP32 AP serve TWT on stock 1.17.6.</p>
+  </div>
+
+  <h2 id="commands">Commands (reference)</h2>
+  <p>chronium Mesh+AP+TWT bring-up scripts live at <code>/tmp/mesh_ap_test.sh</code>, <code>/tmp/mesh_join2.sh</code>
+  on chronium (and locally). ESP32: <code>make flash APP=rimba-halow-sta BOARD=proto1-fgh100m</code>.</p>
+
+  <h2 id="end-state">State at end of session</h2>
+  <p>chronium: AP (<code>wlan1</code>) + mesh point (<code>mesh0</code>) + TWT'ing ESP32 STA, all concurrent. ESP32
+  ACM0 = TWT STA app; the only repo change is the TWT block added to <code>rimba-halow-sta</code>. No commits.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#why-matters">Why this matters</a></li>
+  <li><a href="#concurrency">1 · Mesh + AP concurrent</a></li>
+  <li><a href="#twt-sta">2 · TWT to ESP32 STA</a></li>
+  <li><a href="#wpa-rebuild">3 · wpa_supplicant_s1g + mesh</a></li>
+  <li><a href="#twt-two-esp32">4 · TWT between two ESP32s</a></li>
+  <li><a href="#s4a">&nbsp;&nbsp;4a · Responder impl</a></li>
+  <li><a href="#s4b">&nbsp;&nbsp;4b · Firmware gate</a></li>
+  <li><a href="#s4c">&nbsp;&nbsp;4c · fw investigation</a></li>
+  <li><a href="#s4d">&nbsp;&nbsp;4d · Breakthrough</a></li>
+  <li><a href="#commands">Commands</a></li>
+  <li><a href="#end-state">End state</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-22-mesh-ap-twt</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

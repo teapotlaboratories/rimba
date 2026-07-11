@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Firmware single-sourced from vendor/morse-firmware — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-06-24</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-24</span>
+    <span class="badge">3 min read</span>
+    <span class="badge ok">✓ done + HW-verified</span>
+    <span class="badge">bring-up · build · firmware</span>
+  </div>
+
+  <h1>Firmware single-sourced from <code>vendor/morse-firmware</code></h1>
+
+  <p class="lead">Stop vendoring pre-converted firmware blobs in a fork. Make
+  <strong><code>vendor/morse-firmware</code></strong> (the upstream ELF) the single source of truth, with the
+  ESP32 <code>.mbin</code> produced at build time. Remove <code>components/firmware</code> entirely.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Bottom line</p>
+    <p>Done + HW-verified: AP and STA boot <strong>1.17.9</strong>, associate, and ping. Firmware now lives in
+    exactly one place — bumping <code>vendor/morse-firmware</code> is the only step to bump firmware; nothing
+    firmware-related is committed under <code>components/</code> anymore.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">2 → 1</div><div class="lbl">firmware sources of truth</div></div>
+    <div class="stat"><div class="num ok">1.17.9</div><div class="lbl">verified boot version (AP + STA)</div></div>
+    <div class="stat"><div class="num">12–37 ms</div><div class="lbl">AP↔STA ping after re-flash</div></div>
+  </div>
+
+  <h2 id="before">Before</h2>
+  <p>Two firmware sources, out of sync:</p>
+  <ul>
+    <li>ESP32 flashed from the <strong><code>components/firmware</code> submodule</strong> (the
+      <code>mm-esp32-firmware</code> fork), which committed <strong>pre-converted <code>.mbin</code></strong> blobs at
+      <strong>1.17.6</strong>.</li>
+    <li><code>vendor/morse-firmware</code> separately tracked the upstream <strong>ELF <code>.bin</code></strong> at
+      1.17.9.</li>
+  </ul>
+  <div class="callout warn">
+    <p class="ct">⚠ The pain</p>
+    <p>The fork had to be hand-maintained on every firmware change — and the two sources drifted (fork
+    <strong>1.17.6</strong> vs vendor <strong>1.17.9</strong>).</p>
+  </div>
+
+  <h2 id="after">After</h2>
+  <p><code>vendor/morse-firmware</code> is the only firmware in the repo. Nothing firmware-related is committed under
+  <code>components/</code>. The firmware "component" is a <strong>template</strong> that is <strong>copied into the
+  build tree</strong> at configure time and converts the ELF there.</p>
+
+  <pre><code>cmake/mm-fw-gen/
+├── morse_firmware.cmake          # helper apps include; copies the template, adds to EXTRA_COMPONENT_DIRS
+└── firmware/                     # the `firmware` component template (real files)
+    ├── CMakeLists.txt            # ELF -> .mbin (convert-bin-to-mbin.py) -> .o (objcopy) -> link
+    ├── Kconfig                   # MM_FW_FILE / MM_BCF_FILE / MMHAL_CHIP_TYPE_*
+    └── idf_component.yml         # version 2.10.4-esp32-2 (satisfies halow's morsemicro/firmware dep)</code></pre>
+
+  <p>Each radio app (ap/sta/ibss/scan), before <code>project()</code>:</p>
+  <pre><code>include(".../cmake/mm-fw-gen/morse_firmware.cmake")
+morse_firmware_generate_component()    # file(COPY) template -> build/&lt;app&gt;/mm-fw-gen/firmware/</code></pre>
+
+  <h3>Pipeline (all build-time, all under <code>build/&lt;app&gt;</code>)</h3>
+  <figure>
+    <div class="flow vert">
+      <div class="node acc"><div class="t">ELF <code>.bin</code></div><div class="s">vendor/morse-firmware, committed — single source of truth</div></div>
+      <div class="node"><div class="t"><code>mm6108.mbin</code></div><div class="s">Morse TLV, via convert-bin-to-mbin.py</div></div>
+      <div class="node"><div class="t"><code>mm6108.mbin.o</code></div><div class="s">objcopy --redefine-sym → firmware_binary_* / bcf_binary_*, --rename-section .rodata._fw_mbin</div></div>
+      <div class="node ok"><div class="t">flashed app image</div><div class="s">target_link_libraries</div></div>
+    </div>
+    <figcaption>The committed ELF is the only source; the <code>.mbin</code> and object file are generated under <code>build/&lt;app&gt;/…/mm-fw-gen/firmware/</code> at build time.</figcaption>
+  </figure>
+
+  <p>The <code>.mbin -&gt; .o</code> objcopy step is <strong>verbatim from the upstream component</strong>
+  (<code>morsemicro/firmware 2.10.4-esp32-2</code>); only the <code>.bin -&gt; .mbin</code> step is new. The exact
+  symbols matter — morselib's <code>mmhal_wlan_binaries.c</code> references
+  <code>firmware_binary_start/_end</code> + <code>bcf_binary_start/_end</code>; IDF's native binary-embed would emit
+  <code>_binary_&lt;filename&gt;_*</code> names instead, hence the manual <code>objcopy --redefine-sym</code>.</p>
+
+  <h2 id="why-template">Why a copied template</h2>
+  <p>Not a checked-in component, and not <code>file(WRITE)</code>-generated strings:</p>
+  <ul>
+    <li><strong>Not <code>components/firmware</code>:</strong> the template lives under <code>cmake/</code>, which is
+      <em>not</em> a component search dir, so IDF never sees it as a live component — it only becomes one once copied
+      under <code>build/&lt;app&gt;</code>. So <code>components/</code> holds only <code>halow</code>.</li>
+    <li><strong>Copied real files, not generated strings:</strong> the component <code>CMakeLists.txt</code> is a
+      normal readable/diffable file, not embedded as a string in the helper.</li>
+    <li><strong>Runs at the component's top level:</strong> so <code>idf_component_register()</code> works directly.
+      (An earlier attempt called it from inside a CMake <em>function</em>, which swallowed the registration — IDF
+      reported "component 'firmware' … not registered". A <code>macro</code> fixed that, but the copied-real-file
+      approach avoids the issue entirely.)</li>
+    <li><strong>No halow change:</strong> the copied component is named <code>firmware</code> and versioned
+      <code>2.10.4-esp32-2</code>, so halow's <code>morsemicro/firmware</code> dependency resolves to it
+      locally.</li>
+  </ul>
+
+  <h2 id="gotchas">Gotchas / notes</h2>
+  <ul>
+    <li>Repo paths in the copied component are resolved from <code>CMAKE_SOURCE_DIR</code> (=
+      <code>firmware/&lt;app&gt;</code>, repo root two up) — it can't use its own
+      <code>CMAKE_CURRENT_LIST_DIR</code> (that's the build copy's dir).</li>
+    <li>Build now needs Python + <strong>pyelftools</strong> (already in the IDF env) to run the converter.</li>
+    <li>Firmware version follows <code>vendor/morse-firmware</code>'s pin — currently <strong>1.17.9</strong>. Bump
+      the firmware by bumping that submodule.</li>
+    <li><code>rimba-halow-mesh</code> (other branch) and <code>rimba-hello</code> (radio-free) are not wired: mesh
+      needs the same two lines when its branch merges; hello has no radio.</li>
+    <li><code>dependencies.lock</code> is gitignored, so the build-specific generated path it records is not
+      committed.</li>
+  </ul>
+
+  <h2 id="verification">Verification</h2>
+  <p><code>rimba-halow-sta</code> + <code>rimba-halow-ap</code> clean-built, both flashed: STA banner
+  <code>Morse firmware version: 1.17.9</code>, SAE association OK, AP↔STA ping ~12–37 ms. Evidence:
+  <code>/tmp/fw-copy-sta.log</code>.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#before">Before</a></li>
+    <li><a href="#after">After</a></li>
+    <li><a href="#why-template">Why a copied template</a></li>
+    <li><a href="#gotchas">Gotchas / notes</a></li>
+    <li><a href="#verification">Verification</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-06-24-firmware-vendor-sourcing</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

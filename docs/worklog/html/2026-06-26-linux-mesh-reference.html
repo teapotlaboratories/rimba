@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux morse 802.11s mesh: working reference — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-06-26</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-26</span>
+    <span class="badge">4 min read</span>
+    <span class="badge ok">✓ working reference</span>
+    <span class="badge">mesh · bring-up · IBSS</span>
+  </div>
+
+  <h1>Linux morse 802.11s mesh: working reference<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">beacon → peer → data</small></h1>
+
+  <p class="lead">Brought the <strong>Linux morse stack</strong> up as a fully working 802.11s HaLow mesh and confirmed
+  two Linux nodes <strong>peer and pass IP traffic</strong>. This is the reference behaviour the ESP (morselib) mesh
+  must match for P2 (peering / MPM). It also unblocks the IBSS port: the same morse code path
+  (<code>morse_ibss_mesh_setup_freq</code>) and config requirements apply to IBSS.</p>
+
+  <p>Bench: <strong>chronium</strong> <code>192.168.7.187</code> (MAC <code>3c:22:7f:37:50:42</code>) and
+  <strong>chronite</strong> <code>192.168.7.191</code> (MAC <code>3c:22:7f:37:51:38</code>), both RPi5 + MM6108, same
+  1.17.8 morse stack, kernel 6.12.21. S1G channel 27 → 5 GHz-model ch112 / <code>freq 5560</code> (915.5 MHz, 1 MHz
+  BW, US).</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">chronium</div><div class="s">10.9.9.1 · MM6108</div></div>
+      <div class="node ok"><div class="t">mesh plink ESTAB</div><div class="s">−20 / −19 dBm</div></div>
+      <div class="node acc"><div class="t">chronite</div><div class="s">10.9.9.2 · MM6108</div></div>
+    </div>
+    <figcaption>Two RPi5 + MM6108 nodes on S1G ch27 (5560 / 915.5 MHz, 1 MHz BW, US) — plink ESTAB, ping 5/5, 0% loss.</figcaption>
+  </figure>
+
+  <h2 id="result">Result</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">ESTAB</div><div class="lbl">mesh plink (both ways)</div></div>
+    <div class="stat"><div class="num ok">5/5</div><div class="lbl">ping received · 0% loss</div></div>
+    <div class="stat"><div class="num acc">18.18 ms</div><div class="lbl">rtt avg (4.77 / 65.8 min/max)</div></div>
+    <div class="stat"><div class="num acc">−20 / −19 dBm</div><div class="lbl">signal chronium / chronite</div></div>
+    <div class="stat"><div class="num">65 ms</div><div class="lbl">first pkt = HWMP path discovery</div></div>
+  </div>
+
+  <pre><code># chronium                                   # chronite
+Station 3c:22:7f:37:51:38 (on wlan1)         Station 3c:22:7f:37:50:42 (on wlan1)
+    signal: -20 dBm                              signal: -19 dBm
+    mesh plink: ESTAB                            mesh plink: ESTAB
+
+# ping over the mesh (10.9.9.1 -> 10.9.9.2): 5/5 received, 0% loss,
+# rtt min/avg/max 4.77/18.18/65.8 ms  (first pkt 65 ms = HWMP path discovery)</code></pre>
+
+  <h2 id="recipe">How to bring up morse Linux mesh (the recipe)</h2>
+
+  <div class="callout">
+    <p class="ct">The single most important fact</p>
+    <p>morse Linux mesh is <strong>driven by <code>wpa_supplicant_s1g</code>, NOT by <code>iw … mesh join</code></strong>.
+    The morse driver comment (<code>mac.c</code>, <code>bss_info_changed</code>, <code>BSS_CHANGED_BEACON_ENABLED</code>)
+    says it outright: <em>"Start mesh will be handled when supplicant configures mesh id and other params."</em></p>
+  </div>
+
+  <p>The mesh START + beaconing command (<code>MORSE_CMD_ID_MESH_CONFIG</code>, opcode START,
+  <code>enable_beaconing</code>) is only sent once the morse mesh conf has a <code>mesh_id_len</code> — and that is
+  populated by a <strong>morse vendor command from wpa_supplicant</strong> (<code>command.c</code> →
+  <code>morse_cmd_set_mesh_config</code> → <code>mesh.c</code> sets <code>mesh_id_len</code>). Bare
+  <code>iw mesh join</code> sets the mesh id in mac80211 but never sends the morse vendor command, so the firmware
+  mesh BSS never starts → <strong>no beacon, and the firmware never enables RX.</strong></p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">wpa_supplicant_s1g</div><div class="s">morse vendor cmd</div></div>
+      <div class="node"><div class="t">morse_cmd_set_mesh_config</div><div class="s">command.c</div></div>
+      <div class="node"><div class="t">mesh_id_len set</div><div class="s">mesh.c</div></div>
+      <div class="node acc"><div class="t">MESH_CONFIG START</div><div class="s">enable_beaconing</div></div>
+      <div class="node ok"><div class="t">beacon + RX on</div><div class="s">mesh BSS live</div></div>
+    </div>
+    <figcaption>Only the <code>wpa_supplicant_s1g</code> vendor command populates <code>mesh_id_len</code> → START the firmware mesh BSS. Bare <code>iw mesh join</code> stops at the mac80211 mesh id and the firmware BSS never starts (no beacon, no RX).</figcaption>
+  </figure>
+
+  <p>Working <code>wpa_supplicant_s1g</code> mesh config (open mesh, matches the ESP <code>rimba-mesh</code>):</p>
+
+  <pre><code>ctrl_interface=/var/run/wpa_supplicant_s1g
+country=US
+user_mpm=1
+network={
+    ssid="rimba-mesh"
+    mode=5                       # WPAS_MODE_MESH
+    key_mgmt=NONE                # open mesh
+    country="US"                 # MUST be quoted (STR field; unquoted parses as hex)
+    op_class=68                  # S1G global op-class for ch27 / 1 MHz
+    channel=27                   # S1G channel (NOT a 5 GHz freq)
+    s1g_prim_chwidth=0
+    s1g_prim_1mhz_chan_index=0
+    dtim_period=1                # REQUIRED — see bug below
+    beacon_int=100
+}</code></pre>
+
+  <p>Run:</p>
+
+  <pre><code>export LC_ALL=C; export PATH=$PATH:/usr/sbin:/usr/local/bin
+sudo iw dev wlan1 mesh leave 2&gt;/dev/null; sudo pkill -9 -f wpa_supplicant_s1g
+sudo rm -f /var/run/wpa_supplicant_s1g/wlan1          # clear stale ctrl socket
+sudo ip link set wlan1 down; sudo iw dev wlan1 set type managed; sudo ip link set wlan1 up
+sudo wpa_supplicant_s1g -B -D nl80211 -i wlan1 -c /tmp/wpa-mesh.conf -f /tmp/wpa-mesh.log
+# expect: wlan1 type "mesh point", channel 112 (5560), log "MESH-GROUP-STARTED"
+# verify beaconing: page_stats "Beacon Tx" climbs (~9.8/s); peers: iw dev wlan1 station dump</code></pre>
+
+  <p>Do <strong>not</strong> set a <code>frequency=</code> line — morse derives the HT/5 GHz freq from
+  <code>country</code>+<code>op_class</code>+<code>channel</code> (<code>s1g oper class 68 → S1G ch27 → HT chan 112 → 5560</code>).</p>
+
+  <h2 id="pitfalls">Two morse-fork wpa_supplicant pitfalls (cost most of the debugging)</h2>
+
+  <p>Both live in the morse hostap fork (<code>~/halow/hostap/wpa_supplicant</code>), under
+  <code>#ifdef CONFIG_IEEE80211AH</code>.</p>
+
+  <div class="callout bug">
+    <p class="ct">🐛 1 · <code>morse_ibss_mesh_setup_freq()</code> segfaults (SIGSEGV) if the S1G fields are missing</p>
+    <p><code>wpa_supplicant.c:~2948 morse_ap_configure_channelization(ssid-&gt;country, ssid-&gt;op_class)</code>
+    dereferences a NULL in the channelization table when <code>country</code> is empty / <code>op_class</code> 0.
+    Backtrace: <code>morse_ibss_mesh_setup_freq</code> ← <code>wpa_supplicant_join_mesh (mesh.c:713)</code> ←
+    <code>wpa_supplicant_associate</code>. <strong>Fix:</strong> always provide
+    <code>country</code>/<code>op_class</code>/<code>channel</code> in the network block. (This function serves
+    <strong>both IBSS and mesh</strong> — same requirement for IBSS.)</p>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">🐛 2 · DTIM ≠ 1 is rejected, not corrected</p>
+    <p><code>mesh.c:766-773</code> (<code>wpa_supplicant_join_mesh</code>) logs
+    <code>"Invalid DTIM period (%d) for Mesh, set (1)"</code> then does <code>ret = -1; goto out</code> — the message
+    lies; it does NOT set 1, it bails. With no <code>dtim_period</code> configured it defaults to 0 → every join fails
+    with "Could not join mesh". <strong>Fix:</strong> set <code>dtim_period=1</code> explicitly. (Candidate upstream
+    fix: actually set <code>params-&gt;dtim_period = 1</code> instead of erroring — left as a backlog item, config
+    works.)</p>
+  </div>
+
+  <h2 id="correction">Correction: the "CONFIG_MORSE_MONITOR breaks RX" conclusion was WRONG</h2>
+
+  <p>Earlier sessions concluded the monitor build broke normal-vif RX. <strong>It does not.</strong> The real cause of
+  the "deaf" nodes was the same as above: <strong>no active BSS → firmware RX disabled.</strong> Bare
+  <code>iw mesh join</code> never starts the morse mesh, so the radio never listens — looked like broken RX. With a
+  real <code>wpa_supplicant_s1g</code> mesh, <strong>chronium peered with chronite at −20 dBm while running the
+  monitor (<code>CONFIG_MORSE_MONITOR=y</code>) build.</strong> So the monitor build is fine for normal mesh/AP/STA
+  operation.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Caveat that <em>is</em> real</p>
+    <p>The <code>morse0</code> <strong>raw monitor tap delivers 0 frames</strong> here (capture returned nothing even
+    with an active mesh and the radio on-channel). Not needed for mesh dev —
+    <code>iw dev wlan1 station dump</code> / <code>iw dev wlan1 mpath dump</code> and the Linux nodes themselves give
+    us the reference. <code>morse0</code> raw-tap delivery is a separate, still-open issue (low priority).</p>
+  </div>
+
+  <h2 id="esp">Implication for the ESP side (P2)</h2>
+
+  <p>The ESPs (<code>rimba-halow-mesh</code>, board0/board1) <strong>beacon</strong> <code>rimba-mesh</code> with real
+  per-node MACs and hear each other, but <strong>do not form a peer link</strong> with the Linux nodes — because
+  ESP-side MPM (mesh peering action frames: Open / Confirm / Close) is the P2 work still in progress, not a
+  morse/Linux incompatibility. We now have a fully working Linux peer (chronium↔chronite) to diff against:
+  capture/observe the Mesh Peering Management frames and the Mesh Configuration element (active path sel = HWMP,
+  metric = airtime, sync = neighbour-offset) the Linux nodes exchange, and match them in morselib's MPM.</p>
+
+  <h2 id="state">State at end of session</h2>
+
+  <ul>
+    <li>chronium + chronite: both running <code>wpa_supplicant_s1g</code> open mesh <code>rimba-mesh</code>,
+      <strong>plink ESTAB</strong>, IPs <code>10.9.9.1</code> / <code>10.9.9.2</code>, ping 0% loss. (Runtime only —
+      re-run the recipe after reboot; not yet a service.)</li>
+    <li>chronium kernel module rebuilt + installed with <code>CONFIG_MORSE_MONITOR=y</code> (morse0 present but raw tap
+      empty); normal mesh vif RX confirmed working on this build.</li>
+    <li>ESP boards: board0/board1 beaconing <code>rimba-mesh</code>; no peer yet (P2 MPM pending).</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#result">Result</a></li>
+    <li><a href="#recipe">Bring-up recipe</a></li>
+    <li><a href="#pitfalls">Two wpa_supplicant pitfalls</a></li>
+    <li><a href="#correction">MONITOR-breaks-RX was wrong</a></li>
+    <li><a href="#esp">Implication for ESP (P2)</a></li>
+    <li><a href="#state">State at end of session</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-06-26-linux-mesh-reference</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

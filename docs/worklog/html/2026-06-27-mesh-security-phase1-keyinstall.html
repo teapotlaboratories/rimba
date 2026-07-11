@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh security P1: firmware key-install — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-27</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-27</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ done</span>
+    <span class="badge">mesh · security · CCMP</span>
+  </div>
+
+  <h1>Mesh security Phase 1: firmware key-install boundary proven on a MESH vif<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">the −116 wall doesn't apply — and static-key CCMP now encrypts on-air</small></h1>
+
+  <p class="lead">Phase 1 of the mesh-security port (SAE+AMPE, following Morse's Linux stack) verified the pivotal
+  unknown on real hardware: <strong>the MM6108 firmware accepts <code>SET_STA_STATE</code> + <code>INSTALL_KEY</code>
+  for an 802.11s mesh peer</strong> — it mints a per-peer station handle and installs the pairwise MTK + group
+  MGTK, all returning success. The −116 (<code>-ENETDOWN</code>) wall that blocks IBSS/ADHOC chip-CCMP does
+  <strong>not</strong> apply to the MESH vif, exactly as the <code>morse_driver</code> code-map predicted (mesh runs
+  the AP key path; <code>mac.c:4933</code> gates the AID bitmap on <code>AP || MESH_POINT</code>).</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Pivotal result — and where it ended up</p>
+    <p>Every firmware key-install command returns 0 on a live mesh peer. The follow-on "finish P1" work then hit a
+    real blocker (<strong>keys install but data stays plaintext</strong>) that turned out to be the P2 foundation, and
+    was carried through: <strong>ESP mesh unicast data is now genuinely CCMP-encrypted on-air</strong> (29 frames,
+    all <code>Protected=1</code>, 0% ping loss) using per-peer stads + the <code>umac_keys</code> layer.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">6/6</div><div class="lbl">firmware key-install cmds <code>ret=0</code></div></div>
+    <div class="stat"><div class="num acc">aid=2</div><div class="lbl">real per-peer station handle minted</div></div>
+    <div class="stat"><div class="num ok">29</div><div class="lbl">ESP data frames <code>Protected=1</code> on-air</div></div>
+    <div class="stat"><div class="num ok">0%</div><div class="lbl">board1↔board0 ping loss (encrypted)</div></div>
+  </div>
+
+  <h2 id="result">Result (on-air-adjacent: board0 console, ESP↔ESP mesh, ch27 clear)</h2>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">AUTH</div><div class="s">sta_state=2</div></div>
+      <div class="node"><div class="t">ASSOC</div><div class="s">sta_state=3</div></div>
+      <div class="node acc"><div class="t">AUTHORIZED</div><div class="s">sta_state=4</div></div>
+      <div class="node acc"><div class="t">MTK</div><div class="s">INSTALL_KEY PTK</div></div>
+      <div class="node acc"><div class="t">peer MGTK</div><div class="s">INSTALL_KEY GTK</div></div>
+      <div class="node ok"><div class="t">netif up=1</div><div class="s">ESTAB</div></div>
+    </div>
+    <figcaption>Firmware key-install boundary on a mesh peer: three <code>SET_STA_STATE</code> steps → pairwise MTK → group MGTK → the peer reaches ESTAB. Every command returns 0.</figcaption>
+  </figure>
+
+  <pre><code>MESH-SEC sta_state aid=2 state=2 ret=0     # SET_STA_STATE AUTHENTICATED
+MESH-SEC sta_state aid=2 state=3 ret=0     # SET_STA_STATE ASSOCIATED
+MESH-SEC sta_state aid=2 state=4 ret=0     # SET_STA_STATE AUTHORIZED
+MESH-SEC install MTK (pairwise) aid=2 ret=0   # INSTALL_KEY key_type=PTK
+MESH-SEC install peer MGTK (group RX) aid=2 ret=0  # INSTALL_KEY key_type=GTK
+netif up=1                                 # peer reached ESTAB</code></pre>
+
+  <p>Every firmware command returns 0. The peer gets a real station handle (aid=2, self-assigned from the mesh
+  peer pool — Linux assigns it in wpa_supplicant <code>hostapd_get_aid</code>, <code>mesh_mpm.c:798</code>).</p>
+
+  <h2 id="implementation">The implementation (<code>feature/mesh-security-phase1</code> in the submodule)</h2>
+  <p><code>umac/mesh/umac_mesh.c</code>: <code>struct mesh_peer.aid</code> (pool-index+1);
+  <code>umac_mesh_peer_secure_estab()</code> called at both ESTAB edges (<code>:1469</code>/<code>:1483</code>) — steps
+  the peer AUTH→ASSOC→AUTHORIZED via <code>mmdrv_update_sta_state</code>, then installs MTK (pairwise, key_idx 0) +
+  peer MGTK (group, key_idx 1) via <code>mmdrv_install_key</code>, mirroring hostap <code>mesh_mpm_plink_estab</code>
+  (<code>mesh_mpm.c:928/938</code>). Keys are static/shared (Phase 1); P2 derives the real MTK + exchanges MGTK via
+  AMPE. Code-map: <code>docs/mesh-ap/rimba-mesh-security-codemap.md</code>.</p>
+
+  <h2 id="findings">Two findings that cost the debugging (both real, both fixed)</h2>
+  <p>Getting here required fixing a peering regression that masked the test. Two independent causes:</p>
+
+  <h3>1. The own-MGTK install at mesh start breaks OPEN MPM peering (architectural)</h3>
+  <p>My first cut followed Linux literally and installed the node's own MGTK (group key, aid=0) at mesh
+  <strong>start</strong> (<code>__mesh_rsn_auth_init</code>, <code>mesh_rsn.c:266</code>). On hardware this
+  <strong>prevented ESTAB</strong>. Clean A/B, same clear channel: <code>PHASE1=1</code> → <code>netif up=0</code>
+  (no peer); <code>PHASE1=0</code> → <code>netif up=1</code> (peers). Removing the start-time install → peering
+  returns. <strong>Mechanism:</strong> installing a group key flips the firmware to expect protected frames;
+  morselib's MPM peering is <strong>OPEN</strong> (unprotected Open/Confirm), so those frames get dropped → no
+  ESTAB. Linux gets away with the start-time install because its peering is <strong>AMPE-protected from the
+  start</strong>. So this is a forced divergence: with open MPM the own MGTK must be <strong>deferred</strong> (it
+  only belongs at start once AMPE-protected peering lands in P2). The key-install boundary test doesn't need it —
+  per-peer keys at ESTAB are enough.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Clean A/B, same clear channel</p>
+    <p><code>PHASE1=1</code> (own MGTK at start) → <code>netif up=0</code> — <strong>no peer</strong>.
+    <code>PHASE1=0</code> (deferred) → <code>netif up=1</code> — <strong>peers</strong>. Group key at start makes the
+    firmware demand protected frames; morselib's OPEN Open/Confirm frames then get dropped.</p>
+  </div>
+
+  <h3>2. The 4-node Linux secured mesh on ch27 saturates the channel</h3>
+  <p>Separately, the live <code>rimba-smesh</code> (chronium-monitor + chronite/chronosalt/chronogen) continuously
+  beaconing/handshaking on ch27 <strong>breaks the ESPs' sparse peering</strong> (the action frames don't survive
+  the contention; beacons/discovery do). <code>PHASE1=0</code> peers only with the Linux mesh <strong>stopped</strong>.
+  The ESP-ESP test (which worked 2026-06-26 before this mesh existed) must run with ch27 clear, or on a different
+  channel. <strong>Stop the Linux mesh during ESP mesh tests.</strong></p>
+
+  <h3>Bonus: morselib MMLOG is not on the ESP console</h3>
+  <p>None of the <code>umac_mesh.c</code> <code>MMLOG_INF</code> lines (MESH FSM, MESH-SEC) reach the serial console —
+  raising <code>MMLOG_LEVEL_OVRD</code> didn't help (the "Morse Micro HaLow NetIF" lines are ESP_LOG from the netif
+  glue, not MMLOG). The MESH-SEC returns above were surfaced with a <strong>temporary <code>printf</code></strong>
+  (marked TEMP in the diff). Revert before merge, or wire MMLOG to the console properly.</p>
+
+  <h2 id="cleanup">State / cleanup TODO (uncommitted feature branch)</h2>
+  <ul>
+    <li>TEMP debug to revert: <code>#include &lt;stdio.h&gt;</code> + the <code>printf("MESH-SEC …")</code> lines
+      (were <code>MMLOG_INF</code>).</li>
+    <li>Own-MGTK-at-start is deferred (commented) — revisit in P2 with AMPE-protected peering.</li>
+    <li>A workflow misdiagnosed this as a "responder never sends OPEN" FSM bug — it trusted an unreliable on-air
+      SA/category decode; the board-side console (<code>netif up</code>) + the clean PHASE1 A/B were ground truth.
+      Lesson: for MPM, the node's own FSM log/state beats a lossy sniffer decode.</li>
+  </ul>
+
+  <h2 id="plaintext">Trying to "finish P1": keys install but DATA STAYS PLAINTEXT (the real blocker)</h2>
+  <p>Added the own MGTK install at first ESTAB (deferred): now all six commands return 0 (own MGTK aid=0 +
+  sta_state + MTK + peer MGTK), the link <strong>stays up</strong>, and board1↔board0 ping at <strong>0% loss</strong>.
+  But the chronium monitor decode is decisive: <strong>every ESP data frame is <code>Protected=0</code> —
+  unencrypted.</strong> The keys are live in the chip but <strong>dormant</strong>; the ping works because both
+  sides send plaintext.</p>
+
+  <div class="callout err">
+    <p class="ct">✗ Root cause (architectural) — keys live but dormant</p>
+    <p>morselib only encrypts a data frame when the <em>stad</em> it TXes through has <code>security_type != OPEN</code>
+    <strong>and</strong> the <strong>umac keychain</strong> holds the key (<code>umac_datapath.c:1922-1930</code>:
+    <code>umac_keys_get_active_key_id(stad, ...)</code> → sets <code>FC PROTECTED</code> +
+    <code>tx_metadata-&gt;key_idx</code>). Phase-1 code called the <strong>raw <code>mmdrv_install_key</code></strong>
+    (firmware level, correct per-peer AIDs) and <strong>never</strong> went through <code>umac_keys_install_key</code>
+    (which populates the stad keychain) nor set <code>security_type</code>. So the TX path doesn't know a key exists →
+    plaintext.</p>
+  </div>
+
+  <p>And the mesh has only ONE <code>common_stad</code> for all TX (<code>umac_datapath.c:2994-3019</code> both lookups
+  return <code>umac_mesh_get_common_stad()</code>; <strong>no per-peer stads</strong> — the long-standing TODO). The
+  group key (aid=0) <em>can</em> live on the common_stad, but the <strong>pairwise MTK needs the peer's AID</strong>,
+  which the common_stad (aid 0) can't carry. So unicast encryption fundamentally needs <strong>per-peer stads</strong>.</p>
+
+  <h2 id="next-step">The real Next step (P1-encryption == P2 foundation)</h2>
+  <p>Enabling actual encryption is the proper key-management layer, not a quick finish:</p>
+  <ol>
+    <li><strong>Per-peer stads</strong> — allocate a <code>umac_sta_data</code> per mesh peer (its AID + keychain),
+      mirroring mac80211's <code>sta_info</code>. Make
+      <code>umac_datapath_lookup_stad_by_tx_dest_addr_mesh</code> return the peer's stad for unicast (so the MTK is
+      found + Protected set), keep <code>common_stad</code> for group/broadcast.</li>
+    <li>Install keys via <strong><code>umac_keys_install_key(stad, …)</code></strong> (populates keychain + firmware)
+      instead of raw <code>mmdrv_install_key</code>; set <code>umac_sta_data_set_security(stad, …)</code> to
+      non-OPEN.</li>
+    <li>Then unicast encrypts with the per-peer MTK, broadcast with the common_stad MGTK. Verify on-air
+      (<code>Protected=1</code> + CCMP header), byte-diff vs a live Linux secured node.</li>
+  </ol>
+  <p>This per-peer-stad infrastructure is the foundation P2 (AMPE) builds on anyway, so P1 and P2 merge here.
+  <strong>P1's pivotal result — the firmware accepts mesh key-install — stands.</strong></p>
+
+  <h2 id="done">DONE — working static-key encrypted mesh (on-air proven)</h2>
+  <p>Built the per-peer-stad + <code>umac_keys</code> layer (design workflow + verified vs the IBSS per-peer-stad
+  model). Result: <strong>ESP mesh unicast data is genuinely CCMP-encrypted on-air.</strong></p>
+
+  <pre><code>chronium morse0 monitor: 29 ESP data frames, ALL Protected=1 (vs prot=0 before)
+CCMP header 3d 00 00 20 00 00 00 00  -> ExtIV set, keyid=0 (pairwise MTK), PN increments
+board1&lt;-&gt;board0 ping: 0% loss (encrypted AND correctly decrypted by the peer)</code></pre>
+
+  <p>What landed (<code>umac_mesh.c</code>, <code>umac_mesh.h</code>, <code>umac_datapath.c</code>):</p>
+  <ol>
+    <li><strong>Per-peer stad</strong> on <code>struct mesh_peer</code> — <code>umac_sta_data_alloc</code> at
+      <code>mesh_peer_alloc</code> (aid, peer_addr, <code>security=MMWLAN_SAE</code>), freed at every
+      close/teardown/<code>mesh_stop</code> (<code>mesh_peer_free</code>). Mirrors IBSS.</li>
+    <li><strong>Keys via <code>umac_keys_install_key</code></strong> (populates the host keychain that gates TX +
+      installs to firmware) — replacing the raw <code>mmdrv_install_key</code>. Per-peer MTK/MGTK keyed by
+      <code>peer-&gt;aid</code>.</li>
+    <li><strong>The decisive fix:</strong> mesh TX is <strong>common-stad-driven</strong> (all frames dequeue from
+      the common stad, like IBSS — my first cut wrongly enqueued unicast on the per-peer stad, so frames stuck and
+      never TXed). So the common_stad holds BOTH keys (MTK key_idx 0 + MGTK key_idx 1); the TX path
+      (<code>umac_datapath.c:1922</code>) then sets Protected + the right key_idx. Per-peer stads serve RX
+      (<code>lookup_stad_by_peer_addr_mesh</code>) + the firmware per-peer AID slots.</li>
+  </ol>
+
+  <div class="callout">
+    <p class="ct">The P1→P2 seam</p>
+    <p>The common-stad single MTK works because P1 keys are <strong>static/shared</strong> (every peer the same MTK).
+    P2 (AMPE) derives a <strong>distinct MTK per pair</strong>, so a single common-stad MTK no longer suffices — P2
+    must drive TX from the <strong>per-peer stad</strong> (queue/dequeue per peer, like AP), the proper form. The
+    per-peer stads added here are exactly that foundation. Cleanup TODO unchanged: the <code>printf</code> MESH-SEC
+    traces are TEMP (MMLOG isn't on the ESP console); revert before merge to main.</p>
+  </div>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#result">Result (key-install boundary)</a></li>
+  <li><a href="#implementation">The implementation</a></li>
+  <li><a href="#findings">Two findings that cost debugging</a></li>
+  <li><a href="#cleanup">State / cleanup TODO</a></li>
+  <li><a href="#plaintext">Data stays plaintext (the blocker)</a></li>
+  <li><a href="#next-step">The real next step</a></li>
+  <li><a href="#done">DONE — static-key encrypted mesh</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-27-mesh-security-phase1-keyinstall</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

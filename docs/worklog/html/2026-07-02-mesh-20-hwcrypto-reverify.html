@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#20 HW-crypto A4≠TA mesh forward — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-02</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-02</span>
+    <span class="badge">5 min read</span>
+    <span class="badge warn">isolated · backlog</span>
+    <span class="badge bug">mesh · HW-crypto · security</span>
+  </div>
+
+  <h1>#20 HW-crypto A4≠TA mesh forward<br><small style="font-weight:600;color:var(--muted);font-size:1.05rem">re-verified on the ESP, isolated to the host stack — and proven <em>not</em> a driver→FW command difference</small></h1>
+
+  <p class="lead">Re-opened the <code>#20</code> backlog — "in HW-crypto mode the MM6108 FW withholds a forwarded
+  4-address frame whose A4 (mesh-SA) ≠ TA" — after the §#25/§#26 verdict in
+  <code>2026-06-27-mesh-security-phase3-sae.md</code> was found <strong>self-contradictory</strong>: §#25 proved
+  the <em>same</em> FW binary HW-decrypts + delivers the A4≠TA forward on Linux (including running the ESP's exact
+  blob on chronite), then §#26 concluded "it's the firmware" — a logical inversion of its own strongest datum.
+  A reliable, independent re-run overturns the "closed-FW, unpinnable" framing.</p>
+
+  <h2 id="bottom-line">Bottom line</h2>
+
+  <ol>
+    <li><strong>The A4≠TA-forward withhold is REAL on the ESP</strong> — re-confirmed with a <em>reliable</em>
+      RX-entry probe. §#26's linchpin ("RX fired 0×") came from a probe §#26 <em>itself</em> called unreliable
+      (it never captured even a positive control — a USB-CDC reset-on-open artifact).</li>
+    <li><strong>It is the HOST STACK (morselib), not the FW and not the BCF.</strong> Excluded the FW version
+      (ran <strong>1.17.8</strong> on the ESP → still withholds) and the BCF (the ESP runs
+      <code>bcf_fgh100mhaamd</code>, the <em>same</em> BCF chronosalt runs while <em>delivering</em> under
+      morse_driver).</li>
+    <li><strong>But it is NOT a driver→FW command difference.</strong> An exhaustive ID- <em>and</em> byte-level
+      diff of morse_driver's vs morselib's mesh-vif + peer-add command streams shows them <strong>functionally
+      equivalent</strong>. The fix is not "configure the FW like Linux via command X"; the difference is a
+      host-side interaction <em>outside</em> the FW command interface.</li>
+  </ol>
+
+  <div class="callout"><p style="margin:0">This corrects §#26 on both counts: it's the <strong>host stack</strong>
+  (not the FW/BCF), and it is genuinely <em>not a command</em> (§#26 guessed a "non-command FW input" — right that
+  it isn't a command, wrong that it's FW-side).</p></div>
+
+  <h2 id="reprobe">1 · The reliable on-ESP re-probe (the decisive test §#26 lacked)</h2>
+  <ul>
+    <li>Instrumented <code>umac_datapath_process_rx_frame</code> (the earliest host RX entry,
+      <code>umac_datapath.c</code>) with a counter split by <strong>A4==TA (direct)</strong> vs
+      <strong>A4≠TA (forward)</strong> and the <code>MMDRV_RX_FLAG_DECRYPTED</code> bit, exposed via
+      <code>mmwlan_mesh_get_rx20dbg()</code> and logged in the app heartbeat. Read via <code>stty raw</code> +
+      <code>cat</code> (no DTR/RTS reset — the fix for §#26's dead probe).</li>
+    <li>Forced HW-crypto (<code>g_mesh_sw_crypto=false</code>, <code>umac_mesh.c</code>).</li>
+    <li>Generated a <strong>deterministic</strong> A4≠TA forward: board0 emits, from
+      <code>umac_mesh_plink_tick</code> (umac context; the app beacon-cb never fires — S1G mesh-peer beacons
+      bypass the app rx_frame_cb), a synthetic 4-addr frame to board2 with mesh-SA = board1 —
+      <strong>byte-identical to board0's working <em>direct</em> frame except A4</strong>
+      (<code>mmwlan_mesh_debug_synth_forward</code> → <code>umac_mesh_forward_data</code>).</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">board0</div><div class="s">relay / emitter</div></div>
+      <div class="node"><div class="t">synthetic 4-addr</div><div class="s">A4 = board1 ≠ TA</div></div>
+      <div class="node"><div class="t">on-air</div><div class="s">Protected, PN++<br>chronium morse0</div></div>
+      <div class="node ok"><div class="t">board2</div><div class="s">measurer · RX-entry</div></div>
+    </div>
+    <figcaption>Same TA, same board0↔board2 pairwise MTK — the forward differs from the working direct frame in <strong>A4 only</strong>.</figcaption>
+  </figure>
+
+  <p><strong>Result</strong> (board0 = relay/emitter, board2 = measurer; on-air confirmed on chronium's
+  <code>morse0</code>):</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num">739</div><div class="lbl">synthetic A4≠TA forwards emitted</div></div>
+    <div class="stat"><div class="num acc">60+</div><div class="lbl">captured on-air (4-addr, Protected, PN++)</div></div>
+    <div class="stat"><div class="num ok">291</div><div class="lbl">direct RX at board2 (288 decrypted) · 0% loss, ~20 ms</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">0</div><div class="lbl">forward RX at board2 (withheld)</div></div>
+  </div>
+
+  <p>board2 RX-entry, direct vs forward (bars to scale — the FW delivers <em>every</em> direct frame and
+  <em>zero</em> forwards):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">direct (A4=TA)</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">291 (288 dec)</span></div>
+    <div class="bar-row"><span class="lbl">forward (A4≠TA)</span><span class="bar-track"><span class="bar-fill slow" style="width:0%"></span></span><span class="val">0</span></div>
+  </div>
+
+  <div class="callout ok"><p class="ct">✓ The positive control is airtight</p><p style="margin:0">291 direct frames
+  delivered, so the 0 is a <strong>genuine FW withhold, not a dead probe</strong>. §#26's phenomenon holds; its
+  broken-probe evidence is replaced by a solid one.</p></div>
+
+  <h2 id="fw-bcf">2 · FW version + BCF excluded</h2>
+
+  <table>
+    <thead><tr><th>host stack</th><th>FW</th><th>BCF</th><th>A4≠TA forward</th></tr></thead>
+    <tbody>
+      <tr><td>morselib (ESP)</td><td class="num">1.17.9</td><td>fgh100mhaamd</td><td>withhold</td></tr>
+      <tr><td>morselib (ESP)</td><td class="num"><strong>1.17.8</strong></td><td>fgh100mhaamd</td><td><strong>withhold</strong></td></tr>
+      <tr><td>morse_driver (chronosalt)</td><td class="num">1.17.8</td><td>fgh100mhaamd</td><td><strong>deliver</strong> (§#25)</td></tr>
+    </tbody>
+  </table>
+
+  <ul>
+    <li>Swapped the ESP's vendored FW to <strong>1.17.8</strong>
+      (<code>vendor/morse-firmware/firmware/mm6108.bin</code> ← chronite's <code>~/mm6108-1.17.8.bak</code>),
+      rebuilt, re-ran the synth-forward test → <strong>still withholds</strong>. Board banner confirmed
+      <code>Morse firmware version: 1.17.8</code>. FW version excluded.</li>
+    <li>The ESP's BCF is <code>bcf_fgh100mhaamd</code> (<code>BOARD=proto1-fgh100m</code>); its embedded
+      <code>.board_desc</code> string is literally <code>mf16858</code>, so the on-board
+      "BCF board description: mf16858" <em>is</em> the Quectel fgh100mhaamd BCF — the same BCF chronosalt runs
+      while delivering. BCF excluded.</li>
+  </ul>
+
+  <div class="callout warn"><p class="ct">⚠ Same FW + same BCF, opposite behavior</p><p style="margin:0">The only
+  remaining variable is the <strong>host stack</strong>.</p></div>
+
+  <h2 id="cmd-diff">3 · The driver→FW command diff — functionally equivalent</h2>
+  <p>Captured morse_driver's live command stream on a 2-node secured mesh (chronite + chronosalt,
+  <code>wpa_supplicant_s1g</code>, mesh id <code>rimba-smesh</code>, SAE, S1G ch27):</p>
+  <ul>
+    <li><strong>IDs</strong> — kprobe on <code>morse_cmd_tx</code> (<code>command.c:130</code>) reading
+      <code>message_id</code> at <code>+2(%x2)</code>.</li>
+    <li><strong>Bytes</strong> — rebuilt morse_driver (SPI config, matching vermagic) with the existing
+      <code>MORSE_DBG</code> CMD log (<code>command.c:186</code>) enhanced to dump <code>len</code> + first 32
+      payload bytes, gated by the per-feature debug level <code>default=7</code> (keep <code>skb=3</code> to
+      suppress the per-frame flood).</li>
+  </ul>
+
+  <p><strong>morse_driver mesh+peer sequence (byte-verified):</strong></p>
+  <pre><code>HW_SCAN · MCAST_FILTER · REMOVE_IF · GET_VERSION · GET_DISABLED_CHANNELS ·
+ADD_INTERFACE(type=MESH) · GET_CAPABILITIES · SET_QOS_PARAMS×4 · SET_CHANNEL ·
+GET_CHANNEL_FULL · INSTALL_KEY(own MGTK) · SET_DUTY_CYCLE · MPSW_CONFIG · BSS_CONFIG ·
+MESH_CONFIG(enable_beaconing=1, mbca=1) · SET_STA_STATE×3 (aid, state 2/3/4, flags=0) ·
+INSTALL_KEY×2 (peer MTK type=PTK idx=0 / peer MGTK type=GTK idx=1)</code></pre>
+
+  <p><strong>Diff vs morselib:</strong></p>
+  <ul>
+    <li><strong>Peer-add matches byte-for-byte:</strong> <code>SET_STA_STATE.flags=0</code>;
+      <code>INSTALL_KEY</code> cipher=<code>AES_CCM</code>, <code>key_type</code> PTK(2)/GTK(1),
+      <code>key_idx</code> — all identical. Only the internal <code>aid</code> index differs (1 vs 2).</li>
+    <li><strong>Shared config matches:</strong> ADD_INTERFACE type=MESH; BSS_CONFIG beacon=100/dtim=1;
+      MESH_CONFIG enable_beaconing=1/mbca=1 (only <code>min_beacon_gap</code> 10 vs 25 — a beacon-timing
+      value).</li>
+    <li><strong>Every non-shared command ruled out:</strong> <code>MCAST_FILTER</code> (multicast list
+      <code>01:00:5e…</code>; <code>configure_filter</code> <code>mac.c:4269</code> ignores the FIF flags
+      entirely), <code>SET_QOS_PARAMS</code> (EDCA/TX — <em>also empirically tested</em>: adding it to
+      <code>mmwlan_mesh_start</code> did <strong>not</strong> fix delivery), <code>MPSW_CONFIG</code>/<code>SET_DUTY_CYCLE</code>
+      (airtime/regulatory), <code>HW_SCAN</code> (morselib host-beacons), the <code>GET_*</code> reads.</li>
+    <li>morselib-only commands (<code>BSSID_SET 0x52</code>, <code>SET_MESH_CONFIG 0xA018</code>,
+      <code>BSS_BEACON_CONFIG 0x3D</code>) are its host-beacon path; none restricts RX.</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0"><strong>No command/flag/value in either direction gates A4-delivery —
+  the command streams are functionally equivalent.</strong></p></div>
+
+  <h2 id="conclusion">4 · Conclusion + open next steps</h2>
+  <p>The A4≠TA-forward difference is a <strong>host-side interaction not carried by the <code>morse_cmd_tx</code>
+  FW-command interface.</strong> Candidates for a future dig (all deep, low-odds, unnecessary while P5 ships):</p>
+  <ul>
+    <li>A host↔FW interaction <em>outside</em> <code>morse_cmd_tx</code> (raw SPI/register access, a data-path
+      setup).</li>
+    <li>Frame <strong>content</strong> the FW keys off — a Mesh Configuration IE (113) capability bit, or a
+      mesh-header/QoS field morselib emits differently.</li>
+    <li>A command sent only on data-flow / a later <code>BSS_CHANGED_*</code> event beyond the ~13 s bring-up
+      window.</li>
+  </ul>
+
+  <div class="callout ok"><p class="ct">✓ P5 host SW-CCMP remains the working answer</p><p style="margin:0">No FW
+  mesh key ⇒ the FW delivers protected frames raw, host decrypts, bypassing the gate for <em>all</em> origins.
+  <code>#20</code> stays a low-priority backlog item; this is the re-verified state to resume from.</p></div>
+
+  <h2 id="method">Method / bench-safety notes (to resume)</h2>
+  <ul>
+    <li>morselib TEMP (reverted after this session): <code>g_mesh_sw_crypto=false</code>; the
+      <code>g_mesh_rx20dbg[4]</code> RX-entry counter + <code>mmwlan_mesh_get_rx20dbg</code>; the armed synthetic
+      forward (<code>mmwlan_mesh_debug_synth_forward</code> → <code>umac_mesh_plink_tick</code>).</li>
+    <li>app TEMP (<code>rimba-halow-mesh-perf</code>, reverted): <code>MESH_LINE_RELAY_DEMO</code> + board0
+      direct-control ping/arm + heartbeat RX20/synthfwd readout.</li>
+    <li>Linux capture: <code>docs/reference/captures/wpa-smesh.conf</code> (SAE <code>rimbamesh2026</code>); the
+      byte-log driver (original <code>.ko</code> backed up on chronite at
+      <code>.../wireless/morse/morse.ko.preByteLog.bak</code>, since restored).</li>
+  </ul>
+
+  <div class="callout bug"><p class="ct">🐛 Do NOT set <code>debug_mask=0x7fffffff</code></p><p>bit0=DEBUG turns on
+  per-frame logging that floods a beaconing node into userspace starvation (locked out chronite + chronium this
+  session; both needed a reboot). Use per-feature <code>logging/default=7</code> + <code>logging/skb=3</code>.
+  A kprobe on <code>morse_cmd_tx</code> likewise overloads a <em>live-peering</em> node. Reboot the Linux nodes
+  for a clean peering state after churn.</p></div>
+
+  <p><strong>Follow-up cleanup:</strong> the now-refuted "FW keys CCMP by the mesh-SA/A4" comments at
+  <code>umac_mesh.c:134-135</code> and <code>umac_datapath.c:509/727</code> should be corrected in a future
+  submodule touch (the gate is real, but it is a host-stack difference, not a keys-by-A4 decrypt limit).</p>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#bottom-line">Bottom line</a></li>
+  <li><a href="#reprobe">1 · The reliable on-ESP re-probe</a></li>
+  <li><a href="#fw-bcf">2 · FW version + BCF excluded</a></li>
+  <li><a href="#cmd-diff">3 · The driver→FW command diff</a></li>
+  <li><a href="#conclusion">4 · Conclusion + next steps</a></li>
+  <li><a href="#method">Method / bench-safety notes</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-02-mesh-20-hwcrypto-reverify</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

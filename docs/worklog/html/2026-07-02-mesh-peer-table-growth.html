@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh peer-table growth — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-02</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-02</span>
+    <span class="badge">2 min read</span>
+    <span class="badge">mesh · memory</span>
+    <span class="badge ok">✓ shipped · bench deferred</span>
+  </div>
+
+  <h1>Mesh peer-table growth<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem"><code>UMAC_MESH_MAX_PEERS</code> 4 → 8 · +2.6 KB .bss · SAE bodies stay inline</small></h1>
+
+  <p class="lead">Doubles the ESP mesh peer table so a node can hold more than 4 direct neighbours — headroom
+  for denser meshes. A one-value change (Option A); the SAE bodies stay per-peer. Uncommitted → committed
+  alongside this worklog.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">4 → 8</div><div class="lbl">direct (1-hop) neighbours per node</div></div>
+    <div class="stat"><div class="num">636 B</div><div class="lbl">per <code>mesh_peer</code> entry (nm-confirmed)</div></div>
+    <div class="stat"><div class="num">2544 → 5088 B</div><div class="lbl"><code>mesh_peers</code> static array</div></div>
+    <div class="stat"><div class="num ok">+2.6 KB</div><div class="lbl">total <code>.bss</code> delta (negligible on S3)</div></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Decision</p>
+    <p>Keep the SAE bodies <strong>inline</strong>; just raise the count. Pooling/freeing the 384 B of SAE
+    scratch per peer would regress secure-mesh reauth/resync robustness for a saving the RAM budget doesn't
+    need — the bodies are read in the ESTAB steady state, not only during the handshake.</p>
+  </div>
+
+  <h2 id="why">Why</h2>
+  <p><code>UMAC_MESH_MAX_PEERS = 4</code> sizes the only peer array (<code>mesh_peers[MESH_MAX_PEERS]</code>,
+  <code>umac_mesh.c:489</code>). It caps <strong>direct</strong> (1-hop) neighbours, not mesh size (paths are
+  separate — see the dynamic-path-table worklog). In a mesh with &gt;4 neighbours in RF range, an ESP hub could
+  hold at most 4. 8 covers any near-term bench topology (a 6-node mesh puts 5 peers on a hub).</p>
+
+  <div class="callout">
+    <p class="ct">Cap is on direct neighbours, not mesh size</p>
+    <p>The peer array bounds how many 1-hop links a node maintains. Reachable mesh <em>size</em> is bounded by
+    the separate path table, not by this define.</p>
+  </div>
+
+  <h2 id="decision">Decision — Option A (raise the count)</h2>
+  <p>Not pool/defer the SAE bodies. <code>struct mesh_peer</code> is <strong>636 B/entry</strong> (nm-confirmed:
+  <code>mesh_peers</code> bss = 0x9f0 = 2544 B / 4), dominated by <code>sae_commit[192]</code> +
+  <code>sae_confirm[192]</code> (<code>MESH_SAE_BODY_MAX=192</code>, <code>umac_mesh.c:83,480,482</code>). The
+  tempting saving is to pool/free those 384 B post-handshake — <strong>but the assessment found they're read in
+  the ESTAB steady state</strong>, not just during the handshake:</p>
+  <ul>
+    <li><code>umac_mesh.c:1073-1077</code> — reauth restart-detect reads <code>peer-&gt;sae_commit</code>.</li>
+    <li><code>umac_mesh.c:1179-1181</code> — CONFIRMED-resync replays <code>peer-&gt;sae_confirm</code>.</li>
+    <li>After ACCEPTED the bignum tmp is freed (<code>mesh_sae_clear_temp</code>, <code>umac_mesh.c:1151</code>),
+      so the cached bytes <strong>cannot be regenerated</strong>.</li>
+  </ul>
+  <p>So pooling/deferring would regress secure-mesh reauth/resync robustness for a 384 B/peer saving the RAM
+  budget doesn't need. The large transient SAE scratch (Dragonfly bignums) is <strong>already heap</strong> and
+  already freed at ACCEPTED — nothing left to pool. → keep the bodies inline; just raise the count.</p>
+
+  <h2 id="edits">Edits</h2>
+  <ol>
+    <li><code>umac_mesh.h:98</code> — <code>UMAC_MESH_MAX_PEERS (4) → (8)</code> (the single source of truth;
+      <code>MESH_MAX_PEERS</code> aliases it at <code>umac_mesh.c:431</code>).</li>
+    <li><code>umac_mesh.c:497</code> — <code>MESH_ALLOWLIST_MAX (4) → (8)</code> (an <em>independent</em>
+      test-topology cap, not auto-scaled by the define; keep ≥ the peer count so all peers fit the allowlist).</li>
+    <li><code>firmware/rimba-halow-mesh/main/app_main.c</code> — <code>#include "esp_system.h"</code> + a heap-free
+      line in the 5 s heartbeat, to observe the runtime RAM headroom (telemetry).</li>
+  </ol>
+
+  <div class="callout">
+    <p class="ct">No struct change — everything else scales off the define (verified)</p>
+    <p>Every other count-sized site scales automatically: the <code>mesh_peers</code> array, the peer-iteration
+    loops (<code>:555,567,1244,1351,3174</code>), the index bound (<code>:656</code>), the <code>estab_macs</code>
+    copy in <code>mmwlan_mesh_peer_count</code> (<code>:1348-1357</code>), the datapath TX scheduler
+    (<code>umac_datapath.c:3380</code>), and the app's <code>peer_macs[UMAC_MESH_MAX_PEERS][6]</code>
+    (<code>app_main.c:178</code>). The beacon "0 peerings" byte (<code>:184</code>) is a cosmetic static template
+    — unaffected.</p>
+  </div>
+
+  <h2 id="verification">Verification</h2>
+  <ul>
+    <li><strong>Build:</strong> <code>make build APP=rimba-halow-mesh BOARD=proto1-fgh100m</code> — clean.</li>
+    <li><strong>Static RAM delta (nm, authoritative):</strong> <code>mesh_peers</code>
+      <strong>2544 → 5088 B</strong> (8 × 636), <code>mesh_allowlist</code> <strong>24 → 48 B</strong>;
+      ~+2.6 KB <code>.bss</code> total — negligible on the ESP32-S3. (16 is a drop-in alternative at +7.6 KB if
+      a denser mesh is ever wanted.)</li>
+    <li><strong>&gt;4-peer establish (bench):</strong> deferred to the next multi-node run — it piggybacks on the
+      real-RC bench test (which needs a ≥6-node mesh anyway). Low-risk: this is a pure array-size bump; the
+      per-peer plink FSM is unchanged, so &gt;4 peers establish by construction. The heap telemetry will confirm
+      runtime headroom.</li>
+  </ul>
+
+  <p>Static RAM of the <code>mesh_peers</code> array at each peer cap (to scale, 636 B/entry):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">4 peers · was</span><span class="bar-track"><span class="bar-fill" style="width:25%"></span></span><span class="val">2544 B</span></div>
+    <div class="bar-row"><span class="lbl">8 peers · new</span><span class="bar-track"><span class="bar-fill fast" style="width:50%"></span></span><span class="val">5088 B</span></div>
+    <div class="bar-row"><span class="lbl">16 peers · alt</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="val">10176 B</span></div>
+  </div>
+
+  <h2 id="divergence">Divergence</h2>
+  <p>No Linux analog — mac80211 has no such small static cap; this is an embedded static-array sizing choice.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#why">Why</a></li>
+  <li><a href="#decision">Decision — Option A</a></li>
+  <li><a href="#edits">Edits</a></li>
+  <li><a href="#verification">Verification</a></li>
+  <li><a href="#divergence">Divergence</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-02-mesh-peer-table-growth</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rimba — Engineering Worklogs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+<span class="home">Rimba · Worklogs</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme">◑</button>
+</header>
+
+<div class="wrap index">
+
+<section class="hero">
+<h1>Engineering Worklogs</h1>
+<p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
+<p class="stat"><b>48</b> worklogs · 2026-06-17 – 2026-07-11</p>
+</section>
+
+<section class="month">
+<h2>July 2026 <span class="mcount">21</span></h2>
+<div class="grid">
+
+<a class="card" href="2026-07-11-esp32-mesh-swccmp-bulk-aes.html">
+<div class="card-date">2026-07-11</div>
+<div class="card-title">ESP32 mesh SW-CCMP: bulk-DMA AES-CCM</div>
+<div class="card-ex">Root-caused and fixed the host SW-CCMP per-frame crypto cost that shows up as a relay bottleneck under concurrent load. SW-CCMP is the mesh's host-side CCMP: the MM6108 f</div>
+<div class="card-meta">6 min · ✓ fixed &amp; merged · mesh · SW-CCMP · crypto</div>
+</a>
+
+<a class="card" href="2026-07-11-mesh-20-linux-also-withholds-fw-limitation.html">
+<div class="card-date">2026-07-11</div>
+<div class="card-title">#20 RESOLVED: the A4≠TA HW-crypto withhold is a universal MM6108 firmware limitation</div>
+<div class="card-ex">Bench session (full all-ESP + Linux access) that finally resolves backlog item #20 — "in HW-crypto mode the MM6108 firmware withholds from the host a forwarded 4-address </div>
+<div class="card-meta">6 min · ✓ #20 closed · mesh · security · HW-crypto</div>
+</a>
+
+<a class="card" href="2026-07-10-dhcp-de-hardcode-wip.html">
+<div class="card-date">2026-07-10</div>
+<div class="card-title">DHCP de-hardcode of the Mesh-gate (task #5)</div>
+<div class="card-ex">This is task #5 of the mesh-gate PR follow-ups (the interim, keeps-L3 de-hardcode). It is complete and hardware-verified — a cold-boot bench run passed every check, with </div>
+<div class="card-meta">5 min · ✓ verified done · DHCP · mesh-gate · AP</div>
+</a>
+
+<a class="card" href="2026-07-10-esp32-mesh-gate-returnleg-fixed-forward-rootcaused.html">
+<div class="card-date">2026-07-10</div>
+<div class="card-title">All-ESP Mesh-gate END-TO-END WORKS</div>
+<div class="card-ex">Task #17 is COMPLETE — the all-ESP Mesh-gate end-to-end route (STA → AP → ip_forward → mesh → board1 → reply → back) works 10/10, 0% loss, ttl=63, deterministic across tw</div>
+<div class="card-meta">9 min · ✓ task #17 done · mesh-gate · lwIP · datapath</div>
+</a>
+
+<a class="card" href="2026-07-10-mesh-gate-coverage-soak-multista.html">
+<div class="card-date">2026-07-10</div>
+<div class="card-title">Mesh-gate coverage (task #3): soak + multi-STA</div>
+<div class="card-ex">Coverage testing of the all-ESP L3 Mesh-gate — the follow-up #3, after the #5 DHCP work landed. Outcome across the four scenarios: #1 soak PASS, #3 multi-STA PASS (two co</div>
+<div class="card-meta">8 min · ✓ all 4 scenarios green · mesh · gate · DHCP · power-save</div>
+</a>
+
+<a class="card" href="2026-07-10-mesh-gate-stress-permutation-matrix.html">
+<div class="card-date">2026-07-10</div>
+<div class="card-title">Mesh-gate stress test: full source→destination permutation matrix + flood</div>
+<div class="card-ex">A whole-network stress test of the all-ESP L3 Mesh-gate: exercise every source→destination permutation across both subnets (mesh 10.9.9.0/24 ↔ AP 192.168.12.0/24, bridged</div>
+<div class="card-meta">3 min · ✓ every permutation passes · mesh · gate · stress-test</div>
+</a>
+
+<a class="card" href="2026-07-09-esp32-mesh-ap-end-to-end-forward.html">
+<div class="card-date">2026-07-09</div>
+<div class="card-title">All-ESP Mesh-gate end-to-end: forward works, reply return-leg doesn't</div>
+<div class="card-ex">On the all-ESP Mesh-gate (mesh + SoftAP co-channel on one MM6108), an ESP STA under the gateway's AP still cannot complete a ping to a 2nd mesh node — but the failure was</div>
+<div class="card-meta">9 min · partial · reply return-leg open · mesh · AP · gateway</div>
+</a>
+
+<a class="card" href="2026-07-08-1178-ps-baseline-and-deepsleep.html">
+<div class="card-date">2026-07-08</div>
+<div class="card-title">1.17.9 regresses STA power-save</div>
+<div class="card-ex">The headline: HaLow 1.17.9 roughly doubles the ESP32-STA power-save doze current vs 1.17.8, on the same board / rig / AP / TX-cap. That is the "elevated PS numbers" that </div>
+<div class="card-meta">7 min · power-save · STA · TWT · 1.17.9 regression</div>
+</a>
+
+<a class="card" href="2026-07-08-userspace-1179-and-ps-retest.html">
+<div class="card-date">2026-07-08</div>
+<div class="card-title">1.17.9 userspace build + matched-1.17.9 STA power-save retest</div>
+<div class="card-ex">Two pieces of work, both self-contained: (1) built + deployed the 1.17.9 Linux userspace to all four nodes — the bench was NOT actually matched before (userspace was stil</div>
+<div class="card-meta">5 min · ⚠ conclusions retracted · power-save · TWT · bring-up</div>
+</a>
+
+<a class="card" href="2026-07-05-board2-ps-vs-linux-mesh-ap.html">
+<div class="card-date">2026-07-05</div>
+<div class="card-title">board2 STA power-save vs a Linux Mesh+AP gateway</div>
+<div class="card-ex">Measure board2's full PS ladder against a Linux node running mesh + AP concurrently on one MM6108, with the mesh actually peering and board2's traffic routing through the</div>
+<div class="card-meta">6 min · ✓ concurrency works · power-save · mesh · AP</div>
+</a>
+
+<a class="card" href="2026-07-05-esp32-ap-ps-retest-matched-1179.html">
+<div class="card-date">2026-07-05</div>
+<div class="card-title">HaLow STA power-save: ESP32 AP vs Linux AP</div>
+<div class="card-ex">Re-ran the ESP32-AP-vs-Linux-AP STA power-save comparison with matched firmware, after the whole bench was brought to stock 1.17.9 — the earlier comparison had a version </div>
+<div class="card-meta">5 min · power-save · TWT · AP · ✓ measured</div>
+</a>
+
+<a class="card" href="2026-07-05-esp32-ap-wnm-responder-and-ps-beacon.html">
+<div class="card-date">2026-07-05</div>
+<div class="card-title">ESP32 AP WNM-sleep responder + STA power-save beacon fix</div>
+<div class="card-ex">Two goals. (1) Make the morselib ESP32 SoftAP a working WNM-sleep responder so an all-ESP32 STA can enter/exit WNM sleep — previously the STA was trapped, blocked forever</div>
+<div class="card-meta">8 min · ✓ both goals met · power-save · WNM · TWT · AP</div>
+</a>
+
+<a class="card" href="2026-07-05-onair-verify-wnm-twt-vs-linux.html">
+<div class="card-date">2026-07-05</div>
+<div class="card-title">On-air verify: ESP32-AP WNM / TWT frames vs live Linux</div>
+<div class="card-ex">Closing the on-air-verification gap flagged in the WNM/TWT PRs (mm-esp32-halow#20, rimba#29): byte-diff the frames the ESP32 SoftAP transmits against what a live Linux ho</div>
+<div class="card-meta">5 min · partial · gold standard blocked · TWT · WNM · AP · on-air verify</div>
+</a>
+
+<a class="card" href="2026-07-04-halow-sta-powersave-ppk2.html">
+<div class="card-date">2026-07-04</div>
+<div class="card-title">HaLow STA power-save: PPK2-measured</div>
+<div class="card-ex">Actually measured the board-level current of every HaLow STA power-save feature on board2 (the nRF PPK2 node), then pushed further by sleeping the ESP32-S3 host as well (</div>
+<div class="card-meta">5 min · ✓ complete · power-save · TWT · WNM</div>
+</a>
+
+<a class="card" href="2026-07-02-mesh-20-hwcrypto-reverify.html">
+<div class="card-date">2026-07-02</div>
+<div class="card-title">#20 HW-crypto A4≠TA mesh forward</div>
+<div class="card-ex">Re-opened the #20 backlog — "in HW-crypto mode the MM6108 FW withholds a forwarded 4-address frame whose A4 (mesh-SA) ≠ TA" — after the §#25/§#26 verdict in 2026-06-27-me</div>
+<div class="card-meta">5 min · isolated · backlog · mesh · HW-crypto · security</div>
+</a>
+
+<a class="card" href="2026-07-02-mesh-dynamic-path-table.html">
+<div class="card-date">2026-07-02</div>
+<div class="card-title">Mesh dynamic path table</div>
+<div class="card-ex">Replaces morselib's fixed 8-entry linear-scan mesh path table with a 64-entry pool + a dest-MAC hash index (O(1) lookup, int16_t-chained), lifting the hard cap on reachab</div>
+<div class="card-meta">4 min · ✓ host-tested + bench-verified · mesh · HWMP · path-table</div>
+</a>
+
+<a class="card" href="2026-07-02-mesh-hwmp-multipath-dedup-sn.html">
+<div class="card-date">2026-07-02</div>
+<div class="card-title">HWMP multi-path reply-dedup / per-reply-SN fix</div>
+<div class="card-ex">Fixes morselib's HWMP path selection flapping in a multi-path topology, found by the P6c routing-decision test (2026-07-02-mesh-p6c-airtime-metric.md). After this fix the</div>
+<div class="card-meta">4 min · ✓ fixed &amp; verified · mesh · HWMP · routing</div>
+</a>
+
+<a class="card" href="2026-07-02-mesh-multinode-onair-validation.html">
+<div class="card-date">2026-07-02</div>
+<div class="card-title">Mesh at-scale + on-air validation</div>
+<div class="card-ex">Validates the shipped P6c airtime link metric + HWMP multi-path dedup/SN fix (mm-esp32-halow #15, worklogs 2026-07-02-mesh-p6c-airtime-metric.md + 2026-07-02-mesh-hwmp-mu</div>
+<div class="card-meta">3 min · ✓ validated · mesh · HWMP · on-air</div>
+</a>
+
+<a class="card" href="2026-07-02-mesh-p6c-airtime-metric.html">
+<div class="card-date">2026-07-02</div>
+<div class="card-title">P6c: mesh airtime link metric</div>
+<div class="card-ex">Replaces morselib's fixed per-hop HWMP cost (MESH_PATH_LINK_METRIC = 100) with a rate-derived airtime metric ported line-for-line from net/mac80211 airtime_link_metric_ge</div>
+<div class="card-meta">6 min · ✓ hw-verified · mesh · HWMP · airtime metric</div>
+</a>
+
+<a class="card" href="2026-07-02-mesh-peer-table-growth.html">
+<div class="card-date">2026-07-02</div>
+<div class="card-title">Mesh peer-table growth</div>
+<div class="card-ex">Doubles the ESP mesh peer table so a node can hold more than 4 direct neighbours — headroom for denser meshes. A one-value change (Option A); the SAE bodies stay per-peer</div>
+<div class="card-meta">2 min · mesh · memory · ✓ shipped · bench deferred</div>
+</a>
+
+<a class="card" href="2026-07-02-mesh-real-rc-airtime-metric.html">
+<div class="card-date">2026-07-02</div>
+<div class="card-title">Real per-peer rate control feeding the mesh airtime metric</div>
+<div class="card-ex">Replaces P6c's RSSI-seeded rate in mesh_last_hop_metric with mmrc's learned best-throughput rate + the real success probability, removing P6c divergences #1 (RSSI-seed) a</div>
+<div class="card-meta">4 min · ✓ hardware-verified · mesh · HWMP · rate-control</div>
+</a>
+
+</div>
+</section>
+
+<section class="month">
+<h2>June 2026 <span class="mcount">27</span></h2>
+<div class="grid">
+
+<a class="card" href="2026-06-30-mesh-leaf-single-hop-toggle.html">
+<div class="card-date">2026-06-30</div>
+<div class="card-title">Mesh single-hop / leaf toggle</div>
+<div class="card-ex">Give a mesh node a runtime switch to opt out of multi-hop entirely and behave as a pure single-hop leaf: it still forms direct 1-hop peer links, but it never relays other</div>
+<div class="card-meta">5 min · ✓ implemented + on-air verified · mesh · HWMP</div>
+</a>
+
+<a class="card" href="2026-06-30-mesh-security-sae-hardening.html">
+<div class="card-date">2026-06-30</div>
+<div class="card-title">Mesh security — SAE hardening</div>
+<div class="card-ex">Phase-2 of the secured 802.11s mesh: three hostap-parity hardening fixes on the SAE state machine, derived line-by-line from hostap/src/ap/ieee802_11.c + src/common/sae.c</div>
+<div class="card-meta">9 min · mesh · security · SAE · ✓ GAP-C + #14 A/B-proven</div>
+</a>
+
+<a class="card" href="2026-06-27-linux-secured-mesh-reference.html">
+<div class="card-date">2026-06-27</div>
+<div class="card-title">Linux SECURED (SAE+AMPE) 802.11s mesh: working reference</div>
+<div class="card-ex">Brought up two Linux morse nodes as a secured 802.11s HaLow mesh — SAE authentication + AMPE-encrypted peering + CCMP data — and confirmed they peer and pass encrypted IP</div>
+<div class="card-meta">4 min · ✓ reference captured · mesh · security · SAE+AMPE</div>
+</a>
+
+<a class="card" href="2026-06-27-mesh-security-phase1-keyinstall.html">
+<div class="card-date">2026-06-27</div>
+<div class="card-title">Mesh security Phase 1: firmware key-install boundary proven on a MESH vif</div>
+<div class="card-ex">Phase 1 of the mesh-security port (SAE+AMPE, following Morse's Linux stack) verified the pivotal unknown on real hardware: the MM6108 firmware accepts SET_STA_STATE + INS</div>
+<div class="card-meta">5 min · ✓ done · mesh · security · CCMP</div>
+</a>
+
+<a class="card" href="2026-06-27-mesh-security-phase2-ampe.html">
+<div class="card-date">2026-06-27</div>
+<div class="card-title">Mesh security Phase 2 (AMPE)</div>
+<div class="card-ex">Phase 2 replaces Phase-1's static/shared keys with the real AMPE key hierarchy: a per-pair MTK derived from a PMK + exchanged nonces, plus a per-node MGTK exchanged in an</div>
+<div class="card-meta">12 min · ✓ P2a–P2d done · mesh · security · AMPE</div>
+</a>
+
+<a class="card" href="2026-06-27-mesh-security-phase3-sae.html">
+<div class="card-date">2026-06-27</div>
+<div class="card-title">Mesh security Phase 3 (SAE)</div>
+<div class="card-ex">Phase 3 replaces P2's static PMK with a real per-peer SAE-derived PMK/PMKID, by driving morselib's already-compiled src/common/sae.c from a native umac mesh SAE FSM. This</div>
+<div class="card-meta">78 min · mesh · security · ✓ cross-vendor encrypted mesh works</div>
+</a>
+
+<a class="card" href="2026-06-26-linux-mesh-reference.html">
+<div class="card-date">2026-06-26</div>
+<div class="card-title">Linux morse 802.11s mesh: working reference</div>
+<div class="card-ex">Brought the Linux morse stack up as a fully working 802.11s HaLow mesh and confirmed two Linux nodes peer and pass IP traffic. This is the reference behaviour the ESP (mo</div>
+<div class="card-meta">4 min · ✓ working reference · mesh · bring-up · IBSS</div>
+</a>
+
+<a class="card" href="2026-06-26-mesh-ap-perf-iperf-ping.html">
+<div class="card-date">2026-06-26</div>
+<div class="card-title">Mesh vs AP↔STA performance: iperf throughput + ping latency</div>
+<div class="card-ex">Characterised the HaLow link throughput (iperf) and latency (ping) across link type (802.11s mesh vs AP↔STA) and node pair (Linux↔Linux, Linux↔ESP32, ESP32↔ESP32) on the </div>
+<div class="card-meta">3 min · ✓ characterised · mesh · AP · perf</div>
+</a>
+
+<a class="card" href="2026-06-26-mesh-mpm-peering-frames.html">
+<div class="card-date">2026-06-26</div>
+<div class="card-title">Mesh peering (MPM) exchange: decoded reference frames</div>
+<div class="card-ex">Captured the 802.11s mesh peering handshake between two Linux morse nodes (chronium 3c:22:7f:37:50:42 ↔ chronite 3c:22:7f:37:51:38, open mesh, user_mpm=1) to spec the ESP</div>
+<div class="card-meta">24 min · ✓ ESP↔Linux mesh IP working · mesh · MPM · HWMP</div>
+</a>
+
+<a class="card" href="2026-06-25-mesh-p1-vif-beacon.html">
+<div class="card-date">2026-06-25</div>
+<div class="card-title">802.11s mesh P1: vif up + periodic beacon</div>
+<div class="card-ex">P1 of the 802.11s mesh port: bring a mesh vif up and self-beacon a mesh beacon, following morse_driver's mesh BSS config flow exactly. Done. On HW the firmware fires beac</div>
+<div class="card-meta">11 min · mesh · bring-up · beacon · ✓ P1 done</div>
+</a>
+
+<a class="card" href="2026-06-24-firmware-vendor-sourcing.html">
+<div class="card-date">2026-06-24</div>
+<div class="card-title">Firmware single-sourced from vendor/morse-firmware</div>
+<div class="card-ex">Stop vendoring pre-converted firmware blobs in a fork. Make vendor/morse-firmware (the upstream ELF) the single source of truth, with the ESP32 .mbin produced at build ti</div>
+<div class="card-meta">3 min · ✓ done + HW-verified · bring-up · build · firmware</div>
+</a>
+
+<a class="card" href="2026-06-24-mesh-80211s-port-recon.html">
+<div class="card-date">2026-06-24</div>
+<div class="card-title">802.11s mesh port: recon &amp; effort estimate</div>
+<div class="card-ex">Author: Aldwin. Goal: estimate the work to port Linux 802.11s mesh into morselib (ESP32-S3 + MM6108), following the morse Linux kernel/driver flow exac</div>
+<div class="card-meta">7 min · ✓ done · P0 gate passed · mesh · recon · 802.11s</div>
+</a>
+
+<a class="card" href="2026-06-24-twt-action-frame.html">
+<div class="card-date">2026-06-24</div>
+<div class="card-title">Action-frame TWT (requester) on hardware</div>
+<div class="card-ex">Exercise the mid-session, action-frame TWT path on real hardware. Until now the ESP32 STA only ever negotiated TWT in association IEs (join-time). This adds the requester</div>
+<div class="card-meta">5 min · ✓ PASS · ESP32 AP · TWT · power-save · STA</div>
+</a>
+
+<a class="card" href="2026-06-23-ap-multinode-twt-hwtest.html">
+<div class="card-date">2026-06-23</div>
+<div class="card-title">Multi-node HW test: ESP32 AP + 2 ESP32 STA + Linux STA, TWT</div>
+<div class="card-ex">On-air validation that the rebuilt ESP32 HaLow AP (two-block S1G TIM, MAX_SUPPORTED_AID 128, per-STA state + TWT table in PSRAM — see 2026-06-23-ap-sta-ceiling-100-psram)</div>
+<div class="card-meta">5 min · ✓ core goals PASS · AP · TWT · power-save</div>
+</a>
+
+<a class="card" href="2026-06-23-ap-sta-ceiling-100-psram.html">
+<div class="card-date">2026-06-23</div>
+<div class="card-title">AP STA-count ceiling → 100, per-STA state in PSRAM</div>
+<div class="card-ex">Make the AP's max-associated-STA count and the per-STA RAM placement configurable from sdkconfig, allocate per-STA state strictly from PSRAM, and raise the structural cei</div>
+<div class="card-meta">9 min · AP · S1G TIM · PSRAM · scaling · code complete · hw deferred</div>
+</a>
+
+<a class="card" href="2026-06-23-ap-sta-ceiling-255.html">
+<div class="card-date">2026-06-23</div>
+<div class="card-title">AP STA-count ceiling 127 → 255</div>
+<div class="card-ex">Raise the HaLow AP's structural STA ceiling from 127 to 255 — the max of the public uint8_t mmwlan_ap_args.max_stas field — and verify it on hardware. Code + build + on-a</div>
+<div class="card-meta">5 min · ✓ build + on-air PASS · AP · S1G TIM · scaling</div>
+</a>
+
+<a class="card" href="2026-06-23-regression-stress-test.html">
+<div class="card-date">2026-06-23</div>
+<div class="card-title">Regression + stress test</div>
+<div class="card-ex">Regression + stress test of every feature built so far on both L2s — the Mesh-gate (AP + TWT + STA-scaling) and IBSS — plus the radio-free / scan sanity apps. Status: PAS</div>
+<div class="card-meta">4 min · IBSS · Mesh-gate · stress · PASS · 1 finding</div>
+</a>
+
+<a class="card" href="2026-06-22-mesh-ap-twt.html">
+<div class="card-date">2026-06-22</div>
+<div class="card-title">Mesh+AP concurrency + TWT leaf power-save</div>
+<div class="card-ex">Verify the MM6108 can run 802.11s mesh + AP concurrently, get a real TWT (Target Wake Time) power-save agreement to an ESP32 STA, and rebuild wpa_supplicant_s1g with mesh</div>
+<div class="card-meta">11 min · ✓ done (all 3 on hardware) · mesh · TWT · AP · power-save</div>
+</a>
+
+<a class="card" href="2026-06-21-mm6108-powersave-decompile.html">
+<div class="card-date">2026-06-21</div>
+<div class="card-title">MM6108 firmware decompile + IBSS power-save analysis</div>
+<div class="card-ex">Author: Aldwin. Phase: 1 — IBSS foundation (power-save de-risking, ahead of Phase 4 leaf sleep). Goal: answer "the MM6108 can sleep — is IBSS power-sav</div>
+<div class="card-meta">5 min · analysis complete · bench owed · power-save · IBSS</div>
+</a>
+
+<a class="card" href="2026-06-21-phase1-validation-complete.html">
+<div class="card-date">2026-06-21</div>
+<div class="card-title">Phase-1 IBSS validation complete</div>
+<div class="card-ex">Short session closing out the open-IBSS foundation validation, plus recording the power-save architecture decisions. Continues 2026-06-20-ibss-adoption-interop-phantom.md</div>
+<div class="card-meta">2 min · ✓ validated · IBSS · soak · power-save</div>
+</a>
+
+<a class="card" href="2026-06-20-ibss-adoption-interop-phantom.html">
+<div class="card-date">2026-06-20</div>
+<div class="card-title">IBSS adoption, Linux interop &amp; the beacon phantom-flood</div>
+<div class="card-ex">The day's arc: adopting the momentary-systems IBSS implementation (proper EEXIST fix) → validating drop/rejoin (P0.6) → mixed-cell Linux interop (I.5) → root-causing and </div>
+<div class="card-meta">7 min · ✓ merged to main · IBSS · interop · beacon</div>
+</a>
+
+<a class="card" href="2026-06-19-linux-node-halow-bringup.html">
+<div class="card-date">2026-06-19</div>
+<div class="card-title">Linux MM6108 node — HaLow bring-up</div>
+<div class="card-ex">Bringing up the Raspberry Pi 5 dev host as the Linux MM6108 reference/interop node the open-IBSS test plan calls for (P0.5). This is the durable handoff for resuming afte</div>
+<div class="card-meta">8 min · ✓ bring-up done · interop passed · bring-up · IBSS</div>
+</a>
+
+<a class="card" href="2026-06-19-p0-multinode-bench.html">
+<div class="card-date">2026-06-19</div>
+<div class="card-title">P0 multi-node bench — 3× ESP32 IBSS</div>
+<div class="card-ex">First real multi-node exercise of the open 802.11ah IBSS foundation: 3 ESP32-S3 + HaLow boards in one cell, validating the per-peer station records (#14) that are invisib</div>
+<div class="card-meta">3 min · IBSS · multi-node · bring-up · 5 pass · 2 partial</div>
+</a>
+
+<a class="card" href="2026-06-18-halow-ap-sta-ping.html">
+<div class="card-date">2026-06-18</div>
+<div class="card-title">HaLow AP↔STA ping</div>
+<div class="card-ex">Two XIAO ESP32-S3 + MM6108 boards run a bidirectional ICMP ping over an 802.11ah AP↔STA link — ~12 ms RTT, US 915.5 MHz, 1 MHz BW. This validates the Phase-1 RISK-01 AP-S</div>
+<div class="card-meta">3 min · ✓ success · bring-up · AP↔STA</div>
+</a>
+
+<a class="card" href="2026-06-18-risk01-ibss-recon.html">
+<div class="card-date">2026-06-18</div>
+<div class="card-title">RISK-01 IBSS bring-up: reconnaissance &amp; plan</div>
+<div class="card-ex">This entry is the de-risking record before any code. It maps the exact firmware command sequence the Linux driver uses for IBSS, pins a coherent version matrix, locates t</div>
+<div class="card-meta">30 min · ✓ RISK-01 resolved · IBSS · ad-hoc · bring-up</div>
+</a>
+
+<a class="card" href="2026-06-17-mm6108-halow-bringup.html">
+<div class="card-date">2026-06-17</div>
+<div class="card-title">MM6108 HaLow bring-up</div>
+<div class="card-ex">Pull real MM6108 code into a firmware and get the radio to boot. Result: SUCCESS. The MM6108 boots over SPI on the Seeed XIAO ESP32-S3, loads its firmware + BCF, and runs</div>
+<div class="card-meta">5 min · ✓ success · bring-up · HaLow</div>
+</a>
+
+<a class="card" href="2026-06-17-phase1-bringup.html">
+<div class="card-date">2026-06-17</div>
+<div class="card-title">Phase 1 bring-up start</div>
+<div class="card-ex">Stand up the firmware project, the ESP-IDF toolchain, and build + flash a first example firmware to the real hardware — a deliberately radio-free sanity build that proves</div>
+<div class="card-meta">5 min · ✓ build/flash PASS · bring-up · ESP32 · HaLow</div>
+</a>
+
+</div>
+</section>
+
+</div>
+
+<footer class="foot">Rimba engineering worklog archive</footer>
+
+<script>function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();</script>
+</body>
+</html>

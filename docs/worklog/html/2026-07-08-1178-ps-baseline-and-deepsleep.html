@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1.17.9 PS regression + 1.17.8 baseline — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-08</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-08</span>
+    <span class="badge">7 min read</span>
+    <span class="badge">power-save · STA · TWT</span>
+    <span class="badge err">1.17.9 regression</span>
+  </div>
+
+  <h1>1.17.9 regresses STA power-save<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">matched-1.17.8 baseline + deep-sleep leaf economics</small></h1>
+
+  <p class="lead">The headline: <strong>HaLow 1.17.9 roughly doubles the ESP32-STA power-save doze current vs 1.17.8</strong>,
+  on the same board / rig / AP / TX-cap. That is the "elevated PS numbers" that kicked off the investigation. The whole
+  bench was reverted to matched <strong>1.17.8</strong> (the good baseline), where the full PS-feature ladder vs the
+  Linux AP was measured, plus the deep-sleep duty-cycle economics.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Retraction</p>
+    <p>A brief earlier 2026-07-08 pass mis-concluded "TWT is a mislabel / doze tiers cluster at a ~15 mA host floor /
+    APs are peers" — <strong>RETRACTED</strong>; that was the 1.17.9-regressed bench mistaken for a fundamental floor.
+    See the retraction atop <code>2026-07-08-userspace-1179-and-ps-retest.md</code>.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num err">~2×</div><div class="lbl">1.17.9 doze current vs 1.17.8</div></div>
+    <div class="stat"><div class="num ok">4.0 mA</div><div class="lbl">WNM+powerdown, stays associated (+ light sleep)</div></div>
+    <div class="stat"><div class="num acc">0.35 mA</div><div class="lbl">deep-sleep floor (loses link)</div></div>
+    <div class="stat"><div class="num ok">~238 days</div><div class="lbl">deep-sleep battery (2000 mAh)</div></div>
+    <div class="stat"><div class="num acc">~2.5 min</div><div class="lbl">wake-cadence crossover between the two leaves</div></div>
+    <div class="stat"><div class="num">~5.1 s</div><div class="lbl">deep-sleep reconnect tax per wake</div></div>
+  </div>
+
+  <h2 id="regression">The regression (same rig, only the version differs)</h2>
+  <p>board2 (XIAO ESP32-S3 + FGH100M) STA, TX-capped 1 dBm, on the PPK2 (5 V, 1 s avg), C6-triggered ladder, against
+  the Linux AP (chronite <code>hostapd_s1g</code>). Host-awake:</p>
+
+  <table>
+    <thead><tr><th>STA doze mode</th><th class="num">1.17.8</th><th class="num">1.17.9</th></tr></thead>
+    <tbody>
+      <tr><td>Dynamic PS</td><td class="num"><strong>9.1 mA</strong></td><td class="num">20.2</td></tr>
+      <tr><td>WNM+powerdown</td><td class="num"><strong>5.1 mA</strong></td><td class="num">17.5</td></tr>
+      <tr><td>Dynamic PS + host light sleep</td><td class="num"><strong>8.2 mA</strong></td><td class="num">30.8 (backfire)</td></tr>
+      <tr><td>TWT + host light sleep</td><td class="num"><strong>9.6 mA</strong></td><td class="num">30.8 (backfire)</td></tr>
+    </tbody>
+  </table>
+
+  <p>1.17.8 (green) vs 1.17.9 (orange), same rig — the doze current roughly doubles and light-sleep blows up:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">Dyn-PS · 1.17.8</span><span class="bar-track"><span class="bar-fill fast" style="width:29.5%"></span></span><span class="val">9.1 mA</span></div>
+    <div class="bar-row"><span class="lbl">Dyn-PS · 1.17.9</span><span class="bar-track"><span class="bar-fill slow" style="width:65.6%"></span></span><span class="val">20.2 mA</span></div>
+    <div class="bar-row"><span class="lbl">WNM+pd · 1.17.8</span><span class="bar-track"><span class="bar-fill fast" style="width:16.6%"></span></span><span class="val">5.1 mA</span></div>
+    <div class="bar-row"><span class="lbl">WNM+pd · 1.17.9</span><span class="bar-track"><span class="bar-fill slow" style="width:56.8%"></span></span><span class="val">17.5 mA</span></div>
+    <div class="bar-row"><span class="lbl">Dyn+LS · 1.17.8</span><span class="bar-track"><span class="bar-fill fast" style="width:26.6%"></span></span><span class="val">8.2 mA</span></div>
+    <div class="bar-row"><span class="lbl">Dyn+LS · 1.17.9</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">30.8 mA</span></div>
+    <div class="bar-row"><span class="lbl">TWT+LS · 1.17.8</span><span class="bar-track"><span class="bar-fill fast" style="width:31.2%"></span></span><span class="val">9.6 mA</span></div>
+    <div class="bar-row"><span class="lbl">TWT+LS · 1.17.9</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">30.8 mA</span></div>
+  </div>
+
+  <p>At 1.17.8 the board reaches 4–9 mA host-awake (radio off → DFS + tickless idle drop the host deep) and host
+  light-sleep does <strong>NOT</strong> backfire. At 1.17.9 the doze current ~doubles and light-sleep blows up to
+  ~31 mA. So the older doc's 1.17.8 figures (Dyn 14.5, WNM 4.0, ESP-AP TWT 6.8) are physically fine — <strong>not
+  mislabels</strong>.</p>
+
+  <h2 id="revert">Reverting the bench to matched 1.17.8</h2>
+  <p>All 1.17.8 artifacts were already on the nodes (<code>/root/rollback_1178/</code> = morse.ko + dot11ah.ko +
+  mm6108.bin 480664, per-arch; <code>/root/us_1178_rollback/</code> = userspace). Per node: restore userspace →
+  <code>/usr/local/bin</code>, swap <code>/lib/firmware/morse/mm6108.bin</code> → 480664, copy the 1.17.8
+  <code>.ko</code>s into the module path, <code>depmod</code>, <code>rmmod morse dot11ah</code> +
+  <code>modprobe morse</code> (wlan1 down so rmmod is clean; the 1.17.8 Pi-5 driver already has the gpiod reset
+  patch, so the chip re-probes fine). 1.17.9 backed up to <code>/root/rollback_1179/</code> first. Resulting drivers:
+  Pi 5 srcver <code>BF1E2755</code>, Pi Zero <code>405F9B14</code> (both 1.17.8).</p>
+  <p>ESP side: the ESP <code>vendor/morse-firmware/firmware/mm6108.bin</code> is <strong>byte-identical</strong> to
+  the Linux one (md5 <code>616ae6b6</code> @ 1.17.9), so swapping it to the 1.17.8 bin (<code>cfe56db2</code>, 480664)
+  reverts the ESP build too; <code>rimba-hello</code> doesn't load the chip fw so no reflash was needed (any HaLow app
+  built now bundles 1.17.8).</p>
+
+  <h2 id="ladder">Full matched-1.17.8 ladder — ESP32 STA vs Linux AP</h2>
+  <p>Two ladders each (host-awake and + host light sleep) against the Linux AP:</p>
+
+  <table>
+    <thead><tr><th>Mode</th><th class="num">Host-awake</th><th class="num">+ host light sleep</th><th class="num">Battery (2000 mAh)</th></tr></thead>
+    <tbody>
+      <tr><td>No-PS</td><td class="num">64.8 mA</td><td class="num">64.0 mA</td><td class="num">~31 h</td></tr>
+      <tr><td>Dynamic PS</td><td class="num">9.1 mA</td><td class="num">8.2 mA</td><td class="num">~9 days</td></tr>
+      <tr><td>TWT (10 s)</td><td class="num">9.9 mA</td><td class="num">9.6 mA</td><td class="num">~9 days</td></tr>
+      <tr><td>WNM + powerdown</td><td class="num">5.1 mA</td><td class="num"><strong>4.0 mA</strong></td><td class="num">~18–21 days</td></tr>
+      <tr><td>Deep sleep (RESET_N-low + ESP32 deep sleep)</td><td class="num">—</td><td class="num"><strong>0.35 mA</strong></td><td class="num">~238 days</td></tr>
+    </tbody>
+  </table>
+
+  <p>Battery life on a 2000 mAh cell — the duty-cycle spread, bars to scale (deep-sleep dominates):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">No-PS</span><span class="bar-track"><span class="bar-fill slow" style="width:0.6%"></span></span><span class="val">~1.3 days</span></div>
+    <div class="bar-row"><span class="lbl">Dynamic PS</span><span class="bar-track"><span class="bar-fill" style="width:3.8%"></span></span><span class="val">~9 days</span></div>
+    <div class="bar-row"><span class="lbl">TWT (10 s)</span><span class="bar-track"><span class="bar-fill" style="width:3.8%"></span></span><span class="val">~9 days</span></div>
+    <div class="bar-row"><span class="lbl">WNM + powerdown</span><span class="bar-track"><span class="bar-fill" style="width:8.4%"></span></span><span class="val">~18–21 days</span></div>
+    <div class="bar-row"><span class="lbl">Deep sleep</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">~238 days</span></div>
+  </div>
+
+  <p>TWT ≈ Dyn-PS because the Linux <code>hostapd_s1g</code> doesn't engage a mid-session TWT responder (STA falls
+  back to dynamic PS). WNM+powerdown is the deepest tier that <strong>stays associated</strong>. Deep-sleep floor
+  0.35 mA (radio held in RESET_N-low, host in deep sleep) — even cleaner than the earlier ~0.6 mA.</p>
+
+  <h2 id="deepsleep">Deep-sleep as a duty-cycled leaf (<code>rimba-deepsleep-cycle</code>)</h2>
+  <p>New app: connect (SAE) → deep-sleep (MM6108 RESET_N-low, ESP32-S3 deep sleep, <strong>0.37 mA</strong>) → wake on
+  the C6 trigger (D5 pulled LOW; ext1 ALL_LOW + 60 s backup timer) → cold boot → <strong>re-associate to the Linux
+  AP</strong> → sleep again. <code>esp_sleep_get_wakeup_cause()</code> distinguishes a deep-sleep wake (skip the
+  flash-hold guard, reconnect) from a fresh power-on (guard + 8 s flash window).</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">connect</div><div class="s">SAE</div></div>
+      <div class="node ok"><div class="t">deep-sleep</div><div class="s">RESET_N-low · 0.37 mA</div></div>
+      <div class="node"><div class="t">wake</div><div class="s">C6 trigger · ext1 ALL_LOW</div></div>
+      <div class="node"><div class="t">cold boot</div><div class="s">chip-fw reload</div></div>
+      <div class="node acc"><div class="t">re-associate</div><div class="s">~5.1 s tax</div></div>
+      <div class="node"><div class="t">sleep again</div><div class="s">repeat</div></div>
+    </div>
+    <figcaption>The duty-cycled leaf cycle — the link is dropped on sleep and paid back with a ~5 s cold-boot re-association on every wake.</figcaption>
+  </figure>
+
+  <p>Measured, 5/5 clean cycles: wake cause = EXT1 (the C6 trigger fires the wake), <strong>reconnect latency
+  ~5.1 s</strong> (cold boot + chip-fw reload + SAE; 5149/5150/5109/5133/5109 ms). PPK2 per cycle: ~90 mA wake spike
+  → ~65 mA during the ~11 s re-association → 0.37 mA asleep. <strong>Reconnect tax ≈ 11 s @ ~63 mA ≈ 690 mA·s per
+  wake.</strong></p>
+
+  <p>Average current ≈ <code>0.37 + 690/T</code> mA for wake interval T:</p>
+
+  <table>
+    <thead><tr><th>Wake interval</th><th class="num">Avg current</th><th>vs WNM+powerdown (5.1 mA, stays associated)</th></tr></thead>
+    <tbody>
+      <tr><td>30 s (measured)</td><td class="num">23.4 mA</td><td>much worse</td></tr>
+      <tr><td>1 min</td><td class="num">~11.9 mA</td><td>worse</td></tr>
+      <tr><td>~2.5 min</td><td class="num">~5.1 mA</td><td>break-even</td></tr>
+      <tr><td>5 min</td><td class="num">~2.7 mA</td><td>better</td></tr>
+      <tr><td>10 min</td><td class="num">~1.5 mA</td><td>better</td></tr>
+      <tr><td>1 h</td><td class="num">~0.56 mA</td><td>far better</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <p class="ct">✓ Takeaway — the two low-power leaves split by wake cadence</p>
+    <p>Deep-sleep (loses the link, ~5 s reconnect tax, 0.37 mA floor) wins only for wakes <strong>rarer than
+    ~2.5 min</strong>; for anything more frequent, WNM+powerdown stays associated at ~4–5 mA with <strong>no reconnect
+    tax</strong> and wins. Pick the leaf by how often the node must wake, not by the sleep-floor number alone.</p>
+  </div>
+
+  <h2 id="radio-doze">Radio-doze (stay-associated) — "deep-sleep without powering off the radio" (<code>rimba-doze-hold</code>)</h2>
+  <p>The opposite tradeoff to deep-sleep: keep the STA <strong>ASSOCIATED</strong> and let the <em>radio</em> doze, so
+  there is <strong>no re-association tax</strong>. Constraint: staying associated needs morselib's link state in RAM,
+  so the ESP32 host can only <strong>light-sleep</strong> (deep sleep would lose it) → floor ~4 mA, not 0.37 mA. Held
+  each doze mode 45 s against the Linux AP, host-awake:</p>
+
+  <table>
+    <thead><tr><th>Radio-doze mode (STA stays associated)</th><th class="num">Current</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>TWT</td><td class="num">13.4 mA</td><td><strong>needs PS enabled first</strong> — <code>mmwlan_twt_setup_request</code> alone leaves the radio fully on (No-PS ~64 mA); and the Linux AP doesn't engage a TWT schedule → falls back to dyn-PS, still associated</td></tr>
+      <tr><td>WNM+powerdown</td><td class="num"><strong>3.9 mA</strong></td><td>chip powered down, radio deeply dozed, <strong>STILL ASSOCIATED</strong> — the deepest keep-the-link leaf</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <p class="ct">✓ AP-confirmed</p>
+    <p>board2 logged <strong>0 disassoc events</strong> across both holds, and chronite's hostapd log shows it
+    associated once (aid 1) and held (connected time 210 s+, no re-assoc). NB: <code>iw dev wlan1 station dump</code>
+    on the morse driver does <strong>not</strong> list a deeply-dozing STA at that instant (the live poll read 0) —
+    the hostapd log is authoritative.</p>
+  </div>
+
+  <p><strong>The two low-power strategies side by side:</strong></p>
+  <ul>
+    <li><strong>Radio-doze (WNM+powerdown, ~4 mA):</strong> stays associated, instant resume, no reconnect tax —
+      best when the node must stay reachable or wakes often.</li>
+    <li><strong>Deep-sleep (0.37 mA + ~5 s reconnect):</strong> ~10× lower floor but loses the link — best only for
+      wakes rarer than ~2.5 min.</li>
+  </ul>
+
+  <p><strong>TWT is not the low-power lever on the Linux AP</strong> (no mid-session responder → dyn-PS ~13 mA);
+  WNM+powerdown is. TWT's deep-doze win would need an AP that installs the schedule (the ESP32 AP, unverified at
+  1.17.8).</p>
+
+  <h2 id="twt">TWT engages on the Linux AP — assoc-embedded, not mid-session (<code>rimba-twt-assoc</code>)</h2>
+  <p>The "Linux doesn't engage TWT" story was a <strong>STA-API-path</strong> artifact, not an AP gap. hostapd's
+  <code>he_twt_responder</code> (default-on) advertises TWT in the beacon and negotiates it in the
+  <strong>association</strong> exchange, but doesn't answer a <strong>mid-session</strong> TWT Setup
+  <em>action frame</em>:</p>
+  <ul>
+    <li><code>mmwlan_twt_setup_request()</code> — a mid-session action, used in <strong>every earlier test</strong> —
+      hostapd ignores it → STA stays at dyn-PS (~9.9 mA). This is what looked like "TWT doesn't work on Linux."</li>
+    <li><code>mmwlan_twt_add_configuration()</code> <strong>before connect</strong> (TWT in the assoc IEs) → hostapd
+      installs the schedule → <strong>ENGAGES</strong>: <strong>6.0 mA host-awake</strong>, clean <strong>10 s SP
+      cadence</strong> (~4 mA baseline + ~16 mA SP spikes every 10 s), <strong>5.8 mA</strong> + host light sleep,
+      0 disassoc. This is the path the morselib <code>twt_setup</code> example uses.</li>
+  </ul>
+  <p>So <strong>both APs do TWT at ~6 mA</strong>; the old "ESP-AP TWT 2× better" was "ESP answers the mid-session
+  action, Linux needs the assoc-embedded path." <strong>TWT is NOT the deepest tier</strong> — it keeps the chip
+  powered to wake at each SP (6.0/5.8 mA); <strong>WNM+powerdown powers the chip <em>down</em> (4.0 mA)</strong> and
+  wins on pure power. TWT's value is the <em>scheduled, predictable</em> wake (the AP buffers downlink and flushes it
+  at the SP).</p>
+
+  <h2 id="esp-ap">ESP32 AP ladder + §3b downlink (1.17.8)</h2>
+  <p><strong>ESP32 AP (board0) idle ladder</strong> (host-awake / + light-sleep), mA:</p>
+
+  <table>
+    <thead><tr><th>Mode</th><th class="num">Host-awake</th><th class="num">+ light-sleep</th></tr></thead>
+    <tbody>
+      <tr><td>No-PS</td><td class="num">64.6</td><td class="num">64.6</td></tr>
+      <tr><td>Dyn-PS</td><td class="num">15.3</td><td class="num">10.7</td></tr>
+      <tr><td>TWT (mid-session)</td><td class="num"><strong>7.6</strong></td><td class="num"><strong>7.2</strong></td></tr>
+      <tr><td>WNM+pd</td><td class="num">4.2</td><td class="num">4.2</td></tr>
+    </tbody>
+  </table>
+
+  <p>TWT here is mid-session — the ESP AP answers the mid-session action; clean 10 s SP cadence, matching the doc's
+  original ~6.8 mA. Both APs track closely except the ESP AP's Dyn-PS runs higher (15.3 vs Linux 9.1).
+  <strong>WNM+powerdown (~4 mA) is the deepest associated tier on both</strong>; TWT (~6–8 mA) stays higher (chip
+  stays powered to wake at the SP).</p>
+
+  <p><strong>§3b downlink-while-dozing (Linux AP):</strong> board2 at static IP .51, Dyn-PS, <code>ping -i 1</code>
+  from chronite → <strong>25/25, 0% loss</strong>, RTT 23–166 ms (avg 80 = DTIM buffering), board2 <strong>23.6
+  mA</strong> under the 1 Hz load (vs ~9 mA idle) — matches the doc's ~25 mA §3b row. (<code>iw station dump</code>
+  reads 0 for a dozing STA = display artifact; the successful ping is the proof. ESP-AP downlink not re-run — its
+  pinger is <code>#if RIMBA_AP_PING_STAS</code>, default 0.)</p>
+
+  <p>New fw this pass: <code>rimba-twt-assoc</code>, <code>rimba-standby-test</code>, <code>rimba-downlink-test</code>
+  (+ earlier <code>rimba-deepsleep-cycle</code>, <code>rimba-doze-hold</code>).</p>
+
+  <h2 id="standby">Q2 "deep-sleep but keep the link" — what morselib actually offers</h2>
+  <ul>
+    <li><strong><code>MMWLAN_STANDBY</code></strong> (<code>morselib/src/umac/offload/</code>) — the Morse chip keeps
+      the association alive (normal DTIM PS + ARP/DHCP/keep-alive offload) while the ESP32 host sleeps, waking it via
+      GPIO on a wake-packet/deauth/trigger. <strong>TESTED (<code>rimba-standby-test</code>):</strong> the symbols
+      ARE compiled into the ESP build; <code>mmwlan_standby_enter</code>/<code>_exit</code> return 0; board2
+      <strong>stayed associated</strong> through a 45 s standby hold (hostapd log: no disassoc; 0 disassoc/no
+      auto-exit STA-side). <strong>But the power is ~11.3 mA</strong> (host light-sleep) — <em>worse</em> than
+      dyn-PS+LS (8.2) and far worse than <strong>WNM+powerdown+LS (4.0)</strong>. Reason: at <code>dtim_period=1</code>
+      the chip in standby still wakes every DTIM (~100 ms) and TXes periodic keep-alives (spikes to ~26 mA), i.e. it
+      keeps the chip <strong>active</strong>, whereas WNM+powerdown powers the chip <strong>down</strong>. So even with
+      the host fully deep-asleep, standby would stay chip-bound (~8–11 mA) and lose to WNM+powerdown. STANDBY's value
+      is functional (offload housekeeping so the host wakes only on real traffic), <strong>not</strong> a raw-power
+      win — and it's <strong>deprecated</strong>. Verdict: not the low-power lever; WNM+powerdown (4 mA, stays
+      associated) remains best for "low power while connected." (A higher AP DTIM would lower standby's chip draw, but
+      WNM+powerdown still wins.)</li>
+    <li><strong>No STA-side PMKSA caching</strong> in morselib (the PMK/PMKID code is all mesh-SAE), so there's no easy
+      fast-reconnect shortcut to shave the ~5 s deep-sleep re-assoc tax.</li>
+  </ul>
+
+  <h2 id="open">Open</h2>
+  <ul>
+    <li>The <strong>ESP32 AP</strong> was not re-measured at 1.17.8 (its TWT path — the mid-session action it answers —
+      is understood; the numbers just weren't retaken at the good baseline).</li>
+    <li>The 1.17.9 regression mechanism (why doze current doubles + light-sleep backfires) is characterised but not
+      root-caused in the driver/fw.</li>
+  </ul>
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#regression">The regression</a></li>
+  <li><a href="#revert">Reverting to 1.17.8</a></li>
+  <li><a href="#ladder">Full 1.17.8 ladder</a></li>
+  <li><a href="#deepsleep">Deep-sleep leaf</a></li>
+  <li><a href="#radio-doze">Radio-doze (associated)</a></li>
+  <li><a href="#twt">TWT on the Linux AP</a></li>
+  <li><a href="#esp-ap">ESP32 AP ladder + §3b</a></li>
+  <li><a href="#standby">Q2 · MMWLAN_STANDBY</a></li>
+  <li><a href="#open">Open</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-08-1178-ps-baseline-and-deepsleep</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

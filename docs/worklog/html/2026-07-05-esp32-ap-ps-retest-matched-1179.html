@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 AP vs Linux AP STA power-save — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-05</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-05</span>
+    <span class="badge">5 min read</span>
+    <span class="badge">power-save · TWT · AP</span>
+    <span class="badge ok">✓ measured</span>
+  </div>
+
+  <h1>HaLow STA power-save: ESP32 AP vs Linux AP<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">retest at MATCHED stock 1.17.9 — the TWT divergence is real, not a version skew</small></h1>
+
+  <p class="lead">Re-ran the ESP32-AP-vs-Linux-AP STA power-save comparison with <strong>matched firmware</strong>, after
+  the whole bench was brought to stock 1.17.9 — the earlier comparison had a version skew (ESP 1.17.9 / Linux
+  1.17.8) that confounded it. At matched fw, no-PS / dynamic-PS / WNM are <strong>equivalent</strong>;
+  <strong>mid-session TWT is ~2× better on the ESP32 AP</strong> (STA deep-dozes to 6.8 mA vs 14.7 mA — the Linux
+  <code>hostapd_s1g</code> doesn't engage the mid-session TWT responder). So the TWT divergence is a
+  <strong>real AP-implementation difference, not a firmware artifact.</strong></p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">6.8 mA</div><div class="lbl">STA @ TWT vs the <strong>ESP32 AP</strong> (deep doze)</div></div>
+    <div class="stat"><div class="num">14.7 mA</div><div class="lbl">STA @ TWT vs the <strong>Linux AP</strong> (no SP cadence)</div></div>
+    <div class="stat"><div class="num acc">~2×</div><div class="lbl">TWT advantage, in the ESP32 AP's favour</div></div>
+    <div class="stat"><div class="num">~2.9–3 mA</div><div class="lbl">board hardware floor (15 mW), not CPU</div></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Bottom line</p>
+    <p>The all-ESP32 SoftAP is a <strong>full peer</strong> of the Linux AP for STA power-save. no-PS, dynamic PS,
+    and WNM are within measurement noise. The one real divergence — mid-session TWT — favours the ESP32 AP by ~2×,
+    and it <strong>held at matched firmware</strong>, so it is a morselib-AP-vs-<code>hostapd_s1g</code>
+    implementation difference, not the earlier version skew.</p>
+  </div>
+
+  <h2 id="firmware">Firmware (verified, both sides)</h2>
+  <p><strong>Stock <code>rel_1_17_9_2026_Apr_20</code>, no patches.</strong> ESP boards: 1.17.9 chip fw (from
+  <code>vendor/morse-firmware</code>). Linux nodes: 1.17.9 driver (srcver <code>65FDC1A3A73287FD44CE6E2</code> = pure
+  stock) + fw + dot11ah + <code>hostapd_s1g</code> + <code>wpa_supplicant_s1g</code> + <code>morse_cli</code>; BCF
+  unchanged. See <code>docs/reference/rimba-linux-node-setup.md §1</code>.</p>
+
+  <h2 id="setup">Setup</h2>
+  <ul>
+    <li><strong>DUT (measured):</strong> board2 = XIAO ESP32-S3 + FGH100M (MM6108), app <code>rimba-halow-sta</code>
+      = the PS-ladder, powered only by a <strong>PPK2 @ 5.00 V</strong> (source-meter mode;
+      <code>~/pwr_test/ppk2_mon2.py</code> → <code>board2_pwr_sweep.log</code>, 1 s avg). Netif-free (zero traffic).
+      Power = 5.00 V × I.</li>
+    <li><strong>Host power condition: ESP32-S3 AWAKE — NO host light sleep</strong> (<code>CONFIG_PM_ENABLE</code>
+      not set; app configures no <code>esp_pm</code>). These numbers isolate the HaLow <strong>radio</strong> PS
+      modes with the host running — the clean AP-comparison target (identical host-awake STA on both APs), NOT the
+      absolute floor. Adding host light sleep lowers the deep tiers (2026-07-04: WNM+powerdown+host-light-sleep
+      ≈ 3.7 mA, deep-sleep ≈ 2.9 mA) but backfires at DTIM1 for dyn-PS/TWT. ~3 mA = board hardware floor, not CPU.</li>
+    <li><strong>AP under test — either:</strong> board0 = ESP32 SoftAP (<code>rimba-halow-ap</code>, WNM responder +
+      short_beacon_int, pinger off) <strong>or</strong> chronite = Pi 5 + MM6108 <code>hostapd_s1g</code> (SSID
+      <code>rimba-ping</code>, SAE, <code>dtim_period=1</code>, <code>ht_vht_twt_responder=1</code>). Same
+      SSID/security → identical STA firmware connects to whichever is up.</li>
+    <li><strong>chronium</strong> = morse0 S1G monitor (on-air TWT verification).</li>
+    <li>Board hardware floor ≈ 2.9–3 mA (15 mW).</li>
+  </ul>
+
+  <h2 id="method">Method — one ladder app, both APs</h2>
+  <p><code>rimba-halow-sta</code> walks the whole ladder in one aligned run, grep-able uptime markers:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">connect</div><div class="s">assoc + SAE</div></div>
+      <div class="node"><div class="t">P1 NO-PS</div><div class="s">PS_DISABLED · 20 s</div></div>
+      <div class="node"><div class="t">P2 dynamic PS</div><div class="s">PS_ENABLED · 20 s</div></div>
+      <div class="node acc"><div class="t">P3 TWT</div><div class="s">REQUESTER · 40 s</div></div>
+      <div class="node ok"><div class="t">P4 WNM</div><div class="s">+ chip_powerdown · 40 s</div></div>
+    </div>
+    <figcaption>connect → <strong>P1 NO-PS</strong> (<code>mmwlan_set_power_save_mode(MMWLAN_PS_DISABLED)</code>) 20 s
+    → <strong>P2 dynamic PS</strong> (<code>PS_ENABLED</code>) 20 s → <strong>P3 TWT</strong>
+    (<code>mmwlan_twt_setup_request</code>, REQUESTER, 10 s wake_interval, 65280 µs min_wake) 40 s →
+    <strong>P4 WNM</strong> (<code>mmwlan_set_wnm_sleep_enabled_ext</code>, <code>chip_powerdown_enabled=1</code>) 40 s.</figcaption>
+  </figure>
+
+  <p>Reset board2 at a recorded <code>T0</code>, slice <code>board2_pwr_sweep.log</code> on
+  <code>epoch ≥ T0 + phase_uptime</code>. <strong>Read spike CADENCE, not just the average</strong> — at DTIM1,
+  dynamic PS and a non-engaged TWT both read ~14 mA; only the ~SP-interval wake pattern proves the schedule
+  installed.</p>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Carried pitfall</p>
+    <p><code>mmhalow_init()</code> disables PS at <code>mmhalow.c:200</code>, so the app must re-enable it.</p>
+  </div>
+
+  <h2 id="results">Results — per-phase board2 current</h2>
+  <p>Averaged over the aligned window, host-awake (no host light sleep):</p>
+
+  <table>
+    <thead><tr><th>Mode</th><th>ESP32 AP (board0)</th><th>Linux AP (chronite)</th></tr></thead>
+    <tbody>
+      <tr><td>No PS</td><td>66.0 mA / 330 mW</td><td>65.4 mA / 327 mW</td></tr>
+      <tr><td>Dynamic PS</td><td>16.3 mA / 81 mW (floor 9)</td><td>14.5 mA / 73 mW (floor 9)</td></tr>
+      <tr><td><strong>TWT, 10 s SP</strong></td><td><strong>6.8 mA / 34 mW</strong> (floor 5, SP-cadence spikes)</td><td><strong>14.7 mA / 73 mW</strong> (≈ dyn-PS, no SP cadence)</td></tr>
+      <tr><td>WNM + chip powerdown</td><td>5.0 mA / 25 mW (floor 4)</td><td>4.0 mA / 20 mW (floor 4)</td></tr>
+    </tbody>
+  </table>
+
+  <p>The ESP32-AP power ladder descends cleanly as each PS tier engages (bars to scale, No-PS = full width):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">No PS</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">66.0 mA</span></div>
+    <div class="bar-row"><span class="lbl">Dynamic PS</span><span class="bar-track"><span class="bar-fill" style="width:24.7%"></span></span><span class="val">16.3 mA</span></div>
+    <div class="bar-row"><span class="lbl">TWT, 10 s SP</span><span class="bar-track"><span class="bar-fill fast" style="width:10.3%"></span></span><span class="val">6.8 mA</span></div>
+    <div class="bar-row"><span class="lbl">WNM + powerdown</span><span class="bar-track"><span class="bar-fill fast" style="width:7.6%"></span></span><span class="val">5.0 mA</span></div>
+  </div>
+
+  <p>At the TWT tier the two APs diverge — the ESP32 AP lets the STA deep-doze to a floor of 5, the Linux AP holds
+  it in dynamic PS (bars to scale, Linux = full width):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">TWT · ESP32 AP</span><span class="bar-track"><span class="bar-fill fast" style="width:46.3%"></span></span><span class="val">6.8 mA</span></div>
+    <div class="bar-row"><span class="lbl">TWT · Linux AP</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">14.7 mA</span></div>
+  </div>
+
+  <p><strong>Raw TWT traces (mA / 1 s):</strong></p>
+  <pre><code>ESP32 AP : 6 6 5 6 11 16 5 5 5 6 … 21 6 6 5   (deep floor + periodic SP spikes)
+Linux AP : 30 11 13 11 32 10 13 10 30 … 22 11 10   (dynamic-PS-like, no deep floor)</code></pre>
+  <p>All phases returned <code>ret=0</code> on the STA against both APs.</p>
+
+  <div class="callout">
+    <p class="ct">On-air (chronium morse0), matched 1.17.9</p>
+    <p><strong>vs the ESP32 AP</strong> — <code>board2→board0 SETUP REQUEST</code> then
+    <code>board0→board2 SETUP ACCEPT</code> (cat-22 S1G action, unprotected) → the STA installs the TWT agreement
+    and deep-dozes. <strong>vs the Linux AP</strong> — the STA sends the request but chronite's
+    <code>hostapd_s1g</code> <strong>doesn't engage</strong> the mid-session responder, so the STA stays in dynamic
+    PS (matches the 14.7 ≈ 14.5 mA reading).</p>
+  </div>
+
+  <h2 id="host-ls">+ ESP32 host light sleep (2026-07-05 second pass)</h2>
+  <p>Re-ran the ladder with <code>CONFIG_PM_ENABLE</code> + <code>CONFIG_FREERTOS_USE_TICKLESS_IDLE</code> +
+  <code>esp_pm_configure(160/40 MHz, light_sleep_enable=true)</code> (temp variant; reverted after). Host light
+  sleep is a <strong>multiplier that only pays off with rare radio wakes</strong> (each host wake = full
+  light-sleep exit ≈ 700 mA/ms spike). Measurement was fragile — USB-JTAG console flaps during light sleep (sparse
+  markers, aligned by the surviving <code>P2end=P3start=uptime66</code> + fixed durations), the PPK2 monitor stalls
+  on the deep &lt;5 mA states, and the <strong>WNM enter handshake can sleep through under host light sleep</strong>
+  (WNM phase stuck at ~32 mA one run). Indicative numbers:</p>
+
+  <table>
+    <thead><tr><th>Mode + host-LS</th><th>ESP32 AP</th><th>Linux AP</th></tr></thead>
+    <tbody>
+      <tr><td>No PS</td><td>~32 mA</td><td>~31 mA</td></tr>
+      <tr><td>Dynamic PS</td><td>~32 mA (backfire)</td><td>~32 mA (backfire)</td></tr>
+      <tr><td><strong>TWT (10 s)</strong></td><td><strong>~3–4 mA</strong> ✅</td><td>~32 mA ✗</td></tr>
+      <tr><td>WNM + powerdown</td><td>~3.7 mA*</td><td>~3.7 mA* (*2026-07-04 clean run)</td></tr>
+      <tr><td>Deep sleep</td><td>~2.9 mA</td><td>~2.9 mA</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Standout — host light sleep is a lever, not a free win</p>
+    <p>Host light sleep <strong>backfires</strong> on per-DTIM PS (no-PS, dyn-PS, TWT-vs-Linux) → ~32 mA; but
+    <strong>TWT + host light sleep = ~3–4 mA against the ESP32 AP</strong> (rare 10 s wakes let the host
+    deep-sleep), which does NOT happen against the Linux AP (its TWT keeps DTIM wakes). So the ESP AP's effective
+    mid-session TWT uniquely unlocks a ~3–4 mA <em>associated</em> leaf. WNM+powerdown+host-LS ≈ 3.7 mA both APs;
+    deep-sleep 2.9 mA (loses link, ~8 s reconnect). ~3 mA is the board hardware floor, not the CPU. Full table +
+    caveats: <code>docs/reference/rimba-halow-ps-esp32-vs-linux-ap.md §3c</code>.</p>
+  </div>
+
+  <h2 id="conclusions">Conclusions</h2>
+  <ol>
+    <li><strong>The all-ESP32 SoftAP is a full peer of the Linux AP for STA power-save</strong> — no-PS, dynamic PS,
+      and WNM are within measurement noise (Linux marginally lower on dyn-PS/WNM: 14.5 vs 16.3, 4.0 vs 5.0 mA).</li>
+    <li><strong>Mid-session TWT is the one real divergence, in the ESP32 AP's favor</strong> (~2×: 6.8 vs 14.7 mA).
+      It held at matched firmware → it's a morselib-AP-vs-<code>hostapd_s1g</code> implementation difference, not a
+      version artifact. <em>Scope:</em> only the mid-session TWT path (<code>mmwlan_twt_setup_request</code>) was
+      tested; Linux <strong>assoc-embedded</strong> TWT (<code>mmwlan_twt_add_configuration</code> before enable)
+      was not — chronite may support that path.</li>
+    <li>WNM is the deepest tier on both (~4–5 mA ≈ the board hardware floor).</li>
+  </ol>
+
+  <h2 id="state">State</h2>
+  <p>Full comparison written up in <code>docs/reference/rimba-halow-ps-esp32-vs-linux-ap.md</code> (superseding the
+  skewed pass). Bench radio-silenced after: <code>rimba-hello</code> on board0 + board2; chronite hostapd stopped +
+  <code>wlan1</code> down; chronium monitor→managed + <code>wlan1</code> down. Nothing committed.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#firmware">Firmware (both sides)</a></li>
+  <li><a href="#setup">Setup</a></li>
+  <li><a href="#method">Method — one ladder</a></li>
+  <li><a href="#results">Results</a></li>
+  <li><a href="#host-ls">+ Host light sleep</a></li>
+  <li><a href="#conclusions">Conclusions</a></li>
+  <li><a href="#state">State</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-05-esp32-ap-ps-retest-matched-1179</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

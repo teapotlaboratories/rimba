@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DHCP de-hardcode of the Mesh-gate — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-10</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-10</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ verified done</span>
+    <span class="badge">DHCP · mesh-gate · AP</span>
+  </div>
+
+  <h1>DHCP de-hardcode of the Mesh-gate <span style="color:var(--accent)">(task #5)</span><br><small style="font-weight:600;color:var(--muted);font-size:1.05rem">the interim, keeps-L3 de-hardcode · zero-config STA · cold-boot verified</small></h1>
+
+  <p class="lead">This is <strong>task #5</strong> of the mesh-gate PR follow-ups (the interim, keeps-L3
+  de-hardcode). It is <strong>complete and hardware-verified</strong> — a cold-boot bench run passed
+  every check, with the headline artifact (<code>DHCP lease 192.168.12.2 gw 192.168.12.1 …</code>)
+  captured on the STA console.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Headline deliverable</p>
+    <p>A zero-config STA cold-booted and got its IP + gateway + mask from the gate's DHCP server:
+    <strong><code>DHCP lease 192.168.12.2 gw 192.168.12.1 mask 255.255.255.0 (up=1)</code></strong>,
+    then <strong>10/10 ping</strong> across the gate to the mesh node (every reply <code>ttl=63</code>).</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">10 / 10</div><div class="lbl">ping across the gate (0% loss)</div></div>
+    <div class="stat"><div class="num acc">ttl=63</div><div class="lbl">single gate <code>ip_forward</code> hop</div></div>
+    <div class="stat"><div class="num ok">10 / 10</div><div class="lbl">bench checks green</div></div>
+    <div class="stat"><div class="num acc">~7 s</div><div class="lbl">to lease <code>.2</code> from cold start</div></div>
+    <div class="stat"><div class="num">~33–85 ms</div><div class="lbl">end-to-end RTT</div></div>
+    <div class="stat"><div class="num">3 apps</div><div class="lbl">carry the task-#5 edits</div></div>
+  </div>
+
+  <h2 id="shipped">What shipped</h2>
+  <p><em>Branch <code>feat/mesh-gate-end-to-end</code>, uncommitted — held for review.</em> Three apps
+  carry the task-#5 edits (<code>git diff</code>):</p>
+  <ul>
+    <li><strong><code>firmware/rimba-halow-mesh-ap/main/app_main.c</code></strong> —
+      <code>gw_setup_ap_netif()</code> now runs a <strong>DHCP server</strong> on the AP netif:
+      <code>ESP_NETIF_DHCP_SERVER | ESP_NETIF_FLAG_AUTOUP</code>, and the AP IP <strong>and gw</strong>
+      (<code>192.168.12.1/24</code>) go in the <strong>inherent config</strong> (a function-local
+      <code>static esp_netif_ip_info_t ap_ip</code> set at runtime before <code>esp_netif_new</code>).
+      The old manual <code>esp_netif_set_ip_info</code> + the
+      <code>action_connected</code>-then-<code>set_ip_info</code> sequence is removed.</li>
+    <li><strong><code>firmware/rimba-halow-sta-perf/main/app_main.c</code></strong> —
+      <code>net_task()</code> converted from a static MAC-derived IP to a <strong>DHCP client</strong>:
+      <code>esp_netif_dhcpc_start</code> (idempotent — tolerates <code>ALREADY_STARTED</code> since
+      mmhalow starts a dhcpc on link-up) + a 40×500 ms (20 s) wait-for-lease loop that logs
+      <code>DHCP lease &lt;ip&gt; gw &lt;gw&gt; mask &lt;m&gt;</code>. (<code>#define IPERF 1</code> is
+      orthogonal and unchanged: it puts the STA in console mode so the end-to-end
+      <code>ping 10.9.9.100</code> can be driven over serial; <code>net_task</code> runs and logs the
+      lease in either mode.)</li>
+    <li><strong><code>firmware/rimba-halow-mesh/main/app_main.c</code></strong> — cosmetic: the return-gw
+      literal <code>10.9.9.136</code> is now <code>#define MESH_GATE_IP</code> (documented deployment
+      param; behaviour identical).</li>
+  </ul>
+
+  <h2 id="bootloop">Why the earlier attempt boot-looped (fixed)</h2>
+  <div class="callout bug">
+    <p class="ct">🐛 First attempt: DHCP_SERVER flag but inherent <code>ip_info = {0}</code></p>
+    <p>With AUTOUP the AP netif came up with IP <code>0.0.0.0</code>, so esp_netif auto-started dhcps on
+    <code>0.0.0.0</code> → <code>dhcpserver.c</code> <code>ip4_addr_isany</code> →
+    <strong>"could not obtain pcb"</strong>; then the manual
+    <code>ESP_ERROR_CHECK(esp_netif_set_ip_info)</code> aborted with
+    <strong><code>0x5007 ESP_ERR_ESP_NETIF_DHCP_NOT_STOPPED</code></strong> → Guru Meditation boot loop.</p>
+  </div>
+  <p><strong>Fix</strong> = mirror stock WIFI_AP: put the real IP+gw in the inherent config so dhcps
+  auto-starts with a valid server IP, and never call <code>set_ip_info</code> afterward.
+  <code>CONFIG_LWIP_DHCPS=y</code> + <code>MAX_UDP_PCBS=16</code> were already set.</p>
+
+  <h2 id="source-analysis">Source analysis (predicted PASS, no step-3 fix needed)</h2>
+  <p>Done before the bench cycle. The one open question was whether the STA would get a <strong>default
+  gateway</strong> (router option) or just an IP. Traced through the vendored ESP-IDF (v5.4.2) and
+  confirmed it is offered automatically:</p>
+  <ul>
+    <li><code>components/lwip/apps/dhcpserver/dhcpserver.c</code>: <code>dhcps_new()</code> sets
+      <code>dhcps_offer = 0xFF</code> (all options on) → router option (opt 3) enabled by default; its
+      value = the netif <strong>gw</strong> field (<code>get_ip_info</code> reads <code>netif->gw</code>,
+      offered only if <code>gw != 0.0.0.0</code>) — lines ~168, ~443-455, ~190-196.</li>
+    <li><code>components/esp_netif/lwip/esp_netif_lwip.c</code>: <code>esp_netif_init_configuration</code>
+      memcpies the whole inherent <code>ip_info</code> incl. <strong>gw</strong> (~line 623);
+      <code>netif_add</code> installs <code>ip_info->gw</code> onto the lwIP netif (~line 925); the
+      DHCP-server start path passes the real server IP <code>192.168.12.1</code> to
+      <code>dhcps_start</code> (~line 1135) → no isany/pcb failure, and there is no later
+      <code>set_ip_info</code> → no <code>DHCP_NOT_STOPPED</code>.</li>
+    <li>Because the code sets <code>ap_ip.gw = 192.168.12.1</code>, the OFFER carries router =
+      <code>192.168.12.1</code>.</li>
+  </ul>
+  <div class="callout">
+    <p class="ct">Prediction (bench confirmed exactly)</p>
+    <p>STA gets <code>192.168.12.x</code> + <code>gw 192.168.12.1</code>; the fallback of explicitly
+    enabling the router option is unnecessary.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">STA</div><div class="s">DISCOVER</div></div>
+      <div class="node acc"><div class="t">gate</div><div class="s">OFFER · router=192.168.12.1</div></div>
+      <div class="node"><div class="t">STA</div><div class="s">REQUEST</div></div>
+      <div class="node ok"><div class="t">gate</div><div class="s">ACK · lease .2</div></div>
+    </div>
+    <figcaption>Stock ESP-IDF lwIP DHCP exchange over the AP data path — the OFFER carries the router
+    option because the gate's netif <code>gw</code> = <code>192.168.12.1</code>.</figcaption>
+  </figure>
+
+  <h2 id="verification">Verification — cold-boot bench run (PASS, 2026-07-10)</h2>
+  <p>Rig: gateway <code>rimba-halow-mesh-ap</code> on ACM0 (MAC <code>…ef:a4</code> → mesh
+  <code>10.9.9.136</code> + AP <code>192.168.12.1</code>), board1 <code>rimba-halow-mesh</code> on ACM1
+  (MAC <code>…f9:40</code> → mesh <code>10.9.9.100</code>), board2 STA <code>rimba-halow-sta-perf</code>
+  on ACM4 (PPK2-powered, MAC <code>…f0:08</code>). Boards mapped by efuse MAC, not ttyACM. All three
+  built for <code>proto1-fgh100m</code>, flashed, then <strong>cold-booted simultaneously</strong> via
+  esptool and captured from t≈0 (a plain pyserial open does NOT reset these XIAO USB-JTAG boards — only
+  an esptool/RTS reset does; the first, warm-boot capture missed the one-shot boot lines for that
+  reason). Verifier + <code>cold_ttyACM{0,1,4}.txt</code> logs are in the session scratchpad.
+  <strong>All 10 checks green:</strong></p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">STA</div><div class="s">192.168.12.2</div></div>
+      <div class="node acc"><div class="t">gate AP</div><div class="s">192.168.12.1</div></div>
+      <div class="node"><div class="t">ip_forward</div><div class="s">1 hop</div></div>
+      <div class="node acc"><div class="t">gate mesh</div><div class="s">10.9.9.136</div></div>
+      <div class="node ok"><div class="t">board1</div><div class="s">10.9.9.100 · responder</div></div>
+    </div>
+    <figcaption>End-to-end route the 10/10 ping traverses (and the reply back): STA → gate AP →
+    <code>ip_forward</code> → gate mesh → board1. <code>ttl=63</code> = single gate hop.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Gateway</strong> — no crash / no boot-loop / no "could not obtain pcb" / no
+      <code>0x5007</code>; heartbeats climb (<code>alive uptime=5s…30s mesh_peers=1 ap_stas=1</code>);
+      <code>AP netif up: 192.168.12.1/24 + DHCP server</code>;
+      <code>DHCP server started on interface HALOW_GWAP</code>;
+      <code>esp_netif_lwip: DHCP server assigned IP to a client, IP is: 192.168.12.2</code>;
+      <code>mesh netif static IP 10.9.9.136</code>; <code>gateway ready</code>.</li>
+    <li><strong>board1</strong> — <code>mesh static IP 10.9.9.100 gw 10.9.9.136 (netif up=1) — responder</code>.</li>
+    <li><strong>STA</strong> — <code>STA link up</code>;
+      <strong><code>DHCP lease 192.168.12.2 gw 192.168.12.1 mask 255.255.255.0 (up=1)</code></strong>
+      (the headline deliverable: zero-config STA got IP + gateway + mask from the gate's DHCP server).</li>
+    <li><strong>End-to-end</strong> — <code>ping -c 10 10.9.9.100</code> from the STA console →
+      <code>10 packets transmitted, 10 received, 0% packet loss</code>, every reply <code>ttl=63</code>
+      (single gate <code>ip_forward</code> hop). RTT ~33-85 ms.</li>
+  </ul>
+
+  <p>Boot-ordering held on a simultaneous cold start: the gate's DHCP server was up and leased
+  <code>.2</code> to the STA within ~7 s, the mesh peered (<code>mesh_peers=1</code>), and the route was
+  10/10 — a stronger result than a warm re-test.</p>
+
+  <div class="callout">
+    <p class="ct">On-air verification: N/A (not skipped, inapplicable)</p>
+    <p>This task adds no port-authored radio frame. DHCP DISCOVER/OFFER/REQUEST/ACK are stock ESP-IDF
+    lwIP UDP over the already-on-air-verified AP data path, not a hand-derived mesh/beacon/action IE —
+    so the "byte-diff vs a live Linux device" gold standard has nothing rimba-authored to check.
+    Verification is end-to-end functional (lease + 10/10 ping).</p>
+  </div>
+
+  <h2 id="scoping">Honest scoping note (carried through)</h2>
+  <div class="callout warn">
+    <p class="ct">⚠ DHCP de-hardcodes the STA, not the mesh node</p>
+    <p>DHCP cleanly de-hardcodes the <strong>STA</strong> (client) — that is task #5's real deliverable,
+    plus the mesh-node <code>#define</code> tidy. It does <strong>not</strong> de-hardcode the
+    <strong>mesh node's</strong> gw: that would need DHCP-over-mesh, which is invasive (the mesh netif is
+    created inside shared <code>mmhalow</code> as a <em>client</em> netif; a server there means editing
+    shared code) and is <strong>superseded by the planned 802.11s port</strong> (task #1), which
+    de-hardcodes the mesh node properly via RANN + learned MPP + an L2 bridge.</p>
+  </div>
+  <p>If full DHCP-over-mesh is ever wanted as an interim, that is a separate <code>mmhalow</code> change
+  to raise. Note also the STA already MAC-auto-derived its IP and used the well-known AP gw, so DHCP is
+  marginal <em>value</em> there — but it is the correct zero-config mechanism and removes the last
+  STA-side hardcode.</p>
+
+  <h2 id="task-order">Task order (this done; remaining follow-ups)</h2>
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">#5 DHCP</div><div class="s">DONE</div></div>
+      <div class="node"><div class="t">#2 bcast/mcast</div><div class="s">forward across gate</div></div>
+      <div class="node"><div class="t">#3 coverage</div><div class="s">multi-STA · soak · PS</div></div>
+      <div class="node"><div class="t">#4 per-stad</div><div class="s">deferred, blocked on #3</div></div>
+      <div class="node acc"><div class="t">#1 802.11s</div><div class="s">L2-bridge + MPP</div></div>
+    </div>
+    <figcaption>Follow-up ordering. #4 is blocked on #3 finding a failure; #1 is the big proper port.</figcaption>
+  </figure>
+  <ul>
+    <li><strong>#5 DHCP (DONE)</strong></li>
+    <li><strong>#2 broadcast/multicast forwarding across the gate</strong> — lwIP <code>ip4_forward</code>
+      drops LL bcast/mcast via <code>ip4_canforward</code>, so mDNS/discovery won't traverse; may be
+      subsumed by the L2-bridge.</li>
+    <li><strong>#3 wider coverage</strong> — multiple STAs / multi-hop STA→gate→relay→node / soak /
+      power-save-behind-gate.</li>
+    <li><strong>#4 per-stad ops dispatch</strong> — deferred, blocked on #3 finding a failure.</li>
+    <li><strong>#1 full 802.11s L2-bridge + MPP mesh-gate port</strong> — design + Linux code-map ready:
+      <code>docs/mesh-ap/rimba-mesh-ap-mesh-gate-discovery-design.md</code>; RANN+IS_GATE+learned MPP,
+      NOT literal GANN/PXU; ~12-19 days. Memory <code>[[mesh-gate-8021s-port-planned]]</code>.</li>
+  </ul>
+
+  <h2 id="already-shipped">Already shipped / don't redo</h2>
+  <p>The end-to-end route itself is DONE + in two PRs:
+  <strong><code>teapotlaboratories/mm-esp32-halow#21</code></strong> (submodule feature) +
+  <strong><code>teapotlaboratories/rimba#31</code></strong> (gateway app + the two fixes: board1 gw
+  <code>10.9.9.1→10.9.9.136</code>, and <code>gw_rx_deliver</code> copy-into-PBUF_RAM for forwardable
+  RX). Memory <code>[[gateway-e2e-forward-mesh-unicast-gap]]</code>.</p>
+
+  <h2 id="rig-gotchas">Bench rig + gotchas</h2>
+  <p>board0 gateway (ACM0, efuse <code>e0:72:a1:f8:ef:a4</code>) / board1 mesh node (ACM1,
+  <code>…f9:40</code>) / board2 STA (ACM4 when PPK2-powered, <code>…f0:08</code>).</p>
+  <ul>
+    <li><strong>Map by efuse MAC not ttyACM</strong> (PPK2 = ACM2+ACM3, don't flash).</li>
+    <li>IDF venv python
+      <code>/home/quartz/.espressif/python_env/idf5.4_py3.13_env/bin/python</code>.</li>
+    <li><strong>A plain pyserial open does NOT reset these boards</strong> (correcting an earlier note) —
+      the board keeps running from its last flash/reset; to capture a fresh boot log, reset via esptool
+      (<code>--before default_reset --after hard_reset</code>) then open the port.</li>
+    <li><code>make flash</code> rebuilds first (build separately to avoid a 2-min shell timeout / OOM).</li>
+    <li>Matched Morse fw 1.17.8 (BCF <code>mf16858</code>, morselib 2.10.4) confirmed on-board this run.</li>
+    <li>Radio-silenced after the test: <code>rimba-hello</code> ×3 + <code>ppk2_hold.py off</code>
+      (board2 dark).</li>
+    <li><strong>Do not <code>git commit</code> during weekday 09:00-17:00 local; never auto-commit</strong>
+      — changes held in the working tree.</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#shipped">What shipped</a></li>
+    <li><a href="#bootloop">Why it boot-looped (fixed)</a></li>
+    <li><a href="#source-analysis">Source analysis</a></li>
+    <li><a href="#verification">Verification — cold-boot run</a></li>
+    <li><a href="#scoping">Honest scoping note</a></li>
+    <li><a href="#task-order">Task order</a></li>
+    <li><a href="#already-shipped">Already shipped</a></li>
+    <li><a href="#rig-gotchas">Bench rig + gotchas</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-10-dhcp-de-hardcode-wip</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

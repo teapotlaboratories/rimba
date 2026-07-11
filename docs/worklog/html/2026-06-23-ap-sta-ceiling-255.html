@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AP STA-count ceiling 127 → 255 — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-23</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-23</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ build + on-air PASS</span>
+    <span class="badge">AP · S1G TIM · scaling</span>
+  </div>
+
+  <h1>AP STA-count ceiling 127 → 255<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">four-block S1G TIM · XIAO ESP32-S3 + FGH100M · morselib fw 1.17.6</small></h1>
+
+  <p class="lead">Raise the HaLow AP's <strong>structural</strong> STA ceiling from 127 to <strong>255</strong> — the max
+  of the public <code>uint8_t mmwlan_ap_args.max_stas</code> field — and verify it on hardware. Code + build +
+  on-air regression test all PASS. Builds on the 127/two-block work (<code>2026-06-23-ap-sta-ceiling-100-psram.md</code>).</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Status</p>
+    <p>Code + build + on-air regression test <strong>PASS</strong>. The AID&nbsp;≥&nbsp;64 path (blocks 1–3) is
+    <strong>still not exercised</strong> — it needs 64+ live associations; this test used 3 STAs (low AIDs, block 0
+    only). The four-block encoding is proven <em>structurally</em> (static asserts + stable beaconing), not yet by a
+    STA landing in block 1+.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">127 → 255</div><div class="lbl">structural STA ceiling</div></div>
+    <div class="stat"><div class="num acc">2 → 4</div><div class="lbl">PVB blocks (S1G TIM)</div></div>
+    <div class="stat"><div class="num acc">128 → 256</div><div class="lbl"><code>MAX_SUPPORTED_AID</code></div></div>
+    <div class="stat"><div class="num">3</div><div class="lbl">STAs associated on-air (WPA3-SAE)</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">ping timeouts (95 total)</div></div>
+    <div class="stat"><div class="num">~230 KB</div><div class="lbl">per-STA data → PSRAM @ 255</div></div>
+  </div>
+
+  <h2 id="change">1 · Change — two-block (AID 128) → four-block (AID 256)</h2>
+  <p>Three edits in <code>components/halow</code>, all flowing from one <code>#define</code>:</p>
+  <ul>
+    <li><code>src/umac/ap/traffic_bitmap.h</code>: <code>MAX_SUPPORTED_AID</code> <strong>128 → 256</strong>
+      (four PVB blocks, 64 AIDs each → valid AIDs 1..255). Auto-recomputes <code>S1G_BITMAP_SUBBLOCKS</code>
+      (16→32), <code>MAX_ENCODED_BLOCKS</code> (2→4), <code>MAX_SUPPORTED_PVB_LEN</code> (20→40) in the encoder.</li>
+    <li><code>src/umac/ies/s1g_tim.c</code>: tripwire assert <code>MAX_SUPPORTED_PVB_LEN == 20 → 40</code>.</li>
+    <li><code>Kconfig</code>: <code>HALOW_AP_MAX_STAS</code> range <code>1 127 → 1 255</code>; help notes 255 is also
+      the public <code>uint8_t max_stas</code> ceiling (256+ would need that widened to <code>uint16_t</code>).</li>
+  </ul>
+
+  <p>Invariants re-checked for four blocks (AID 256) — all hold:</p>
+  <table>
+    <thead><tr><th>Invariant</th><th>Value @ AID=256</th><th class="num">OK</th></tr></thead>
+    <tbody>
+      <tr><td><code>MAX_SUPPORTED_PVB_LEN</code> ≤ <code>S1G_TIM_MAX_BLOCK_SIZE - 5</code> (251)</td><td>40</td><td class="num">✓</td></tr>
+      <tr><td>block-offset field width (5-bit, 0..31)</td><td>blocks 0..3 used</td><td class="num">✓</td></tr>
+      <tr><td><code>MAX_SUPPORTED_AID &lt; 512</code> (single TIM page)</td><td>256</td><td class="num">✓</td></tr>
+      <tr><td><code>bitmap[S1G_BITMAP_SUBBLOCKS]*8 ≥ MAX_SUPPORTED_AID</code></td><td>32 B → 256 ≥ 256</td><td class="num">✓</td></tr>
+      <tr><td><code>MMWLAN_AP_MAX_STAS_LIMIT &lt; MAX_SUPPORTED_AID</code></td><td>255 &lt; 256</td><td class="num">✓</td></tr>
+      <tr><td>usable STAs = cap (AID 1..255, <code>stas[256]</code>, AID 0 reserved)</td><td>255</td><td class="num">✓</td></tr>
+    </tbody>
+  </table>
+
+  <p>The encoder/parse paths were already generic over <code>MAX_ENCODED_BLOCKS</code>, so <strong>no logic
+  change</strong> — only the derived sizes and the tripwire moved.</p>
+
+  <div class="callout">
+    <p class="ct">Reference AP app config</p>
+    <p><code>firmware/rimba-halow-ap/sdkconfig.defaults</code>: <code>CONFIG_HALOW_AP_MAX_STAS=255</code> +
+    <code>CONFIG_HALOW_STA_DATA_IN_PSRAM=y</code>. At 255, the per-STA <code>umac_sta_data</code> (~230 KB total)
+    and the 255-entry TWT agreement table both come from <strong>PSRAM</strong>, not internal SRAM.</p>
+  </div>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">ceiling · before</span><span class="bar-track"><span class="bar-fill" style="width:49.8%"></span></span><span class="val">127</span></div>
+    <div class="bar-row"><span class="lbl">ceiling · after</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">255</span></div>
+  </div>
+
+  <h2 id="build">2 · Build — PASS</h2>
+  <p><code>make build APP=rimba-halow-ap BOARD=proto1-fgh100m</code> with cap=255 + PSRAM → <strong>exit 0</strong>,
+  <code>rimba_halow_ap.bin</code> ~1.48 MB. The four TIM static asserts (which would fail the compile if the
+  four-block arithmetic were wrong) all passed.</p>
+
+  <h2 id="onair">3 · On-air regression test — PASS</h2>
+  <p>Flashed the cap=255 AP; re-ran the multi-node topology from <code>2026-06-23-ap-multinode-twt-hwtest.md</code>:</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 560 200" role="img" aria-label="Three STAs associated concurrently to one HaLow AP">
+      <!-- STA boxes -->
+      <rect x="16" y="8" width="210" height="48" rx="8" fill="none" stroke="#888" stroke-width="1.3"/>
+      <text x="121" y="30" text-anchor="middle" font-size="12.5" font-weight="600" fill="currentColor">ESP32 STA</text>
+      <text x="121" y="46" text-anchor="middle" font-size="10.5" fill="#888">bc:2a:33:96:b2:9f</text>
+
+      <rect x="16" y="76" width="210" height="48" rx="8" fill="none" stroke="#888" stroke-width="1.3"/>
+      <text x="121" y="98" text-anchor="middle" font-size="12.5" font-weight="600" fill="currentColor">ESP32 STA</text>
+      <text x="121" y="114" text-anchor="middle" font-size="10.5" fill="#888">68:24:99:44:6a:56</text>
+
+      <rect x="16" y="144" width="210" height="48" rx="8" fill="none" stroke="#888" stroke-width="1.3"/>
+      <text x="121" y="166" text-anchor="middle" font-size="12.5" font-weight="600" fill="currentColor">chronium (Linux STA)</text>
+      <text x="121" y="182" text-anchor="middle" font-size="10.5" fill="#888">3c:22:7f:37:50:42</text>
+
+      <!-- links -->
+      <line x1="226" y1="32" x2="372" y2="90" stroke="#2f6feb" stroke-width="1.5"/>
+      <line x1="226" y1="100" x2="372" y2="100" stroke="#2f6feb" stroke-width="1.5"/>
+      <line x1="226" y1="168" x2="372" y2="110" stroke="#2f6feb" stroke-width="1.5"/>
+
+      <!-- AP box -->
+      <rect x="372" y="72" width="172" height="56" rx="8" fill="none" stroke="#2f6feb" stroke-width="1.6"/>
+      <text x="458" y="96" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">HaLow AP</text>
+      <text x="458" y="114" text-anchor="middle" font-size="10.5" fill="#888">cap=255 · 4-block TIM</text>
+    </svg>
+    <figcaption>3 STAs associated concurrently, all WPA3-SAE. No crash/assert despite the 255-entry TWT table now
+      in PSRAM and the four-block TIM beacon path. AIDs are low (block 0 only).</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>3 STAs associated</strong> concurrently — 2 ESP32 (<code>bc:2a:33:96:b2:9f</code>,
+      <code>68:24:99:44:6a:56</code>) + chronium Linux STA (<code>3c:22:7f:37:50:42</code>), all WPA3-SAE. No
+      crash/assert despite the 255-entry TWT table now in PSRAM and the four-block TIM beacon path.</li>
+    <li><strong>TWT power-save active</strong> — AP→STA(.2) ping over two windows: <strong>35/35 then 60/60
+      replies, 0 timeouts</strong>, RTT <strong>62–86 ms</strong> (avg ~71 ms) vs the ~10 ms non-TWT baseline.
+      (Steady offset rather than the ~1 s spikes seen earlier = ping period phase-locked to the wake interval this
+      run; the TWT code is unchanged from the validated cap=100 build.)</li>
+  </ul>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Test-harness gotchas (not cap=255 issues)</p>
+    <p>After reflashing the AP, the ESP32 STAs held <strong>stale DHCP leases</strong> and the AP's hardcoded
+    <code>STA_IP=192.168.12.2</code> ping timed out until the STAs were reset (fresh boot → re-assoc → re-DHCP).
+    Also confirmed: chronium (a STA) can't ARP/ping the ESP32 STAs — <strong>the AP doesn't forward STA↔STA</strong>,
+    so AP→STA (the app's own ping) is the only downlink-RTT probe available.</p>
+  </div>
+
+  <h2 id="limits">4 · Not exercised / limits (unchanged from the 127 work)</h2>
+  <ul>
+    <li><strong>AID ≥ 64</strong> (the 2nd/3rd/4th TIM blocks) still not hit on air — needs 64+ live associations;
+      this test used 3 STAs (low AIDs, block 0 only). The four-block encoding is proven structurally (asserts +
+      stable beaconing), not by a STA in block 1+.</li>
+    <li>MM6108 firmware's <strong>true concurrent-STA capacity remains unknown</strong> (Linux caps at 2007, spec
+      8191); the 255 config number is a build/structural ceiling, not a firmware guarantee.</li>
+  </ul>
+
+  <h2 id="linux">5 · Linux alignment (verified against <code>morse_driver</code> 1.17.8)</h2>
+  <p>Checked the multi-block TIM change against the actual Linux driver source on the reference node
+  (<code>/home/chronium/halow/morse_driver</code>, the exact loaded driver
+  <code>version 0-rel_1_17_8_2026_Mar_24</code>). morselib's S1G TIM is a <strong>port of the Linux
+  <code>dot11ah/tim.c</code></strong> — so raising the block count <em>follows</em> Linux, it doesn't diverge:</p>
+  <ul>
+    <li><strong>Identical constant, name + value:</strong> <code>S1G_TIM_MAX_BLOCK_SIZE = 256</code> in both
+      morselib (<code>ies/s1g_tim.h:10</code>) and Linux (<code>dot11ah/tim.h</code>).</li>
+    <li><strong>Same geometry:</strong> Linux <code>dot11ah/tim.h:52</code>
+      <code>S1G_TIM_NUM_SUBBLOCKS_PER_BLOCK = 8</code>, <code>S1G_TIM_NUM_AID_PER_SUBBLOCK = 8</code> → 64 AIDs/block
+      ≡ morselib's <code>MAX_SUBBLOCKS_IN_BLOCK = 8</code>.</li>
+    <li><strong>Same four encoding modes:</strong> Linux <code>enum dot11ah_tim_encoding_mode { ENC_MODE_BLOCK,
+      _AID, _OLB, _ADE }</code> ≡ morselib's four <code>ie_s1g_tim_{block_bitmap,single_aid,olb,ade}_has_aid</code>.</li>
+    <li><strong>Same whole-page convention:</strong> Linux <code>S1G_TIM_PAGE_SLICE_ENTIRE_PAGE = 31</code>
+      (<code>dot11ah/tim.h:63</code>), <code>page_index = 0</code> (<code>beacon.c:256</code>) ≡ morselib
+      <code>page_slice = 0x1F</code>, <code>page_index = 0</code>.</li>
+    <li><strong>Encoder:</strong> Linux <code>morse_dot11ah_insert_s1g_tim()</code> (<code>dot11ah/tim.c:1030</code>)
+      loops over blocks (<code>block_offset = S1G_TIM_AID_TO_BLOCK_OFFSET(...)</code>) ≡ morselib
+      <code>ie_s1g_tim_build</code> block loop.</li>
+    <li><strong>AID space:</strong> Linux sizes its bitmap to the full space —
+      <code>DECLARE_BITMAP(aid_bitmap, MORSE_AP_AID_BITMAP_SIZE = AID_LIMIT + 1)</code>
+      (<code>morse.h:398/415</code>), AIDs set via <code>test_and_set_bit(aid, aid_bitmap)</code>
+      (<code>mac.c:4934</code>); mac80211 caps at <code>IEEE80211_MAX_AID = 2007</code> (hostap
+      <code>morse.h:164</code>). morselib's single-block cap was a self-imposed embedded limit, not a behaviour
+      difference — the encoder loop was already generic, mirroring the driver.</li>
+  </ul>
+
+  <div class="callout bug">
+    <p class="ct">🐛 One divergence (no Linux counterpart)</p>
+    <p>Routing per-STA state + the TWT table to <strong>PSRAM</strong> is ESP32-specific (Linux uses one kernel
+    address space; the <code>aid_bitmap</code> is static and per-STA TWT lives on mac80211's
+    <code>ieee80211_sta</code>). Documented as a platform adaptation. The full new-code ↔ Linux table is in
+    <code>docs/mesh-ap/rimba-mesh-ap-milestones.md</code> ("AP STA-count scaling").</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#change">1 · Change — 2-block → 4-block</a></li>
+  <li><a href="#build">2 · Build — PASS</a></li>
+  <li><a href="#onair">3 · On-air regression — PASS</a></li>
+  <li><a href="#limits">4 · Not exercised / limits</a></li>
+  <li><a href="#linux">5 · Linux alignment</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-23-ap-sta-ceiling-255</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh at-scale + on-air validation — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-02</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-02</span>
+    <span class="badge">3 min read</span>
+    <span class="badge ok">✓ validated</span>
+    <span class="badge">mesh · HWMP · on-air</span>
+  </div>
+
+  <h1>Mesh at-scale + on-air validation<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">6-node ESP+Linux stress · forced-topology multi-hop decision</small></h1>
+
+  <p class="lead">Validates the shipped <strong>P6c airtime link metric + HWMP multi-path dedup/SN fix</strong>
+  (mm-esp32-halow <code>#15</code>, worklogs <code>2026-07-02-mesh-p6c-airtime-metric.md</code> +
+  <code>2026-07-02-mesh-hwmp-multipath-dedup-sn.md</code>) <em>beyond</em> the 3-board line/triangle — at full
+  6-node scale, and with the on-air gold standard on chronium.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">6 nodes</div><div class="lbl">3 ESP + 3 Linux, fully connected</div></div>
+    <div class="stat"><div class="num">5 peers</div><div class="lbl">each node, via SAE</div></div>
+    <div class="stat"><div class="num ok">0% loss</div><div class="lbl">single-flow ping, every pair</div></div>
+    <div class="stat"><div class="num">12 flows</div><div class="lbl">concurrent stress streams</div></div>
+    <div class="stat"><div class="num acc">5462 vs 54614</div><div class="lbl">2-hop path metric: via board1 vs board2</div></div>
+    <div class="stat"><div class="num ok">25 vs 0</div><div class="lbl">on-air DATA frames: RA=board1 vs RA=board2</div></div>
+  </div>
+
+  <h2 id="six-node">1 · Full 6-node secured mesh — stress test</h2>
+  <p><strong>3 ESP (board0/1/2) + 3 Linux (chronite/chronosalt/chronogen)</strong>, secured SAE
+  (<code>rimbamesh2026</code>), mesh id <code>rimba-mesh</code>, S1G ch27. chronium held out as the (would-be)
+  monitor. Reconciling the config was one edit — the ESP already uses SAE + the same password
+  (<code>umac_mesh.c</code> <code>MESH_SAE_PASSWORD</code>), so only the mesh-id differed
+  (<code>rimba-smesh</code> → <code>rimba-mesh</code> on the Linux conf).</p>
+
+  <ul>
+    <li><strong>Peering:</strong> every node reached <strong>5 peers</strong> (all others) via SAE — a
+      fully-connected 6-node secured mesh.</li>
+    <li><strong>Data path:</strong> single-flow ping <strong>0% loss on every pair</strong> (ESP↔Linux, ESP↔ESP,
+      Linux↔Linux), e.g. board0 ↔ chronite 20 ms.</li>
+    <li><strong>Concurrent stress:</strong> 12 simultaneous ping streams — board0's flows clean; 20–50% loss on
+      some board1/board2/chronogen flows. This is <strong>RF contention on the shared 1 MHz S1G channel</strong>
+      (12 flows is a lot of simultaneous traffic for HaLow's bandwidth), <strong>not a routing defect</strong> —
+      all nodes are 1-hop here, so the loss is direct-transmission collisions, and single-flow is clean. The mesh
+      stayed <strong>stable</strong> (no crashes, peer counts held).</li>
+  </ul>
+
+  <div class="callout ok">
+    <p class="ct">✓ Validates</p>
+    <p>The airtime metric + HWMP fix hold up for peering, data path, and stability in a full 6-node secured
+    ESP+Linux mesh. (Fully-connected ⇒ 1-hop, so it does <em>not</em> exercise multi-hop routing — that's §2.)</p>
+  </div>
+
+  <h3 id="bench-ops">Bench-ops lessons (also in memory)</h3>
+  <ul>
+    <li>The apparent "chronite/chronosalt flakiness" was <strong>self-inflicted</strong>: rebooting them wiped
+      <code>/tmp</code> (tmpfs) incl. the pushed <code>wpa_supplicant_s1g</code> conf → wpa exits
+      <code>Failed to open config file</code> and the interface stays <code>type managed</code>.
+      <strong>Don't reboot the Linux nodes; re-push the conf.</strong> (memory
+      <code>dont-reboot-linux-mesh-nodes</code>)</li>
+    <li>A genuinely stuck node (chronogen: mesh point but 0 peers, no channel, wpa non-responsive) recovered with a
+      <strong>driver reload</strong> (<code>modprobe -r morse; modprobe morse</code> — re-probes the SPI chip), not
+      a reboot. The morse node <code>soc/spi@7e204000/mm6108@0</code> exposes <code>reset-gpios</code> =
+      <strong>BCM GPIO5</strong> for a direct <code>gpioset</code> reset.</li>
+    <li><code>iw dev wlan1 info</code> mis-labels the S1G channel as legacy "channel 112 (5560 MHz)" — that's
+      normal.</li>
+  </ul>
+
+  <h2 id="diamond">2 · Forced-topology diamond — multi-hop routing decision, console + on-air</h2>
+  <p>The 6-node run is 1-hop, so a forced topology drove an actual multi-hop <em>decision</em>: <strong>board0 →
+  {board1, board2} → chronite</strong> (ESP source, two ESP relays, <strong>Linux dest</strong>). ESP allowlists
+  blocked <code>board0↔chronite</code> (chronite a non-neighbor ⇒ multi-hop) and <code>board1↔board2</code> (relays
+  don't shortcut); a TEMP RSSI override made <strong>board2 the weak relay</strong> (any link touching board2 →
+  −90). Two competing 2-hop paths: via board1 = 2×2731 = <strong>5462</strong>, via board2 = 2×27307 =
+  <strong>54614</strong>.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 660 220" role="img" aria-label="Diamond topology: board0 to chronite via board1 (chosen) or board2 (weak)">
+        <defs>
+          <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#2f6feb"></path>
+          </marker>
+          <marker id="ahg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#888"></path>
+          </marker>
+        </defs>
+        <!-- chosen path board0->board1->chronite -->
+        <line x1="132" y1="105" x2="270" y2="52" stroke="#2f6feb" stroke-width="2.2" marker-end="url(#ah)"></line>
+        <line x1="410" y1="52" x2="528" y2="99" stroke="#2f6feb" stroke-width="2.2" marker-end="url(#ah)"></line>
+        <!-- weak path board0->board2->chronite -->
+        <line x1="132" y1="113" x2="270" y2="166" stroke="#888" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ahg)"></line>
+        <line x1="410" y1="166" x2="528" y2="113" stroke="#888" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ahg)"></line>
+        <!-- nodes -->
+        <g>
+          <rect x="22" y="86" width="112" height="46" rx="9" fill="#fff" stroke="#888" stroke-width="1.4"></rect>
+          <text x="78" y="106" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">board0</text>
+          <text x="78" y="122" text-anchor="middle" font-size="11" fill="#888">ESP source</text>
+        </g>
+        <g>
+          <rect x="270" y="28" width="140" height="48" rx="9" fill="#eaf1ff" stroke="#2f6feb" stroke-width="1.8"></rect>
+          <text x="340" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#2f6feb">board1 ✓</text>
+          <text x="340" y="65" text-anchor="middle" font-size="11" fill="#2f6feb">relay · metric 2731</text>
+        </g>
+        <g>
+          <rect x="270" y="144" width="140" height="48" rx="9" fill="#fff" stroke="#888" stroke-width="1.4" stroke-dasharray="5 4"></rect>
+          <text x="340" y="164" text-anchor="middle" font-size="14" font-weight="700" fill="#888">board2</text>
+          <text x="340" y="181" text-anchor="middle" font-size="11" fill="#888">weak relay · RSSI −90</text>
+        </g>
+        <g>
+          <rect x="528" y="86" width="112" height="46" rx="9" fill="#fff" stroke="#888" stroke-width="1.4"></rect>
+          <text x="584" y="106" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">chronite</text>
+          <text x="584" y="122" text-anchor="middle" font-size="11" fill="#888">Linux dest</text>
+        </g>
+        <!-- metric labels -->
+        <text x="200" y="26" text-anchor="middle" font-size="11.5" font-weight="650" fill="#2f6feb">via board1 = 5462</text>
+        <text x="200" y="210" text-anchor="middle" font-size="11.5" fill="#888">via board2 = 54614</text>
+      </svg>
+    </div>
+    <figcaption>Two competing 2-hop paths from board0 to the Linux dest chronite. board2 is TEMP-forced weak
+    (any link touching it → −90 RSSI), so its path metric is 10× worse; the airtime metric installs the board1
+    path.</figcaption>
+  </figure>
+
+  <p>Lower airtime metric wins — the board1 path (5462) is 10× cheaper than the board2 path (54614):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">via board1</span><span class="bar-track"><span class="bar-fill fast" style="width:10%"></span></span><span class="val">5462 ✓ chosen</span></div>
+    <div class="bar-row"><span class="lbl">via board2</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">54614</span></div>
+  </div>
+
+  <ul>
+    <li><strong>Console:</strong> board0's path to chronite installed <strong>via board1</strong> (5462) and
+      <strong>held stably</strong> (refreshes stayed on board1; initial board2 first-PREP-on-empty-path transients
+      settled out). board0 ping chronite <strong>0% loss</strong> (multi-hop through board1).</li>
+    <li><strong>On-air (gold standard):</strong> captured on chronium's <code>morse0</code> monitor — board0's DATA
+      frames carried <strong>RA = board1 ×25, RA = board2 ×0</strong> (+1 broadcast ARP). The routing decision is
+      proven on the physical air, not just the log.</li>
+  </ul>
+
+  <div class="callout ok">
+    <p class="ct">✓ Validates</p>
+    <p>The airtime metric + HWMP fix <strong>pick the better multi-hop route at scale, across the ESP↔Linux
+    boundary</strong> — exactly what the old fixed metric could not (both paths 2 hops = tie).</p>
+  </div>
+
+  <h3 id="monitor-recipe">chronium monitor recipe (the correct one)</h3>
+  <p>Per <code>docs/reference/rimba-linux-halow-monitor.md</code>: on chronium, <code>iw dev wlan1 set type
+  monitor</code> + <code>iw dev wlan1 set freq 5560</code> (S1G ch27 via morse's 5 GHz model — <strong>not</strong>
+  <code>set channel 27</code>, which errors), bring up <code>morse0</code>, read it with an
+  <strong>AF_PACKET/SOCK_RAW</strong> reader skipping the radiotap header (the Pis have no tcpdump). Monitor is
+  exclusive with normal operation, so chronium sniffs while the ESPs + chronite drive traffic. Restore with
+  <code>set type managed</code>.</p>
+
+  <h2 id="status">Status</h2>
+  <div class="callout">
+    <p style="margin:0">Both are <strong>validations of already-merged code</strong> (no source change — the
+    diamond firmware was flashed from the existing <code>-perf</code> build artifact; the TEMP override/app-config
+    were reverted). The 6-node + on-air results close the "at-scale / on-air" gaps left by the unit + 3-board
+    verification.</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#six-node">1 · Full 6-node stress test</a></li>
+  <li><a href="#bench-ops">Bench-ops lessons</a></li>
+  <li><a href="#diamond">2 · Forced-topology diamond</a></li>
+  <li><a href="#monitor-recipe">chronium monitor recipe</a></li>
+  <li><a href="#status">Status</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-02-mesh-multinode-onair-validation</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

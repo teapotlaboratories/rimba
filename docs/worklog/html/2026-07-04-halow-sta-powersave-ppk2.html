@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HaLow STA power-save — PPK2-measured — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-04</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-04</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ complete</span>
+    <span class="badge">power-save · TWT · WNM</span>
+  </div>
+
+  <h1>HaLow STA power-save: PPK2-measured<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">dynamic PS · TWT · WNM · deep sleep — and the board hardware floor</small></h1>
+
+  <p class="lead">Actually <strong>measured</strong> the board-level current of every HaLow STA power-save feature on
+  <strong>board2</strong> (the nRF PPK2 node), then pushed further by sleeping the <strong>ESP32-S3 host</strong> as
+  well (light-sleep and deep-sleep). Closes the long-open gap from the 2026-06-22 TWT worklog, which confirmed TWT by
+  <em>ping cadence</em> only — "no radio-rail current measured this round." Full power-save ladder measured, board
+  hardware floor identified. All test firmware reverted; bench radio-silenced.</p>
+
+  <p>Self-contained record. <strong>Rig:</strong> board2 = Seeed XIAO ESP32-S3 + FGH100M (MM6108),
+  <code>BOARD=proto1-fgh100m</code>, morselib fw 1.17.6, powered through the <strong>Nordic PPK2</strong> in
+  ampere-meter mode (5 V passthrough). <strong>AP</strong> = chronite (Raspberry Pi + Wio-WM6180 MM6108),
+  <code>hostapd_s1g</code>, morse 1.17.8, <code>enable_twt=Y</code>. Config
+  <code>/home/chronite/hostapd-rimba.conf</code>: SSID <code>rimba-ping</code>, SAE <code>rimbahalow</code>, S1G ch27,
+  <code>beacon_int=100</code>, <strong><code>dtim_period=1</code></strong>, <code>wnm_sleep_mode=1</code>.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num">64.2 mA</div><div class="lbl">no-PS baseline (321 mW), radio always on</div></div>
+    <div class="stat"><div class="num ok">80–90%</div><div class="lbl">cut by any radio power-save</div></div>
+    <div class="stat"><div class="num ok">6.1 mA</div><div class="lbl">WNM + chip power-down (host awake)</div></div>
+    <div class="stat"><div class="num ok">3.7 mA</div><div class="lbl">lowest while <strong>associated</strong> (WNM+powerdown+light-sleep)</div></div>
+    <div class="stat"><div class="num acc">2.9 mA</div><div class="lbl">deep sleep — link lost, ~8 s reconnect</div></div>
+    <div class="stat"><div class="num">~3 mA</div><div class="lbl">hardware floor — below this needs HW</div></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Bottom line — the board2 power-save ladder</p>
+    <p>Any HaLow power-save cuts board2 <strong>80–90%</strong> (321 mW → 31–68 mW) — the number that was never
+    measured before. WNM+powerdown+host-light-sleep bottoms out at <strong>3.7 mA / 19 mW while staying associated</strong>;
+    deep sleep reaches <strong>2.9 mA / 14 mW</strong> but loses the link and pays ~8 s reconnect per wake. Below ~3 mA
+    is <strong>board hardware</strong>, not the CPU — the firmware/silicon core is already at µA.</p>
+  </div>
+
+  <h2 id="method">Method</h2>
+  <ul>
+    <li><strong>PPK2</strong> powers board2 and logs current at <strong>1 s</strong> with a wall-clock epoch
+      (<code>pwr_test/ppk2_mon_1s.py</code>, ampere mode, <code>set_source_voltage(5000)</code> needed even in
+      passthrough).</li>
+    <li><strong>Sweep firmware</strong> (a temporary rework of <code>rimba-halow-sta</code>): associate, then hold each
+      mode for a ~40 s <strong>idle</strong> window (NO traffic, so the radio dozes to its floor) with a grep-able
+      marker <code>=== PHASE &lt;name&gt; START uptime=&lt;s&gt;s ===</code>. The PPK2 trace is sliced per phase by
+      aligning the marker epochs to the current log. Phase durations are deterministic, so even when the serial log is
+      lost (see below) the schedule anchors the slicing.</li>
+    <li>All power-save calls are <strong>morselib host API</strong> — no GPIO/register/radio-IO poked; the API sends SPI
+      command frames to the MM6108 fw, which runs the actual radio sleep states. Used:
+      <code>mmwlan_set_power_save_mode()</code>, <code>mmwlan_set_dynamic_ps_timeout()</code>,
+      <code>mmwlan_twt_setup_request()</code> / <code>mmwlan_twt_teardown()</code>,
+      <code>mmwlan_set_wnm_sleep_enabled_ext()</code> (field <code>chip_powerdown_enabled</code>),
+      <code>mmwlan_shutdown()</code>.</li>
+  </ul>
+
+  <h2 id="radio-ps">1 · Radio power-save, ESP32 host awake (PM off)</h2>
+  <table>
+    <thead><tr><th>Mode</th><th class="num">Board current</th><th class="num">Power @5 V</th><th class="num">vs baseline</th></tr></thead>
+    <tbody>
+      <tr><td>No PS (<code>MMWLAN_PS_DISABLED</code>, radio always on)</td><td class="num"><strong>64.2 mA</strong></td><td class="num">321 mW</td><td class="num">—</td></tr>
+      <tr><td>Dynamic 802.11 PS (<code>PS_ENABLED</code>, DTIM1, 100 ms timeout)</td><td class="num">~13 mA</td><td class="num">65 mW</td><td class="num">−80%</td></tr>
+      <tr><td>TWT, 1 s service period</td><td class="num">~13 mA</td><td class="num">65 mW</td><td class="num">−80%</td></tr>
+      <tr><td>TWT, 10 s service period</td><td class="num">~13 mA</td><td class="num">66 mW</td><td class="num">−80%</td></tr>
+      <tr><td>WNM sleep (multi-DTIM)</td><td class="num"><strong>6.7 mA</strong></td><td class="num">33 mW</td><td class="num">−90%</td></tr>
+      <tr><td>WNM sleep + chip power-down</td><td class="num"><strong>6.1 mA</strong></td><td class="num">31 mW</td><td class="num">−90%</td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li><strong>Any HaLow power-save cuts board2 80–90%</strong> (321 mW → 31–68 mW). This is the number that was never
+      measured before.</li>
+    <li><strong>WNM sleep is deepest</strong> because it sleeps across <em>several</em> beacons; dynamic PS and TWT wake
+      at <strong>every DTIM</strong> (DTIM1 ≈ every 102 ms) so they idle higher (~13 mA), converging to ~6.7 mA only
+      when fully silent (the post-sweep tail read 6.7 mA).</li>
+    <li><strong>TWT ≈ dynamic PS at the board level</strong> — both just park the radio between wakes. TWT's extra value
+      (scheduled wake + AP downlink buffering) is latency/reliability and <em>letting the host sleep on a known
+      schedule</em> — which needs host-sleep integration (§2) to show up in board current.</li>
+    <li>Raw traces are flat within each mode with periodic DTIM-wake spikes (e.g. no-PS flat 64; WNM flat ~6 with rare
+      wakes). Measurement is clean and repeatable.</li>
+  </ul>
+
+  <h2 id="light-sleep">2 · + ESP32-S3 light-sleep (<code>esp_pm</code>, tickless) — counterintuitive</h2>
+  <p>Enabled <code>CONFIG_PM_ENABLE</code> + <code>CONFIG_FREERTOS_USE_TICKLESS_IDLE</code>,
+  <code>esp_pm_configure(160/40 MHz, light_sleep_enable=true)</code> after association.</p>
+  <table>
+    <thead><tr><th>Mode</th><th class="num">host awake</th><th class="num">+ host light-sleep</th><th>effect</th></tr></thead>
+    <tbody>
+      <tr><td>No PS</td><td class="num">64 mA</td><td class="num"><strong>31 mA</strong></td><td>✅ −33</td></tr>
+      <tr><td>Dynamic PS</td><td class="num">13 mA</td><td class="num"><strong>32 mA</strong></td><td>❌ +19</td></tr>
+      <tr><td>TWT 1 s / 10 s</td><td class="num">13 mA</td><td class="num"><strong>32 mA</strong></td><td>❌ +19</td></tr>
+      <tr><td>WNM sleep</td><td class="num">6.7 mA</td><td class="num"><strong>33 mA</strong></td><td>❌ +26</td></tr>
+      <tr><td><strong>WNM sleep + chip power-down</strong></td><td class="num">6.1 mA</td><td class="num"><strong>3.7 mA</strong></td><td>✅ <strong>−2.4 — new associated floor</strong></td></tr>
+    </tbody>
+  </table>
+  <p><strong>Sleeping the host helped in two places and hurt everywhere else.</strong> The 1 s averages hide fast
+  structure: within each second the current dips to <strong>0 mA</strong> (both asleep) and spikes to
+  <strong>~700 mA</strong> (wake). The problem is <strong>wake frequency vs. wake cost</strong>: at DTIM1 the radio
+  wakes the host ~10×/s, and each host wake is a full light-sleep exit (PLL relock + cache restore ≈ 700 mA spike). At
+  10 wakes/s the relock overhead <strong>exceeds</strong> the sleep savings → ~32 mA, <em>worse</em> than the no-PM
+  <code>waiti</code> idle (6–13 mA). No-PS improved (host was otherwise pinned awake). The winner is
+  <strong>WNM+powerdown</strong>: with the radio chip fully powered off there are no IRQs to wake the host, so it
+  light-sleeps for long stretches → <strong>3.7 mA / 19 mW</strong>, the lowest while <strong>staying associated</strong>.</p>
+  <div class="callout warn">
+    <p class="ct">⚠ Takeaway — host light-sleep only pays off when wakes are rare</p>
+    <p>Naively enabling <code>esp_pm</code> on top of radio PS <strong>backfires</strong>. To win: cut the wake rate
+    (raise AP <code>dtim_period</code> / STA listen interval) or power the radio down.</p>
+  </div>
+
+  <h2 id="deep-sleep">3 · ESP32-S3 deep sleep — the RTC leaf cycle</h2>
+  <p>Leaf firmware runs a clean RTC cycle — deep sleep powers off CPU + RAM, so <strong>the association is lost</strong>
+  and each wake pays a cold-boot + re-associate tax:</p>
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">boot</div><div class="s">cold start</div></div>
+      <div class="node acc"><div class="t">re-associate</div><div class="s">SAE + link</div></div>
+      <div class="node"><div class="t">brief work</div></div>
+      <div class="node"><div class="t"><code>mmwlan_shutdown()</code></div><div class="s">radio off</div></div>
+      <div class="node ok"><div class="t"><code>esp_deep_sleep</code></div><div class="s">30 s, CPU+RAM off</div></div>
+      <div class="node"><div class="t">wake = reboot</div><div class="s">→ repeat</div></div>
+    </div>
+    <figcaption>The deep-sleep RTC leaf cycle. Each 30 s doze costs a full reboot + re-associate on wake (~8 s).</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th>Phase</th><th class="num">Board current</th><th class="num">Duration</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Deep sleep</strong> (CPU off + radio shut down)</td><td class="num"><strong>~2.9 mA / 14 mW</strong> (min 2.72)</td><td class="num">the sleep window</td></tr>
+      <tr><td>Wake → cold-boot → re-associate</td><td class="num">~70–85 mA</td><td class="num"><strong>~8 s per wake</strong></td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    <p class="ct">The ~3 mA floor is hardware, not the CPU</p>
+    <p>The ESP32-S3 in deep sleep is ~7 µA, yet the board reads 2.9 mA. That residual is the always-on board hardware:
+    the FGH100M/MM6108 module regulator + whatever remains after <code>mmwlan_shutdown()</code> (it <em>resets</em> the
+    chip, does not hard power-gate it), the XIAO 5 V→3.3 V regulator quiescent draw, and the power LED. So
+    <strong>deep sleep (2.9 mA) barely beats WNM+powerdown+light-sleep (3.7 mA)</strong> — and deep sleep loses the link
+    + pays ~8 s reconnect per wake.</p>
+  </div>
+
+  <h2 id="ladder">The board2 power-save ladder</h2>
+  <table>
+    <thead><tr><th>State</th><th class="num">Current</th><th class="num">Power</th><th style="text-align:center">Associated?</th></tr></thead>
+    <tbody>
+      <tr><td>No power save</td><td class="num">64 mA</td><td class="num">321 mW</td><td style="text-align:center">✓</td></tr>
+      <tr><td>Radio PS (dynamic / TWT / WNM), host awake</td><td class="num">6–13 mA</td><td class="num">31–65 mW</td><td style="text-align:center">✓</td></tr>
+      <tr><td>WNM sleep + chip-powerdown + host light-sleep</td><td class="num">3.7 mA</td><td class="num">19 mW</td><td style="text-align:center">✓</td></tr>
+      <tr><td>Deep sleep (radio shut down + CPU off)</td><td class="num">2.9 mA</td><td class="num">14 mW</td><td style="text-align:center">✗ (~8 s reconnect)</td></tr>
+      <tr><td>below ~3 mA</td><td class="num">—</td><td class="num">—</td><td style="text-align:center"><strong>needs hardware</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>Board current at each rung, to scale from the 64 mA no-PS baseline:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">No PS</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">64 mA</span></div>
+    <div class="bar-row"><span class="lbl">Radio PS (dyn/TWT)</span><span class="bar-track"><span class="bar-fill fast" style="width:20.3%"></span></span><span class="val">~13 mA</span></div>
+    <div class="bar-row"><span class="lbl">WNM sleep</span><span class="bar-track"><span class="bar-fill fast" style="width:10.5%"></span></span><span class="val">6.7 mA</span></div>
+    <div class="bar-row"><span class="lbl">WNM + powerdown</span><span class="bar-track"><span class="bar-fill fast" style="width:9.5%"></span></span><span class="val">6.1 mA</span></div>
+    <div class="bar-row"><span class="lbl">+ host light-sleep</span><span class="bar-track"><span class="bar-fill fast" style="width:5.8%"></span></span><span class="val">3.7 mA</span></div>
+    <div class="bar-row"><span class="lbl">Deep sleep <em>(unassoc)</em></span><span class="bar-track"><span class="bar-fill fast" style="width:4.5%"></span></span><span class="val">2.9 mA</span></div>
+  </div>
+
+  <div class="callout">
+    <p class="ct">Deploy implication — the floor is duty-cycle-driven</p>
+    <p>Below ~3 mA requires <strong>hardware</strong> (power-gate the FGH100M, drop the power LED, more efficient
+    regulator) — the firmware/silicon core is already at µA. Because deep-sleep barely beats staying associated with the
+    radio off: <strong>rare wakes → deep-sleep RTC leaf; frequent / latency-sensitive → WNM+powerdown stays connected at
+    nearly identical power</strong> with no reconnect tax.</p>
+  </div>
+
+  <h2 id="raw">RAW (Restricted Access Window) — not power-measured (single-STA limit)</h2>
+  <p><code>hostapd_s1g</code> supports RAW (<code>raw_enabled</code>, <code>raw_conf</code>, <code>praw_period</code>,
+  <code>praw_start_offset</code> in the binary; the AP logs <code>RAW Settings:</code> on boot). STA side is just
+  <code>mmwlan_sta_args.raw_sta_priority</code> (0–7, −1 = off); the AP owns the schedule. RAW is an
+  <strong>AP-scheduled multi-STA contention</strong> feature — with a single board2 STA its power benefit ≈ dynamic PS
+  (nothing to contend with). Measuring its real win (per-group slots cutting collisions + letting STAs sleep outside
+  their slot) needs <strong>multiple STAs</strong> (board0/board1 as extra STAs). Deferred.</p>
+
+  <h2 id="gotchas">Gotchas (for next time)</h2>
+  <ul>
+    <li><strong>Sleep firmware flaps USB.</strong> Light-sleep (CPU+USB power-down each DTIM) and deep-sleep (USB off
+      for the whole sleep window) make board2's <code>/dev/ttyACM4</code> appear/disappear, so esptool can't grab it and
+      the serial log garbles. <strong>Fix:</strong> power-cycle board2 via the PPK2 DUT rail and flash with
+      <strong>direct esptool</strong> (skip <code>make</code>'s cmake latency) in the ~8 s fresh-boot window before the
+      fw sleeps. Helpers in <code>pwr_test/</code> (<code>reflash_and_flash.py</code>, <code>reflash_hello.py</code>,
+      <code>killall_pwr.py</code>). Rely on the PPK2 (not the serial) for the numbers; the deterministic phase schedule
+      anchors the slicing.</li>
+    <li><strong><code>esp_pm</code> overhead is real.</strong> Enabling PM without an achievable sleep raises idle
+      current — light sleep only wins when the sleep interval amortizes the ~ms relock.</li>
+    <li><strong><code>iw info</code> misreports txpower</strong>, and other bench notes: see the mesh worklogs.</li>
+  </ul>
+
+  <h2 id="state">State at end</h2>
+  <p>All test firmware reverted (<code>rimba-halow-sta</code> back to its TWT action-frame test; app
+  <code>sdkconfig.defaults</code> removed). board2 = rimba-hello + powered OFF; board0/board1 = rimba-hello; all 4 Linux
+  nodes <code>wlan1</code> DOWN, chronite hostapd stopped. Repo clean. Measurement scripts live outside the repo in
+  <code>~/pwr_test/</code> (<code>ppk2_mon_1s.py</code>, <code>analyze.py</code>, <code>analyze_pm.py</code>, the reflash
+  helpers).</p>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#method">Method</a></li>
+  <li><a href="#radio-ps">1 · Radio power-save (host awake)</a></li>
+  <li><a href="#light-sleep">2 · + host light-sleep</a></li>
+  <li><a href="#deep-sleep">3 · Deep sleep — RTC leaf</a></li>
+  <li><a href="#ladder">The power-save ladder</a></li>
+  <li><a href="#raw">RAW — not power-measured</a></li>
+  <li><a href="#gotchas">Gotchas</a></li>
+  <li><a href="#state">State at end</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-04-halow-sta-powersave-ppk2</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

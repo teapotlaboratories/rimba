@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P0 multi-node bench — 3× ESP32 IBSS — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-19</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-19</span>
+    <span class="badge">3 min read</span>
+    <span class="badge">IBSS · multi-node · bring-up</span>
+    <span class="badge warn">5 pass · 2 partial</span>
+  </div>
+
+  <h1>P0 multi-node bench — 3× ESP32 IBSS<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">first 3-node exercise of the open 802.11ah IBSS foundation</small></h1>
+
+  <p class="lead">First real multi-node exercise of the open 802.11ah IBSS foundation: 3 ESP32-S3 + HaLow
+  boards in one cell, validating the per-peer station records (<code>#14</code>) that are invisible with
+  2 boards. Companion to the test plan (<a href="../../ibss/rimba-ibss-test-plan.md"><code>rimba-ibss-test-plan.md</code></a>
+  §4) — results recorded there; this is the blow-by-blow.</p>
+
+  <h2 id="setup">Setup</h2>
+  <ul>
+    <li>3× XIAO ESP32-S3 + HaLow (MM6108) on <code>/dev/ttyACM0..2</code>, <code>boards/proto1-fgh100m</code>.</li>
+    <li>One binary: <code>firmware/rimba-halow-ibss</code> with the new <strong>N-node addressing</strong> —
+      <code>my_ip = 192.168.13.&lt;octet(mac)&gt;</code> (octet = <code>mac[5]</code>, clamp 0→1 / 255→254),
+      and a ping to <strong>every</strong> peer from <code>mmwlan_ibss_get_peers()</code> (was hardcoded
+      <code>.1</code>/<code>.2</code>, which collides at ≥3 nodes). The IBSS create/join role stays a MAC heuristic.</li>
+    <li>Cell params: SSID <code>rimba-ibss</code>, BSSID <code>02:12:34:56:78:9a</code>, S1G ch27 / 1 MHz /
+      op-class 68 / US, OPEN.</li>
+  </ul>
+
+  <p>MAC → IP that formed:</p>
+  <table>
+    <thead><tr><th>MAC</th><th>IP</th><th>Port (this run)</th></tr></thead>
+    <tbody>
+      <tr><td><code>68:24:99:44:6b:b7</code></td><td class="num"><code>.183</code></td><td>ACM0</td></tr>
+      <tr><td><code>bc:2a:33:96:b2:9f</code></td><td class="num"><code>.159</code></td><td>ACM1</td></tr>
+      <tr><td><code>68:24:99:44:6a:56</code></td><td class="num"><code>.86</code></td><td>ACM2</td></tr>
+    </tbody>
+  </table>
+
+  <div class="diagram">
+    <svg viewBox="0 0 480 300" role="img" aria-label="Three-node IBSS cell, all pairs connected">
+      <!-- edges: full triangle -->
+      <line x1="240" y1="60" x2="95" y2="235" stroke="#888" stroke-width="2"/>
+      <line x1="240" y1="60" x2="385" y2="235" stroke="#888" stroke-width="2"/>
+      <line x1="95" y1="235" x2="385" y2="235" stroke="#888" stroke-width="2"/>
+      <!-- node N0 -->
+      <circle cx="240" cy="60" r="34" fill="rgba(47,111,235,0.10)" stroke="#2f6feb" stroke-width="2"/>
+      <text x="240" y="55" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">N0</text>
+      <text x="240" y="73" text-anchor="middle" font-size="12" fill="#888">.183 · ACM0</text>
+      <!-- node N1 -->
+      <circle cx="95" cy="235" r="34" fill="rgba(47,111,235,0.10)" stroke="#2f6feb" stroke-width="2"/>
+      <text x="95" y="230" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">N1</text>
+      <text x="95" y="248" text-anchor="middle" font-size="12" fill="#888">.159 · ACM1</text>
+      <!-- node N2 -->
+      <circle cx="385" cy="235" r="34" fill="rgba(47,111,235,0.10)" stroke="#2f6feb" stroke-width="2"/>
+      <text x="385" y="230" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">N2</text>
+      <text x="385" y="248" text-anchor="middle" font-size="12" fill="#888">.86 · ACM2</text>
+      <!-- ssid label -->
+      <text x="240" y="160" text-anchor="middle" font-size="12" fill="#888">SSID rimba-ibss · BSSID 02:12:34:56:78:9a</text>
+    </svg>
+    <figcaption>The cell that formed — 3 nodes, one BSSID, all-pairs unicast reachable (P0.2: 165 replies, 0 timeouts).</figcaption>
+  </div>
+
+  <h2 id="results">Results</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">2</div><div class="lbl">peer records / node (correct MACs, AIDs 1 &amp; 2)</div></div>
+    <div class="stat"><div class="num ok">165 / 0</div><div class="lbl">ping replies / timeouts (all-pairs)</div></div>
+    <div class="stat"><div class="num">16–57 ms</div><div class="lbl">3-node RTT (vs ~16 ms on 2 boards)</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">errors / asserts under concurrent load</div></div>
+    <div class="stat"><div class="num ok">130 + 73</div><div class="lbl">survivor replies across the drop, 0 timeouts</div></div>
+    <div class="stat"><div class="num acc">~6.1 s</div><div class="lbl">rejoin → bidirectional data</div></div>
+  </div>
+
+  <p><strong>P0.1 discovery ☑</strong> — every node formed <strong>exactly 2</strong> peer records, correct MACs,
+  distinct AIDs (1 &amp; 2), no self/BSSID/bogus entries.</p>
+
+  <p><strong>P0.2 all-pairs unicast ☑</strong> — full triangle reachable; <strong>165 ping replies, 0 timeouts</strong>
+  in the capture window. RTT 16–57 ms (vs ~16 ms on the 2-board bench — the spread is the added 3-node contention,
+  all well-behaved).</p>
+
+  <p><strong>P0.3 broadcast ☑</strong> — each node received the raw <code>0x88B5</code> broadcast (13–18 frames/node).</p>
+
+  <p><strong>P0.5 concurrent multi-peer load ☑</strong> — each node drove <strong>both</strong> peers' unicast pings
+  + the <code>0x88B5</code> broadcast simultaneously; all flows held, <strong>0 errors/asserts</strong> on any board.</p>
+
+  <div class="callout warn">
+    <p class="ct">◐ P0.4 per-peer dedup — partial</p>
+    <p>Per-peer AIDs are independent and the concurrent 2-peer flows stayed healthy, but per-peer <strong>seq/dup
+    counter</strong> independence was only inferred from clean flows, not isolated as its own assertion. Revisit with
+    a forced duplicate / seq-wrap probe.</p>
+  </div>
+
+  <p><strong>P0.6 drop/rejoin ◐</strong> (core PASS, survivor-side caveat) — dropped N2 (<code>.86</code>) by
+  re-flashing it (radio off through the flash = clean departure), survivors capturing throughout:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node err"><div class="t">Drop N2</div><div class="s">re-flash · radio off</div></div>
+      <div class="node ok"><div class="t">Survivors hold</div><div class="s">130 + 73 replies · 0 timeouts</div></div>
+      <div class="node"><div class="t">N2 reboots</div><div class="s">rejoins cell</div></div>
+      <div class="node acc"><div class="t">Rediscovers</div><div class="s">both peers · stable AIDs</div></div>
+      <div class="node ok"><div class="t">Bidirectional</div><div class="s">~6.1 s after app start</div></div>
+    </div>
+    <figcaption>Drop/rejoin sequence — the survivor link never broke; N2 re-acquired both peers and had data flowing again ~6.1 s after app start.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Survivor link unaffected</strong> — ACM0↔ACM1 (<code>.183</code>↔<code>.159</code>) ran
+      <strong>130 + 73 continuous replies, 0 timeouts, 0 crashes</strong> across the drop.</li>
+    <li><strong>Rejoin</strong> — N2 rebooted, rejoined, rediscovered <strong>both</strong> peers with stable AIDs,
+      restarted pings to both (fresh empty <code>pinged[]</code>), and had <strong>bidirectional data back
+      ~6.1 s after app start</strong> (first reply 53 ms; a one-off 718 ms first packet = ARP resolution, then
+      steady ~30 ms).</li>
+  </ul>
+
+  <div class="callout warn">
+    <p class="ct">◐ Caveat — test-harness, not IBSS</p>
+    <p>The <strong>survivor side</strong> of re-acquisition was under-tested. Survivors logged <strong>0 new pings</strong>
+    when <code>.86</code> returned, because the app's <code>pinged[]</code> dedup still had <code>.86</code> from the
+    first run → no fresh session for a peer that returns with the <strong>same MAC</strong>. This is the no-age-out gap
+    (test plan §8.1) surfacing at the app layer: survivors never free the stale peer record, and the ping app conflates
+    "discovered once" with "ping started once." The <strong>protocol path is unaffected</strong> — real Rimba DATA is
+    driven off the live peer table every loop, not a one-shot ping session. To test survivor re-acquisition properly the
+    ping app needs <strong>membership-driven</strong> sessions (start/stop with peer-table presence), which is blocked on
+    peer age-out (§8.1, backlog <code>#14</code> follow-on).</p>
+  </div>
+
+  <p><strong>P0.7 multi-creator convergence ☑</strong> — all three boards (whatever role the MAC heuristic assigned)
+  shared one BSSID/cell; no split-cell.</p>
+
+  <h2 id="takeaways">Takeaways</h2>
+  <ul>
+    <li>The N-node addressing change works exactly as intended; the per-peer records (<code>#14</code>) hold up at
+      3 nodes — independent AIDs, no cross-peer false dedup, healthy concurrent flows.</li>
+    <li>The no-age-out gap (§8.1) now has a concrete observed consequence at the app layer (survivors can't cleanly
+      re-acquire a returned same-MAC peer). Reinforces that <strong>peer age-out</strong> is the next robustness item
+      before survivor-side reliability testing is meaningful.</li>
+  </ul>
+
+  <h2 id="next">Next</h2>
+  <ul>
+    <li><strong>P0.5-interop ★</strong> — Linux MM6108 (<code>morse_driver</code>) 4th node; the reference-impl check
+      (riskiest divergence: our beacon IE set vs <code>morse_driver</code>).</li>
+    <li><strong>P1 reliability</strong> — throughput, loss/jitter, MTU sweep, overnight soak (this run was minutes,
+      not hours).</li>
+  </ul>
+
+  <h2 id="bench-state">Bench state</h2>
+  <div class="callout"><p style="margin:0">All three boards returned to radio-silent (<code>rimba-hello</code>) after the run.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#setup">Setup</a></li>
+    <li><a href="#results">Results</a></li>
+    <li><a href="#takeaways">Takeaways</a></li>
+    <li><a href="#next">Next</a></li>
+    <li><a href="#bench-state">Bench state</a></li>
+  </ul>
+</div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-19-p0-multinode-bench</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

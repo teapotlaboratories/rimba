@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Real per-peer rate control → mesh airtime metric — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-02</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-02</span>
+    <span class="badge">4 min read</span>
+    <span class="badge ok">✓ hardware-verified</span>
+    <span class="badge bug">mesh · HWMP · rate-control</span>
+  </div>
+
+  <h1>Real per-peer rate control feeding the mesh airtime metric<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">learned best-throughput rate + real success probability into the ETT</small></h1>
+
+  <p class="lead">Replaces P6c's RSSI-seeded rate in <code>mesh_last_hop_metric</code> with mmrc's
+  <strong>learned</strong> best-throughput rate + the <strong>real success probability</strong>, removing P6c
+  divergences <code>#1</code> (RSSI-seed) and <code>#2</code> (<code>err</code> structurally 0). Implemented
+  across 4 files, built, and <strong>hardware-verified</strong> (the metric now tracks the real per-link loss).
+  Backward-compatible: a cold/unconverged peer is byte-identical to the old behaviour.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">4 files</div><div class="lbl">implemented across</div></div>
+    <div class="stat"><div class="num acc">2 gaps → 3 edits</div><div class="lbl">wiring that was missing</div></div>
+    <div class="stat"><div class="num ok">#1 + #2</div><div class="lbl">P6c divergences removed</div></div>
+    <div class="stat"><div class="num ok">on-air</div><div class="lbl">confirmed on chronium <code>morse0</code></div></div>
+  </div>
+
+  <h2 id="feasibility">Feasibility — FEASIBLE in morselib (unlike A-MPDU)</h2>
+  <p>Assessed 2026-07-02 (workflow + anchor-verify). The key result: unlike A-MPDU
+  (<code>[[mesh-no-ampdu-aggregation]]</code>), the <strong>tx-status signal reaches the mesh datapath
+  ungated</strong> — mesh <code>get_sta_state</code> = <code>umac_datapath_get_state_ibss</code> returns
+  CONNECTED unconditionally, so no <code>MMWLAN_STA_CONNECTED</code> gate blocks feedback. Only two wirings
+  were missing.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Why this is feasible where A-MPDU wasn't</p>
+    <p>Mesh <code>get_sta_state</code> returns CONNECTED unconditionally, so tx-status feedback flows to the mesh
+    datapath with no <code>MMWLAN_STA_CONNECTED</code> gate in the way. The rate-control signal was already
+    arriving — it just wasn't wired to per-peer state or consumed by the metric.</p>
+  </div>
+
+  <h2 id="gaps-edits">The two gaps + the three edits</h2>
+
+  <div class="callout bug">
+    <p class="ct">🐛 GAP-1 — mmrc was never <em>started</em> for mesh peer stads</p>
+    <p>So <code>reference_table</code> stayed NULL and there was no learned rate.</p>
+    <p><strong>Edit 1</strong> (<code>umac_mesh.c</code>): <code>umac_mesh_peer_rc_start()</code> →
+    <code>umac_rc_start(peer-&gt;stad, 0, MMRC_MCS7)</code> at the two ESTAB transitions (after
+    <code>umac_mesh_link_up_once</code>, outside the <code>#if MMWLAN_MESH_SEC_PHASE1</code> so the open build
+    also learns); <code>umac_rc_stop(peer-&gt;stad)</code> in <code>mesh_peer_free</code> before the free (no-op
+    if never started).</p>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">🐛 GAP-2 — <code>datapath_ops_mesh.lookup_stad_by_aid</code> pointed at the STA variant</p>
+    <p>(<code>umac_datapath.c</code>) which returns the single common (AID-0) stad and AID-mismatches every peer
+    (1..N) → per-peer feedback dropped.</p>
+    <p><strong>Edit 2</strong> (<code>umac_datapath.c</code>): new
+    <code>umac_datapath_lookup_stad_by_aid_mesh</code> → <code>aid==0</code> = common stad, else
+    <code>umac_mesh_peer_stad_at(aid-1)</code> (mirrors <code>umac_ap_lookup_sta_by_aid</code>), wired into
+    <code>datapath_ops_mesh</code>. Now <code>umac_datapath_process_tx_status_queue</code> resolves the per-peer
+    stad and <code>umac_rc_feedback</code> lands in its <code>reference_table</code>.</p>
+    <p><strong>Edit 2b</strong> (<code>umac_datapath.c</code>): the keyed relay/group forward path pinned the mgmt
+    (MCS0) table; switch it to <code>umac_rc_init_rate_table_data(stad, …, mmpkt_get_data_length(txbufview))</code>
+    (mirrors the local-origin path) so a relay-dominated node also trains mmrc, not just MCS0. Auto-falls-back to
+    mgmt until RC starts.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">tx-status queue</div><div class="s">per forwarded/local frame</div></div>
+      <div class="node acc"><div class="t">lookup_stad_by_aid_mesh</div><div class="s">aid → peer stad</div></div>
+      <div class="node"><div class="t">per-peer stad</div><div class="s">peer 1..N (was AID-0)</div></div>
+      <div class="node acc"><div class="t">umac_rc_feedback</div><div class="s">lands per peer</div></div>
+      <div class="node ok"><div class="t">reference_table</div><div class="s">learned rate + prob</div></div>
+    </div>
+    <figcaption>Edit 2 routes tx-status feedback to the correct per-peer stad, so <code>umac_rc_feedback</code> trains each peer's own <code>reference_table</code> instead of the shared AID-0 common stad.</figcaption>
+  </figure>
+
+  <h3>Edit 3 — consume it</h3>
+  <ul>
+    <li>New <code>umac_rc_get_learned_metric(stad, &amp;thr_kbps, &amp;prob)</code> (<code>umac_rc.c/h</code>):
+      <code>umac_sta_data_get_rc</code> → <code>mmrc_sta_get_best_rate(reference_table)</code> → returns
+      <code>false</code> if <code>reference_table==NULL</code> (RC not started) or
+      <code>table[best.index].evidence==0</code> (no samples yet); else <code>thr_kbps =
+      mmrc_calculate_theoretical_throughput(best)/1000</code> + <code>prob = table[best.index].prob</code>.</li>
+    <li><code>mesh_airtime_from_thr_kbps(thr_kbps, prob)</code> now takes the success probability: the hard-coded
+      <code>err=0</code> becomes <code>err = s_unit − s_unit*prob/100</code> (the real Linux fail term,
+      <code>mesh_hwmp.c:361-372</code>); <code>prob==0</code> → <code>MAX_METRIC</code> (==
+      <code>fail_avg&gt;=100</code>). <strong>prob=100 ⇒ err=0 ⇒ byte-identical to the old path.</strong></li>
+    <li><code>mesh_last_hop_metric</code> is hybrid: learned-metric when converged, else the RSSI-seed tier with
+      prob=100.</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">reference_table</div><div class="s">mmrc learned</div></div>
+      <div class="node acc"><div class="t">get_learned_metric</div><div class="s">thr_kbps + prob</div></div>
+      <div class="node acc"><div class="t">airtime_from_thr_kbps</div><div class="s">err = s_unit − s_unit·prob/100</div></div>
+      <div class="node"><div class="t">mesh_last_hop_metric</div><div class="s">ETT (hybrid)</div></div>
+    </div>
+    <figcaption>Edit 3 consumes the learned rate: converged peers use the real throughput + fail term; unconverged peers fall back to the RSSI-seed tier at prob=100 (byte-identical to before).</figcaption>
+  </figure>
+
+  <h2 id="invariants">Invariants held</h2>
+  <ul>
+    <li><strong>Same metric scale as Linux airtime</strong> — learned <code>thr_kbps</code> from the identical
+      <code>mmrc_calculate_theoretical_throughput/1000</code> the RSSI path used, into the identical ETT. Mixed
+      learned/RSSI-seed nodes stay comparable; no PREQ/PREP wire-format change.</li>
+    <li><strong>Monotonic, strictly-positive per hop</strong> — for <code>prob∈[1,100]</code>,
+      <code>s_unit−err = s_unit*prob/100 ≥ 2 &gt; 0</code> (no div-by-zero); every hop contributes ≥ 1.
+      <code>prob==0</code>/<code>rate==0</code> short-circuit to <code>MAX_METRIC</code>.</li>
+    <li><strong>Staged + reversible</strong> — Edit 2(+2b) is inert without RC (feedback resolves a stad whose
+      table is NULL, <code>umac_rc_feedback</code> no-ops); Edit 1 turns on learning; Edit 3 consumes it.</li>
+  </ul>
+
+  <h2 id="verification">Verification (hardware, 2026-07-02)</h2>
+  <p>2-hop-capable mesh: board0 + board1 (secured) + chronite; chronite drove a sustained ping at board0 so
+  board0's TX (replies) trained mmrc for the chronite link. A TEMP <code>printf</code> in
+  <code>mesh_last_hop_metric</code> logged when the <strong>learned</strong> branch was taken:</p>
+
+<pre><code>RC-METRIC LEARNED sa=&lt;chronite&gt;  thr=3000k prob=93  metric=2934
+RC-METRIC LEARNED sa=&lt;chronite&gt;  thr=900k  prob=100 metric=9103
+RC-METRIC LEARNED sa=&lt;board1&gt;    thr=300k  prob=100 metric=27307</code></pre>
+
+  <ul>
+    <li><strong>RC started + converged</strong> (learned prints appear) — proves Edit 1 + the feedback path
+      (Edit 2), since the accessor gates on <code>evidence&gt;0</code>.</li>
+    <li><strong>Real fail term</strong> — chronite <code>prob=93</code> (not 100) raised the metric
+      <strong>2731 → 2934</strong> vs the old RSSI-seed MCS7 (err=0); the metric now tracks the real ~7% link
+      loss (divergence <code>#2</code> gone).</li>
+    <li><strong>Learned rate</strong> — <code>thr</code> is mmrc's best-throughput (3000k/900k as it samples), not
+      the 3-tier RSSI guess (divergence <code>#1</code> gone).</li>
+    <li><strong>Build:</strong> clean across the 4 files. TEMP <code>printf</code>/<code>&lt;stdio.h&gt;</code>
+      reverted after.</li>
+  </ul>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">old RSSI-seed MCS7 · err=0</span><span class="bar-track"><span class="bar-fill slow" style="width:93.1%"></span></span><span class="val">metric 2731</span></div>
+    <div class="bar-row"><span class="lbl">learned · prob=93</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">metric 2934</span></div>
+  </div>
+  <p style="font-size:13.5px;color:var(--muted);margin-top:-.4em">The real ~7% link loss now raises the chronite metric instead of the old hard-coded <code>err=0</code> pinning it at the ideal.</p>
+
+  <h3>On-air confirmation (chronium <code>morse0</code>, 2026-07-03)</h3>
+  <p>Re-verified on a secured mesh (board0 + board1 + chronite/chronosalt/chronogen) with <strong>chronium sniffing
+  <code>morse0</code></strong> (freq 5560, S1G ch27). Parsed the ESP HWMP <strong>PREQ metric field</strong> off the
+  air: originated PREQs carry <code>metric=0</code> (correct), forwarded PREQs accumulate the forwarder's learned
+  per-link cost, and — the decisive check — <strong>non-tier metric values appear on the air (<code>3035</code>,
+  <code>8441</code>)</strong> that the RSSI-seed <em>physically cannot</em> emit (it only produces
+  2731/6827/27307 at prob=100). So the learned rate + real prob reach the <strong>on-air</strong> metric field, not
+  just the local computation — the gold-standard confirmation. The same run also closed the peer-table growth's
+  deferred check: <strong>board0 held 5 peers</strong> (&gt;4, the old cap).</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Gold-standard on-air proof</p>
+    <p>Metric values <code>3035</code> and <code>8441</code> observed in the PREQ field on <code>morse0</code> are
+    outside the RSSI-seed's only possible outputs (2731 / 6827 / 27307 at prob=100), so the learned rate + real
+    probability demonstrably reach the wire, not just the local computation.</p>
+  </div>
+
+  <h2 id="rollout">Rollout</h2>
+  <p>Interop-safe: scalar ETT on a fixed scale, no wire change — a learned-rate node and an RSSI-seed node compare
+  on the same axis, no flag day. Directionality note (unchanged from P6c): <code>mesh_last_hop_metric</code> is keyed
+  by the transmitter and reads the local node's RC toward it, so a link is only as good as its better-instrumented
+  end.</p>
+
+  <h2 id="code-map">Code-map</h2>
+  <p>Rows updated in <code>docs/mesh-ap/rimba-mesh-80211s-code-map.md</code> (P6c / RC section). Removes P6c worklog
+  divergences <code>#1</code>/<code>#2</code> (<code>2026-07-02-mesh-p6c-airtime-metric.md</code>). Feasibility
+  memory: <code>[[mesh-real-rc-feasible-design]]</code>.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#feasibility">Feasibility in morselib</a></li>
+    <li><a href="#gaps-edits">Two gaps + three edits</a></li>
+    <li><a href="#invariants">Invariants held</a></li>
+    <li><a href="#verification">Verification (hardware)</a></li>
+    <li><a href="#rollout">Rollout</a></li>
+    <li><a href="#code-map">Code-map</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-02-mesh-real-rc-airtime-metric</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

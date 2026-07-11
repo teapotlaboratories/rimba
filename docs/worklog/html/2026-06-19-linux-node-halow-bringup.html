@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux MM6108 node — HaLow bring-up — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-19</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-19</span>
+    <span class="badge">8 min read</span>
+    <span class="badge ok">✓ bring-up done · interop passed</span>
+    <span class="badge">bring-up · IBSS</span>
+  </div>
+
+  <h1>Linux MM6108 node — HaLow bring-up<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">Path B (patched 6.12.21) kernel · Raspberry Pi 5 reference/interop node</small></h1>
+
+  <p class="lead">Bringing up the <strong>Raspberry Pi 5</strong> dev host as the <strong>Linux MM6108 reference/interop
+  node</strong> the open-IBSS test plan calls for (P0.5). This is the durable handoff for resuming <em>after the
+  reboot</em> — the working session runs <em>on</em> the Pi, so the reboot ends it; this doc + <code>~/halow/staging/</code>
+  + the <code>memory/</code> notes are how the next session continues.</p>
+
+  <h2 id="hardware">Hardware (what this node actually is)</h2>
+  <ul>
+    <li><strong>Host:</strong> Raspberry Pi 5, 8 GB, was running stock <code>6.18.34+rpt-rpi-2712</code>.</li>
+    <li><strong>HaLow radio:</strong> Seeed <strong>Wio-WM6108</strong> (Quectel <strong>FGH100M-H</strong>, Morse Micro
+      <strong>MM6108</strong>), seated in the <strong>Seeed WM1302 Pi hat</strong>, talking to the Pi <strong>over
+      SPI</strong> (not PCIe/SDIO). Nothing enumerated on any bus at start — SPI was disabled (<code>nospi10</code>,
+      no <code>dtparam=spi</code>).</li>
+    <li><code>wlan0</code> = onboard <strong>Broadcom CYW43455</strong> (brcmfmac) — the SSH/remote link rides on it,
+      <strong>NOT</strong> the HaLow radio. The HaLow radio comes up as a separate <code>wlanN</code>.</li>
+    <li>Module BCF: <strong><code>bcf_fgh100mhaamd.bin</code></strong> (the "H" = FGH100M-H). Chip FW:
+      <code>mm6108.bin</code>.</li>
+  </ul>
+
+  <h2 id="decision">The decision that shaped everything (Path A dead → Path B)</h2>
+  <p>The out-of-tree <code>morse_driver</code> <strong>cannot build against the stock 6.18 kernel</strong> — it needs
+  mac80211 S1G channel-bandwidth flags (<code>IEEE80211_CHAN_{1,2,4,8}MHZ</code>) that only exist in Morse Micro's
+  patched kernel tree. (Confirmed empirically: the build died on those flags being undeclared; they're absent from
+  <code>/usr/src/linux-headers-6.18.34*/include/net/cfg80211.h</code>.) Morse's newest patched branch is
+  <strong><code>mm/rpi-6.12.21/1.17.x</code></strong> (no 6.18). So the node <strong>requires building + booting
+  Morse's patched 6.12.21 kernel</strong> (a downgrade from 6.18.34). This is also the porting guide's recommended
+  path.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">stock 6.18.34</div><div class="s">rpt-rpi-2712</div></div>
+      <div class="node"><div class="t">morse_driver build</div><div class="s">Path A</div></div>
+      <div class="node err"><div class="t">FAIL</div><div class="s">S1G CHAN flags absent</div></div>
+      <div class="node ok"><div class="t">Path B</div><div class="s">build mm/rpi-6.12.21/1.17.x</div></div>
+    </div>
+    <figcaption>The <code>IEEE80211_CHAN_{1,2,4,8}MHZ</code> flags live only in Morse's patched kernel tree — Path A
+    dies at compile, Path B builds + boots the patched 6.12.21.</figcaption>
+  </figure>
+
+  <h2 id="sources">Sources followed (authority order)</h2>
+  <ol>
+    <li><strong><code>docs/reference/MM_APPNOTE-24_Linux_Porting_Guide.pdf</code></strong> — Morse's official Linux
+      Porting Guide v2 (governing source; §2 reqs/kernels, §3 patches, §4 driver, §5 firmware/BCF, §6 DT, §7 bring-up).</li>
+    <li><strong><code>morse_driver</code> source</strong> — ground truth for the DT contract (<code>spi.c</code>,
+      <code>of.c</code>).</li>
+    <li><strong>teapotlaboratories worklog</strong> (WM6180→Luckfox over SPI) — same flow, different SoC/pins.</li>
+    <li><strong>Morse community thread</strong> (exact WM6108+WM1302+Pi5 combo) — only for the board-specific GPIO
+      pin numbers (reset=17, power/wake+busy=23/24, spi-irq=5; on RP1 <code>&amp;spi0</code>).</li>
+  </ol>
+  <p>Corrections APPNOTE-24 made to the first-pass plan: driver flags add <code>CONFIG_MORSE_VENDOR_COMMAND=y</code>
+  (drop SDIO, SPI-only); BCF fallback symlink is <code>bcf_default.bin</code> not <code>bcf_boardtype_0801</code>
+  (0801 = Morse's own MF08651; explicit <code>bcf=</code> param is the primary selector anyway); load order needs
+  <code>modprobe mac80211 &amp;&amp; modprobe crc7</code> before the morse modules (<code>crc7</code> is <code>=m</code>).</p>
+
+  <h2 id="what-was-done">What was done (all non-destructive; default boot still 6.18)</h2>
+  <p>Working dir <code>~/halow/</code> (clones: <code>morse_driver</code> 1.17.9, <code>morse_cli</code> rel_1_17_8,
+  <code>morse-firmware</code>, <code>hostap</code>, <code>rpi-linux@mm/rpi-6.12.21/1.17.x</code>). Staging:
+  <code>~/halow/staging/</code>.</p>
+  <ul>
+    <li>Build deps installed (bc/bison/flex/libssl/ncurses/dtc/libnl-3/libnl-route-3/libusb-1.0/poppler-utils).</li>
+    <li><strong>Kernel <code>6.12.21-v8-16k+</code> built</strong> (<code>bcm2712_defconfig</code>;
+      mac80211/cfg80211=m, CRYPTO CCM/GCM/AES, CRC7=m, <strong>BRCMFMAC=m so onboard wifi/remote link
+      survives</strong>, S1G CHAN flags present). <code>Image.gz</code> + Pi5 dtb + 350 overlays.
+      <code>make modules_install</code> → <code>/lib/modules/6.12.21-v8-16k+</code>.</li>
+    <li><strong><code>morse_driver</code> built vs the new kernel</strong> (vermagic matches) → <code>morse.ko</code>
+      + <code>dot11ah.ko</code> installed into that module tree + <code>depmod</code>. (This was the exact build that
+      FAILED on 6.18.)</li>
+    <li><strong><code>morse_cli</code></strong>, <strong><code>hostapd_s1g</code></strong> +
+      <code>hostapd_cli_s1g</code> built → <code>/usr/local/bin</code>. (<code>wpa_supplicant_s1g</code> deferred:
+      OpenSSL-3.0 <code>EC_KEY</code> deprecation-as-error in DPP; not needed for the AP test — fix for the
+      IBSS/open-join phase, e.g. disable CONFIG_DPP or -Wno-deprecated.)</li>
+    <li>Firmware/BCF in <code>/lib/firmware/morse</code> (+ <code>bcf_default.bin</code> →
+      <code>bcf_fgh100mhaamd.bin</code>). <code>/etc/modprobe.d/morse.conf</code>:
+      <code>options morse bcf=bcf_fgh100mhaamd.bin country=US spi_clock_speed=20000000 enable_ps=0</code>.</li>
+    <li><strong>Pi-5 SPI overlay</strong> authored + dtc-validated → <code>/boot/firmware/overlays/wm6108-spi-pi5.dtbo</code>
+      (compatible <code>morse,mm610x-spi</code>; reset=GPIO17 active-low, power=GPIO23/24, spi-irq=GPIO5, CS0=GPIO8,
+      target <code>&amp;spi0</code>/RP1). Source: <code>~/halow/staging/wm6108-spi-pi5-overlay.dts</code>.</li>
+    <li><strong><code>/boot/firmware</code>:</strong> <code>kernel-morse.img</code>, <code>initramfs-morse</code>
+      (built for 6.12.21; root drivers ext4/mmc/sdhci-brcmstb verified <code>=y</code>), <code>config.txt.bak</code>
+      (stock 6.18, the UNTOUCHED default), and <strong><code>tryboot.txt</code></strong> = config.txt +
+      <code>dtoverlay=wm6108-spi-pi5</code> + <code>kernel=kernel-morse.img</code> +
+      <code>initramfs initramfs-morse followkernel</code>.</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">build 6.12.21</div><div class="s">Image.gz + morse.ko</div></div>
+      <div class="node"><div class="t">tryboot (once)</div><div class="s">power-cycle auto-reverts</div></div>
+      <div class="node acc"><div class="t">verify-bringup.sh</div><div class="s">check the chip + links</div></div>
+      <div class="node ok"><div class="t">promote-kernel.sh</div><div class="s">permanent</div></div>
+    </div>
+    <figcaption>Boot safety: default <code>config.txt</code> is unchanged (boots 6.18). <code>tryboot</code> boots
+    the Morse kernel ONCE; a power-cycle auto-reverts to 6.18. Nothing permanent until <code>promote-kernel.sh</code>.</figcaption>
+  </figure>
+
+  <h2 id="resume">RESUME HERE after reboot</h2>
+  <ol>
+    <li><strong>Reboot into the Morse kernel (once):</strong>
+      <pre><code>sudo reboot '0 tryboot'</code></pre></li>
+    <li><strong>New session — verify bring-up:</strong>
+      <pre><code>~/halow/staging/verify-bringup.sh</code></pre>
+      Checks: <code>uname</code> = 6.12.21-v8-16k+ · dmesg shows <code>mm6108.bin</code> + BCF loaded · new
+      <code>wlanN</code> (S1G) in <code>iw dev</code> · <code>morse_cli -i wlanN stats</code> responds · onboard
+      <code>wlan0</code> link survived.</li>
+    <li><strong>If good → make permanent:</strong> <code>~/halow/staging/promote-kernel.sh</code></li>
+    <li><strong>AP test (APPNOTE-24 §7.2):</strong> start <code>hostapd_s1g</code> (US op_class), confirm beaconing.
+      Association leg needs a STA peer — flash an ESP32 with <code>rimba-halow-sta</code>, OR just confirm beaconing
+      as the minimal gate.</li>
+    <li><strong>Then IBSS</strong> (the actual rimba goal): diverge from the guide's AP/STA path to
+      <code>iw dev wlanN ibss join rimba-ibss &lt;freq&gt; ... fixed-freq 02:12:34:56:78:9a</code> to match the
+      existing 3-board cell (SSID <code>rimba-ibss</code>, BSSID <code>02:12:34:56:78:9a</code>, S1G ch27 / 1 MHz /
+      op-class 68 / US, OPEN; IP <code>192.168.13.&lt;octet(mac)&gt;</code>). Needs <code>morse_cli</code>-driven S1G
+      chan setup.</li>
+  </ol>
+
+  <h2 id="gotchas">Gotchas (community thread, this exact combo)</h2>
+  <ul>
+    <li>First SPI bring-up wants a <strong>cold boot / power-cycle</strong> (warm reboot → <code>cmd63</code> SPI
+      errors). Recovery if the tryboot pass hits cmd63 but kernel+network are fine: <code>promote-kernel.sh</code>
+      then a cold power-cycle (safe now — boot+network already validated this pass).</li>
+    <li>Brownout under load → <code>cmd53_write ret:-71</code>: use a solid 5 V supply.</li>
+    <li>Overlay already disables kernel spidev on CE0/CE1 (else "chipselect 0 in use").</li>
+    <li>For hostapd/mesh later: <code>nmcli dev set wlanN managed no</code> first.</li>
+  </ul>
+
+  <h2 id="pointers">Pointers</h2>
+  <ul>
+    <li>Full runbook: <code>~/halow/staging/POST-BUILD-RUNBOOK.md</code></li>
+    <li>Memory: <code>memory/halow-linux-node-hardware.md</code>, <code>memory/halow-linux-node-bringup-status.md</code></li>
+    <li>Kernel build log: <code>~/halow/kbuild.log</code></li>
+  </ul>
+
+  <h2 id="bringup-done">UPDATE (later) — bring-up DONE + promoted</h2>
+  <p>Resumed from quartz (Armbian board) over SSH and drove the reboot + verification.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Result: SUCCESS</p>
+    <p>Warm <code>sudo reboot '0 tryboot'</code> booted <code>6.12.21-v8-16k+</code>; onboard <code>wlan0</code>/SSH
+    survived (brcmfmac=m). No <code>cmd63</code>/<code>cmd53</code> SPI errors (the warm-boot gotcha did <strong>not</strong>
+    trigger).</p>
+  </div>
+
+  <p>dmesg:</p>
+  <pre><code>morse_spi spi0.0: Loaded firmware from morse/mm6108.bin, size 481040, crc32 0xa4993663
+morse_spi spi0.0: Loaded BCF from morse/bcf_fgh100mhaamd.bin, size 1251, crc32 0x941b2a82</code></pre>
+
+  <ul>
+    <li>HaLow iface = <strong><code>wlan1</code></strong> (MAC <code>3c:22:7f:37:50:42</code>, Morse OUI),
+      <code>iw dev</code> OK.</li>
+    <li><strong>IBSS mode IS supported</strong> (<code>iw phy</code> → Supported interface modes: IBSS, …) — good for
+      rimba.</li>
+    <li>Promoted via <code>promote-kernel.sh</code>: <code>config.txt</code> now boots the Morse kernel by default.
+      Backups: <code>config.txt.pre-morse</code>, <code>config.txt.bak</code> (stock 6.18). Revert = restore
+      <code>.bak</code> + reboot.</li>
+  </ul>
+
+  <p><strong>Two gaps before the IBSS join (next session):</strong></p>
+  <ol>
+    <li><strong><code>morse_cli</code> is built without a transport</strong> — runtime prints "No transports
+      supported"; can't talk to the chip. Needs a rebuild with the nl80211/transport backend. Required for S1G
+      channel setup.</li>
+    <li><strong>S1G channel mapping.</strong> <code>iw phy</code> exposes the radio as <strong>5 GHz-mapped
+      channels</strong> (5180 MHz [36] …), not literal 900 MHz S1G. The IBSS join freq for our <strong>ch27 /
+      op_class 68 / 1 MHz</strong> must come from morse's S1G↔5 GHz mapping (via <code>morse_cli</code>), not
+      "915.5". Resolve the mapped freq, then <code>iw dev wlan1 set type ibss</code> + join the rimba cell (SSID
+      <code>rimba-ibss</code>, BSSID <code>02:12:34:56:78:9a</code>, OPEN, IP
+      <code>192.168.13.&lt;octet(mac)&gt;</code>).</li>
+  </ol>
+  <p>Note: <code>iw</code> lives in <code>/usr/sbin</code> (not in non-login SSH PATH); <code>morse_cli</code> in
+  <code>/usr/local/bin</code>.</p>
+
+  <h2 id="interop-passed">UPDATE 2026-06-20 — version-matched + AP↔ESP32 interop PASSED</h2>
+  <p>Driven from quartz over SSH. Reproducible recipe extracted to
+  <code>docs/reference/rimba-linux-node-setup.md</code>.</p>
+
+  <h3><code>morse_cli</code> <code>-28</code> root cause: it was <code>sudo</code> all along (not version skew)</h3>
+  <p>A long detour: <code>morse_cli -i wlan1 hw_version</code> returned <code>NL80211 code -28: Failed to
+  rcvmsgs</code>. Chased it as a version mismatch (rebuilt driver→1.17.8, firmware→1.17.8) — <strong>all
+  wrong</strong>. nl80211 vendor commands need <strong>CAP_NET_ADMIN</strong>; running as the <code>chronium</code>
+  user is rejected at the netlink layer. <strong><code>sudo morse_cli …</code> works:</strong> <code>HW Version:
+  MM6108A1</code>, FW <code>rel_1_17_8</code>. Lesson recorded as Gotcha <code>#1</code> in the setup doc. (Also: the
+  system-wide <code>morse_cli</code> was a stale no-transport build; replaced with the
+  <code>CONFIG_MORSE_TRANS_NL80211=1</code> build.)</p>
+
+  <h3>Stack now version-matched at 1.17.8</h3>
+  <p>driver / firmware / morse_cli / hostapd_s1g all <code>rel_1_17_8_2026_Mar_24</code>; kernel
+  <code>6.12.21-v8-16k+</code> (<code>mm/rpi-6.12.21/1.17.x</code>). Got the 1.17.8 firmware blob from the
+  <code>morse-firmware</code> <strong><code>1.17</code> branch</strong> commit <code>fd41e1c</code> (main only has
+  1.17.9; no tags). Displaced 1.17.9 binaries backed up in <code>~/halow/staging/</code>. Git hashes in the setup
+  doc §1.</p>
+
+  <h3>AP↔STA interop — PASSED ★ (P0.5-adjacent, the real milestone)</h3>
+  <p><code>hostapd_s1g</code> AP on <code>wlan1</code> (SSID <code>rimba-ping</code>, WPA3-SAE/CCMP, ch27/915.5 MHz/1
+  MHz/US, IP 192.168.12.1) ↔ ESP32 <code>rimba-halow-sta</code> (ACM0):</p>
+  <ul>
+    <li><code>AP-STA-CONNECTED 68:24:99:44:6b:b7</code> + <code>EAPOL-4WAY-HS-COMPLETED</code> (full WPA3-SAE
+      handshake)</li>
+    <li>station: signal −39 dBm, tx 21.7 / rx 72.2 Mbit/s, authorized</li>
+    <li>bidirectional ping: ESP32→AP ~12 ms; AP→ESP32 3/3 0% loss ~10 ms</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">hostapd_s1g AP</div><div class="s">wlan1 · rimba-ping</div></div>
+      <div class="node"><div class="t">WPA3-SAE</div><div class="s">CCMP</div></div>
+      <div class="node"><div class="t">EAPOL 4-way</div><div class="s">HS-COMPLETED</div></div>
+      <div class="node ok"><div class="t">AP-STA-CONNECTED</div><div class="s">−39 dBm · authorized</div></div>
+      <div class="node"><div class="t">ESP32 STA</div><div class="s">rimba-halow-sta</div></div>
+    </div>
+    <figcaption>→ our ESP32 port interoperates with the reference Linux <code>morse_driver</code> on-air.
+    Bidirectional ping 0% loss (~10–12 ms), tx 21.7 / rx 72.2 Mbit/s.</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">6.12.21-v8-16k+</div><div class="lbl">promoted Morse kernel</div></div>
+    <div class="stat"><div class="num">wlan1</div><div class="lbl">HaLow iface · 3c:22:7f:37:50:42</div></div>
+    <div class="stat"><div class="num acc">1.17.8</div><div class="lbl">stack version-matched</div></div>
+    <div class="stat"><div class="num">−39 dBm</div><div class="lbl">STA signal</div></div>
+    <div class="stat"><div class="num">21.7 / 72.2</div><div class="lbl">tx / rx Mbit/s</div></div>
+    <div class="stat"><div class="num ok">0%</div><div class="lbl">bidirectional ping loss</div></div>
+  </div>
+
+  <p><code>hostapd</code> log also revealed the <strong>S1G ch27 → 5 GHz ch 112 (5560 MHz)</strong> mapping — the
+  freq to feed <code>iw</code> for the IBSS join. <code>hostapd</code> config fix: <code>s1g_prim_chwidth=0</code>
+  (1 MHz), not 1.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">S1G ch27</div><div class="s">op_class 68 · 1 MHz · US · 915.5 MHz</div></div>
+      <div class="node acc"><div class="t">5 GHz ch112</div><div class="s">5560 MHz</div></div>
+      <div class="node ok"><div class="t">iw ibss join freq</div><div class="s">fixed-freq</div></div>
+    </div>
+    <figcaption>The S1G↔5 GHz mapping <code>iw</code> needs for the IBSS join, revealed by the <code>hostapd</code>
+    log; <code>morse_cli channel</code> later confirmed 915500 kHz / 1 MHz.</figcaption>
+  </figure>
+
+  <h3>Bench state</h3>
+  <p>Radio-silent: chronium hostapd stopped + <code>wlan1</code> down; ESP32 ACM0 reflashed <code>rimba-hello</code>.</p>
+
+  <h3>Next</h3>
+  <p>IBSS interop (P0.5 proper): <code>sudo /usr/sbin/iw dev wlan1 set type ibss</code> + join <code>rimba-ibss</code>
+  on freq <strong>5560 MHz</strong> fixed-freq <code>02:12:34:56:78:9a</code> (OPEN), IP
+  <code>192.168.13.&lt;octet(mac)&gt;</code>. Framing compat is now de-risked by the AP-STA success.</p>
+
+  <h2 id="ibss-run">UPDATE 2026-06-20 (later) — IBSS interop run (P0.5 proper)</h2>
+  <p>Joined the cell from Linux: <code>sudo iw dev wlan1 set type ibss; sudo iw dev wlan1 ibss join rimba-ibss 5560
+  fixed-freq 02:12:34:56:78:9a</code> (5 GHz ch112 = S1G ch27; <code>morse_cli channel</code> confirmed
+  <strong>915500 kHz / 1 MHz</strong> — the <code>iw</code> join lands on the right S1G channelization), IP
+  <code>192.168.13.66</code>. ESP32 <code>rimba-halow-ibss</code> on ACM0.</p>
+
+  <p><strong>Result (details + scorecard in test plan §5):</strong></p>
+  <ul>
+    <li><strong>Data path interoperates</strong> — Linux→ESP32 ping 3/3, 0% loss; the ESP32 receives Linux frames
+      and replies. Linux correctly discovers the ESP32 (<code>iw station dump</code>).</li>
+    <li><strong>Bug found (backlog <code>#16</code>)</strong> — the ESP32 misparses Linux's S1G <strong>beacons</strong>,
+      reading the TA from an offset in the TSF timestamp → floods its peer table with phantom peers, never records
+      Linux's real MAC. ESP32-side fix; data path unaffected.</li>
+  </ul>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Bug found — backlog <code>#16</code> (S1G beacon TA misparse)</p>
+    <p>The ESP32 reads the TA from an offset inside the TSF timestamp of Linux's S1G beacons → floods its peer table
+    with phantom peers and never records Linux's real MAC. ESP32-side fix; the data path is unaffected.</p>
+  </div>
+
+  <p>Radio-silent after: <code>iw dev wlan1 ibss leave</code> + <code>wlan1</code> down; ESP32 ACM0 →
+  <code>rimba-hello</code>.</p>
+
+  <h2 id="ibss-passing">UPDATE 2026-06-20 — <code>#16</code> fixed, IBSS interop fully passing</h2>
+  <p>Fixed the ESP32 S1G-beacon TA parse (<code>umac_datapath_rx_frame_filter</code> reads <code>source_addr</code>
+  for <code>(EXT, S1G_BEACON)</code> instead of <code>dot11_get_ta</code>'s addr2 offset, which landed in the beacon
+  timestamp). Re-ran against chronium: ESP32 forms <strong>1 clean peer</strong> (<code>3c:22:7f</code>, 0 phantoms),
+  discovers it passively from the beacon, and pings bidirectionally (ESP32→Linux 30/30, Linux→ESP32 4/4 0% loss,
+  ~12 ms). <strong>I.1/I.2/I.3 pass.</strong> Fix lives in the <code>mm-esp32-halow</code> submodule. Next: I.4 (frame
+  diff, <code>#11</code>), I.5 (mixed 4-node cell). Radio-silent after.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ IBSS interop fully passing (I.1 / I.2 / I.3)</p>
+    <p>1 clean peer (<code>3c:22:7f</code>, 0 phantoms) discovered passively from the beacon; bidirectional ping
+    ESP32→Linux 30/30, Linux→ESP32 4/4, 0% loss, ~12 ms. Fix in the <code>mm-esp32-halow</code> submodule. Next:
+    I.4 (frame diff, <code>#11</code>), I.5 (mixed 4-node cell).</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#hardware">Hardware</a></li>
+  <li><a href="#decision">Path A dead → Path B</a></li>
+  <li><a href="#sources">Sources followed</a></li>
+  <li><a href="#what-was-done">What was done</a></li>
+  <li><a href="#resume">Resume after reboot</a></li>
+  <li><a href="#gotchas">Gotchas</a></li>
+  <li><a href="#pointers">Pointers</a></li>
+  <li><a href="#bringup-done">Bring-up DONE + promoted</a></li>
+  <li><a href="#interop-passed">Version-match + AP↔ESP32</a></li>
+  <li><a href="#ibss-run">IBSS interop run</a></li>
+  <li><a href="#ibss-passing">#16 fixed · IBSS passing</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-19-linux-node-halow-bringup</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

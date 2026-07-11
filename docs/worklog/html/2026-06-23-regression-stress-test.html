@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Regression + stress test — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-23</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-23</span>
+    <span class="badge">4 min read</span>
+    <span class="badge">IBSS · Mesh-gate · stress</span>
+    <span class="badge warn">PASS · 1 finding</span>
+  </div>
+
+  <h1>Regression + stress test<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">IBSS + Mesh-gate / AP — every feature so far, both L2s</small></h1>
+
+  <p class="lead">Regression + stress test of every feature built so far on both L2s — the <strong>Mesh-gate</strong>
+  (AP + TWT + STA-scaling) and <strong>IBSS</strong> — plus the radio-free / scan sanity apps.
+  <strong>Status: PASS overall.</strong> One real finding: a <strong>drop/rejoin survivor-side rediscovery gap</strong>
+  in IBSS (logged as TODO <code>#20</code>). No crashes or reboots anywhere.</p>
+
+  <p><strong>Hardware:</strong> 3× XIAO ESP32-S3 + FGH100M (<code>/dev/ttyACM0..2</code>,
+  <code>BOARD=proto1-fgh100m</code>, fw 1.17.6) + chronium (RPi5 + MM6108, <code>morse_driver</code> 1.17.8).
+  The AP build under test is the cap=255 four-block-TIM firmware.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">600/600</div><div class="lbl">AP pings, 0% loss (120 s)</div></div>
+    <div class="stat"><div class="num acc">3 STAs</div><div class="lbl">authorized whole window (42/42)</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">reboots / panics anywhere</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">phantom peers (IBSS mixed cell)</div></div>
+    <div class="stat"><div class="num acc">≈ 1 s</div><div class="lbl">max TWT wake vs ~10 ms baseline</div></div>
+    <div class="stat"><div class="num warn">#20</div><div class="lbl">1 finding: survivor rediscovery gap</div></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Bottom line — every feature passed, no crashes</p>
+    <p>SoftAP (SAE), multi-STA assoc, AP↔STA data, TWT power-save, Linux-STA interop, IBSS bring-up + all-pairs
+    data, Linux-IBSS interop, and both radio-free apps all pass. Both stress runs held steady — <strong>0% AP loss</strong>,
+    <strong>no phantom peers</strong>, <strong>zero reboots</strong>. The single genuine gap is IBSS survivor-side
+    rediscovery after a drop/rejoin — not a crash, the datapath stays healthy. Recorded as TODO <code>#20</code>.</p>
+  </div>
+
+  <h2 id="results">Results matrix</h2>
+  <table>
+    <thead><tr><th>#</th><th>Feature</th><th>Test</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>AP1</td><td>SoftAP (SAE)</td><td>boots + beacons; STAs associate</td><td>✅</td></tr>
+      <tr><td>AP2</td><td>Multi-STA assoc</td><td>2 ESP32 STA + chronium STA = <strong>3 authorized</strong></td><td>✅</td></tr>
+      <tr><td>AP3</td><td>AP↔STA data</td><td>AP→STA ping, bidirectional</td><td>✅ 33/33 replies, 0 timeouts</td></tr>
+      <tr><td>AP4</td><td>TWT power-save</td><td>AP→STA RTT doze signature</td><td>✅ 12–1190 ms (max ≈ 1 s wake interval) vs ~10 ms baseline</td></tr>
+      <tr><td>AP5</td><td>Linux STA interop</td><td>chronium <code>wpa_supplicant_s1g</code> SAE → ESP32 AP</td><td>✅ associated + in authorized list</td></tr>
+      <tr><td>AP-stress</td><td>sustained load</td><td>chronium→AP 600 pings @5/s + 2 min watch</td><td>✅ <strong>0% loss</strong>, 3 STAs stable (42/42 samples), <strong>0 reboots</strong></td></tr>
+      <tr><td>IB1</td><td>IBSS bring-up</td><td>boots, joins cell</td><td>✅</td></tr>
+      <tr><td>IB2</td><td>3-board mesh</td><td>each node discovers both peers</td><td>✅ ACM0=.183, ACM1=.159, ACM2=.86</td></tr>
+      <tr><td>IB3</td><td>All-pairs data</td><td>bidirectional ping every pair</td><td>✅ (ACM1/ACM2 0 timeouts; ACM0 a few at settle)</td></tr>
+      <tr><td>IB4</td><td><code>0x88B5</code> raw frame</td><td>EtherType 0x88B5 exchange</td><td>⚠️ not re-observed this run (its shared IP datapath is healthy)</td></tr>
+      <tr><td>IB5</td><td>Drop/rejoin</td><td>drop + rejoin one node, survivors recover</td><td>⚠️ <strong>partial — see finding</strong></td></tr>
+      <tr><td>IB6</td><td>Linux IBSS interop</td><td>chronium IBSS node ↔ 3 ESP32</td><td>✅ chronium reaches all 3 (.183/.159 5/5, .86 4/5), <code>station dump</code>=3</td></tr>
+      <tr><td>IB-stress</td><td>mixed 4-node + load</td><td>3 ESP32 + chronium, sustained ping, drop/rejoin</td><td>✅ <strong>no phantom peers</strong>, <strong>0 survivor reboots</strong></td></tr>
+      <tr><td>H1</td><td><code>rimba-hello</code></td><td>radio-free boot + PSRAM</td><td>✅ PSRAM 8 MB, no panic</td></tr>
+      <tr><td>SC1</td><td><code>rimba-halow-scan</code></td><td>radio boots + scans</td><td>✅ chip 0x0306, scans, no panic</td></tr>
+    </tbody>
+  </table>
+
+  <p>AP4 — the TWT (power-save) RTT doze signature: baseline ~10 ms while the STA is awake, stretching up to
+  ~1190 ms when it is dozing, capped at the ≈ 1 s wake interval (bars to scale):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">awake baseline</span><span class="bar-track"><span class="bar-fill fast" style="width:1%"></span></span><span class="val">~10 ms</span></div>
+    <div class="bar-row"><span class="lbl">TWT dozing (max)</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">12–1190 ms</span></div>
+  </div>
+  <p style="color:var(--muted);font-size:13.5px;margin-top:-.4em">The long RTT is the doze signature working as intended — the AP buffers until the STA's next ≈ 1 s wake.</p>
+
+  <h2 id="stress">Stress detail</h2>
+  <ul>
+    <li><strong>AP</strong> — chronium→AP <code>192.168.12.1</code>: <strong>600/600 pings, 0% loss</strong> over 120 s;
+      AP held <strong>3 STAs the whole window</strong> (42/42 "authorized STAs: 3" samples), AP→STA(.2) 125 replies /
+      0 timeouts, <strong>0 reboots/panics</strong>.</li>
+    <li><strong>IBSS</strong> — mixed 4-node cell (ACM0 .183, ACM1 .159, ACM2 .86, chronium .66) under chronium load.
+      Survivors over ~100 s spanning a drop/rejoin: ACM0 saw <strong>only 2 distinct peer IPs (.159, .66) — zero
+      phantoms</strong> (the <code>#17</code> mixed-cell regression stays fixed), 2 timeouts; ACM1 similar, 3 timeouts;
+      <strong>0 reboots</strong>. Both survivors actively ping chronium (.66) — 500+ replies each — confirming
+      ESP32→Linux discovery (it just needs longer than a short window).</li>
+  </ul>
+
+  <div class="diagram"><svg viewBox="0 0 480 250" role="img" aria-label="Mixed 4-node IBSS cell topology">
+    <g stroke="#888" stroke-opacity=".5" stroke-width="1">
+      <line x1="110" y1="55" x2="370" y2="55"/>
+      <line x1="110" y1="55" x2="110" y2="195"/>
+      <line x1="110" y1="55" x2="370" y2="195"/>
+      <line x1="370" y1="55" x2="110" y2="195"/>
+      <line x1="370" y1="55" x2="370" y2="195"/>
+      <line x1="110" y1="195" x2="370" y2="195"/>
+    </g>
+    <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" text-anchor="middle">
+      <!-- ACM0 -->
+      <rect x="35" y="32" width="150" height="46" rx="9" fill="var(--card)" stroke="var(--line)" stroke-width="1"/>
+      <text x="110" y="52" fill="currentColor" font-size="13" font-weight="650">ACM0 · .183</text>
+      <text x="110" y="68" fill="var(--muted)" font-size="10.5">ESP32 · survivor</text>
+      <!-- ACM1 -->
+      <rect x="295" y="32" width="150" height="46" rx="9" fill="var(--card)" stroke="var(--line)" stroke-width="1"/>
+      <text x="370" y="52" fill="currentColor" font-size="13" font-weight="650">ACM1 · .159</text>
+      <text x="370" y="68" fill="var(--muted)" font-size="10.5">ESP32 · survivor</text>
+      <!-- chronium -->
+      <rect x="35" y="172" width="150" height="46" rx="9" fill="var(--card)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="110" y="192" fill="currentColor" font-size="13" font-weight="650">chronium · .66</text>
+      <text x="110" y="208" fill="var(--muted)" font-size="10.5">Linux · load driver</text>
+      <!-- ACM2 -->
+      <rect x="295" y="172" width="150" height="46" rx="9" fill="var(--card)" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="5 3"/>
+      <text x="370" y="192" fill="currentColor" font-size="13" font-weight="650">ACM2 · .86</text>
+      <text x="370" y="208" fill="var(--muted)" font-size="10.5">drop / rejoin</text>
+    </g>
+  </svg></div>
+  <figure style="margin-top:-.6em"><figcaption>Mixed 4-node IBSS cell under chronium load — 3× ESP32 + chronium (Linux). All-pairs peering; ACM2 is the node dropped then rejoined.</figcaption></figure>
+
+  <h2 id="finding">Finding — drop/rejoin survivor-side rediscovery gap (→ IBSS TODO <code>#20</code>)</h2>
+  <p>Dropping then rejoining ACM2 (.86) in the mixed cell:</p>
+  <ul>
+    <li><strong>ACM2 fully recovers</strong> — after reboot it rejoins and pings all three peers (.183, .159, .66)
+      with <strong>0 timeouts</strong>.</li>
+    <li><strong>Survivors still serve ACM2</strong> — ACM0/ACM1 reply to ACM2's pings (so their RX/TX datapath and
+      routing to .86 work).</li>
+    <li><strong>But survivors did not re-add ACM2 to their own active-ping set</strong> within ~90 s — ACM0/ACM1 never
+      resumed pinging .86. So the survivor→returned-peer <em>rediscovery</em> (app peer-table re-add) didn't re-fire,
+      even though the RX path clearly sees ACM2's frames.</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node err"><div class="t">ACM2 drops</div><div class="s">leaves cell</div></div>
+      <div class="node ok"><div class="t">reboot + rejoin</div><div class="s">fully recovers</div></div>
+      <div class="node ok"><div class="t">ACM2 → 3 peers</div><div class="s">0 timeouts</div></div>
+      <div class="node ok"><div class="t">survivors reply</div><div class="s">RX/TX + route OK</div></div>
+      <div class="node err"><div class="t">re-add to ping set?</div><div class="s">didn't refire ~90 s</div></div>
+    </div>
+    <figcaption>The asymmetry: recovery works in every direction except the survivors' own app-side re-add of the returned peer to their active-ping list.</figcaption>
+  </figure>
+
+  <div class="callout bug">
+    <p class="ct">🐛 What to root-cause</p>
+    <p>P0.6 (2026-06-20) reported survivors re-acquire a returned peer as a fresh record; this run — under a mixed cell
+    with chronium present — shows that <strong>not</strong> happening for the active-ping list. Re-confirm and
+    root-cause (likely the get-or-add-on-RX-TA path vs. the app's ping list, or an 8-slot / age-out interaction).
+    Not a crash; the datapath stays healthy. Recorded as TODO <code>#20</code>.</p>
+  </div>
+
+  <h2 id="bench">Bench state left</h2>
+  <p>ACM0/ACM1 on IBSS, ACM2 last flashed <code>rimba-halow-scan</code>; chronium <code>wlan1</code> in
+  <strong>IBSS mode</strong> (<code>iw … ibss join rimba-ibss 5560 …</code>, IP .66). Per the radio-silent workflow,
+  idle boards should be returned to <code>rimba-hello</code> and chronium's IBSS torn down
+  (<code>sudo iw dev wlan1 ibss leave</code>) when done.</p>
+
+  <h2 id="caveats">Coverage caveats</h2>
+  <ul>
+    <li><code>0x88B5</code> (IB4) not re-observed in-window — the app logs it infrequently; its IP datapath (same path)
+      is proven. Worth an explicit re-check.</li>
+    <li>No long soak this run (minutes, not the earlier ~6.5 h); no µA measurement (no bench meter).</li>
+    <li>AID ≥ 64 (4-block TIM, AP) still not exercised (needs 64+ STAs).</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#results">Results matrix</a></li>
+  <li><a href="#stress">Stress detail</a></li>
+  <li><a href="#finding">Finding — rediscovery gap</a></li>
+  <li><a href="#bench">Bench state left</a></li>
+  <li><a href="#caveats">Coverage caveats</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-23-regression-stress-test</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

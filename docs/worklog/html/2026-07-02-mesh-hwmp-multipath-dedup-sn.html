@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HWMP multi-path reply-dedup fix — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-07-02</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-02</span>
+    <span class="badge">4 min read</span>
+    <span class="badge ok">✓ fixed &amp; verified</span>
+    <span class="badge bug">mesh · HWMP · routing</span>
+  </div>
+
+  <h1>HWMP multi-path reply-dedup / per-reply-SN fix<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">port from net/mac80211</small></h1>
+
+  <p class="lead">Fixes morselib's HWMP path selection <strong>flapping</strong> in a multi-path topology, found by
+  the P6c routing-decision test (<code>2026-07-02-mesh-p6c-airtime-metric.md</code>). After this fix the airtime
+  metric can cleanly <em>decide</em> a route — the originator settles on the lower-metric path and holds it.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Result</p>
+    <p>After the fix (plus 4 adversarial-review hardening passes) the originator settles on the lower-metric
+    <strong>relay</strong> path (5462) and holds it stable ~20 s per discovery round, <strong>ping 0% loss</strong>
+    — vs the pre-fix ~7 s direct-dominant oscillation between direct (27307) and relay (5462).</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">5462</div><div class="lbl">relay metric — path selected</div></div>
+    <div class="stat"><div class="num">27307</div><div class="lbl">direct metric — weak link, rejected</div></div>
+    <div class="stat"><div class="num acc">~7 → ~20 s</div><div class="lbl">flap period → stable hold</div></div>
+    <div class="stat"><div class="num acc">5 edits</div><div class="lbl"><code>umac_mesh.c</code></div></div>
+    <div class="stat"><div class="num acc">4 issues</div><div class="lbl">found + fixed in review</div></div>
+    <div class="stat"><div class="num ok">0%</div><div class="lbl">ping loss throughout</div></div>
+  </div>
+
+  <h2 id="bug">The bug</h2>
+  <p>In a triangle where a destination is reachable both <strong>directly</strong> and <strong>via a relay</strong>,
+  the target replies to <em>every</em> copy of one flooded PREQ (morselib has no received-PREQ reply-dedup) and
+  stamps each PREP with <code>target_sn = ++mesh_hwmp_sn</code> — a <strong>per-reply</strong> increment
+  (<code>umac_mesh.c:2264</code>, pre-fix). So the direct and relayed PREPs of a single discovery carry
+  <em>different, climbing</em> SNs; the originator's fresh-info rule (<code>mesh_path_update</code>) then takes
+  whichever arrived with the newer SN — <strong>short-circuiting the metric compare</strong> (<code>SN_GT</code>
+  wins before <code>metric &lt;</code> is even evaluated). Observed: the installed path oscillated
+  direct(27307)↔relay(5462) roughly every 7 s, direct-dominant (4:2 in a 40 s window). Single-path multi-hop was
+  unaffected (no competing PREQ copies).</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 440 235" role="img" aria-label="Triangle topology: board1 originator reaches board2 directly over a weak link or via board0 relay over two strong legs">
+      <!-- edges (drawn first, nodes paint over) -->
+      <line x1="130" y1="200" x2="310" y2="200" stroke="#888" stroke-width="2" stroke-dasharray="6 5"/>
+      <line x1="90" y1="180" x2="215" y2="72" stroke="#2f6feb" stroke-width="2.5"/>
+      <line x1="225" y1="72" x2="350" y2="180" stroke="#2f6feb" stroke-width="2.5"/>
+      <!-- nodes -->
+      <rect x="175" y="32" width="90" height="40" rx="9" fill="var(--card)" stroke="#2f6feb" stroke-width="1.5"/>
+      <text x="220" y="50" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">board0</text>
+      <text x="220" y="64" text-anchor="middle" font-size="10.5" fill="#888">relay</text>
+      <rect x="40" y="180" width="90" height="40" rx="9" fill="var(--card)" stroke="#888" stroke-width="1.5"/>
+      <text x="85" y="198" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">board1</text>
+      <text x="85" y="212" text-anchor="middle" font-size="10.5" fill="#888">originator · ping</text>
+      <rect x="310" y="180" width="90" height="40" rx="9" fill="var(--card)" stroke="#888" stroke-width="1.5"/>
+      <text x="355" y="198" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">board2</text>
+      <text x="355" y="212" text-anchor="middle" font-size="10.5" fill="#888">destination</text>
+      <!-- edge labels -->
+      <text x="220" y="194" text-anchor="middle" font-size="11" fill="#888">direct · 27307 (weak)</text>
+      <text x="120" y="122" text-anchor="middle" font-size="11" fill="#2f6feb">2731</text>
+      <text x="320" y="122" text-anchor="middle" font-size="11" fill="#2f6feb">2731</text>
+    </svg>
+    <figcaption>The P6c test rig: a compile-time override forces the direct board1↔board2 link weak (27307)
+    while the board1→board0→board2 relay stays strong (2×2731 = 5462). board1 pings board2.</figcaption>
+  </figure>
+
+  <p>The two candidate paths, by airtime link metric (lower wins):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">direct (weak)</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">27307</span></div>
+    <div class="bar-row"><span class="lbl">relay via board0</span><span class="bar-track"><span class="bar-fill fast" style="width:20%"></span></span><span class="val">5462 ✓</span></div>
+  </div>
+
+  <h2 id="reference">The mac80211 reference</h2>
+  <p>Re-grepped on chronite <code>rpi-linux @372414fd</code>. <code>hwmp_preq_frame_process</code>
+  (<code>mesh_hwmp.c:660</code>) does <strong>not</strong> dedup by replying once; instead the target-SN bump is
+  <strong>time-rate-limited</strong> (<code>:685-701</code>):</p>
+  <pre><code>if (SN_GT(target_sn, ifmsh-&gt;sn)) ifmsh-&gt;sn = target_sn;     // adopt a newer requested SN
+if (time_after(jiffies, ifmsh-&gt;last_sn_update + net_traversal_jiffies(...))) {
+    ++ifmsh-&gt;sn; ifmsh-&gt;last_sn_update = jiffies;            // bump AT MOST once per net-traversal window
+}
+target_sn = ifmsh-&gt;sn;</code></pre>
+  <p>So every reply within one discovery (the copies arrive within ms) shares the <strong>same</strong>
+  <code>target_sn</code>, and the originator selects by <strong>metric</strong>. <code>hwmp_route_info_get</code>
+  (<code>:499-509</code>) additionally applies a <code>mult_frac(new_metric, 10, 9)</code> (~11%) hysteresis on a
+  same-SN copy that arrived via a <strong>different next hop</strong>, and returns 0 (⇒ caller replies/forwards
+  nothing) for a stale/duplicate copy — the only dup suppressor.</p>
+
+  <h2 id="fix">The fix — 5 edits (morselib <code>umac_mesh.c</code>)</h2>
+  <ol>
+    <li><strong><code>MESH_HWMP_NET_TRAVERSAL_MS = 500</code></strong> (near <code>MESH_PATH_REFRESH_MS</code>) — the
+      ms analog of <code>net_traversal_time</code>; ≫ a flood's arrival spread (tens of ms), ≪ the ~24 s refresh.</li>
+    <li><strong><code>mesh_hwmp_last_sn_update_ms</code></strong> global (<code>ifmsh-&gt;last_sn_update</code> analog).</li>
+    <li><strong><code>mesh_metric_mul_10_9()</code></strong> helper (64-bit intermediate + saturation).</li>
+    <li><strong><code>mesh_path_update</code> now returns <code>bool fresh</code></strong> with the mac80211 fresh
+      test: inactive / strictly-newer SN / (equal SN AND metric better — by the 10/9 margin when the next hop
+      differs, raw otherwise). The PREP-branch caller ignores the return (unchanged).</li>
+    <li><strong>PREQ branch:</strong> <code>if (!fresh) return;</code> gates the PREP reply <em>and</em> the
+      re-flood (mac80211's dup suppressor); the target SN becomes our own <code>mesh_hwmp_sn</code>, adopted-up to
+      a higher request then bumped at most once per <code>MESH_HWMP_NET_TRAVERSAL_MS</code>
+      (<code>since &lt; 0</code> reproduces the <code>time_before</code> wrap guard).</li>
+  </ol>
+  <p>Legitimate paths preserved: a genuinely newer <code>orig_sn</code> PREQ (<code>SN_GT</code> branch) still
+  replies + floods; the PREP + PERR branches and the PREQ <em>originate</em> SN bump (<code>++mesh_hwmp_sn</code>
+  for <code>orig_sn</code>) are untouched.</p>
+
+  <h2 id="verification">Verification — 3-board triangle, software RSSI override</h2>
+  <p>No RF work. Same rig as the P6c decision test: board0/1/2 all peered (triangle), a compile-time override
+  forcing the <strong>direct</strong> board1↔board2 link weak (−90 → 27307) while the board1→board0→board2 relay
+  stays strong (2×2731 = 5462); board1 pings board2; a TEMP <code>printf</code> in <code>mesh_path_update</code>'s
+  fresh block logs each installed path.</p>
+
+  <p><strong>Result — settles on the relay, no flapping:</strong></p>
+  <pre><code>INSTALL via board2 (DIRECT) 27307  →  INSTALL via BOARD0 (relay) 5462   (direct arrives first; relay, same SN, wins on metric)
+uptime 75–95s: (no installs)                                             (path holds on the relay ~20 s)
+INSTALL via board2 (DIRECT) 27307  →  INSTALL via BOARD0 (relay) 5462   (next discovery, settles on relay again)</code></pre>
+
+  <p>Every discovery round settles on the relay (5462) and holds stable ~20 s until the next refresh — vs the
+  pre-fix ~7 s direct-dominant oscillation. Ping 0% loss throughout. The brief direct→relay transient per round is
+  normal reactive HWMP (the 1-hop PREP arrives first, the better-metric relay PREP then replaces it at the same
+  SN). Build: <code>make build APP=rimba-halow-mesh</code> compiles + links clean (PREP-branch bare call — no
+  unused-result warning). TEMP verify-scaffolding reverted after.</p>
+
+  <h2 id="hardening">Post-review hardening — adversarial code review</h2>
+  <p>An adversarial review (3 dimensions × per-finding verify) of the uncommitted diff found 4 issues, all fixed +
+  re-verified on the bench:</p>
+  <ol>
+    <li><strong>Newer-SN adopted unconditionally.</strong> mac80211 <code>hwmp_route_info_get</code> ORs the metric
+      test independently of the SN test, so it applies the 10/9 different-next-hop hysteresis to <em>any</em>
+      not-older SN — not just equal-SN. The first port did <code>else if (SN_GT) fresh=true</code>, adopting every
+      newer-SN copy; that is what produced the per-round direct→relay transient. Rewrote the fresh test: reject if
+      the stored SN is strictly newer; otherwise adopt only via the SAME next hop or a &gt;10%-better metric
+      (uniform across equal/newer SN).</li>
+    <li><strong>PREP branch not freshness-gated.</strong> The <code>if (!fresh) return;</code> gate was on the PREQ
+      handler only; mac80211 gates PREP processing too. Added it to the PREP branch — no duplicate PREP
+      re-forwarding.</li>
+    <li><strong><code>==0</code> SN-timestamp sentinel</strong> aliased a real <code>mmosal_get_time_ms()==0</code>
+      (the 32-bit ms clock passes through 0 every ~49.7 days; also early boot) → a spurious extra SN bump.
+      Replaced with a separate <code>mesh_hwmp_sn_bumped</code> bool.</li>
+    <li><strong><code>tx_time</code> associativity</strong> aligned to Linux's <code>(10*tfl)/rate</code> (was
+      <code>10*(tfl/rate)</code>); the <code>&gt;&gt;16</code> absorbs the ≤1-unit intermediate difference so the
+      tier values are unchanged (27307/6827/2731).</li>
+  </ol>
+
+  <div class="callout">
+    <p class="ct">Re-verified — triangle</p>
+    <p>With fix <code>#1</code> the per-round transient is <strong>gone</strong> — after the single initial install
+    of an empty path, refreshes install the <strong>relay only</strong> (the newer-SN direct copy is now rejected
+    by the hysteresis, matching mac80211). Settles on the relay (5462), stable ~20 s, ping 0% loss (relay 2 :
+    direct 1 in a ~50 s window, the direct being only the first-ever install).</p>
+  </div>
+
+  <h2 id="code-map">Code-map</h2>
+  <p>Rows in <code>docs/mesh-ap/rimba-mesh-80211s-code-map.md</code> (HWMP section); Linux refs are @pinned
+  <code>rpi-linux</code> and must be re-grepped on the chronite reference before the code-map is considered final.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#bug">The bug</a></li>
+  <li><a href="#reference">The mac80211 reference</a></li>
+  <li><a href="#fix">The fix — 5 edits</a></li>
+  <li><a href="#verification">Verification</a></li>
+  <li><a href="#hardening">Post-review hardening</a></li>
+  <li><a href="#code-map">Code-map</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-07-02-mesh-hwmp-multipath-dedup-sn</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

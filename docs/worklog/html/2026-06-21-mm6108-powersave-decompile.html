@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MM6108 decompile + IBSS power-save — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-21</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-21</span>
+    <span class="badge">5 min read</span>
+    <span class="badge warn">analysis complete · bench owed</span>
+    <span class="badge">power-save · IBSS</span>
+    <span class="badge bug">firmware decompile</span>
+  </div>
+
+  <h1>MM6108 firmware decompile + IBSS power-save analysis<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">static analysis + docs · no on-air work this session</small></h1>
+
+  <p class="lead"><strong>Author:</strong> Aldwin. <strong>Phase:</strong> 1 — IBSS foundation
+  (power-save de-risking, ahead of Phase 4 leaf sleep). <strong>Goal:</strong> answer "the MM6108 can sleep — is
+  IBSS power-save blocked by firmware or just the host driver?", and rebaseline the power/battery docs on real
+  datasheet numbers.</p>
+
+  <div class="callout"><p style="margin:0"><strong>Status:</strong> analysis complete; one host patch produced;
+  docs rebaselined. No on-air work this session (pure static analysis + docs). Bench measurements (idle-RX current,
+  cold-boot time) still owed. This entry is a static-analysis + documentation record — it does not rewrite any prior
+  worklog; it captures new findings and the doc edits made from them.</p></div>
+
+  <h2 id="decompile">1 · MM6108 firmware decompilation (the enabling work)</h2>
+  <p>Decompiled the vendored <code>mm6108.mbin</code> (firmware <code>rel_1_17_6</code>, 399,468 B) to answer the
+  power-save question from the chip side.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">399,468 B</div><div class="lbl">firmware image (<code>rel_1_17_6</code>)</div></div>
+    <div class="stat"><div class="num">RV32IMC</div><div class="lbl">CPU (RISC-V, clean boot vector)</div></div>
+    <div class="stat"><div class="num ok">2114 / 2114</div><div class="lbl">functions decompiled</div></div>
+  </div>
+
+  <ul>
+    <li><strong>Container:</strong> Morse <strong>MBIN TLV</strong> stream (<code>mbin.h</code>/<code>firmware_mbin.c</code>)
+      — <code>MMFW</code> magic, raw <code>FW_SEGMENT</code> TLVs, <code>EOF</code>. <strong>Not compressed, not
+      encrypted, not signed</strong> (ends <code>FIELD_TYPE_EOF</code>, not <code>EOF_WITH_SIGNATURE</code>).</li>
+    <li><strong>CPU:</strong> <strong>RISC-V RV32IMC</strong> (<code>csrrs mhartid</code>, <code>mtval</code>, clean
+      boot vector).</li>
+    <li><strong>Memory map</strong> (walked from the TLV chain): code RAM <code>0x00100000</code>, <code>0x120000</code>,
+      <code>0x150000</code>, <code>0x158000</code>, <code>0x1f0000</code>; data RAM <code>0x80100000</code>+;
+      peripherals <code>0x10000000</code> (not in file). BCF loads at <code>0x8011fa80</code>.</li>
+    <li><strong>Tooling:</strong> Ghidra 12.1.2 headless on <strong>chronium</strong> (the Pi-5 Linux node; aarch64).
+      The decompiler native isn't shipped for ARM, so it was <strong>built from source</strong> (<code>ghidra_opt</code>,
+      ARCH_TYPE override). <strong>2114/2114 functions decompiled.</strong></li>
+    <li><strong>Artifacts</strong> (workspace root <code>mm6108_re/</code>, outside the repo):
+      <code>mm6108_decompiled.c</code> (raw), <code>mm6108_annotated.c</code> (whole program, ~110 renamed + plate
+      comments on all 2114 + named globals/enums), <code>mm6108_ibss_powersave.c</code> (157-function IBSS/PS slice +
+      curated cluster), <code>ibss-powersave.patch</code>, <code>segments/</code>, <code>ghidra_scripts/</code>,
+      Ghidra project on chronium (<code>~/Developments/mm6108_re/ghidra_proj</code>).</li>
+  </ul>
+
+  <h2 id="core-finding">2 · Core finding — the AP/STA gate is host policy, not firmware</h2>
+  <p>Full analysis: <a href="../../design-specification/rimba-mm6108-powersave-analysis.md"><code>design-specification/rimba-mm6108-powersave-analysis.md</code></a>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">host cmd</div><div class="s"><code>mmdrv_set_chip_power_save</code><br>interface-agnostic</div></div>
+      <div class="node acc"><div class="t">umac_ps_update()</div><div class="s">host policy gate</div></div>
+      <div class="node err"><div class="t">STA vif lookup</div><div class="s">none on IBSS node</div></div>
+      <div class="node err"><div class="t">"PS disabled"</div><div class="s"><code>CONFIG_PS</code> never sent</div></div>
+    </div>
+    <figcaption>On an IBSS-only node the host gate finds no STA vif, logs <em>"No STA interface. PS disabled"</em> and returns — so <code>CONFIG_PS</code> is never even sent to the chip.</figcaption>
+  </figure>
+
+  <ul>
+    <li>The command sender <code>mmdrv_set_chip_power_save_enabled(vif_id,en)</code> is <strong>interface-agnostic</strong>;
+      <code>CONFIG_PS</code>'s wire struct has no iftype field.</li>
+    <li>The whole gate is host policy in <code>umac/ps/umac_ps.c::umac_ps_update()</code>: it looks up a <strong>STA</strong>
+      vif and, finding none on an IBSS-only node, logs <em>"No STA interface. PS disabled"</em> and returns — so
+      <code>CONFIG_PS</code> is never even sent.</li>
+    <li><strong>Firmware decompile confirms the <code>CONFIG_PS</code> (0x16) handler ACCEPTS interface_type ADHOC(4)</strong>
+      (grouped with AP/MESH; writes the same global PS context as STA). The only firmware rule: enabling needs
+      <code>dynamic_ps_offload!=0</code>, which the host helper already sets.</li>
+  </ul>
+
+  <div class="callout ok"><p class="ct">✓ Chip power-save in IBSS is not firmware-gated</p>
+  <p>It's a host-side policy that a small patch lifts. The RISC-V firmware's <code>CONFIG_PS</code> handler already
+  accepts the ADHOC interface type — the "STA only" restriction lives entirely in <code>umac_ps.c</code>.</p></div>
+
+  <h2 id="wake">3 · The wake story (why it's leaf-sender-only)</h2>
+  <p>Dynamic PS = the datasheet <strong>Snooze</strong> tier. A dozing node wakes on its <strong>own TX</strong> and its
+  own beacon TBTT, but <strong>cannot wake for unsolicited peer traffic</strong> in IBSS.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">own TX</div><div class="s">app has data</div></div>
+      <div class="node acc"><div class="t">WAKE pin</div><div class="s">host asserts (bus-PS wakers)</div></div>
+      <div class="node ok"><div class="t">morse_ps_wakeup</div><div class="s">radio up</div></div>
+    </div>
+    <figcaption>The self-wake path: own TX (or own beacon TBTT) → host asserts the WAKE pin via the bus-PS wakers → <code>morse_ps_wakeup</code>.</figcaption>
+  </figure>
+
+  <div class="callout warn"><p class="ct">⚠ No downlink wake in IBSS</p>
+  <p>The downlink-wake path is 100% AP-dependent (PS-Poll / beacon-TIM / listen-interval), and the firmware has
+  <strong>no ATIM</strong> and doesn't surface peer beacons. Good for a send-mostly leaf, broken for a receiver.</p></div>
+
+  <h2 id="datasheet">4 · Datasheet sleep modes + IBSS reachability</h2>
+  <p>From the public MM6108-MF08651-US datasheet (Table 6):</p>
+
+  <table>
+    <thead><tr><th>Mode</th><th class="num">typ</th><th>IBSS-reachable</th><th>role</th></tr></thead>
+    <tbody>
+      <tr><td>Snooze</td><td class="num">42 µA</td><td>✓ via <code>CONFIG_PS</code> patch</td><td>leaf-unsuitable (~2.9 mA in-cell)</td></tr>
+      <tr><td>Deep sleep</td><td class="num">1 µA</td><td>✗ STA-only (STANDBY/WNM firmware-gated)</td><td>—</td></tr>
+      <tr><td>Hibernate</td><td class="num">0.05 µA</td><td>✓ via <code>RESET_N</code> (= cold boot)</td><td>RTC-scheduled leaf / relay sleep slots</td></tr>
+    </tbody>
+  </table>
+
+  <p>Traced <code>standby_mode_handle</code> (0x1324f8): it <em>does</em> arm a timer wake and isn't hard iftype-gated,
+  but the standby subsystem is pervasively STA-watches-AP (vif bound from a beacon-RX path; connection-loss event on
+  link-down). So a forced timer-wake Deep-sleep on ADHOC is a research-grade stretch, not turnkey.</p>
+
+  <div class="callout"><p class="ct">ATIM: closed — not available</p>
+  <p>No ATIM anywhere in fw 1.17.6 (only mesh TBTT). Implementing it = lower-MAC firmware work; not feasible by
+  patching. Open Issue <code>#6</code> marked CLOSED in the development plan.</p></div>
+
+  <h2 id="patch">5 · The patch (host-side, leaf-sender only)</h2>
+  <p><code>mm6108_re/ibss-powersave.patch</code> — <code>umac_ps.c</code> falls back to the <strong>ADHOC</strong> vif
+  when no STA vif exists, so <code>CONFIG_PS</code> (Snooze) can be armed in IBSS. Validated: applies clean
+  (<code>patch -p1</code>), symbols present.</p>
+  <div class="callout warn"><p class="ct">⚠ Warning baked into the patch</p>
+  <p>Uncoordinated dynamic PS, deaf to peers while dozing — <strong>leaf-sender only; relays must not enable</strong>.
+  Not on the critical path (the RTC design doesn't need it).</p></div>
+
+  <h2 id="rebaseline">6 · Power/battery rebaseline (datasheet currents)</h2>
+  <p>Discovered the docs used a <strong>12 mA</strong> idle-RX assumption; datasheet "Listen" at 1 MHz is
+  <strong>26 mA</strong>. Rebaselined
+  <a href="../../design-specification/rimba-battery-analysis.md"><code>design-specification/rimba-battery-analysis.md</code></a>
+  to 26 mA throughout (v1.1).</p>
+
+  <p>Idle-RX assumption and relay currents, old vs datasheet-corrected (bars to scale, max 28 mA):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">idle-RX · old</span><span class="bar-track"><span class="bar-fill fast" style="width:43%"></span></span><span class="val">12 mA</span></div>
+    <div class="bar-row"><span class="lbl">idle-RX · datasheet</span><span class="bar-track"><span class="bar-fill slow" style="width:93%"></span></span><span class="val">26 mA</span></div>
+    <div class="bar-row"><span class="lbl">relay cont · old</span><span class="bar-track"><span class="bar-fill fast" style="width:50%"></span></span><span class="val">14 mA</span></div>
+    <div class="bar-row"><span class="lbl">relay cont · new</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">28 mA</span></div>
+    <div class="bar-row"><span class="lbl">sched K=6 · old</span><span class="bar-track"><span class="bar-fill fast" style="width:26%"></span></span><span class="val">7.2 mA</span></div>
+    <div class="bar-row"><span class="lbl">sched K=6 · new</span><span class="bar-track"><span class="bar-fill slow" style="width:51%"></span></span><span class="val">14.3 mA</span></div>
+  </div>
+
+  <ul>
+    <li>Relay <strong>Continuous ≈ 28 mA</strong> (was 14), <strong>Scheduled K=6 ≈ 14.3 mA</strong> (was 7.2).</li>
+    <li>Battery-only life: Continuous <strong>~1 wk</strong>, Scheduled <strong>~2 wk</strong> (were ~2 wk / ~4 wk).</li>
+    <li>Solar: recommended panel <strong>3 W Continuous / 2 W Scheduled</strong> (were 2 W / 1 W); self-sustain
+      thresholds 1.46 / 0.75 h-sun/day.</li>
+    <li>Hibernate corrected 0.1 mA → <strong>0.05 µA</strong> (favorable): leaf sleep floor is now
+      <strong>ESP32-bound</strong> (~10–20 µA), radio negligible. Leaf life <strong>unchanged</strong>
+      (sleep-dominated) — ~17 yr radio+MCU at 15 min.</li>
+    <li>New §3A sleep-mode viability matrix; Snooze-as-leaf shown non-viable (~2.9 mA).</li>
+  </ul>
+
+  <h2 id="docs">7 · Docs updated this session</h2>
+  <ul>
+    <li><strong><code>design-specification/rimba-mm6108-powersave-analysis.md</code></strong> — NEW; the
+      source-of-truth analysis (§1–§9: gate, wake, decompile evidence, datasheet modes, standby trace).</li>
+    <li><strong><code>design-specification/rimba-battery-analysis.md</code></strong> — rebaselined to 26 mA (v1.1);
+      sleep-mode matrix; SPEC-UPDATE-PENDING note.</li>
+    <li><strong><code>rimba-development-plan.md</code></strong> — relay figures (~28/~14.3 mA); task 1.12a + RISK-01
+      fallback notes (firmware-confirmed no IBSS PS); Phase-5 relay-power criterion revised; Open Issues
+      <code>#5</code> (approach resolved) / <code>#6</code> (CLOSED); §7 SPEC-UPDATE-PENDING note.</li>
+    <li><strong><code>design-specification/rimba-mesh-comparison.md</code></strong>,
+      <strong><code>design-specification/rimba-mesh-topology.md</code></strong> — relay current reconciled to the
+      26 mA baseline (density conclusions unchanged).</li>
+    <li><strong>Intentionally untouched:</strong> <code>halow-mesh-dtn-spec.md</code> (superseded), prior worklogs
+      (history), <code>design-specification/rimba-protocol-spec.md</code> (flagged SPEC UPDATE PENDING — deferred
+      until bench numbers).</li>
+  </ul>
+
+  <h2 id="next">8 · Open items / next steps</h2>
+  <ol>
+    <li><strong>Measure idle-RX current at 1 MHz</strong> on hardware — the single number that decides which relay
+      column (12 vs 26 mA) is real; drives panel BOM.</li>
+    <li><strong>Measure RISK-02 cold-boot-to-IBSS-joined time</strong> — gates RTC-scheduled mode efficiency and the
+      leaf active-phase energy.</li>
+    <li>(Optional) bench the <code>CONFIG_PS</code>-on-IBSS patch — confirm the radio physically dozes (radio-rail
+      current / BUSY pin) for the leaf-sender case.</li>
+    <li><strong>Update <code>design-specification/rimba-protocol-spec.md</code></strong> (Section 12/13 power, §15
+      open issues) once 1–2 are measured.</li>
+  </ol>
+
+  <div class="callout warn"><p class="ct">⚠ Caveat on all absolute power numbers</p>
+  <p>They rest on the datasheet 26 mA idle-RX until step (1) confirms it.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#decompile">1 · Firmware decompilation</a></li>
+    <li><a href="#core-finding">2 · Gate is host policy</a></li>
+    <li><a href="#wake">3 · The wake story</a></li>
+    <li><a href="#datasheet">4 · Datasheet sleep modes</a></li>
+    <li><a href="#patch">5 · The patch</a></li>
+    <li><a href="#rebaseline">6 · Power/battery rebaseline</a></li>
+    <li><a href="#docs">7 · Docs updated</a></li>
+    <li><a href="#next">8 · Open items / next</a></li>
+  </ul>
+</div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-21-mm6108-powersave-decompile</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

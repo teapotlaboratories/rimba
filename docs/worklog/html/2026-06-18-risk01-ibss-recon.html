@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RISK-01 IBSS bring-up — Rimba Worklog</title><link rel="stylesheet" href="style.css"></head><body>
+<header class="topbar"><a class="home" href="index.html">&larr; Worklogs</a><span class="crumb">2026-06-18</span>
+<button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button></header>
+
+<div class="wrap doc"><main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-18</span>
+    <span class="badge">30 min read</span>
+    <span class="badge ok">✓ RISK-01 resolved</span>
+    <span class="badge">IBSS · ad-hoc · bring-up</span>
+  </div>
+
+  <h1>RISK-01 IBSS bring-up: reconnaissance &amp; plan<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">Porting MorseMicro's Linux ad-hoc sequence to the MM6108 on ESP32-S3</small></h1>
+
+  <p class="lead">This entry is the de-risking record before any code. It maps the exact firmware command
+  sequence the Linux driver uses for IBSS, pins a coherent version matrix, locates the injection points in the
+  ESP32 morselib, and diagnoses the <code>EEXIST(-17)</code> seen on the bench. It then follows the work all the
+  way through to a proven, bidirectional IBSS data path.</p>
+
+  <div class="callout">
+    <p class="ct">De-risking record — before any code</p>
+    <ul style="margin:.2em 0">
+      <li><strong>Author:</strong> Aldwin</li>
+      <li><strong>Phase:</strong> 1 — IBSS Foundation, RISK-01 (no public IBSS API on the MM6108)</li>
+      <li><strong>Branch:</strong> <code>test2</code> (off <code>main</code>)</li>
+      <li><strong>Goal:</strong> prove an MM6108 IBSS / ad-hoc link on <strong>ESP32-S3 + mm-iot-sdk</strong>, by
+        porting the ad-hoc setup sequence from MorseMicro's Linux mac80211 driver.</li>
+      <li><strong>Status (at recon):</strong> reconnaissance complete — <strong>feasible</strong>; implementation
+        not yet started.</li>
+    </ul>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Governing requirement — derive everything from the Linux side</p>
+    <p>The IBSS implementation MUST be based on the <strong>Linux-side implementation</strong>, not improvised from
+    morselib's AP/STA code. Every IBSS behaviour (beacon contents, datapath addressing, probe handling, IBSS merge,
+    ATIM) must trace to:</p>
+    <ul style="margin:.2em 0">
+      <li><strong><code>morse_driver</code></strong> (MorseMicro Linux mac80211 driver) for the firmware command
+        sequence / S1G specifics, and</li>
+      <li><strong><code>net/mac80211/ibss.c</code></strong> (use the MorseMicro kernel fork) — esp.
+        <code>ieee80211_ibss_build_presp()</code> for the IBSS beacon/probe-resp IE set — plus the higher-level
+        programs <code>wpa_supplicant</code> (ad-hoc <code>mode=1</code>) and <code>iw … ibss join</code>.</li>
+    </ul>
+    <p>This was the owner's requirement from the start. Earlier beacon/datapath work here was modelled on
+    morselib's <strong>AP path</strong> (probe-response template) — a deviation; the beacon likely lacks
+    IBSS-specific IEs (IBSS Parameter Set / ATIM, supported rates). Reconcile against <code>ibss.c</code> before
+    continuing. Where the ESP32/morselib target can't match Linux exactly, call out the divergence explicitly.
+    (Memory: <code>ibss-base-on-linux-implementation</code>.)</p>
+  </div>
+
+  <h2 id="decisions">Decisions locked in</h2>
+  <ul>
+    <li><strong>Target platform:</strong> ESP32-S3 + <code>mm-iot-sdk</code> (morselib). The Linux driver is a
+      <em>reference</em> for the firmware-command sequence, not a build target.</li>
+    <li><strong>Radio module:</strong> Quectel <strong>FGH100M</strong> (<code>bcf_fgh100mhaamd</code>). NB
+      <code>proto1</code> is the Seeed mf16858 board (<code>bcf_mf16858</code>); FGH100M will need its own board
+      config.</li>
+    <li><strong>Firmware anchor:</strong> <code>mm6108.mbin v1.17.6</code> (<code>rel_1_17_6_2026_Feb_23</code>),
+      the combo a community member reported IBSS working with on ESP32.</li>
+  </ul>
+
+  <h2 id="ref-source">The reference source (correction)</h2>
+  <p>The mac80211 driver is <strong>not</strong> in <code>github.com/MorseMicro/linux</code> — that repo is only a
+  patched Linux <em>kernel</em> tree (no <code>drivers/net/wireless/morse/</code>). The actual out-of-tree driver
+  is <strong><code>github.com/MorseMicro/morse_driver</code></strong> (latest
+  <code>0-rel_1_17_9_2026_Apr_20</code>, pairs with kernel branch <code>mm/linux-6.12.81/1.17.x</code>). That is
+  the authoritative reference for the IBSS command sequence below.</p>
+  <p>Two code paths exist there: <strong>mac80211/softmac</strong> (<code>mac.c</code>, <code>command.c</code>)
+  and <strong>FullMAC/cfg80211</strong> (<code>wiphy.c</code>). <strong>IBSS lives only in the mac80211 path</strong>
+  (<code>wiphy.c</code> has <code>join_ibss</code> commented out).</p>
+
+  <h2 id="command-seq">The IBSS command sequence (from <code>morse_driver</code> mac80211 path)</h2>
+  <p>The chip is the same silicon/firmware the ESP32 drives, so these firmware commands are exactly what we
+  replicate over morselib's command channel.</p>
+  <p>Command IDs (<code>morse_commands.h</code> — <strong>all present in the ESP32 SDK header too, except where
+  noted</strong>):</p>
+
+  <table>
+    <thead><tr><th>Command</th><th>ID</th><th>ESP32 SDK header?</th></tr></thead>
+    <tbody>
+      <tr><td><code>SET_CHANNEL</code></td><td><code>0x0001</code></td><td>✅ declared</td></tr>
+      <tr><td><code>ADD_INTERFACE</code></td><td><code>0x0004</code></td><td>✅ declared</td></tr>
+      <tr><td><code>REMOVE_INTERFACE</code></td><td><code>0x0005</code></td><td>✅ declared</td></tr>
+      <tr><td><code>BSS_CONFIG</code></td><td><code>0x0006</code></td><td>✅ declared</td></tr>
+      <tr><td><code>SET_QOS_PARAMS</code></td><td><code>0x0011</code></td><td>✅ declared</td></tr>
+      <tr><td><code>IBSS_CONFIG</code></td><td><code>0x0035</code></td><td>❌ <strong>gap</strong> (0x0034 → 0x0036)</td></tr>
+      <tr><td><code>BSSID_SET</code></td><td><code>0x0052</code></td><td>❌ <strong>not declared</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>Interface-type enum (identical on both sides):
+  <code>STA=1, AP=2, MON=3, ADHOC=4, MESH=5</code>.</p>
+
+  <p><code>IBSS_CONFIG</code> request struct (from the Linux driver — we recreate this on ESP32):</p>
+  <pre><code>struct morse_cmd_req_ibss_config {
+    struct morse_cmd_header hdr;
+    u8 ibss_bssid[6];
+    u8 ibss_cfg_opcode;        // CREATE=0, JOIN=1, STOP=2
+    u8 ibss_probe_filtering;   // module param, default true
+};</code></pre>
+
+  <p><strong>Exact ordering</strong> (mac80211 callback order → firmware commands):</p>
+
+  <figure>
+    <div class="flow vert">
+      <div class="node"><div class="t">1 · ADD_INTERFACE</div><div class="s">0x0004 · type ADHOC(4) → vif_id</div></div>
+      <div class="node"><div class="t">2 · SET_CHANNEL</div><div class="s">0x0001 · dot11_mode AH (S1G)</div></div>
+      <div class="node"><div class="t">3 · BSSID_SET</div><div class="s">0x0052</div></div>
+      <div class="node"><div class="t">4 · BSS_CONFIG</div><div class="s">0x0006 · bi / dtim / cssid</div></div>
+      <div class="node acc"><div class="t">5 · IBSS_CONFIG</div><div class="s">0x0035 · CREATE / JOIN — enters ad-hoc</div></div>
+      <div class="node"><div class="t">6 · SET_QOS_PARAMS</div><div class="s">0x0011 · S1G TXOP 15008 µs</div></div>
+      <div class="node"><div class="t">7 · Beaconing</div><div class="s">host-generated · #1 open unknown</div></div>
+    </div>
+    <figcaption>The firmware command order per the mac80211 callback sequence. Step 5 is the command that actually
+    enters ad-hoc; step 7 (beaconing) is the #1 open unknown to validate on hardware.</figcaption>
+  </figure>
+
+  <ol>
+    <li><code>ADD_INTERFACE</code> (<code>0x0004</code>), <code>interface_type = ADHOC(4)</code> → response
+      returns the assigned <code>vif_id</code>; everything after is scoped to it.</li>
+    <li><code>SET_CHANNEL</code> (<code>0x0001</code>), <code>dot11_mode = AH</code> (S1G), op/primary BW from the
+      S1G chandef (1/2/4/8 MHz).</li>
+    <li><code>BSSID_SET</code> (<code>0x0052</code>).</li>
+    <li><code>BSS_CONFIG</code> (<code>0x0006</code>): <code>beacon_interval_tu</code>, <code>dtim_period</code>,
+      <code>cssid</code> (compressed SSID, 32-bit; <code>morse_vif_generate_cssid</code>).</li>
+    <li><code>IBSS_CONFIG</code> (<code>0x0035</code>): <code>bssid</code>, opcode <code>CREATE</code> (creator) /
+      <code>JOIN</code> (joiner). <strong>This is the command that actually enters ad-hoc.</strong></li>
+    <li><code>SET_QOS_PARAMS</code> (<code>0x0011</code>): IBSS forces S1G default TXOP 15008 µs.</li>
+    <li><strong>Beaconing:</strong> the Linux <em>host</em> software-generates S1G beacons (<code>beacon.c</code>);
+      there is no "start beacon" command for IBSS on Linux. On ESP32 this is likely handled in firmware —
+      <code>mmdrv_start_beaconing(vif_id)</code> exists in morselib (<code>mmdrv.h:196</code>).
+      <strong>This is the #1 open unknown to validate on hardware.</strong></li>
+  </ol>
+
+  <p>Teardown: <code>IBSS_CONFIG</code> opcode <code>STOP(2)</code> → <code>REMOVE_INTERFACE (0x0005)</code>.</p>
+
+  <p>HaLow/IBSS quirks worth noting: ADHOC is treated as an <strong>AP-type</strong> interface (it beacons);
+  <strong>no ATIM window</strong> (S1G IBSS doesn't use ATIM — relevant to Open Issue #6 power-save); long S1G
+  beacons only (no short beacons in IBSS); AID is 0 so the driver overloads it with the low 2 bytes of the peer
+  MAC for peer lookup.</p>
+
+  <h2 id="gating">ESP32 morselib: where ad-hoc is gated (and the injection points)</h2>
+  <p>The public stack is <code>mmwlan → umac → mmdrv → morse_cmd → chip</code>, and <strong>every layer above the
+  wire assumes STA or AP</strong>:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">mmwlan</div><div class="s">public API</div></div>
+      <div class="node"><div class="t">umac</div><div class="s">interface map</div></div>
+      <div class="node"><div class="t">mmdrv</div><div class="s">add_if switch</div></div>
+      <div class="node"><div class="t">morse_cmd</div><div class="s">command channel</div></div>
+      <div class="node acc"><div class="t">chip</div><div class="s">accepts ADHOC=4</div></div>
+    </div>
+    <figcaption>Every layer above the wire assumes STA or AP — but the wire itself (<code>ADD_INTERFACE</code>) already
+    accepts <code>ADHOC=4</code>, which is in the SDK header. The blocker is the host-side gating, not the chip.</figcaption>
+  </figure>
+
+  <ul>
+    <li><code>mmwlan</code> (public API): only STA / AP / SoftAP enable paths. No IBSS API.</li>
+    <li><code>umac_interface.c</code>: maps interface types to STA or AP only; anything else
+      <code>MMOSAL_DEV_ASSERT(false)</code> + <code>INVALID_ARGUMENT</code>.</li>
+    <li><code>mmdrv_add_if()</code> (<code>driver.c:548</code>): <code>switch</code> STA→STA, AP→AP,
+      <strong>default → <code>MMWLAN_INVALID_ARGUMENT</code></strong>. <code>enum mmdrv_interface_type</code>
+      (<code>mmdrv.h:179</code>) only defines STA/AP.</li>
+  </ul>
+
+  <p><strong>But the wire is not the blocker.</strong> The <code>ADD_INTERFACE</code> builder at
+  <code>driver.c:568</code> sends <code>.interface_type = htole32(if_type)</code> for whatever <code>if_type</code>
+  it's handed, and <code>MORSE_CMD_INTERFACE_TYPE_ADHOC = 4</code> is already in the SDK header. The two practical
+  injection points:</p>
+  <ul>
+    <li><strong><code>mmdrv_add_if()</code> switch</strong> — add <code>MMDRV_INTERFACE_TYPE_ADHOC</code> (enum +
+      one <code>case</code>) to get the firmware to create an ad-hoc vif.</li>
+    <li><strong><code>morse_cmd_tx()</code></strong> (<code>command.c:47</code>) — generic command-send primitive;
+      use it to issue the undeclared <code>IBSS_CONFIG (0x0035)</code> and <code>BSSID_SET (0x0052)</code> with
+      request structs we define to match the Linux driver.</li>
+  </ul>
+
+  <h3>Diagnosis of the bench <code>EEXIST(-17)</code></h3>
+  <p>morselib creates its (STA) vif during the normal enable path. Issuing another <code>ADD_INTERFACE</code>
+  afterwards hits an interface that already exists → <code>EEXIST(-17)</code>. (timothyb89's earlier
+  <code>EINVAL</code> was a different ordering fault.) The fix is to drive <code>ADD_INTERFACE(ADHOC)</code> from a
+  <strong>clean state</strong> — before any STA/AP enable, or after removing the default vif — not to add a second
+  interface on top.</p>
+
+  <h2 id="version-matrix">Version matrix (binary-verified)</h2>
+  <p><code>mm6108.mbin</code> is <strong>byte-identical</strong> between
+  <code>morsemicro/firmware 2.10.4-esp32-1</code> and <code>-esp32-2</code> (same SHA256; both
+  <code>rel_1_17_6_2026_Feb_23</code>). The only delta between the two ESP components is the version tag + an
+  <code>idf &lt;6.0</code> cap on the <code>halow</code> component. So our vendored <code>2.10.4-esp32-2</code>
+  <strong>already ships the forum-proven firmware</strong>.</p>
+
+  <table>
+    <thead><tr><th>Item</th><th>Vendored now</th><th>Recommended</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Chip FW <code>mm6108.mbin</code></td><td>v1.17.6</td><td>v1.17.6</td><td>✅ already the proven blob</td></tr>
+      <tr><td><code>components/halow</code> + <code>firmware</code></td><td><code>2.10.4-esp32-2</code></td><td>keep</td><td>identical FW to <code>-esp32-1</code></td></tr>
+      <tr><td><code>vendor/mm-iot-sdk</code> (reference)</td><td><code>2.11.2</code></td><td><strong>pin to <code>2.10.4</code></strong></td><td>match the proven morselib generation; build uses <code>components/halow</code>, so this is reference-only</td></tr>
+      <tr><td>ESP-IDF</td><td>5.4.2 (vendored)</td><td>keep</td><td>satisfies <code>halow &gt;=5.4.2,&lt;6.0</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>Caveat: the ESP32 build uses <code>components/halow</code> (esp-halow), <strong>not</strong>
+  <code>vendor/mm-iot-sdk</code>. The mm-iot-sdk prebuilt morselib <code>.a</code> is ARM-only; ESP32 morselib is
+  built from source in the halow component. Confirm the IBSS edits land in the <strong>halow</strong> component's
+  morselib copy, not just <code>vendor/mm-iot-sdk</code>.</p>
+
+  <h2 id="forum">Forum / prior-art summary</h2>
+  <ul>
+    <li><strong>Thread 1653 (FGH100M IBSS):</strong> Morse staff (ajudge) — IBSS is "something we offer support for
+      on our <strong>Linux driver</strong>" (officially Linux-only). timothyb89 (ESP32) hit <code>EINVAL</code> on
+      <code>INTERFACE_TYPE_ADHOC</code>, fixed his init sequence, and "tentatively got things working" on
+      <code>mm6108.mbin v1.17.6 / 2.10.4-esp32-1</code> — <strong>but never posted the corrected sequence.</strong>
+      <em>(Our own post in that thread, asking for the ordering after hitting <code>EEXIST(-17)</code>, has no
+      reply.)</em></li>
+    <li><strong>Thread 1085 (MAC-layer access):</strong> morselib source is open as of rel 2.10 for porting to
+      other MCUs, but Morse will <strong>only support unmodified morselib</strong>; no raw-frame injection /
+      advertising mode officially. → our approach is unsupported-by-vendor by definition; keep changes minimal and
+      well-isolated.</li>
+    <li><strong>Teapot worklog (Luckfox + FGH100M, Linux):</strong> working SPI bring-up at MM release
+      <strong>1.15.3</strong> (driver/hostap/morse_cli <code>1.15.3</code>, kernel branch
+      <code>mm/linux-5.10.11/1.15.x</code>, firmware repo branch <code>1.15</code>), BCF
+      <strong><code>bcf_fgh100mhaamd.bin</code></strong>, <code>insmod morse.ko bcf=bcf_fgh100mhaamd.bin
+      spi_clock_speed=10000000 country=US</code>. It compiles <code>NL80211_IFTYPE_ADHOC</code> support but
+      <strong>never configures an IBSS</strong> — no proven IBSS recipe there, just a solid SPI bring-up
+      reference.</li>
+  </ul>
+
+  <h2 id="strategies">Two implementation strategies</h2>
+  <p><strong>A — Low-level command injection (minimal morselib touch).</strong> A <code>rimba_ibss</code> module
+  issues the raw sequence via <code>morse_cmd_tx()</code>, bypassing umac. Closest to the Linux command flow;
+  smallest diff to vendored code. <em>Risk:</em> the RX datapath / netif plumbing still expects a umac-known vif —
+  frames may not be delivered up without umac awareness.</p>
+  <p><strong>B — Extend umac/mmdrv with an ADHOC path (deeper, "complete").</strong> Add
+  <code>MMDRV_INTERFACE_TYPE_ADHOC</code> + a <code>UMAC_INTERFACE_ADHOC</code> path + a public
+  <code>mmwlan_ibss_enable()</code>, mirroring the Linux <code>bss_info_changed</code> IBSS branch and reusing
+  <code>mmdrv_start_beaconing()</code>. Cleaner data path; matches the dev plan's <code>rimba_ibss_init()</code>
+  wrapper. <em>Risk:</em> larger modification of unsupported morselib; must confirm firmware-side beaconing.</p>
+  <p><strong>Leaning B</strong> for a working data path, but validating the <strong>A</strong> command sequence
+  first on hardware (does <code>ADD_INTERFACE(ADHOC)</code> + <code>IBSS_CONFIG</code> + beaconing bring a link up
+  at all?) is the cheapest way to retire the #1 unknown.</p>
+
+  <h2 id="unknowns">Open unknowns to retire on hardware (in order)</h2>
+  <ol>
+    <li>Does the v1.17.6 firmware <strong>auto-beacon</strong> for IBSS once <code>IBSS_CONFIG(CREATE)</code> is
+      sent, or must the host TX S1G beacons (as on Linux)? (<code>mmdrv_start_beaconing</code>)</li>
+    <li>Is <code>IBSS_CONFIG (0x0035)</code> / <code>BSSID_SET (0x0052)</code> actually required on ESP32, or does
+      <code>ADD_INTERFACE(ADHOC)</code> + <code>BSS_CONFIG</code> suffice? (timothyb89's silence)</li>
+    <li>Does RX deliver up the stack with an ADHOC vif umac doesn't track? (→ A vs B)</li>
+    <li>The exact clean-state ordering that avoids <code>EEXIST(-17)</code>.</li>
+  </ol>
+
+  <h2 id="cmd-accept">Update — command-acceptance test implemented (builds; awaiting hardware)</h2>
+  <p>Done in this session (working tree, uncommitted):</p>
+  <ul>
+    <li>✓ Pinned <code>vendor/mm-iot-sdk</code> → <code>2.10.4</code> (reference parity).</li>
+    <li>✓ Added <code>boards/proto1-fgh100m/</code> (same XIAO pins, <code>bcf_fgh100mhaamd.mbin</code>).</li>
+    <li>✓ Built out <code>firmware/rimba-halow-ibss/</code> (diagnostic app).</li>
+    <li>✓ morselib additions (in <code>components/halow/.../morselib</code>):
+      <ul>
+        <li><code>morse_commands.h</code>: declared <code>MORSE_CMD_ID_IBSS_CONFIG (0x0035)</code> +
+          <code>MORSE_CMD_ID_BSSID_SET (0x0052)</code> and their req/resp structs + opcode enum (recreated from
+          <code>morse_driver</code>).</li>
+        <li><code>mmdrv.h</code>/<code>driver.c</code>: <code>MMDRV_INTERFACE_TYPE_ADHOC</code>, the
+          <code>ADD_INTERFACE</code> switch case, and new <code>mmdrv_set_bssid()</code> /
+          <code>mmdrv_cfg_ibss()</code> senders.</li>
+        <li><code>umac_interface.{h,c}</code>: <code>UMAC_INTERFACE_ADHOC</code> (AP-type), type mapping to
+          <code>MMDRV_INTERFACE_TYPE_ADHOC</code>, compat exclusion vs STA.</li>
+        <li><code>umac_core.h</code>: <code>ibss_start</code> event arg.</li>
+        <li><code>umac.c</code>: public <strong><code>mmwlan_ibss_enable()</code></strong> + handler — mirrors the
+          AP path, skips the supplicant, issues the full sequence, logs each command's status.</li>
+        <li><code>mmwlan.h</code>: <code>struct mmwlan_ibss_args</code> + <code>mmwlan_ibss_enable()</code> decl
+          (auto-exported via the <code>mmwlan*</code> rule in <code>protected_syms.txt</code>).</li>
+      </ul>
+    </li>
+    <li>✓ <strong>Builds clean</strong>: <code>rimba-halow-ibss</code> on <code>proto1-fgh100m</code>, and the
+      non-AP <code>rimba-halow-scan</code> (regression — shared morselib edits don't break other apps; unused IBSS
+      path is <code>--gc-sections</code>-collected).</li>
+  </ul>
+
+  <p><strong>Scope of this increment:</strong> command <em>acceptance</em>, not a full link. The app calls
+  <code>mmwlan_ibss_enable()</code> with <code>start_beaconing = false</code> (no IBSS beacon body is built yet)
+  and prints each command's return code. It directly tests the <code>EEXIST(-17)</code> fix (clean-state add) and
+  whether the firmware honours <code>IBSS_CONFIG (0x0035)</code>.</p>
+
+  <h3>Hardware test procedure</h3>
+  <div class="callout"><p style="margin:0">Radio-silent rule still applies — flash <code>rimba-hello</code> when
+  not actively testing.</p></div>
+  <pre><code>make flash-monitor APP=rimba-halow-ibss BOARD=proto1-fgh100m PORT=/dev/ttyACM0</code></pre>
+  <p>Watch the console for the <code>IBSS:</code> lines:</p>
+  <pre><code>IBSS: ADD_INTERFACE(ADHOC) ok (vif_id=…)
+IBSS: SET_CHANNEL ok (chan#=27, 1 MHz)
+IBSS: BSSID_SET (…) ret=0
+IBSS: BSS_CONFIG (bi=100 cssid=0x…) ret=0
+IBSS: IBSS_CONFIG(CREATE) ret=0
+==&gt; mmwlan_ibss_enable SUCCESS — firmware accepted the IBSS sequence</code></pre>
+
+  <h3>Decision tree (read off the <code>IBSS_CONFIG</code> line)</h3>
+  <ul>
+    <li><strong><code>IBSS_CONFIG(CREATE) ret=0</code></strong> → the firmware supports ad-hoc. Proceed to the
+      next increment: build an IBSS beacon body + an IBSS datapath vtable
+      (<code>construct_80211_data_header</code> with IBSS addressing, <code>lookup_stad_*</code> returning a peer
+      for any address), set <code>start_beaconing = true</code>, and check a 2nd board (built
+      <code>-DRIMBA_IBSS_CREATOR=0</code>) hears it / exchanges <code>0x88B5</code>.</li>
+    <li><strong><code>ret = -EEXIST(-17)</code></strong> → an interface still pre-exists; the clean-state
+      assumption is wrong for this build — trace what added it before <code>mmwlan_ibss_enable</code>.</li>
+    <li><strong><code>ret = -EINVAL(-22)</code> or non-zero on <code>IBSS_CONFIG</code></strong> → the
+      <code>0x0035</code> struct layout/opcode differs from <code>morse_driver</code> on this firmware; re-check the
+      field order, or the command id. (<code>ADD_INTERFACE(ADHOC)</code> succeeding but <code>IBSS_CONFIG</code>
+      failing would localise the problem precisely.)</li>
+    <li><strong><code>ADD_INTERFACE(ADHOC)</code> itself fails</strong> → the firmware rejects interface type 4;
+      revisit whether a different chip-fw build is needed (vs the forum report).</li>
+  </ul>
+  <p>Capture the console output into a new worklog entry whichever way it goes.</p>
+
+  <h2 id="hw-first-run">Result — first hardware run (2026-06-18, board on /dev/ttyACM0)</h2>
+  <p>Ran on a XIAO ESP32-S3 + Seeed HaLow module. Boot reported chip <code>0x0306</code> (MM6108), firmware
+  <code>1.17.6</code>, <strong>board description <code>mf16858</code></strong> — NOTE this is the mf16858 module,
+  not FGH100M (the <code>mf16858</code> string shows up regardless of which BCF file is compiled, so it's the
+  module's burned-in identity; the bench hardware is mf16858 and should use <code>boards/proto1</code> /
+  <code>bcf_mf16858</code>).</p>
+
+  <p>Per-command outcome:</p>
+  <table>
+    <thead><tr><th>Command</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td><code>ADD_INTERFACE(ADHOC)</code> (type 4)</td><td>accepted</td></tr>
+      <tr><td><code>SET_CHANNEL</code></td><td>accepted</td></tr>
+      <tr><td><code>BSSID_SET</code> (0x52)</td><td>accepted</td></tr>
+      <tr><td><code>BSS_CONFIG</code> (0x06)</td><td>accepted</td></tr>
+      <tr><td><strong><code>IBSS_CONFIG</code> (0x35), opcode CREATE</strong></td><td><strong><code>rc -17</code> (EEXIST)</strong></td></tr>
+    </tbody>
+  </table>
+
+  <pre><code>E ev morse_cmd_tx Command 35:110 failed with rc -17 (0xffffffef)
+E ev umac_ibss_do_start IBSS: IBSS_CONFIG rejected by firmware (ret=-17)</code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ Interpretation — this resolves the open unknowns</p>
+    <ul style="margin:.2em 0">
+      <li>The v1.17.6 firmware <strong>does support ad-hoc</strong>. Interface type 4 is accepted, and command
+        <code>0x35</code> is <em>recognised</em> — it returned a state error (<code>EEXIST</code>), not
+        <code>-EINVAL</code>/"unknown command". <code>BSSID_SET (0x52)</code> is likewise accepted.</li>
+      <li>The <code>EEXIST(-17)</code> is exactly the error reported on the Morse forum, now localised: it is
+        <strong><code>IBSS_CONFIG(CREATE)</code> reporting the IBSS already exists</strong>. On ESP32,
+        <code>ADD_INTERFACE(ADHOC)</code> + <code>BSS_CONFIG</code> already establish the BSS, so the explicit
+        CREATE is redundant. The fix is to <strong>not treat <code>-17</code> as fatal</strong> (and not tear the
+        interface down on it) — likely the unpublished "init sequence" fix from the forum.</li>
+    </ul>
+  </div>
+
+  <p><strong>Next experiment (cheap, high-value):</strong> treat <code>IBSS_CONFIG</code> <code>-17</code> as
+  success-in-place (keep the interface up instead of removing it on the error path), then check whether the chip is
+  <strong>already auto-beaconing</strong> in IBSS mode — run <code>rimba-halow-scan</code> on a second board and
+  look for SSID <code>rimba-ibss</code> / the shared BSSID. If it appears, firmware-side IBSS beaconing works and
+  we can skip hand-building beacons; if not, the beacon-body + datapath increment is needed.</p>
+
+  <h2 id="auto-beacon">Result — auto-beacon experiment (2026-06-18, two boards)</h2>
+  <p>Made <code>IBSS_CONFIG</code> <code>-17</code> non-fatal (keep the interface up). Board 0 then reports:</p>
+  <pre><code>IBSS: IBSS_CONFIG reports already-exists (rc -17) — treating as created
+==&gt; mmwlan_ibss_enable SUCCESS — firmware accepted the IBSS sequence
+alive (creator=1, ibss_status=0)</code></pre>
+  <p>So the full sequence now "succeeds" and the ADHOC interface stays up (<code>start_beaconing=false</code>).
+  Board 1 (<code>rimba-halow-scan</code>, same channel list) was booted while board 0's IBSS was up and
+  <strong>found no networks</strong> ("Scan finished", zero APs).</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Conclusion — the MM6108 firmware does NOT auto-beacon in IBSS mode</p>
+    <p>Bringing up the ADHOC interface + <code>BSS_CONFIG</code> + <code>IBSS_CONFIG</code> is not enough to put it
+    on air — beacons must be <strong>host-generated and TX'd</strong>, exactly the Linux-driver model
+    (<code>beacon.c</code> software S1G beacons). <code>mmdrv_start_beaconing()</code> can't be used as-is: it
+    pulls the beacon body from <code>umac_ap_get_beacon()</code> (AP data we don't allocate on the ADHOC path), so
+    it would null-deref. Both unknowns #1 (auto-beacon — NO) and #2 (IBSS_CONFIG real — YES, returns EEXIST) are
+    now retired.</p>
+  </div>
+
+  <p>(Aside: both bench modules report board <code>mf16858</code>; per the owner we keep
+  <code>bcf_fgh100mhaamd</code>/<code>proto1-fgh100m</code> for now — it boots fine either way.)</p>
+
+  <h2 id="where-leaves">Where this leaves RISK-01</h2>
+  <p>The chip-command half of RISK-01 is <strong>proven</strong>: ad-hoc interface type and the IBSS commands
+  work; <code>EEXIST</code> is understood and handled. What remains is the host-side <strong>IBSS beacon +
+  datapath</strong> increment:</p>
+  <ol>
+    <li>Allocate IBSS state akin to <code>umac_ap_enable_ap</code> (so <code>umac_ap_get_beacon</code> has a valid
+      context), or add an IBSS beacon builder.</li>
+    <li>Hand-build an IBSS beacon body (long S1G beacon: SSID + supported rates + S1G capabilities/operation + IBSS
+      parameter set; IBSS capability bit, NO TIM), store as <code>config.head</code>/<code>tail</code>, then
+      <code>mmdrv_start_beaconing()</code>.</li>
+    <li>Add an IBSS datapath vtable (<code>construct_80211_data_header</code> with IBSS addressing
+      ToDS=FromDS=0/A1=DA/A2=SA/A3=BSSID; <code>lookup_stad_*</code> returning a peer for any address since IBSS
+      has no association).</li>
+    <li>Two-board check: board 0 beacons, board 1 <code>rimba-halow-scan</code> sees <code>rimba-ibss</code> / the
+      shared BSSID; then exchange EtherType <code>0x88B5</code> frames (the Phase-1 gate).</li>
+  </ol>
+
+  <h2 id="beacon-impl">Result — IBSS beacon implemented; detection needs probe-response (2026-06-18)</h2>
+  <p>Implemented host-generated IBSS beaconing (all in the <code>halow</code> morselib copy):</p>
+  <ul>
+    <li><code>umac_ibss.h</code> + code in <code>umac.c</code>: a single IBSS beacon context (<code>g_ibss</code>),
+      a builder <code>umac_ibss_build_beacon</code> (PV0 mgmt header, beacon subtype, broadcast DA, our MAC as SA,
+      shared BSSID; timestamp/BI; <strong>IBSS capability bit</strong>; SSID IE;
+      <code>ie_s1g_capabilities_build</code>; a hand-packed <strong>S1G Operation IE</strong>; no TIM), and
+      <code>umac_ibss_get_beacon</code> (mgmt frame + tx metadata, mirroring <code>umac_ap_get_beacon</code>).</li>
+    <li><code>umac_mmdrv_shim.c</code>: <code>mmdrv_host_get_beacon</code> dispatches to the IBSS getter when
+      <code>umac_ibss_is_active()</code>.</li>
+    <li><code>umac_ibss_do_start</code> now populates <code>g_ibss</code> (incl. the S1G operation captured from
+      <code>umac_interface_get_current_s1g_operation_info</code> after SET_CHANNEL) and calls
+      <code>mmdrv_start_beaconing</code>. App sets <code>start_beaconing=true</code>.</li>
+  </ul>
+  <p><strong>On hardware:</strong> board 0 brings up IBSS and beacons <strong>stably</strong> —
+  <code>ibss_status=0</code>, no crash, no beacon-worker errors. But board 1 (<code>rimba-halow-scan</code>) sees
+  <strong>no networks</strong>.</p>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Root cause (from the RX dispatch, not the beacon)</p>
+    <ul style="margin:.2em 0">
+      <li><code>umac_datapath_process_rx_mgmt_frame_sta</code> (<code>umac_datapath.c:341</code>) feeds <strong>only
+        <code>PROBE_RSP</code></strong> to the scanner; <strong>beacons are not processed for scanning</strong>.</li>
+      <li>The HW scan is <strong>active</strong>: it broadcasts probe requests and waits for probe
+        <em>responses</em>.</li>
+      <li>Our IBSS node beacons but has <strong>no datapath / mgmt-RX handler</strong>, so it never answers probe
+        requests → scanner gets no probe response → board 0 is invisible to scan despite beaconing correctly. (The
+        AP path answers probes via <code>datapath_ops_ap.process_rx_mgmt_frame</code> →
+        <code>umac_ap_handle_probe_req</code>.)</li>
+    </ul>
+  </div>
+
+  <p>So both "scan detects us" and the <code>0x88B5</code> exchange require the <strong>IBSS datapath</strong>
+  (next increment): an IBSS datapath vtable whose <code>process_rx_mgmt_frame</code> answers probe requests (build a
+  probe response from <code>g_ibss</code> — same IEs as the beacon), plus <code>construct_80211_data_header</code>
+  (IBSS addressing) and a peer model for data.</p>
+
+  <p>Testing aid: <code>rimba-halow-scan</code> was given a re-scan loop (every 4 s) so non-interactive capture
+  doesn't have to race a one-shot boot scan.</p>
+
+  <p>Capture note (bench): XIAO USB-Serial-JTAG re-enumerates on reset; a beaconing board can't be reset by esptool
+  (CPU busy). Reliable capture = flash/reset, then <code>sleep ~2-3 s</code>, then a single continuous
+  <code>cat</code> (see commands in the session).</p>
+
+  <h2 id="beacon-scan">Result — beacon-aware scan still doesn't detect the IBSS node (2026-06-18)</h2>
+  <p>Made the STA RX path also feed <strong>beacons</strong> to the scanner (<code>umac_datapath.c</code>: added a
+  <code>DOT11_FC_SUBTYPE_BEACON</code> case → <code>umac_scan_process_probe_resp</code>; the probe-resp parser is
+  subtype-agnostic and needs SSID + S1G Capabilities + S1G Operation IEs, all of which our beacon has). Also looped
+  <code>rimba-halow-scan</code> (4 s) for reliable capture.</p>
+  <p>Two-board test: board 0 = <code>rimba-halow-ibss</code> (ADHOC, beaconing), board 1 = beacon-aware
+  <code>rimba-halow-scan</code>. <strong>Board 1 still finds no networks</strong> over multiple scan cycles.</p>
+  <p>So the cross-board link is not yet demonstrated, and the cause is now in a <strong>low-visibility</strong> area
+  (no RF sniffer on the bench):</p>
+  <ul>
+    <li><strong>Either</strong> the chip is not actually radiating the host-provided IBSS beacon — plausibly the
+      host beacon needs the fuller AP-style TX context to be admitted (the working SoftAP path also sets up
+      <code>sta_common</code> + <code>umac_datapath_configure_ap_mode</code> + a valid mgmt rate-control table; our
+      ad-hoc path skips those). The beacon worker runs without error, but "handed to the chip" ≠ "on air".</li>
+    <li><strong>Or</strong> the chip does not deliver received beacons to the host during an active scan (reports
+      only probe responses), so even a perfect beacon wouldn't show.</li>
+  </ul>
+  <p>Both are hard to disambiguate without either (a) a HaLow sniffer / monitor-mode capture to confirm OTA
+  beacons, or (b) building the fuller datapath + AP-style TX context so the node both radiates and answers probe
+  requests.</p>
+
+  <h3>State of RISK-01 at this checkpoint</h3>
+  <ul>
+    <li>✅ ADHOC interface + IBSS commands accepted by firmware (HW-proven).</li>
+    <li>✅ <code>EEXIST(-17)</code> understood and handled.</li>
+    <li>✅ Host IBSS beacon generated; board runs stably in ad-hoc mode, no crash.</li>
+    <li>❌ Not yet observed on a second board (radiation/scan-delivery unverified).</li>
+  </ul>
+
+  <h3>Recommended next steps (need a decision)</h3>
+  <ol>
+    <li><strong>Best unblocker: a HaLow sniffer</strong> (another MM6108 in monitor mode, or a HaLow-capable
+      analyzer) to confirm whether board 0's beacon is on air. This removes the guesswork.</li>
+    <li><strong>Or</strong> build the full IBSS datapath + AP-style TX context: allocate a peer <code>stad</code>,
+      <code>umac_datapath_configure_*</code> for ad-hoc, valid mgmt rate control, and probe-request answering —
+      i.e. make the ad-hoc interface a first-class TX/RX interface like AP, then exchange <code>0x88B5</code>.
+      Larger, iteration-heavy.</li>
+  </ol>
+
+  <h3>Working-tree changes from this increment (all uncommitted)</h3>
+  <ul>
+    <li>morselib: <code>umac_ibss.h</code>, IBSS beacon + <code>mmwlan_ibss_enable</code> in <code>umac.c</code>,
+      shim dispatch, <code>morse_commands.h</code>/<code>mmdrv.h</code>/<code>driver.c</code> IBSS commands,
+      <code>umac_interface.*</code> ADHOC type, and the beacon-aware scan case in <code>umac_datapath.c</code>.</li>
+    <li>apps: <code>firmware/rimba-halow-ibss/</code> (new); <code>rimba-halow-scan</code> got a re-scan loop
+      (testing aid — candidate to revert).</li>
+    <li>board: <code>boards/proto1-fgh100m/</code>.</li>
+  </ul>
+
+  <h2 id="sniffer-nothing">Result — in-scan raw sniffer sees nothing (2026-06-18)</h2>
+  <p>Used board 1 as a sniffer (the owner's suggestion): added a raw-frame capture to <code>rimba-halow-scan</code>
+  via the internal <code>mmwlan_register_rx_frame_cb</code> (filter <code>BEACON|PROBE_RSP|PROBE_REQ</code>),
+  printing each frame's flag/len/freq/RSSI/A2/A3 and flagging A3 == our IBSS BSSID. Ran board 0 = beaconing IBSS,
+  board 1 = scan+sniff.</p>
+  <p><strong>Result: zero <code>RXFRAME</code> callbacks over 5 scan cycles</strong> — no OTA frames captured at
+  all.</p>
+  <p>Inconclusive but narrowing:</p>
+  <ul>
+    <li>Consistent with <strong>board 0 not radiating</strong> the host beacon (leading hypothesis: the chip needs
+      the fuller AP-style TX context — peer <code>stad</code>, <code>umac_datapath_configure_*</code>, valid mgmt
+      rate-control — before it will transmit; the minimal ad-hoc path skips these).</li>
+    <li>OR the <code>rx_frame_cb</code> is <strong>not exercised during a hardware-offloaded scan</strong>
+      (<code>hw_scan</code>), so the sniff is a false negative — in which case a true <strong>monitor-mode
+      interface</strong> (<code>INTERFACE_TYPE_MON=3</code> + fixed channel + raw RX) is needed for ground truth,
+      rather than piggy-backing on scan.</li>
+  </ul>
+  <p>So three RX-side approaches (scan, beacon-aware scan, in-scan raw sniff) have all shown no reception. Verdict:
+  <strong>blocked on RF ground-truth.</strong> The two ways forward, both sizable:</p>
+  <ol>
+    <li><strong>Monitor-mode interface on board 1</strong> — a real sniffer (not scan-based) to definitively answer
+      "is board 0 on air?" before more TX work.</li>
+    <li><strong>Full IBSS datapath + AP-style TX context</strong> — make the ad-hoc interface a first-class TX/RX
+      interface (peer <code>stad</code>, datapath config, rate control, probe-request answering) so it both
+      radiates and is reachable; then <code>0x88B5</code>.</li>
+  </ol>
+  <p>The chip-command layer of RISK-01 remains proven; the open question is purely the host-side TX/RX plumbing
+  needed to get frames on/off the air in ad-hoc mode.</p>
+
+  <h2 id="decode-frame">Verification — decoded the on-air IBSS frame vs Linux (2026-06-19)</h2>
+  <p>Added a hexdump to the board-1 sniffer and decoded a captured IBSS probe response (77 B) byte-for-byte. It is
+  well-formed and faithful to the Linux IBSS frame:</p>
+  <pre><code>FC=0x0050 (PV0 mgmt, PROBE_RESP)  Dur=0x02d0
+A1/DA = bc:2a:33:96:b2:9f  (the probe requester, board 1)
+A2/SA = 02:12:34:56:78:9a  (= BSSID)   ← chip applied SW-4741 override
+A3/BSSID = 02:12:34:56:78:9a
+timestamp=0  beacon_int=100TU  cap=0x0002 (IBSS set, ESS clear)
+IE 00/0a "rimba-ibss"            SSID
+IE 06/02 00 00                   IBSS Parameter Set, ATIM=0  (exact ibss.c:133 match)
+IE d9/0f …                       S1G Capabilities (217)
+IE e8/06 00 44 1b 1b 00 00       S1G Operation (232): op_class 68, chan 27</code></pre>
+
+  <p><strong>Two earlier concerns resolved by the decode:</strong></p>
+  <ul>
+    <li>The flagged "SA = my_mac bug" is <strong>not a bug</strong>. The wire SA = BSSID — the chip applies
+      morse_driver's SW-4741 (<code>tx_11n_to_s1g.c:867</code>, "SA MUST be the BSSID") itself. My source
+      <code>SA = my_mac</code> matches mac80211 <code>ieee80211_ibss_build_presp</code> (<code>sa = vif.addr</code>);
+      the chip overrides it. Faithful, no fix needed.</li>
+    <li>The host body provides S1G Cap/Op and the chip does <strong>not</strong> duplicate them — so on ESP32 the
+      host supplies the S1G content IEs (as the AP path does via hostapd) and the chip handles S1G framing + SA.
+      Confirmed: no malformed/dup IEs.</li>
+  </ul>
+
+  <p><strong>Minor deltas vs Linux (not bugs, optional to close):</strong> no legacy Supported Rates IE (mac80211
+  emits it in the 11n presp but morse_driver strips it for S1G, so its absence matches the S1G wire); no Country IE
+  and no S1G Short Beacon Interval IE (Linux probe-resp carries these). The IBSS-defining content matches.</p>
+
+  <p>Note: this is the PROBE RESPONSE (shares <code>umac_ibss_append_s1g_ies</code> with the beacon, so the
+  beacon's IE content is equally verified). The S1G <em>beacon</em> frame itself isn't surfaced by the scan-based
+  sniffer, so its EXT/S1G-beacon framing is the chip's job and unverified-on-wire.</p>
+
+  <h2 id="verify-structs">Verification — command structs vs raw morse_driver (2026-06-19)</h2>
+  <p>Diffed my recreated IBSS commands against <code>MorseMicro/morse_driver@main</code>
+  (<code>morse_commands.h</code>, <code>command.c</code>) — <strong>byte-for-byte match, no
+  discrepancies</strong>:</p>
+  <ul>
+    <li>IDs: <code>MORSE_CMD_ID_IBSS_CONFIG = 0x0035</code>, <code>MORSE_CMD_ID_BSSID_SET = 0x0052</code>.</li>
+    <li><code>morse_cmd_req_ibss_config { hdr; u8 ibss_bssid[6]; u8 ibss_cfg_opcode; u8 ibss_probe_filtering; }
+      __packed</code> — opcodes CREATE=0/JOIN=1/STOP=2.</li>
+    <li><code>morse_cmd_req_bssid_set { hdr; morse_cmd_mac_addr bssid; } __packed</code>.</li>
+    <li><code>morse_cmd_header</code> = 6×<code>__le16</code> (12 B).</li>
+  </ul>
+  <p>My structs are <code>MM_PACKED</code> and <code>ibss_probe_filtering</code> defaults to 1 (matches the
+  driver's <code>enable_ibss_probe_filtering = true</code>). Opcode selection (stop→STOP, else
+  creator→CREATE/joiner→JOIN) matches <code>morse_cmd_cfg_ibss</code>.</p>
+
+  <h3>Linux-fidelity verification summary</h3>
+  <ul>
+    <li>✅ Beacon/probe-resp IE content (on-wire decode) — faithful.</li>
+    <li>✅ Command IDs + structs — byte-for-byte vs morse_driver.</li>
+    <li>✅ Command sequence + probe-answering + addressing — from morse_driver / ibss.c.</li>
+    <li>🚧 Data path — plumbing implemented (see below); data not yet flowing.</li>
+  </ul>
+
+  <h2 id="datapath-arp">Data path — plumbing implemented; ARP not resolving (2026-06-19)</h2>
+  <p>Un-stubbed the IBSS data plane in <code>umac.c</code>, reusing the STA single-peer model:</p>
+  <ul>
+    <li>A single shared peer <code>stad</code> (<code>g_ibss.stad = umac_sta_data_alloc_static</code>) — IBSS has
+      no association, so all peers map to it; real DA/SA travel in the 802.11 header. The TX path requires a
+      non-NULL stad, so the <code>lookup_stad_*</code> ops return it.</li>
+    <li><code>enqueue/dequeue_tx_frame</code> use the per-stad queue
+      (<code>umac_sta_data_queue_pkt</code>/<code>_pop_pkt</code>), mirroring <code>datapath_ops_sta</code>.</li>
+    <li>Marked the shared stad <strong>OPEN</strong> security so the TX datapath sends <strong>plaintext</strong>
+      (<code>umac_datapath.c:1733</code> only encrypts when <code>security_type != MMWLAN_OPEN</code>) — correct
+      for a keyless open IBSS.</li>
+    <li><code>construct_80211_data_header</code> already does IBSS addressing (ToDS=FromDS=0, A1=DA, A2=SA,
+      A3=BSSID).</li>
+    <li>App (<code>rimba-halow-ibss</code>) now picks role from its MAC (one binary for both boards), pins a static
+      IP (CREATOR .1 / JOINER .2), brings the netif up (IBSS, like AP, fires no link-up event), and pings the
+      peer.</li>
+  </ul>
+  <p><strong>On two boards:</strong> both come up with correct roles, beacon, and start pinging — but every ping
+  <strong>times out</strong> with <code>ping_sock: send error=0</code> on <em>both</em> sides. That is the
+  <strong>ARP-unresolved</strong> symptom: lwIP has no MAC for the peer IP, so it never emits the ICMP. (Identical
+  to the AP-STA ping test, which needed a static ARP entry — see
+  <code>2026-06-18-halow-ap-sta-ping.md</code>.)</p>
+  <p><strong>So the data plumbing runs but a frame round-trip isn't completing.</strong> Open question to debug
+  next: does the ARP broadcast TX go out / get received, and does unicast data RX get delivered up? Plan:</p>
+  <ol>
+    <li>Add <strong>static ARP</strong> entries (peer IP → peer MAC) on both boards to bypass ARP and isolate
+      unicast data TX/RX (exactly what unblocked AP-STA). Peer MACs: creator <code>68:24:99:44:6b:b7</code>, joiner
+      <code>bc:2a:33:96:b2:9f</code>.</li>
+    <li>If static ARP makes ICMP flow → broadcast/ARP path is the remaining gap; if not → unicast data RX delivery
+      (the shared-stad RX dedup / 802.11→802.3 translate path) needs tracing against mac80211
+      <code>rx.c</code>.</li>
+    <li>Then swap ICMP for raw EtherType <code>0x88B5</code> (the literal Phase-1 gate).</li>
+  </ol>
+
+  <h3>Static-ARP diagnostic result (2026-06-19)</h3>
+  <p>Added a static ARP entry (peer IP → peer MAC) on both boards (<code>USE_STATIC_ARP</code>,
+  <code>etharp_add_static_entry</code>). Result: the <strong><code>send error=0</code> disappears</strong> — lwIP
+  now <em>sends</em> the ICMP (TX no longer blocked on ARP) — <strong>but pings still time out</strong> on both
+  boards. So:</p>
+  <ul>
+    <li><strong>Unicast TX is now issued</strong> (ARP was the only thing blocking the send).</li>
+    <li><strong>The round-trip still fails</strong> → either the data frame isn't reaching the air, or (more
+      likely, since it's symmetric on both boards) the <strong>RX data path isn't delivering received frames up to
+      the netif</strong>.</li>
+  </ul>
+  <p>Static ARP was the diagnostic; <strong>the goal remains dynamic ARP</strong> (which AP-STA got once its netif
+  came up). But dynamic ARP can't work until the data round-trip does — and the round-trip is the real remaining
+  bug.</p>
+  <p><strong>Next diagnostic:</strong> instrument the RX data path — log in <code>mmhalow</code>
+  <code>halow_rx</code> (the <code>rx_pkt_callback</code>) and/or the umac RX data handler — to see whether the
+  peer receives the frame at all. That splits it cleanly: frames arrive → RX→netif delivery bug; frames don't
+  arrive → OTA TX bug (verify via TX counters or a monitor interface, since the scan sniffer only surfaces mgmt
+  frames, not data). Check <code>umac_datapath_process_tx_frame</code>
+  (dequeue→frame build→<code>mmdrv_tx_frame</code>) for a silent drop on the shared-stad path, and the RX dedup/seq
+  handling against mac80211 <code>rx.c</code> for the IBSS case.</p>
+
+  <h2 id="datapath-works">✅ Data path works — RX-VIF bug found &amp; fixed; IP ping over IBSS (2026-06-19)</h2>
+  <div class="callout bug">
+    <p class="ct">🐛 Root cause — every received IBSS data frame dropped before the netif</p>
+    <p>The RX <strong>data</strong> path resolves the VIF by checking only STA or AP
+    (<code>umac_datapath.c</code> ~595): our interface is <code>UMAC_INTERFACE_ADHOC</code>, so it fell through to
+    <code>"Invalid RX VIF" → drop</code>. <strong>Fix:</strong> add an <code>UMAC_INTERFACE_ADHOC</code> case
+    mapping to <code>MMWLAN_VIF_AP</code> (no dedicated IBSS vif enum), so RX data is delivered up.</p>
+  </div>
+  <p>With the fix + static ARP, two boards exchange ICMP over IBSS:</p>
+  <pre><code>RXDATA len=106 dst=68:24:99:44:6b:b7 src=bc:2a:33:96:b2:9f eth=0x0800
+reply from 192.168.13.2: seq=32 time=17 ms  &lt;== IBSS DATA OK
+counts: ok=16  rxdata=32  timeout=0   (~17-20 ms RTT)</code></pre>
+  <p>The <strong>Phase-1 data gate is met</strong> (IP data exchange between two MM6108 IBSS peers). Note the
+  data-frame <code>src</code> is the peer's <strong>real MAC</strong> — SW-4741 (SA=BSSID) is beacon-only, so
+  unicast data addressing is normal and ARP can work.</p>
+  <p>Implementation note: the shared-stad model + the STA-style enqueue/dequeue + OPEN-plaintext TX + IBSS
+  addressing all check out on the wire. RX dedup uses the single shared stad's sequence space (fine for 2 nodes;
+  revisit for &gt;2).</p>
+
+  <h3>✅ Dynamic ARP works (goal met) — no static entry (2026-06-19)</h3>
+  <p>Set <code>USE_STATIC_ARP=0</code> (remove the static ARP entry entirely) and re-ran:</p>
+  <pre><code>counts: ok=18  rxdata=36  timeout=0  senderr=0   (~16-17 ms RTT)</code></pre>
+  <p>ARP resolves <strong>dynamically</strong> over the IBSS — the static entry was only ever a diagnostic. The
+  RX-VIF drop was the sole root cause; once received frames are delivered, the ARP broadcast→unicast-reply
+  round-trip completes and IP flows with no manual entries. This matches how AP-STA behaved once its netif was
+  up.</p>
+
+  <h2 id="resolved">RISK-01 — RESOLVED</h2>
+  <div class="stats">
+    <div class="stat"><div class="num ok">~16–17 ms</div><div class="lbl">RTT over IBSS</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">ping timeouts (dynamic ARP)</div></div>
+    <div class="stat"><div class="num acc">18 / 36</div><div class="lbl">ok replies / rxdata</div></div>
+    <div class="stat"><div class="num acc">2</div><div class="lbl">ESP32-S3 + MM6108 peers</div></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ End-to-end on two ESP32-S3 + MM6108 boards, all derived from the Linux side</p>
+    <ul style="margin:.2em 0">
+      <li>✅ ADHOC interface + IBSS commands (vs morse_driver, byte-verified)</li>
+      <li>✅ Stable bring-up; <code>EEXIST(-17)</code> understood/handled</li>
+      <li>✅ Host IBSS beacon (vs ieee80211_ibss_build_presp; on-wire verified)</li>
+      <li>✅ Probe-answering → discoverable as a genuine IBSS (cap 0x0002)</li>
+      <li>✅ <strong>IBSS data path: bidirectional IP, dynamic ARP, 0 timeouts, ~17 ms RTT</strong></li>
+    </ul>
+  </div>
+
+  <p>The Phase-1 success gate (two battery nodes exchange L2 frames without infrastructure) is demonstrated. The
+  literal Rimba EtherType <code>0x88B5</code> rides the same data path — it's just a different EtherType than the
+  IP (0x0800) used here; sending raw <code>0x88B5</code> is an app-level <code>mmwlan_tx</code> with that EtherType,
+  not a datapath change.</p>
+
+  <p>Cleanup still owed before this is merge-ready: gate/remove the <code>RXDATA</code> debug log in
+  <code>mmhalow.c</code> and the static-ARP/MAC diagnostic scaffolding in the app; resolve the
+  <code>.mbin.o</code> artifact churn (below).</p>
+
+  <h2 id="mbin-todo">TODO — investigate the <code>components/firmware/*.mbin.o</code> build artifacts</h2>
+  <p>Hit a footgun: <code>components/firmware/mm6108/bcf_fgh100mhaamd.mbin.o</code> (and the other
+  <code>*.mbin.o</code>) are objcopy-generated binary objects (<code>make_binary_object</code> in the firmware
+  component's CMakeLists, from the <code>.mbin</code> blobs). They are <strong>tracked in git</strong> (committed in
+  the pristine import) <strong>but the build regenerates them in-place for the target arch (xtensa)</strong>.
+  Consequences observed:</p>
+  <ul>
+    <li><code>git checkout</code> / reverting a <code>.mbin.o</code> restores the committed object, which is
+      <strong>not an xtensa object</strong>, and the incremental build does <strong>not</strong> regenerate it (its
+      mtime looks up-to-date) → link fails: <em>"unknown architecture … incompatible with xtensa output"</em>. Fix
+      used: <code>rm</code> the <code>.o</code> to force regeneration.</li>
+    <li>Every build dirties the firmware submodule (the <code>.o</code> changes), which is why the RISK-01 commits
+      had to carefully avoid staging it.</li>
+  </ul>
+
+  <div class="callout ok">
+    <p class="ct">✓ RESOLVED (2026-06-19)</p>
+    <p>These are build outputs and shouldn't be tracked. In the <code>firmware</code> submodule (on its
+    <code>test2</code> branch, <code>main</code> left pristine): <code>git rm --cached</code> the three committed
+    <code>*.mbin.o</code> and added a <code>.gitignore</code> for <code>*.mbin.o</code>. The <code>.mbin</code>
+    source blobs stay tracked; the build regenerates the objects locally. Verified by deleting the in-source
+    <code>.o</code> (fresh-clone simulation) and rebuilding — the build regenerates + links, and the submodule
+    stays clean (objects ignored). No more per-build churn and no revert-breaks-the-build trap.</p>
+  </div>
+
+  <h2 id="sniffer-validated">Result — sniffer validated against a known AP (2026-06-19)</h2>
+  <p>Per the owner's suggestion, validated the board-1 sniffer against a known-good radiator: board 0 =
+  <code>rimba-halow-ap</code> (SoftAP), board 1 = scan+sniff. <strong>It works:</strong></p>
+  <ul>
+    <li>Scanner listed <code>rimba-ping</code> (BSSID <code>6a:24:99:44:6b:b7</code>, cap <code>0x0011</code>).</li>
+    <li>Raw sniffer (<code>rx_frame_cb</code>) captured frames at <strong>915.5 MHz / ch27</strong>,
+      <code>A2=A3=</code> the AP's BSSID — so the RF link between the two boards is fine and the capture path
+      works.</li>
+  </ul>
+  <div class="callout warn">
+    <p class="ct">⚠ Crucial detail — scan surfaces probe responses, not beacons</p>
+    <p>Every captured frame was <strong><code>flag=0x20</code> = PROBE_RSP</strong>, never <code>0x100</code> =
+    BEACON — even though the AP beacons continuously. So during a hardware-offloaded scan, <strong>the chip
+    delivers probe <em>responses</em> to the host, not beacons.</strong> The AP is discoverable purely because it
+    <strong>answers probe requests</strong> (active scan).</p>
+  </div>
+  <p>This re-frames everything:</p>
+  <ul>
+    <li>The IBSS null result was NOT evidence the node is silent — beacons aren't surfaced during scan regardless,
+      and the IBSS node doesn't answer probes, so there was nothing to capture either way.</li>
+    <li><strong>Active-scan detection works for anything that answers probe requests.</strong> The cheapest proof
+      that the ad-hoc node is on air (TX + RX) is therefore to make it <strong>answer probe requests</strong>, not
+      to chase beacon reception.</li>
+    <li>A scan-based sniffer cannot see beacons; only a true monitor interface (<code>INTERFACE_TYPE_MON</code>,
+      promiscuous) could — but that's now a detour.</li>
+  </ul>
+
+  <h3>Revised plan (next)</h3>
+  <p>Build the IBSS node's <strong>RX/TX datapath</strong> so it answers probe requests:</p>
+  <ol>
+    <li>Configure a datapath on the ad-hoc interface (so RX mgmt frames are delivered) with a
+      <code>process_rx_mgmt_frame</code> that replies to PROBE_REQ using a probe response built from
+      <code>g_ibss</code> (same IEs as the beacon) + a peer <code>stad</code> + the mgmt-TX path.</li>
+    <li>Verify: board 1's normal scan now lists <code>rimba-ibss</code> (proves the ad-hoc node TX/RXes on
+      air).</li>
+    <li>Then extend the datapath to <code>0x88B5</code> data frames (IBSS addressing) — Phase-1 gate.</li>
+  </ol>
+  <p>This is the full datapath work (task #9); the validation shows it's also the shortest route to an on-air
+  proof.</p>
+
+  <h2 id="ibss-spec">Reference — authoritative IBSS beacon/probe-resp spec from Linux (2026-06-19)</h2>
+  <p>Extracted from <code>MorseMicro/linux@mm/linux-6.12.81/1.17.x</code> <code>net/mac80211/ibss.c</code>
+  (<code>ieee80211_ibss_build_presp</code>) + <code>morse_driver</code> <code>dot11ah/tx_11n_to_s1g.c</code>,
+  <code>dot11ah/ie.c</code>, <code>beacon.c</code>. This is what our IBSS beacon MUST match.</p>
+
+  <p><strong>mac80211 builds the IBSS beacon/probe-resp body (11n form), in order:</strong> fixed (timestamp,
+  beacon_int, capability) → SSID(0) → Supported Rates(1) → DS Param(3, <strong>2.4 GHz only</strong>) →
+  <strong>IBSS Parameter Set(6, len 2, ATIM=0 — ALWAYS present)</strong> → [CSA] → Ext Supp Rates(50) → custom IEs
+  (RSN) → [HT/VHT] → WMM. Capability = <code>WLAN_CAPABILITY_IBSS</code> set, <code>ESS</code> clear,
+  <code>PRIVACY</code> if encrypted.</p>
+
+  <p><strong>morse_driver converts to S1G on TX</strong> (<code>morse_dot11ah_beacon_to_s1g</code>): frame becomes
+  <strong>EXT / S1G_BEACON</strong>, <code>SA = BSSID</code> (SW-4741); strips Supported Rates / Ext Rates / DS /
+  HT / VHT (<code>morse_dot11ah_mask_ies</code>); the <strong>IBSS Parameter Set (6) is NOT masked → carried
+  through</strong>; injects S1G Beacon Compatibility + S1G Capabilities + S1G Operation + S1G Short Beacon
+  Interval. Clears short-slot-time. <strong>IBSS S1G beacons are always LONG</strong> (<code>beacon.c:388</code> —
+  <code>if (type==ADHOC) short_beacon=false</code>). Probe-resp S1G IE set: SSID, Country, [RSN], S1G
+  Capabilities, S1G Operation, S1G Short Beacon Interval.</p>
+
+  <p><strong>IBSS merge</strong> (<code>ieee80211_rx_bss_info</code>): adopt a foreign IBSS iff same SSID, same
+  channel, IBSS cap set, different BSSID; tiebreak by <strong>TSF — higher beacon TSF wins</strong>, the lower-TSF
+  node adopts that BSSID/TSF. <strong>ATIM</strong> is power-save only (window 0 = always awake); not needed for
+  basic data exchange.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Divergence to note (ESP32 vs Linux)</p>
+    <p>On Linux the 11n→S1G beacon conversion is host-side (morse_driver); on ESP32 the <strong>chip
+    firmware</strong> does it (proven by the working SoftAP, whose host beacon is an 11n-form PV0 frame). So on
+    ESP32 we feed an 11n-form beacon body (incl. the S1G Capabilities/Operation IEs, as hostapd does for AP) and
+    rely on the chip to emit the S1G beacon per interface type (ADHOC).</p>
+  </div>
+
+  <p><strong>Applied so far:</strong> added the IBSS Parameter Set IE (EID 6) to
+  <code>umac_ibss_build_beacon</code> (was missing — the one clear deviation in the AP-template-derived beacon).
+  Capability already has IBSS set / short-slot clear.</p>
+
+  <h2 id="detected-onair">✅ Result — genuine IBSS node detected on air (2026-06-19)</h2>
+  <p>Built an <strong>IBSS datapath</strong> (<code>datapath_ops_ibss</code> + helpers in <code>umac.c</code>),
+  configured on the ad-hoc interface in <code>umac_ibss_do_start</code>, mirroring Linux:
+  <code>process_rx_mgmt_frame</code> answers PROBE_REQ with a probe response built from <code>g_ibss</code> (SSID +
+  IBSS Param Set + S1G Capabilities + S1G Operation), exactly as <code>net/mac80211/ibss.c</code>
+  <code>ieee80211_ibss_rx_probe_req</code> does; stad lookups return NULL and PROBE_REQ is in
+  <code>frames_allowed_pre_association</code> (no association in IBSS); data addressing op uses IBSS (ToDS=FromDS=0,
+  A1=DA, A2=SA, A3=BSSID). Data-plane enqueue/dequeue are stubs for now.</p>
+
+  <p>Two-board test (board 0 = <code>rimba-halow-ibss</code>, board 1 = scan+sniff):</p>
+  <pre><code>rimba-ibss   BSSID 02:12:34:56:78:9a   Capability 0x0002 (IBSS set, ESS clear)
+RXFRAME flag=0x20 (PROBE_RSP) len=77 freq=915500kHz  A2=A3=02:12:34:56:78:9a  &lt;== IBSS MATCH</code></pre>
+  <p>6 scan detections + 6 captured probe responses.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ This proves the core of RISK-01 on hardware</p>
+    <p>MM6108 in ADHOC mode on the ESP32 <strong>transmits and receives on air</strong> (received board 1's probe
+    requests, answered with probe responses) and is advertised as a real <strong>IBSS</strong> (cap
+    <code>0x0002</code>). The earlier non-detection was purely the missing probe-answering, not a radiation
+    problem.</p>
+  </div>
+
+  <h3>RISK-01 status</h3>
+  <ul>
+    <li>✅ ADHOC interface + IBSS commands accepted (HW)</li>
+    <li>✅ <code>EEXIST(-17)</code> understood/handled</li>
+    <li>✅ Stable ad-hoc bring-up + host beacon (Linux-correct IEs incl. IBSS Param Set)</li>
+    <li>✅ <strong>On-air TX+RX in IBSS mode, detected by a second board as a genuine IBSS</strong></li>
+    <li>⬜ EtherType <code>0x88B5</code> data exchange between two IBSS peers (data-plane ops still stubbed) — the
+      remaining Phase-1 gate.</li>
+  </ul>
+
+  <h3>Next: data path</h3>
+  <p>Un-stub <code>enqueue_tx_frame</code>/<code>dequeue_tx_frame</code> (or route data TX through a peer
+  <code>stad</code> + the existing TX machinery), deliver RX data frames up to the app, and exchange
+  <code>0x88B5</code> frames between two IBSS nodes. Keep deriving from <code>net/mac80211/ibss.c</code> +
+  <code>morse_driver</code> per the governing requirement.</p>
+
+</main>
+<aside class="toc"><div class="toc-inner"><p class="toc-h">On this page</p><ul>
+  <li><a href="#decisions">Decisions locked in</a></li>
+  <li><a href="#ref-source">The reference source</a></li>
+  <li><a href="#command-seq">IBSS command sequence</a></li>
+  <li><a href="#gating">Where ad-hoc is gated</a></li>
+  <li><a href="#version-matrix">Version matrix</a></li>
+  <li><a href="#forum">Forum / prior-art</a></li>
+  <li><a href="#strategies">Two strategies</a></li>
+  <li><a href="#unknowns">Open unknowns</a></li>
+  <li><a href="#cmd-accept">Command-acceptance test</a></li>
+  <li><a href="#hw-first-run">First hardware run</a></li>
+  <li><a href="#auto-beacon">Auto-beacon experiment</a></li>
+  <li><a href="#where-leaves">Where this leaves RISK-01</a></li>
+  <li><a href="#beacon-impl">IBSS beacon implemented</a></li>
+  <li><a href="#beacon-scan">Beacon-aware scan</a></li>
+  <li><a href="#sniffer-nothing">In-scan sniffer sees nothing</a></li>
+  <li><a href="#decode-frame">Decoded frame vs Linux</a></li>
+  <li><a href="#verify-structs">Command structs vs morse_driver</a></li>
+  <li><a href="#datapath-arp">Data path — ARP not resolving</a></li>
+  <li><a href="#datapath-works">✅ Data path works</a></li>
+  <li><a href="#resolved">RISK-01 — RESOLVED</a></li>
+  <li><a href="#mbin-todo"><code>.mbin.o</code> artifacts</a></li>
+  <li><a href="#sniffer-validated">Sniffer validated vs AP</a></li>
+  <li><a href="#ibss-spec">IBSS beacon spec (Linux)</a></li>
+  <li><a href="#detected-onair">✅ Genuine IBSS on air</a></li>
+</ul></div></aside>
+</div>
+<footer class="foot">Rimba engineering worklog · 2026-06-18-risk01-ibss-recon</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute("data-theme")==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem("wl-theme",n)}catch(e){}}
+(function(){try{var t=localStorage.getItem("wl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script></body></html>

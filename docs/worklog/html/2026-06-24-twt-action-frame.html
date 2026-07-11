@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Action-frame TWT (requester) on hardware — Rimba Worklog</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-06-24</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-06-24</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ PASS · ESP32 AP</span>
+    <span class="badge">TWT · power-save · STA</span>
+  </div>
+
+  <h1>Action-frame TWT (requester) on hardware<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">mid-session TWT setup/teardown without re-associating · proven on the ESP32 AP</small></h1>
+
+  <p class="lead">Exercise the <strong>mid-session, action-frame</strong> TWT path on real hardware. Until now the ESP32 STA
+  only ever negotiated TWT in <strong>association IEs</strong> (join-time). This adds the <strong>requester-side
+  action-frame sender</strong> that morselib was missing, so a STA can set up <em>and</em> tear down a TWT agreement
+  <strong>without re-associating</strong> — and proves it engages power-save (doze) mid-session against the ESP32 AP.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Status — PASS against the ESP32 AP (two STAs concurrently)</p>
+    <p>Requester action-frame TWT works end-to-end against the morselib AP, validated with <strong>two STAs held at
+    once</strong>. <strong>⚠ Linux-AP interop is blocked by PMF</strong> — the request is accepted, but the
+    <em>response</em> comes back CCMP-encrypted and can't yet be installed (see Caveats).</p>
+  </div>
+
+  <p><strong>Rig:</strong> 3× XIAO ESP32-S3 + FGH100M (<code>/dev/ttyACM0..2</code>, <code>BOARD=proto1-fgh100m</code>) +
+  chronium (RPi5 + MM6108, <code>morse_driver</code> 1.17.8). AP build on ACM0; action-frame STA build on ACM1
+  (<code>bc:2a:33:96:b2:9f</code>) and ACM2 (<code>68:24:99:44:6a:56</code>).</p>
+
+  <h2 id="what">What "action-frame TWT" is and why it matters</h2>
+  <p>TWT (Target Wake Time) lets a STA sleep (doze) between scheduled wake windows. There are two ways to negotiate it:</p>
+  <ul>
+    <li><strong>Assoc-IE TWT</strong> — the agreement is carried in the (Re)Association Request/Response IEs. It is
+      fixed at <em>join time</em>; changing it means tearing down and re-associating.</li>
+    <li><strong>Action-frame TWT</strong> — a standalone <strong>TWT-Setup</strong> management <em>action</em> frame
+      negotiates the agreement <strong>mid-session</strong>, association-preserving. A <strong>TWT-Teardown</strong>
+      action ends it. This is what lets a node adapt its wake schedule on the fly (e.g. switch to a low-power schedule
+      when idle, or renegotiate without dropping the link) — essential for a mesh leaf that shouldn't re-auth every time
+      its duty cycle changes.</li>
+  </ul>
+  <p>morselib already had the <strong>responder</strong> (AP) half (<code>umac_twt_responder_handle_action</code> /
+  <code>_tx_setup_response</code>). It had <strong>no requester (STA) action-frame sender</strong> — that is what this
+  work added, mirroring the Linux <code>morse_driver</code>.</p>
+
+  <h2 id="codemap">New code ↔ Linux map</h2>
+  <p>Per the porting rule, the new morselib code is derived from <code>morse_driver</code> / <code>net/mac80211</code>:</p>
+
+  <table>
+    <thead><tr><th>New morselib code</th><th>Linux reference</th><th>Role</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>umac_twt_requester_tx_setup()</code> (<code>umac_twt.c</code>)</td>
+        <td><code>morse_mac_send_twt_action_frame()</code> (setup)</td>
+        <td>Build agreement via CONFIGURE cmd, then TX a TWT-Setup action (cmd REQUEST/SUGGEST/DEMAND)</td>
+      </tr>
+      <tr>
+        <td><code>umac_twt_requester_tx_teardown()</code> (<code>umac_twt.c</code>)</td>
+        <td><code>morse_mac_send_twt_action_frame()</code> (teardown)</td>
+        <td>TX <code>[cat][action 7][flow_id]</code>, free local slot</td>
+      </tr>
+      <tr>
+        <td><code>umac_twt_requester_handle_action()</code> (<code>umac_twt.c</code>)</td>
+        <td>requester half of <code>morse_mac_process_rx_twt_mgmt()</code></td>
+        <td>RX cat-22 action 6 (Setup <em>response</em>) → <code>umac_twt_process_ie</code> + install pending agreement</td>
+      </tr>
+      <tr>
+        <td>dispatch in <code>umac_datapath.c</code> (<code>DOT11_ACTION_CATEGORY_S1G_UNPROTECTED</code>)</td>
+        <td><code>morse_mac_rx_s1g_action()</code></td>
+        <td>Route S1G action to both responder + requester handlers</td>
+      </tr>
+      <tr>
+        <td><code>mmwlan_twt_setup_request()</code> / <code>_teardown()</code> (<code>umac.c</code>, <code>mmwlan.h</code>)</td>
+        <td>(nl80211/<code>morse_cli twt</code>) app entry</td>
+        <td>App→umac-task entry; queue evt that runs the TX on the umac task</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout bug">
+    <p class="ct">🔑 The key fix — <code>tx_setup</code> must CONFIGURE before it TXes</p>
+    <p><code>umac_twt_add_configuration()</code> only <em>stores</em> config (a <code>memcpy</code>) — it does
+    <strong>not</strong> build a PENDING_RESPONSE agreement. The assoc path builds the agreement via a
+    <strong>CONFIGURE</strong> command. So <code>tx_setup</code> first issues
+    <code>UMAC_TWT_CMD_TYPE_CONFIGURE</code> (<code>umac_twt_handle_command</code>) to create the pending agreement,
+    fills the TWT IE from that slot with <code>umac_twt_responder_fill_ie</code>, and TXes it as an action frame via
+    <code>umac_datapath_build_and_tx_mgmt_frame(... frame_action_build ...)</code>.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">tx_setup</div><div class="s">requester entry</div></div>
+      <div class="node acc"><div class="t">CONFIGURE cmd</div><div class="s">UMAC_TWT_CMD_TYPE_CONFIGURE</div></div>
+      <div class="node"><div class="t">pending agreement</div><div class="s">slot created</div></div>
+      <div class="node"><div class="t">fill TWT IE</div><div class="s">responder_fill_ie</div></div>
+      <div class="node ok"><div class="t">TX action</div><div class="s">build_and_tx_mgmt_frame</div></div>
+    </div>
+    <figcaption>Requester setup path: create the pending agreement via CONFIGURE, fill the IE from that slot, then TX the TWT-Setup action frame.</figcaption>
+  </figure>
+
+  <h2 id="method">Test method</h2>
+  <p>STA app (<code>firmware/rimba-halow-sta</code>): connect <strong>without</strong> assoc-IE TWT (flat awake
+  baseline) → 12 s baseline → <code>mmwlan_twt_setup_request()</code> (action frame) → 30 s doze window →
+  <code>mmwlan_twt_teardown()</code>. Requester role, 1 s wake interval, ~65 ms min wake.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">connect</div><div class="s">no assoc-IE TWT</div></div>
+      <div class="node"><div class="t">12 s baseline</div><div class="s">flat awake</div></div>
+      <div class="node acc"><div class="t">TWT-Setup</div><div class="s">action frame</div></div>
+      <div class="node"><div class="t">30 s doze</div><div class="s">1 s wake · ~65 ms</div></div>
+      <div class="node ok"><div class="t">TWT-Teardown</div><div class="s">action frame</div></div>
+    </div>
+    <figcaption>Per-STA test sequence — mid-session setup and teardown, never re-associating.</figcaption>
+  </figure>
+
+  <p>Each STA pins a <strong>MAC-derived static IP</strong> (<code>192.168.12.&lt;mac[5]&gt;</code>) so two STAs don't
+  collide on <code>.2</code>; the AP tracks each authorized STA's MAC and pings it at the same address. The AP→STA ping
+  RTT is the doze probe: a ping that lands while the STA is dozing waits for the next TWT service period (~1 s), so RTT
+  spikes; a ping that lands inside the ~65 ms wake window returns flat.</p>
+
+  <h2 id="results">Results</h2>
+  <p>Both STAs held concurrently — AP logged <strong>"authorized STAs: 2"</strong> the whole window.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">2</div><div class="lbl">STAs held concurrently</div></div>
+    <div class="stat"><div class="num acc">1057 ms</div><div class="lbl">max RTT · <code>.159</code></div></div>
+    <div class="stat"><div class="num acc">1972 ms</div><div class="lbl">max RTT · <code>.86</code> (two missed intervals)</div></div>
+    <div class="stat"><div class="num">~1 s</div><div class="lbl">wake interval</div></div>
+    <div class="stat"><div class="num">~65 ms</div><div class="lbl">min wake window</div></div>
+  </div>
+
+  <p><strong>STA <code>.159</code> baseline → doze transition</strong> (AP→STA RTT, ms):</p>
+  <pre><code>seq=229  22 ms        &lt;- baseline (no TWT yet)
+seq=230  19 ms
+seq=231  966 ms   &lt;-- DOZE engaged (ping waits for next ~1 s wake)
+seq=232  13 ms        &lt;- ping landed inside wake window
+seq=235  956 ms   &lt;-- DOZE
+seq=239  948 ms   &lt;-- DOZE
+seq=243  966 ms   &lt;-- DOZE  (regular ~1 s cadence = the wake interval)</code></pre>
+
+  <p>The doze spike vs a ping that lands inside the wake window (bars to scale):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">awake (in window)</span><span class="bar-track"><span class="bar-fill fast" style="width:2%"></span></span><span class="val">19 ms</span></div>
+    <div class="bar-row"><span class="lbl">doze (waits for wake)</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">966 ms</span></div>
+  </div>
+
+  <p>RTT distribution after setup:</p>
+  <table>
+    <thead><tr><th>STA</th><th class="num">flat (&lt;100 ms)</th><th class="num">elevated (≥100 ms, doze)</th><th class="num">max RTT</th></tr></thead>
+    <tbody>
+      <tr><td><code>.159</code> (<code>bc:2a:33:96:b2:9f</code>)</td><td class="num">86</td><td class="num">9</td><td class="num"><strong>1057 ms</strong></td></tr>
+      <tr><td><code>.86</code> (<code>68:24:99:44:6a:56</code>)</td><td class="num">76</td><td class="num">10</td><td class="num"><strong>1972 ms</strong> (two missed intervals)</td></tr>
+    </tbody>
+  </table>
+
+  <p>The ~1 s spikes are absent from a non-TWT baseline (flat ~10–22 ms), so they are caused by the action-frame TWT
+  agreement, not link jitter. Capture saved at <code>/tmp/ap-multi-twt.log</code>.</p>
+
+  <h2 id="caveats">Caveats / known gaps</h2>
+
+  <div class="callout warn">
+    <p class="ct">⚠ 1 · Linux-AP interop blocked by PMF</p>
+    <p>With the Morse AP (PMF required), the STA's TWT-Setup <strong>request</strong> is accepted (the AP builds the
+    agreement with the exact requested params — Flow 0, 1 000 000 µs interval, 65 280 µs duration), but the AP's Setup
+    <strong>response</strong> is sent <strong>CCMP-protected</strong> (robust management frame). morselib delivers it to
+    the action handler <strong>un-decrypted</strong>, so the requester can't parse the TWT IE and never installs → no
+    doze on a Linux AP. The Linux RX path decrypts first
+    (<code>twt_action = skb-&gt;data + (is_protected ? IEEE80211_CCMP_HDR_LEN : 0)</code>); morselib's STA RX has no
+    robust-management-frame decryption hook here. The ESP32 AP (morselib responder) sends the response
+    <strong>unprotected</strong> (category 22), so STA↔ESP32-AP works end-to-end. <em>Fix later:</em> wire RMF RX
+    decryption for S1G action frames.</p>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚠ 2 · Teardown firmware-remove unwired</p>
+    <p><code>umac_twt_requester_tx_teardown()</code> TXes the Teardown action and frees the AP-side + local agreement
+    slot (state → EMPTY), but does <strong>not</strong> issue the firmware agreement-remove command
+    (<code>0x27</code>). The MAC stops the agreement on Teardown RX in practice; wiring <code>0x27</code> is a cleanup
+    follow-up.</p>
+  </div>
+
+  <h2 id="files">Files changed (morselib submodule + apps)</h2>
+  <ul>
+    <li><code>morselib/.../umac/twt/umac_twt.c</code> / <code>.h</code> — requester <code>tx_setup</code> /
+      <code>tx_teardown</code> / <code>handle_action</code>; constants <code>UMAC_S1G_ACTION_TWT_SETUP</code> (6) /
+      <code>_TEARDOWN</code> (7).</li>
+    <li><code>morselib/.../umac/datapath/umac_datapath.c</code> — requester branch in the S1G action dispatch.</li>
+    <li><code>morselib/.../umac/umac.c</code> + <code>include/mmwlan.h</code> — <code>mmwlan_twt_setup_request()</code> /
+      <code>mmwlan_twt_teardown()</code> + their umac-task evt handlers.</li>
+    <li><code>firmware/rimba-halow-sta/main/app_main.c</code> — connect without assoc-IE TWT; baseline →
+      setup-request → teardown sequence; MAC-derived static IP.</li>
+    <li><code>firmware/rimba-halow-ap/main/app_main.c</code> — per-STA ping (<code>192.168.12.&lt;mac[5]&gt;</code>) so
+      multiple leaves can be probed at once.</li>
+  </ul>
+
+  <h2 id="next">Next</h2>
+  <ul>
+    <li>RAW (Restricted Access Window), AP-side — port from <code>morse_driver</code> <code>raw.c</code> +
+      <code>page_slicing.c</code>, follow Linux exactly. Recon/feasibility pass first. Separate branch + PR.</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#what">What action-frame TWT is</a></li>
+    <li><a href="#codemap">New code ↔ Linux map</a></li>
+    <li><a href="#method">Test method</a></li>
+    <li><a href="#results">Results</a></li>
+    <li><a href="#caveats">Caveats / known gaps</a></li>
+    <li><a href="#files">Files changed</a></li>
+    <li><a href="#next">Next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-06-24-twt-action-frame</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
