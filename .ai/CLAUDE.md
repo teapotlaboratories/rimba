@@ -35,6 +35,11 @@ Most important rules:
   new-code ↔ Linux mapping (`file:line` ↔ `file:line`) + a deliberate-divergences
   section. Verify every cited line by grepping both trees; never cite from memory. See
   [AGENTS.md → Porting Linux code](AGENTS.md#porting-linux-code).
+- **Every worklog gets an HTML render** — when you add or substantially edit a
+  `docs/worklog/*.md`, hand-author its companion `docs/worklog/html/<name>.html`
+  (shared `style.css`, visuals + a content-driven diagram; no Markdown→HTML converter)
+  and update the index. See
+  [AGENTS.md → Worklog HTML renders](AGENTS.md#worklog-html-renders).
 - **Cite sources** when finding, researching, or comparing. See
   [AGENTS.md → Research & citations](AGENTS.md#research--citations).
 - **Connect to bench nodes by hostname, never raw IP** — `ssh chronium` (or `chronium.local`), not

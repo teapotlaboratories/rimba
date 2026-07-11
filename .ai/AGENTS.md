@@ -252,6 +252,31 @@ done until its code map exists.
 Model: `docs/mesh-ap/rimba-mesh-80211s-code-map.md` (separate, function-level, verified)
 and the in-doc "Code map" tables in `docs/mesh-ap/rimba-mesh-ap-milestones.md`.
 
+## Worklog HTML renders
+
+**Every worklog (`docs/worklog/*.md`) must have a companion HTML render at
+`docs/worklog/html/<same-name>.html`.** When you add a new worklog — or substantially
+edit an existing one — author/update its HTML in the same change and add/refresh its
+card in `docs/worklog/html/index.html`.
+
+- **Hand-author it — do NOT run a Markdown→HTML converter.** Read the worklog and write
+  the HTML directly. The goal is a thoughtfully laid-out, *visual* page, not a mechanical
+  transform. (Scripting is fine for verification or metadata extraction — just not for
+  generating the page content.)
+- **Use the shared design system.** Link `docs/worklog/html/style.css` (never inline or
+  invent CSS) and follow the exemplar
+  [`docs/worklog/html/2026-07-11-esp32-mesh-swccmp-bulk-aes.html`](../docs/worklog/html/2026-07-11-esp32-mesh-swccmp-bulk-aes.html):
+  the standard skeleton (topbar, `.content`, a per-page `.toc`, light/dark theme).
+- **Visuals + at least one diagram, built ONLY from the doc's real content.** Use the
+  system's components — callouts (`.callout` `.ok`/`.warn`/`.bug`), stat grids (`.stats`),
+  before/after bars (`.bars`, widths **to scale** from the real numbers), and flow
+  diagrams (`.flow`, or a small inline `<svg>` for a topology). Add a diagram wherever the
+  doc has something structural or numeric to show — a datapath, a handshake/sequence, a
+  before/after, a topology. **Never fabricate** nodes, edges, or values, and don't force a
+  diagram onto pure prose: a clean page with an apt callout beats an invented diagram.
+- **Faithful.** The HTML must carry all the worklog's information — findings, numbers,
+  `file:line`, caveats — never a summary.
+
 ## Research & citations
 
 **When asked to find, research, compare, or investigate something, cite your
