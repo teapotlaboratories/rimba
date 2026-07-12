@@ -233,10 +233,25 @@ after each bench run (flash `rimba-hello` to the ESPs + `ip link set wlan1 down`
 > on this all-ESP mesh (the "undecodable category" action frames are `protected=1` — tshark can't read
 > the encrypted category), so they pass the robust-mgmt filter naturally: **edit (2) routing is the
 > critical path; edit (1)'s *unprotected*-BA exemption was NOT exercised** here — it remains a
-> follow-Linux interop provision for MFP=no peers. **Follow-ups:** (a) byte-diff the ADDBA vs a live
-> Linux mesh (gold standard — also resolves whether Linux sends ADDBA protected/unprotected, hence
-> whether edit 1 is needed for interop or is an unnecessary security loosening on a PMF mesh);
-> (b) multi-hop (S2) + relay (S3). Worklog: `2026-07-11-mesh-ampdu-s1-blockack-rx-routing.md` (TODO).
+> follow-Linux interop provision for MFP=no peers.
+>
+> **Edit 1 — RESOLVED 2026-07-11 (from Linux source + config): KEEP IT.** Linux applies
+> management-frame protection **only** to `WLAN_STA_MFP` stas (`net/mac80211/tx.c:458`), and the Linux
+> mesh runs **MFP=no** — the interop config (`chronite:~/wpa-interop.conf`, ssid `rimba-mesh`) has no
+> `ieee80211w`, and morselib's own verified note records chronite `iw station dump` → `MFP: no`. So
+> **Linux sends its mesh ADDBA UNPROTECTED**; without edit 1 the ESP (peer stads `PMF_REQUIRED`,
+> `umac_mesh.c:607`) would drop it and ESP↔Linux BA setup would fail. Edit 1 is the correct follow-Linux
+> behaviour (mac80211 delivers unprotected BACK to MFP=no peers) — retain. *On-air confirmation was
+> attempted but blocked by bench hardware, not by A-MPDU: the ESP↔Linux SAE peering didn't form
+> (finicky cross-vendor SAE), and both Pi-Zero HaLow nodes (chronogen, chronosalt) reboot on radio-up
+> (power-marginal), so no Linux mesh could be stood up to capture a live ADDBA.*
+>
+> **Residual (worth a follow-up):** the ESP sends its OWN ADDBA CCMP-**protected** (peer stad
+> `PMF_REQUIRED`) while Linux sends it unprotected — an MFP asymmetry. For clean symmetric interop the
+> ESP mesh arguably should treat peers as MFP=no too (as the `frame_is_mesh_action` comments already
+> assume); the reverse direction (does Linux accept the ESP's *protected* ADDBA?) is untested. **Other
+> follow-ups:** multi-hop (S2) + relay (S3); on-air ESP↔Linux BA interop once a stable Linux mesh node
+> is available. Worklog: `2026-07-11-mesh-ampdu-s1-blockack-rx-routing.md` (TODO).
 - **Goal:** let ADDBA/DELBA/BlockAck action frames reach the BA state machine on a mesh vif so a
   single-hop originator session reaches `UMAC_BA_SUCCESS`.
 - **Touch (two edits):** (1) add a `DOT11_ACTION_CATEGORY_BLOCK_ACK` case routing to the existing
