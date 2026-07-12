@@ -215,43 +215,41 @@ after each bench run (flash `rimba-hello` to the ESPs + `ip link set wlan1 down`
 - **Inert:** pure spike. **If NO-GO, stop** — host work can't help (document as a second universal FW
   limitation alongside #20).
 
-### S1 — Mesh `BLOCK_ACK` action RX (**the unlock**, ~1–1.5 day + bench) — ✅ CODE DONE + SECURED-MESH ON-AIR VERIFIED 2026-07-11
+### S1 — Mesh `BLOCK_ACK` action RX + mesh MFP=no — ✅ CODE DONE + SECURED-MESH ON-AIR VERIFIED 2026-07-11
 
-> **Result.** Two edits landed (both in the S0-established gap): (1) `frame_is_block_ack_action`
-> (`action.c:100`) + exemption at `umac_datapath.c:375`; (2) BLOCK_ACK routing in
-> `umac_datapath_process_rx_mgmt_frame_mesh` (`umac_datapath.c:3652`) → peer-keyed
-> `umac_ba_process_rx_frame(peer_stad,…)` (`:3657`, peer stad from frame SA). Built clean. **On-air
-> (board0↔board1, no force):** board1 emits genuine **A-MPDUs** (consecutive-seq MPDUs sharing a PPDU
-> TSFT — 852/853/854, 849/850/851) — which requires `is_ampdu_permitted`=true, i.e. a **completed BA
-> session**, proving the ADDBA handshake now completes through the routing edit; ~230 aggregated
-> PPDUs/run, iperf peaked 1.32 Mbit/s (~6×).
+> **The unlock (routing).** `umac_datapath_process_rx_mgmt_frame_mesh` (`umac_datapath.c:3652`) dispatches
+> `DOT11_ACTION_CATEGORY_BLOCK_ACK` → peer-keyed `umac_ba_process_rx_frame(peer_stad,…)` (`:3657`, peer stad
+> from frame SA), mirroring net/mac80211 `rx.c:3662` `case WLAN_CATEGORY_BACK`. Both ADDBA req+resp take this
+> path. **On-air (secured all-ESP mesh, no force):** board1 emits genuine **A-MPDUs** (consecutive-seq MPDUs
+> sharing a PPDU TSFT — e.g. 852/853/854) — which requires a **completed BA session**, proving the handshake
+> now completes through the routing.
 >
-> **The mesh is secured** (SAE+PMF+SW-CCMP, forced by `MMWLAN_MESH_SEC_PHASE1=1` regardless of the
-> app's OPEN request — `umac_mesh.c:607`). Captured board1 QoS-Data frames are **100% `protected=1`**
-> (1415/1415) — CCMP-encrypted — so the aggregated MPDUs are CCMP-per-MPDU + A-MPDU: **SW-CCMP
-> composes with A-MPDU, validated on-air.** The ADDBA req/resp are themselves sent **CCMP-protected**
-> on this all-ESP mesh (the "undecodable category" action frames are `protected=1` — tshark can't read
-> the encrypted category), so they pass the robust-mgmt filter naturally: **edit (2) routing is the
-> critical path; edit (1)'s *unprotected*-BA exemption was NOT exercised** here — it remains a
-> follow-Linux interop provision for MFP=no peers.
+> **SW-CCMP composes with A-MPDU.** The mesh is secured (SAE+PMF+SW-CCMP, forced by `MMWLAN_MESH_SEC_PHASE1=1`
+> regardless of the app's OPEN request). Captured QoS-Data frames are **100% `protected=1`** (CCMP), and they
+> aggregate — so host CCMP-per-MPDU + A-MPDU compose, validated on-air.
 >
-> **Edit 1 — RESOLVED 2026-07-11 (from Linux source + config): KEEP IT.** Linux applies
-> management-frame protection **only** to `WLAN_STA_MFP` stas (`net/mac80211/tx.c:458`), and the Linux
-> mesh runs **MFP=no** — the interop config (`chronite:~/wpa-interop.conf`, ssid `rimba-mesh`) has no
-> `ieee80211w`, and morselib's own verified note records chronite `iw station dump` → `MFP: no`. So
-> **Linux sends its mesh ADDBA UNPROTECTED**; without edit 1 the ESP (peer stads `PMF_REQUIRED`,
-> `umac_mesh.c:607`) would drop it and ESP↔Linux BA setup would fail. Edit 1 is the correct follow-Linux
-> behaviour (mac80211 delivers unprotected BACK to MFP=no peers) — retain. *On-air confirmation was
-> attempted but blocked by bench hardware, not by A-MPDU: the ESP↔Linux SAE peering didn't form
-> (finicky cross-vendor SAE), and both Pi-Zero HaLow nodes (chronogen, chronosalt) reboot on radio-up
-> (power-marginal), so no Linux mesh could be stood up to capture a live ADDBA.*
+> **MFP-asymmetry root fix (2026-07-11).** The mesh set peer stads `PMF_REQUIRED`, so the host pairwise-encrypted
+> unicast robust mgmt (ADDBA/DELBA, unicast PREP) at `umac_datapath.c:2584` — while net/mac80211 runs mesh peers
+> **MFP=no** (`tx.c:458` protects mgmt only for `WLAN_STA_MFP`; the Linux mesh has no `ieee80211w`, verified
+> `iw station dump` → `MFP: no`) and sends them in the clear. So the ESP transmitted a CCMP-protected ADDBA a
+> Linux peer doesn't expect — an interop-breaking asymmetry (morselib's own comment called the stad
+> "*incorrectly* PMF_REQUIRED"). **Fixed at the root:** set the mesh peer stads + common stad **MFP=no**
+> (`MMWLAN_PMF_DISABLED`, `umac_mesh.c:607`/`:3119`). `pmf_is_required()` is now false for mesh, so all mesh
+> management is sent unprotected **and** the unprotected-robust-mgmt RX drop (`:373`) is skipped wholesale —
+> which makes the earlier per-category exemption (`frame_is_block_ack_action`, the interim "edit 1")
+> unnecessary, so it was **removed**. `security_type` stays SAE, so pairwise/group keys + **DATA CCMP are
+> unchanged**. Net S1 change = BLOCK_ACK routing + MFP=no (2 files).
 >
-> **Residual (worth a follow-up):** the ESP sends its OWN ADDBA CCMP-**protected** (peer stad
-> `PMF_REQUIRED`) while Linux sends it unprotected — an MFP asymmetry. For clean symmetric interop the
-> ESP mesh arguably should treat peers as MFP=no too (as the `frame_is_mesh_action` comments already
-> assume); the reverse direction (does Linux accept the ESP's *protected* ADDBA?) is untested. **Other
-> follow-ups:** multi-hop (S2) + relay (S3); on-air ESP↔Linux BA interop once a stable Linux mesh node
-> is available. Worklog: `2026-07-11-mesh-ampdu-s1-blockack-rx-routing.md` (TODO).
+> **On-air verified (secured all-ESP mesh, chronium `morse0`):** after the fix the **ADDBA is transmitted
+> unprotected** (tshark now decodes category 3, `fc.protected=0`; before: encrypted → empty category) while
+> **DATA stays CCMP** (`fc.protected=1`); SAE/AMPE peering + ping (5/5) + A-MPDU still work. An **A/B in the
+> same RF conditions** confirmed the evening's reduced aggregation depth was **environmental** — the prior
+> protected-ADDBA build degraded identically (217 PPDUs @20:04 → ~34 @22:12) — **not** a regression from this
+> change.
+>
+> **Follow-ups:** on-air ESP↔Linux BA interop capture once a stable Linux mesh node exists (this session it
+> was blocked by bench HW — cross-vendor SAE peering wouldn't form + both Pi-Zero nodes reboot on radio-up);
+> multi-hop (S2) + relay (S3). Worklog: `2026-07-11-mesh-ampdu-s1-blockack-rx-routing.md` (TODO).
 - **Goal:** let ADDBA/DELBA/BlockAck action frames reach the BA state machine on a mesh vif so a
   single-hop originator session reaches `UMAC_BA_SUCCESS`.
 - **Touch (two edits):** (1) add a `DOT11_ACTION_CATEGORY_BLOCK_ACK` case routing to the existing
@@ -320,7 +318,7 @@ code-map as the code lands.
 | TX BA start trigger — `umac_datapath_aggr_check` (`umac_datapath.c:2026`, call `:2206`) | Exists | `ieee80211_aggr_check` `tx.c:1176`; `ieee80211_start_tx_ba_session` `agg-tx.c:605` (MESH whitelist `:610-614`) |
 | ADDBA-req TX — `umac_ba_tx_addba_req` (`umac_ba.c:256`) | Exists | `ieee80211_send_addba_request` `agg-tx.c:61`; sender `:479` |
 | **ADDBA/DELBA/BA RX dispatch on mesh vif** — **✅ S1 code done 2026-07-11**: BLOCK_ACK case in `umac_datapath_process_rx_mgmt_frame_mesh` `umac_datapath.c:3652`, peer-keyed `umac_ba_process_rx_frame(peer_stad,…)` `:3657` (peer stad from frame SA) | Wired | `rx.c:3662` `case WLAN_CATEGORY_BACK` (MESH `:3664`) → `ieee80211_process_addba_request` `agg-rx.c:435` |
-| **Unprotected-BA robust-mgmt exemption** — **✅ S1 code done 2026-07-11**: `frame_is_block_ack_action` `action.c:100` (+ decl `frames_common.h:39`), exemption `umac_datapath.c:375` | Wired | mesh peer MFP=no → `ieee80211_drop_unencrypted_mgmt` drop skipped (gated on `WLAN_STA_MFP`) |
+| **Mesh MFP=no** — **✅ S1 code done 2026-07-11**: peer + common stad `MMWLAN_PMF_DISABLED` `umac_mesh.c:607`/`:3119` (so mesh mgmt incl. ADDBA/PREP is sent unprotected; the interim `frame_is_block_ack_action` exemption was removed as redundant) | Root fix | mesh sta MFP=no → mgmt protection off (`tx.c:458`) + `ieee80211_drop_unencrypted_mgmt` drop skipped (gated on `WLAN_STA_MFP`) |
 | BA RX consumer — `umac_ba_process_rx_frame` (`umac_ba.c:348`) | Exists (unreachable for mesh until S1) | `ieee80211_process_addba_resp` (`agg-tx.c`) → `ieee80211_agg_tx_operational` |
 | RX reorder buffer (`umac_datapath.c:1000-1309`; fields `umac_datapath_data.h:95`/`:97`) | Exists — generic, auto-engages | `__ieee80211_start_rx_ba_session` `agg-rx.c:235`; reorder release in `rx.c` |
 | Recipient session — `umac_ba_rx_addba_req` (`umac_ba.c:286`, cap check `:311`) | Exists (unreachable until S1) | `ieee80211_process_addba_request` `agg-rx.c:435` → `__ieee80211_start_rx_ba_session` |
