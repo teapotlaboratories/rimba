@@ -803,11 +803,23 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   universal answer. Worklog `2026-07-11-mesh-20-linux-also-withholds-fw-limitation.md`. Close unless Morse
   ships an FW fix.)**
 - ☐ **Mesh A-MPDU aggregation — the dominant remaining relay-throughput limiter (NEXT).** Mesh sends single
-  MPDUs (memory `mesh-no-ampdu-aggregation`); per-frame preamble/IFS/backoff/ACK caps relay goodput
-  (~0.04 Mbit/s 2-hop) independent of CPU. Now that SW-CCMP crypto is cheap (below), **this is the ceiling.**
-  Multi-day core-RX + host-goodput feature (previously spiked/deprioritized); gate is `aggr_check`'s
-  `MMWLAN_STA_CONNECTED` check. Smaller optional win first: **in-place mesh forward** (rewrite headers on the
-  RX mmpkt vs `build_mgmt_frame` alloc+copy in `umac_mesh_forward_data`).
+  MPDUs; per-frame preamble/IFS/backoff/ACK caps single-flow + relay goodput (~0.04 Mbit/s 2-hop) and, now
+  that SW-CCMP crypto is cheap (below), **this is the airtime ceiling.** **Re-scoped 2026-07-11** (verified
+  feasibility + staged plan + Linux code-map: **`docs/mesh-ap/rimba-mesh-ampdu-aggregation-design.md`**;
+  memory `mesh-no-ampdu-aggregation`): **feasible ~6–10 d, and the old blocker-map was stale.** The
+  `MMWLAN_STA_CONNECTED` check is **not** the blocker — mesh's `get_sta_state` returns CONNECTED
+  unconditionally (`umac_datapath.c:3386-3390`) so single-hop already fires ADDBA on-air; and A-MPDU is
+  **FW-assembled**, not host-assembled (host only sets `MMDRV_TX_FLAG_AMPDU_ENABLED`, `:2274`, consumed at
+  `skbq.c:832/:845`). The **real unlock is routing inbound `BLOCK_ACK` action frames** to the BA handler on a
+  mesh vif (`umac_mesh_handle_action` drops them; `:273-274` never reached) **+** a PMF/robust-mgmt exemption
+  on a secured mesh (`:372-374`) — after which single-hop A-MPDU lights up. Staged **S0** FW go/no-go spike →
+  **S1** BLOCK_ACK RX routing → **S2** multi-hop next-hop stad (avoid the self-addressed `common_stad`) →
+  **S3** relay data-path retag (the relay win; combine with the **in-place mesh forward** — rewrite headers
+  on the RX mmpkt vs `build_mgmt_frame` alloc+copy in `umac_mesh_forward_data`) → **S4** teardown → **S5**
+  polish. **Status 2026-07-11 (bench, uncommitted): S0 = GO** (FW advertises mesh AMPDU cap + on-air A-MPDU
+  proven for 4-addr mesh data, worklog `2026-07-11-mesh-ampdu-s0-fw-capability-spike.md`); **S1 code done +
+  open-mesh on-air verified** (real A-MPDU from a completed BA session, no force) — follow-ups: secured-mesh
+  PMF/SW-CCMP run + ADDBA byte-diff vs Linux.
 - ✅ **Mesh SW-CCMP bulk-DMA AES-CCM — DONE 2026-07-11** (worklog `2026-07-11-esp32-mesh-swccmp-bulk-aes.md`).
   Root-caused the host SW-CCMP relay crypto cost: the CCM ran AES **one 16-byte ECB block at a time**
   (~187 single-block HW-AES ops per 1442 B frame, each paying the full `esp_aes`

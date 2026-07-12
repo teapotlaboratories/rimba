@@ -168,12 +168,19 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>48</b> worklogs · 2026-06-17 – 2026-07-11</p>
+<p class="stat"><b>49</b> worklogs · 2026-06-17 – 2026-07-11</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">21</span></h2>
+<h2>July 2026 <span class="mcount">22</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-11-mesh-ampdu-s0-fw-capability-spike.html">
+<div class="card-date">2026-07-11</div>
+<div class="card-title">Mesh A-MPDU S0: firmware go/no-go spike</div>
+<div class="card-ex">The Stage-0 hardware spike that gates the whole 802.11s mesh A-MPDU feature. Two questions: does the MM6108 firmware advertise A-MPDU capability for a mesh vif, and will the chip emit a real on-air A-MPDU for 4-address mesh QoS-data if the host force-marks the frames eligible? Both = GO — the mesh vif reports AMPDU_cap=1 and</div>
+<div class="card-meta">7 min · ✓ S0 GO (both halves) · mesh · A-MPDU · datapath</div>
+</a>
 
 <a class="card" href="2026-07-11-esp32-mesh-swccmp-bulk-aes.html">
 <div class="card-date">2026-07-11</div>
