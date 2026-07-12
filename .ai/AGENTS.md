@@ -263,10 +263,14 @@ card in `docs/worklog/html/index.html`.
   the HTML directly. The goal is a thoughtfully laid-out, *visual* page, not a mechanical
   transform. (Scripting is fine for verification or metadata extraction — just not for
   generating the page content.)
-- **Use the shared design system.** Link `docs/worklog/html/style.css` (never inline or
-  invent CSS) and follow the exemplar
-  [`docs/worklog/html/2026-07-11-esp32-mesh-swccmp-bulk-aes.html`](../docs/worklog/html/2026-07-11-esp32-mesh-swccmp-bulk-aes.html):
-  the standard skeleton (topbar, `.content`, a per-page `.toc`, light/dark theme).
+- **Self-contained + shared design system.** Each page must render **standalone** — no
+  external `.css`, JS, fonts, images, or other files; the CSS, diagram SVGs, and
+  theme-toggle JS are all embedded inline (as the exemplar does). The exemplar
+  [`docs/worklog/html/2026-07-11-esp32-mesh-swccmp-bulk-aes.html`](../docs/worklog/html/2026-07-11-esp32-mesh-swccmp-bulk-aes.html)
+  is the **canonical design source**: copy its `<style>` block verbatim into new pages and
+  reuse its skeleton (topbar, `.content`, a per-page `.toc`, light/dark theme) so pages
+  don't drift. To change the design, edit the exemplar's `<style>`, then re-embed it into
+  the other pages.
 - **Visuals + at least one diagram, built ONLY from the doc's real content.** Use the
   system's components — callouts (`.callout` `.ok`/`.warn`/`.bug`), stat grids (`.stats`),
   before/after bars (`.bars`, widths **to scale** from the real numbers), and flow

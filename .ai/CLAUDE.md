@@ -37,7 +37,8 @@ Most important rules:
   [AGENTS.md → Porting Linux code](AGENTS.md#porting-linux-code).
 - **Every worklog gets an HTML render** — when you add or substantially edit a
   `docs/worklog/*.md`, hand-author its companion `docs/worklog/html/<name>.html`
-  (shared `style.css`, visuals + a content-driven diagram; no Markdown→HTML converter)
+  (self-contained — no external files; copy the exemplar's inline `<style>` — visuals + a
+  content-driven diagram; no Markdown→HTML converter)
   and update the index. See
   [AGENTS.md → Worklog HTML renders](AGENTS.md#worklog-html-renders).
 - **Cite sources** when finding, researching, or comparing. See
