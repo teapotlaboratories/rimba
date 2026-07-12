@@ -816,10 +816,13 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   **S1** BLOCK_ACK RX routing → **S2** multi-hop next-hop stad (avoid the self-addressed `common_stad`) →
   **S3** relay data-path retag (the relay win; combine with the **in-place mesh forward** — rewrite headers
   on the RX mmpkt vs `build_mgmt_frame` alloc+copy in `umac_mesh_forward_data`) → **S4** teardown → **S5**
-  polish. **Status 2026-07-11 (bench, uncommitted): S0 = GO** (FW advertises mesh AMPDU cap + on-air A-MPDU
-  proven for 4-addr mesh data, worklog `2026-07-11-mesh-ampdu-s0-fw-capability-spike.md`); **S1 code done +
-  open-mesh on-air verified** (real A-MPDU from a completed BA session, no force) — follow-ups: secured-mesh
-  PMF/SW-CCMP run + ADDBA byte-diff vs Linux.
+  polish. **Status 2026-07-11 (bench; PRs `teapotlaboratories/mm-esp32-halow#23` + `teapotlaboratories/rimba#33`,
+  draft): S0 = GO** (FW advertises mesh AMPDU cap + on-air A-MPDU proven for 4-addr mesh data, worklog
+  `2026-07-11-mesh-ampdu-s0-fw-capability-spike.md`); **S1 code done + SECURED-mesh on-air verified** (real
+  A-MPDU from a completed BA session, no force; the mesh is SAE+PMF+SW-CCMP via `MMWLAN_MESH_SEC_PHASE1=1`, and
+  the aggregated frames are 100% `protected=1` → **SW-CCMP composes with A-MPDU, validated**). The ADDBA is sent
+  CCMP-protected on the all-ESP mesh, so the routing edit is the critical path and the unprotected-BA exemption
+  was not exercised. Follow-ups: ADDBA byte-diff vs Linux; then S2 (multi-hop) + S3 (relay).
 - ✅ **Mesh SW-CCMP bulk-DMA AES-CCM — DONE 2026-07-11** (worklog `2026-07-11-esp32-mesh-swccmp-bulk-aes.md`).
   Root-caused the host SW-CCMP relay crypto cost: the CCM ran AES **one 16-byte ECB block at a time**
   (~187 single-block HW-AES ops per 1442 B frame, each paying the full `esp_aes`

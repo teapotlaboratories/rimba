@@ -111,8 +111,14 @@ a shippable path, only a probe of the silicon's willingness to pack subframes.
 
 ### 4.2 Rig
 
-**OPEN mesh** (no security). `rimba-halow-mesh-perf` runs `args = {0}` → security
-OPEN, so there is **no SAE, no CCMP** in this test.
+**Secured mesh (SAE + PMF + host SW-CCMP).** `rimba-halow-mesh-perf` runs
+`args = {0}` → `args.security_type = MMWLAN_OPEN`, but the mesh **ignores that**:
+morselib gates mesh security on the compile-time `MMWLAN_MESH_SEC_PHASE1`, which
+defaults to **1** (`umac_mesh.c:439-440`) and sets every mesh peer stad to
+`MMWLAN_SAE` / `MMWLAN_PMF_REQUIRED` (`umac_mesh.c:607`), with the SAE password
+hardcoded `"rimbamesh2026"` (`umac_mesh.c:81`). So peering did a full SAE+AMPE
+handshake and the data frames are **CCMP-encrypted** — on-air, board1's QoS-Data
+is 100% `wlan.fc.protected = 1`.
 
 ```
  board0 (relay)                                board1
@@ -217,11 +223,14 @@ change, which is the whole point of running the spike first.
 
 ## 6. Caveats — stated honestly
 
-- **OPEN mesh only.** S0b ran with no CCMP. So the composition that a *real*
-  secured mesh needs — SW-CCMP encrypt each MPDU, *then* let the chip aggregate
-  the ciphertext MPDUs into one PPDU — is **NOT yet proven**. That is explicitly
-  deferred to S1's secured bench. It is plausible (encryption is per-MPDU and the
-  aggregator packs finished MPDUs) but unverified, and must not be assumed.
+- **SW-CCMP + A-MPDU composition is demonstrated on-air (positive result).** The
+  mesh was secured (§4.2), so the forced A-MPDUs were themselves CCMP-encrypted:
+  the firmware aggregated **CCMP-protected** 4-address mesh QoS-Data (board1's
+  QoS-Data was 100% `wlan.fc.protected = 1`). So the composition a *real* secured
+  mesh needs — SW-CCMP encrypt each MPDU, *then* let the chip aggregate the
+  ciphertext MPDUs into one PPDU — is already shown here, not deferred. Honest
+  residual: aggregation depth was still modest (3–7 MPDUs) and this was an
+  all-ESP mesh.
 - **Modest aggregation depth (3–7 MPDUs).** Two likely limiters, neither a
   blocker: the **1 MHz S1G A-MPDU duration cap** (a 1 MHz PPDU can only be so
   long) and a **shallow TX queue** at these rates (few frames actually resident
@@ -259,8 +268,9 @@ change, which is the whole point of running the spike first.
    timeout.
 2. **Secured-mesh PMF exemption** so BA action frames are accepted on an
    AMPE-encrypted mesh.
-3. **Secured bench** — re-run S0b's capture method on a CCMP mesh to prove the
-   encrypt-then-aggregate composition (the §6 deferred item).
+3. **Secured bench under the real handshake** — re-run S0b's capture method with
+   the actual BA handshake (not the force) to re-confirm encrypt-then-aggregate
+   at depth; §6 already shows the composition on-air under the forced path.
 4. **Depth/throughput tuning** — characterise aggregation depth vs offered load
    and bandwidth once the handshake is real (BA-gated, not forced).
 

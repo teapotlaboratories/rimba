@@ -17,14 +17,17 @@ to `net/mac80211/` unless noted.
 > - **S0a (capability):** temp `printf` after `umac_interface.c:321` on board1 → the MM6108 FW
 >   advertises **`AMPDU_cap=1` for a MESH-type vif** (`ampdu_enabled=1` globally). aggr_check gate 2
 >   (`:2044`) passes for mesh. Confirms B2.
-> - **S0b (on-air emission):** temp-forced `MMDRV_TX_FLAG_AMPDU_ENABLED` on mesh unicast (open mesh,
->   board1↔board0 direct peers, ch27), UDP blast board1→board0, captured on chronium `morse0`.
+> - **S0b (on-air emission):** temp-forced `MMDRV_TX_FLAG_AMPDU_ENABLED` on mesh unicast (**secured**
+>   mesh, board1↔board0 direct peers, ch27), UDP blast board1→board0, captured on chronium `morse0`.
 >   **Genuine A-MPDUs observed:** board1 QoS-Data frames with **consecutive sequence numbers sharing
 >   one PPDU TSFT** (e.g. seq 794/795/796 @ tsft 188379322) — 217 aggregated PPDUs (52×2-MPDU,
 >   165×3-MPDU); board0 aggregated up to **7 MPDUs/PPDU**. Throughput rose **~0.2 → 1.27 Mbit/s**
 >   (~6×). So the MM6108 FW **does** assemble on-air A-MPDUs for 4-addr mesh QoS-data — confirms B4.
->   Temp code reverted; bench radio-silent. (Caveat: tested **open** mesh; the SW-CCMP-per-MPDU
->   composition is deferred to S1's **secured** bench. Worklog: `2026-07-11-mesh-ampdu-s0-fw-capability-spike.md`.)
+>   **The mesh is secured** (the app requests `MMWLAN_OPEN` but morselib forces SAE+PMF+SW-CCMP via the
+>   compile-time `MMWLAN_MESH_SEC_PHASE1=1`, `umac_mesh.c:607`; SAE pw `rimbamesh2026`), and the
+>   aggregated frames are **CCMP-encrypted** (`wlan.fc.protected=1`), so **SW-CCMP-per-MPDU composes
+>   with A-MPDU** — validated on-air, not deferred. Temp code reverted; bench radio-silent. Worklog:
+>   `2026-07-11-mesh-ampdu-s0-fw-capability-spike.md`.
 
 ---
 
@@ -212,20 +215,28 @@ after each bench run (flash `rimba-hello` to the ESPs + `ip link set wlan1 down`
 - **Inert:** pure spike. **If NO-GO, stop** — host work can't help (document as a second universal FW
   limitation alongside #20).
 
-### S1 — Mesh `BLOCK_ACK` action RX (**the unlock**, ~1–1.5 day + bench) — ✅ CODE DONE + OPEN-MESH ON-AIR VERIFIED 2026-07-11
+### S1 — Mesh `BLOCK_ACK` action RX (**the unlock**, ~1–1.5 day + bench) — ✅ CODE DONE + SECURED-MESH ON-AIR VERIFIED 2026-07-11
 
 > **Result.** Two edits landed (both in the S0-established gap): (1) `frame_is_block_ack_action`
 > (`action.c:100`) + exemption at `umac_datapath.c:375`; (2) BLOCK_ACK routing in
 > `umac_datapath_process_rx_mgmt_frame_mesh` (`umac_datapath.c:3652`) → peer-keyed
 > `umac_ba_process_rx_frame(peer_stad,…)` (`:3657`, peer stad from frame SA). Built clean. **On-air
-> (open mesh, board0↔board1, no force):** board1 emits genuine **A-MPDUs** (consecutive-seq MPDUs
-> sharing a PPDU TSFT — 852/853/854, 849/850/851) — which requires `is_ampdu_permitted`=true, i.e. a
-> **completed BA session**, proving the ADDBA handshake now completes through the routing edit;
-> ~230 aggregated PPDUs/run, iperf peaked 1.32 Mbit/s (~6×). The ADDBA req/resp frames are visible
-> on `morse0` at BA-setup (action frames, undecodable category = morse S1G NDP-ADDBA — tshark can't
-> dissect it). **Follow-ups:** byte-diff the ADDBA vs a live Linux mesh ADDBA (gold standard);
-> **secured**-mesh run to exercise the PMF exemption (edit 1) + SW-CCMP-per-MPDU composition (S0/S1
-> were open mesh). Worklog: `2026-07-11-mesh-ampdu-s1-blockack-rx-routing.md` (TODO).
+> (board0↔board1, no force):** board1 emits genuine **A-MPDUs** (consecutive-seq MPDUs sharing a PPDU
+> TSFT — 852/853/854, 849/850/851) — which requires `is_ampdu_permitted`=true, i.e. a **completed BA
+> session**, proving the ADDBA handshake now completes through the routing edit; ~230 aggregated
+> PPDUs/run, iperf peaked 1.32 Mbit/s (~6×).
+>
+> **The mesh is secured** (SAE+PMF+SW-CCMP, forced by `MMWLAN_MESH_SEC_PHASE1=1` regardless of the
+> app's OPEN request — `umac_mesh.c:607`). Captured board1 QoS-Data frames are **100% `protected=1`**
+> (1415/1415) — CCMP-encrypted — so the aggregated MPDUs are CCMP-per-MPDU + A-MPDU: **SW-CCMP
+> composes with A-MPDU, validated on-air.** The ADDBA req/resp are themselves sent **CCMP-protected**
+> on this all-ESP mesh (the "undecodable category" action frames are `protected=1` — tshark can't read
+> the encrypted category), so they pass the robust-mgmt filter naturally: **edit (2) routing is the
+> critical path; edit (1)'s *unprotected*-BA exemption was NOT exercised** here — it remains a
+> follow-Linux interop provision for MFP=no peers. **Follow-ups:** (a) byte-diff the ADDBA vs a live
+> Linux mesh (gold standard — also resolves whether Linux sends ADDBA protected/unprotected, hence
+> whether edit 1 is needed for interop or is an unnecessary security loosening on a PMF mesh);
+> (b) multi-hop (S2) + relay (S3). Worklog: `2026-07-11-mesh-ampdu-s1-blockack-rx-routing.md` (TODO).
 - **Goal:** let ADDBA/DELBA/BlockAck action frames reach the BA state machine on a mesh vif so a
   single-hop originator session reaches `UMAC_BA_SUCCESS`.
 - **Touch (two edits):** (1) add a `DOT11_ACTION_CATEGORY_BLOCK_ACK` case routing to the existing

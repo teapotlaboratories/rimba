@@ -270,9 +270,14 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
   <p>i.e. make mesh frames A-MPDU-eligible <strong>without</strong> the BA session that would normally precede
   aggregation. Not a shippable path — a probe of the silicon's willingness to pack subframes.</p>
 
-  <h3 id="rig">Rig — OPEN mesh, two direct peers + a dedicated sniffer</h3>
-  <p><code>rimba-halow-mesh-perf</code> runs <code>args = {0}</code> → security <strong>OPEN</strong>, so there is
-  <strong>no SAE, no CCMP</strong> in this test.</p>
+  <h3 id="rig">Rig — secured mesh (SAE + PMF + host SW-CCMP), two direct peers + a dedicated sniffer</h3>
+  <p><code>rimba-halow-mesh-perf</code> runs <code>args = {0}</code> → <code>args.security_type = MMWLAN_OPEN</code>,
+  but the mesh <strong>ignores that</strong>: morselib gates mesh security on the compile-time
+  <code>MMWLAN_MESH_SEC_PHASE1</code>, which defaults to <strong>1</strong> (<code>umac_mesh.c:439-440</code>) and
+  sets every mesh peer stad to <code>MMWLAN_SAE</code> / <code>MMWLAN_PMF_REQUIRED</code>
+  (<code>umac_mesh.c:607</code>) with the SAE password hardcoded <code>"rimbamesh2026"</code>
+  (<code>umac_mesh.c:81</code>). So peering did a full SAE+AMPE handshake and the data frames are
+  <strong>CCMP-encrypted</strong> — on-air, board1's QoS-Data is 100% <code>wlan.fc.protected = 1</code>.</p>
 
   <pre><code> board0 (relay)                                board1
  rimba-halow-mesh-perf                          rimba-halow-mesh-perf
@@ -478,12 +483,14 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 
   <h2 id="caveats">Caveats — stated honestly</h2>
   <div class="callout warn">
-    <p class="ct">⚠ What S0 does NOT yet prove</p>
+    <p class="ct">⚠ Caveats + residuals — stated honestly</p>
     <ul style="margin:.2em 0">
-      <li><strong>OPEN mesh only.</strong> S0b ran with no CCMP, so the composition a real secured mesh needs —
-        SW-CCMP encrypt each MPDU, <em>then</em> aggregate the ciphertext MPDUs into one PPDU — is <strong>not yet
-        proven</strong>. Deferred to S1's secured bench. Plausible (encryption is per-MPDU; the aggregator packs
-        finished MPDUs) but unverified — do not assume it.</li>
+      <li><strong>SW-CCMP + A-MPDU composition is demonstrated on-air (positive result).</strong> The mesh was
+        secured (see the rig), so the forced A-MPDUs were themselves CCMP-encrypted: the firmware aggregated
+        <strong>CCMP-protected</strong> 4-address mesh QoS-Data (board1's QoS-Data was 100%
+        <code>wlan.fc.protected = 1</code>). So the composition a real secured mesh needs — SW-CCMP encrypt each
+        MPDU, <em>then</em> aggregate the ciphertext MPDUs into one PPDU — is already shown here, not deferred. Honest
+        residual: aggregation depth was still modest (3–7 MPDUs) and this was an all-ESP mesh.</li>
       <li><strong>Modest depth (3–7 MPDUs).</strong> Two likely limiters, neither a blocker: the <strong>1 MHz S1G
         A-MPDU duration cap</strong> and a <strong>shallow TX queue</strong> at these rates. Deeper aggregation needs
         higher offered load and/or wider bandwidth — a Stage-2/3 tuning question, not a go/no-go one.</li>
@@ -514,8 +521,9 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
   </ul>
   <p><strong>Stage 1 (not started):</strong> implement the host BA handshake (route inbound <code>BLOCK_ACK</code>
   action frames to a BA state machine; originate ADDBA per mesh peer/TID; tear down on timeout) → secured-mesh PMF
-  exemption → re-run S0b's capture method on a <strong>CCMP mesh</strong> to prove encrypt-then-aggregate (the
-  deferred caveat) → characterise depth vs offered load and bandwidth once aggregation is BA-gated rather than forced.
+  exemption → re-run S0b's capture method under the <strong>real BA handshake</strong> (not the force) to re-confirm
+  encrypt-then-aggregate at depth — the forced path already shows the composition on-air (see Caveats) → characterise
+  depth vs offered load and bandwidth once aggregation is BA-gated rather than forced.
   Full staged plan and code-map: <code>docs/mesh-ap/rimba-mesh-ampdu-aggregation-design.md</code>.</p>
 
 </main>
