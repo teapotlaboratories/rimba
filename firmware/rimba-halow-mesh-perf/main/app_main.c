@@ -21,6 +21,8 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_system.h"   /* esp_reset_reason (RTC-noinit cold-boot detection) */
+#include "esp_attr.h"     /* RTC_NOINIT_ATTR (fwd-drop counters survive the crash-reboot) */
 #include "nvs_flash.h"
 #include "esp_netif.h"
 
@@ -59,12 +61,66 @@
 static const uint8_t MAC_B0[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xef, 0xa4 }; /* relay (10.9.9.136) */
 static const uint8_t MAC_B1[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xf9, 0x40 }; /* endpoint (10.9.9.100) */
 static const uint8_t MAC_B2[6] = { 0xe2, 0x72, 0xa1, 0xf8, 0xf0, 0x08 }; /* endpoint (10.9.9.108) */
+static const uint8_t MAC_CHRONITE[6] __attribute__((unused)) =
+    { 0x3c, 0x22, 0x7f, 0x37, 0x51, 0x38 }; /* Linux far endpoint (10.9.9.2); unused in the all-ESP line */
 #endif
 /* Runtime ping target (NULL = don't ping: relay + responder roles). */
 static const char *g_ping_target;
 /* Static ARP for the far endpoint (broadcast ARP can't traverse the relay yet). */
 static const char *g_static_arp_ip;
 static const uint8_t *g_static_arp_mac;
+/* TEMP 2026-07-12 — board0 auto-blasts a UDP iperf client to this target once peered, so the S3 relay
+ * RX-drop read runs WITHOUT an ESP console (opening it warm-resets the board). NULL = no auto-blast. */
+static const char *g_iperf_blast_target;
+
+/* TEMP 2026-07-12 — forward/RX-drop instrumentation storage (declared extern in umac/mesh/umac_mesh.h;
+ * morselib increments these). RTC_NOINIT_ATTR keeps them in RTC RAM, which survives a SW reset / panic
+ * reboot (the INT-WDT relay crash-loop is a panic->reboot, not a power cycle), so the accumulated counts
+ * can be read AFTER the relay crashes. They are NOT auto-zeroed at startup — g_mesh_fwd_dbg_magic is a
+ * canary: on a true power-on (or when the canary is garbage after a cold boot) we zero the array so each
+ * test session starts clean; on a crash reboot the canary matches and the counts accumulate across boots. */
+#define MESH_FWD_DBG_MAGIC 0x53334448u /* "S3DH" — BUMP each session where board0/board1 can't POWERON-cycle.
+                                        * The dev-host hub's per-port `disable` cuts USB DATA only, NOT VBUS:
+                                        * board0/board1 stay powered across a "cycle", so a reflash boots via a
+                                        * warm/SW reset (reset_reason != POWERON) and would PRESERVE a stale
+                                        * RTC capture (incl. a prior CCMP-ENC key + the "keep-first-only" latch,
+                                        * which silently corrupts a fresh dual-side key read). A magic mismatch
+                                        * vs the RTC-stored value is the only reliable force-zero for those
+                                        * boards — bump this whenever you need a guaranteed-clean session on
+                                        * board0/board1. board2 (PPK2) does POWERON-cycle, so it zeros anyway. */
+RTC_NOINIT_ATTR uint32_t g_mesh_fwd_dbg[FDBG_COUNT];
+RTC_NOINIT_ATTR uint32_t g_mesh_fwd_dbg_magic;
+
+/* TEMP 2026-07-12 — FIX-1 verification telemetry (RTC_NOINIT; morselib increments attempts/completions via
+ * the externs in umac_mesh.h). boot_count bumps each app_main entry — a crash-reboot loop climbs it, a
+ * crash-free soft restart does not. See the DEFINITIVE-test note in umac_mesh.h. */
+RTC_NOINIT_ATTR uint32_t g_hwr_boot_count;
+RTC_NOINIT_ATTR uint32_t g_hwr_attempts;
+RTC_NOINIT_ATTR uint32_t g_hwr_completions;
+
+/* TEMP 2026-07-12 — mesh-plink flap telemetry (RTC_NOINIT; morselib increments via umac_mesh.h externs).
+ * g_plink_estab==1 over a run => STABLE peer; climbing => FLAPPING. Used for the ESP<->ESP peering test. */
+RTC_NOINIT_ATTR uint32_t g_plink_estab;
+RTC_NOINIT_ATTR uint32_t g_plink_close;
+
+/* TEMP 2026-07-12 — dual-side CCMP AAD/nonce/key capture for the multi-hop MIC failure. morselib
+ * (ccmp.c mesh_ccmp_encrypt/decrypt) captures the FIRST multi-hop (A3!=A1) frame's crypto inputs into
+ * these RTC buffers via mmwlan_ccmp_dbg_capture(). Layout: [0]=valid [1]=aad_len [2..9]=key[0..7]
+ * [10..22]=nonce(13) [23..52]=aad(30). board0 populates _enc (encrypt), board2 populates _dec (decrypt
+ * MIC-fail). Diff the two -> the differing byte pins the discrepancy. */
+RTC_NOINIT_ATTR uint8_t g_ccmp_enc[56];
+RTC_NOINIT_ATTR uint8_t g_ccmp_dec[56];
+void mmwlan_ccmp_dbg_capture(int is_enc, const uint8_t *key, const uint8_t *aad, uint32_t aad_len,
+                             const uint8_t *nonce)
+{
+    uint8_t *b = is_enc ? g_ccmp_enc : g_ccmp_dec;
+    if (b[0]) { return; } /* keep the first capture only */
+    b[0] = 1;
+    b[1] = (uint8_t)aad_len;
+    memcpy(&b[2], key, 8);
+    memcpy(&b[10], nonce, 13);
+    memcpy(&b[23], aad, aad_len > 30 ? 30 : aad_len);
+}
 
 /* 802.11 element IDs + beacon IE offset (24-byte PV0 header + ts/bcn-int/cap = 12). */
 #define DOT11_IE_MESH_ID        (114)
@@ -218,6 +274,7 @@ static void mesh_net_task(void *arg)
 #ifdef MESH_IPERF
 #include "esp_console.h"
 #include "iperf_cmd.h"
+#include "iperf.h"        /* TEMP: iperf_start() for the board0 auto-blast (S3 relay RX-drop read) */
 #include "ping_cmd.h"
 /* Start an esp_console REPL on the console UART + register the `iperf` command (espressif/
  * iperf-cmd). Lets the host drive `iperf -s` / `iperf -c <ip>` over the serial port to measure
@@ -244,9 +301,69 @@ static void start_iperf_console(void)
 }
 #endif
 
+/* TEMP 2026-07-12 — dump the forward/RX-drop counters (FWD-DBG + RX-DBG). `when` labels the call site
+ * ("boot" = the surviving totals from before the crash-reboot; "5s" = the periodic in-run dump). */
+static void dump_fwd_dbg(const char *when)
+{
+    uint32_t fd[FDBG_COUNT];
+    mmwlan_mesh_get_fwd_dbg(fd);
+    ESP_LOGW(TAG, "FWD-DBG[%s] rx_reached=%" PRIu32 " fwd_entry=%" PRIu32 " lookup_miss=%" PRIu32
+                  " nhstad_null=%" PRIu32 " build_null=%" PRIu32 " keyed=%" PRIu32
+                  " txready_to=%" PRIu32 " encfail=%" PRIu32 " mmdrv_fail=%" PRIu32 " mmdrv_ok=%" PRIu32,
+             when, fd[FDBG_RX_FWD_REACHED], fd[FDBG_FWD_ENTRY], fd[FDBG_LOOKUP_MISS], fd[FDBG_NHSTAD_NULL],
+             fd[FDBG_BUILD_NULL], fd[FDBG_KEYED_ENTRY], fd[FDBG_TXREADY_TIMEOUT], fd[FDBG_ENCRYPT_FAIL],
+             fd[FDBG_MMDRV_FAIL], fd[FDBG_MMDRV_OK]);
+    ESP_LOGW(TAG, "RX-DBG[%s] mesh_seen=%" PRIu32 " allowlist=%" PRIu32 " plaintext=%" PRIu32
+                  " hw_ccmp_fail=%" PRIu32 " sw_ccmp_fail=%" PRIu32 " (mic=%" PRIu32 " replay=%" PRIu32
+                  ") no_decrypt=%" PRIu32 " decrypt_ok=%" PRIu32,
+             when, fd[FDBG_RX_MESH_SEEN], fd[FDBG_RX_ALLOWLIST], fd[FDBG_RX_PLAINTEXT], fd[FDBG_RX_HW_CCMP_FAIL],
+             fd[FDBG_RX_SW_CCMP_FAIL], fd[FDBG_RX_SW_MIC_FAIL], fd[FDBG_RX_SW_REPLAY_FAIL],
+             fd[FDBG_RX_NO_DECRYPT], fd[FDBG_RX_DECRYPT_OK]);
+    ESP_LOGW(TAG, "TX-DBG[%s] multihop=%" PRIu32 " nh_null=%" PRIu32 " nh_eq_stad=%" PRIu32 " nh_ok=%" PRIu32
+                  "  (nh_null/eq_stad => wrong per-link key)",
+             when, fd[FDBG_TX_MULTIHOP], fd[FDBG_TX_NH_NULL], fd[FDBG_TX_NH_EQ_STAD], fd[FDBG_TX_NH_OK]);
+    {
+        static char cchx[170];
+        for (int i = 0; i < 53; i++) { snprintf(&cchx[i * 3], 4, "%02x ", g_ccmp_enc[i]); }
+        ESP_LOGW(TAG, "CCMP-ENC[%s] %s", when, cchx);
+        for (int i = 0; i < 53; i++) { snprintf(&cchx[i * 3], 4, "%02x ", g_ccmp_dec[i]); }
+        ESP_LOGW(TAG, "CCMP-DEC[%s] %s (layout: [0]valid [1]aadlen [2..9]key8 [10..22]nonce13 [23..52]aad30)",
+                 when, cchx);
+    }
+    ESP_LOGW(TAG, "HWR-DBG[%s] boot_count=%" PRIu32 " restart_attempts=%" PRIu32 " restart_completions=%" PRIu32,
+             when, g_hwr_boot_count, g_hwr_attempts, g_hwr_completions);
+    ESP_LOGW(TAG, "PLINK-DBG[%s] estab=%" PRIu32 " close=%" PRIu32 "  (stable=1/0, flap=climbs)",
+             when, g_plink_estab, g_plink_close);
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "=== 802.11s mesh bring-up (P1: vif + beacon) ===");
+
+    /* TEMP 2026-07-12 — RTC-noinit fwd/RX-drop counters: zero them on a true power-on (or when the RTC
+     * canary is garbage after a cold boot), else keep accumulating across the INT-WDT crash-reboot loop.
+     * Then dump the SURVIVING totals immediately — so even a boot that crash-loops before the 5 s periodic
+     * dump still surfaces the counts read from RTC RAM. reflash_hello (PPK2 power cycle) => power-on => clean. */
+    esp_reset_reason_t rr = esp_reset_reason();
+    if (rr == ESP_RST_POWERON || g_mesh_fwd_dbg_magic != MESH_FWD_DBG_MAGIC)
+    {
+        memset(g_mesh_fwd_dbg, 0, sizeof(g_mesh_fwd_dbg));
+        g_mesh_fwd_dbg_magic = MESH_FWD_DBG_MAGIC;
+        g_hwr_boot_count = 0;
+        g_hwr_attempts = 0;
+        g_hwr_completions = 0;
+        g_plink_estab = 0;
+        g_plink_close = 0;
+        memset(g_ccmp_enc, 0, sizeof(g_ccmp_enc));
+        memset(g_ccmp_dec, 0, sizeof(g_ccmp_dec));
+        ESP_LOGW(TAG, "FWD-DBG counters ZEROED (reset_reason=%d, fresh session)", (int)rr);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "FWD-DBG counters PRESERVED across reset_reason=%d (crash-reboot)", (int)rr);
+    }
+    g_hwr_boot_count++;   /* bumps each app_main entry: a crash-reboot loop climbs it; a soft restart does not */
+    dump_fwd_dbg("boot");
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -268,20 +385,13 @@ void app_main(void)
     args.beacon_interval_tu = 100;
     args.max_plinks = MESH_MAX_PLINKS;
 
-    ESP_LOGI(TAG, "Starting mesh (id=\"%s\" chan=%d mac=%02x:%02x:%02x:%02x:%02x:%02x)...",
-             MESH_ID, MESH_S1G_CHAN, g_mesh_mac[0], g_mesh_mac[1], g_mesh_mac[2],
-             g_mesh_mac[3], g_mesh_mac[4], g_mesh_mac[5]);
-    enum mmwlan_status st = mmwlan_mesh_start(&args);
-    if (st != MMWLAN_SUCCESS)
-    {
-        ESP_LOGE(TAG, "==> mmwlan_mesh_start FAILED status=%d", (int)st);
-        return;
-    }
-    ESP_LOGI(TAG, "==> mesh vif up; firmware beaconing periodically on chan %d.", MESH_S1G_CHAN);
-
-    /* Log any peer mesh beacons we hear on the channel. */
-    mmwlan_register_rx_frame_cb(MMWLAN_FRAME_BEACON, peer_beacon_cb, NULL);
-
+    /* Forced-topology allowlist MUST be configured BEFORE mmwlan_mesh_start. mesh_start begins beaconing
+     * and RX immediately; an empty allowlist (count==0) allows-all (mesh_peer_allowed()), so any neighbour
+     * beacon/OPEN arriving in the window between start and a later allowlist call could form a direct plink
+     * to a node we intend to reach multi-hop. That window WAS the S3 diagnosis confound: board0 would
+     * sometimes peer chronite directly (all nodes in RF range) and grab a chronite MTK, muddying the
+     * forward-key measurement. Setting the allowlist first closes the race — board0 can then ONLY reach
+     * chronite via the board2 relay, giving a clean true-multi-hop line. */
 #ifdef MESH_LINUX_INTEROP
     /* No allowlist -> peer with anyone (incl. the Linux node). Ping chronite so we originate a
      * PREQ for it (-> Linux PREP) and so chronite builds a path to us (-> Linux PERR on break). */
@@ -293,23 +403,36 @@ void app_main(void)
      * multi-hop via board0 (open peering would peer them directly = 1 hop). No auto-ping; the
      * IP is still pinned. Drive `iperf` over the console: board2 `iperf -s`, board1
      * `iperf -c 10.9.9.108`. A direct board0<->board1 iperf also works (they're allowed peers). */
-    if (memcmp(g_mesh_mac, MAC_B0, 6) == 0)
+    /* S3 bench-verify 2026-07-12 (fwd-drop instrumentation): RELAY=board2 (only fully-wired ESP); far
+     * endpoint = chronite (Linux, peers reliably). Line: board0 (client, iperf -c 10.9.9.2) -> board2
+     * (relay/DUT) -> chronite (Linux iperf -s). Revert to board0-relay after the test. */
+    /* S3 RC-fix verify 2026-07-13: PURE ALL-ESP forced line board0 (client) -> board2 (relay/DUT) ->
+     * board1 (far endpoint). ESP<->ESP peering is far more reliable than the cross-vendor ESP<->Linux
+     * SAE (chronite would not re-peer), and this isolates the RC-on-key_stad fix cleanly: board0's
+     * origin frames to board1 are multi-hop (A1=board2 != A3=board1), the exact A3!=A1 shape that was
+     * MCS0-fragmented. Read board2 RX-DBG decrypt_ok. */
+    if (memcmp(g_mesh_mac, MAC_B2, 6) == 0)
     {
         uint8_t allow[12];
-        memcpy(allow, MAC_B1, 6);
-        memcpy(allow + 6, MAC_B2, 6);
+        memcpy(allow, MAC_B0, 6);
+        memcpy(allow + 6, MAC_B1, 6);
         mmwlan_mesh_set_peer_allowlist(allow, 2);
-        ESP_LOGW(TAG, "MESH role: iperf RELAY (board0)");
+        ESP_LOGW(TAG, "MESH role: iperf RELAY (board2, fully-wired) board0 <-> board1 (all-ESP)");
+    }
+    else if (memcmp(g_mesh_mac, MAC_B0, 6) == 0)
+    {
+        mmwlan_mesh_set_peer_allowlist(MAC_B2, 1);
+        /* Auto-blast board1 (10.9.9.100) via the board2 relay: board0->board2 is the A3!=A1 multi-hop
+         * origin leg whose MCS0 fragmentation the RC fix targets. Static ARP so no broadcast ARP needed. */
+        g_static_arp_ip = "10.9.9.100";
+        g_static_arp_mac = MAC_B1;
+        g_iperf_blast_target = "10.9.9.100";
+        ESP_LOGW(TAG, "MESH role: iperf endpoint board0 -> `iperf -c 10.9.9.100` (board1 via board2)");
     }
     else if (memcmp(g_mesh_mac, MAC_B1, 6) == 0)
     {
-        mmwlan_mesh_set_peer_allowlist(MAC_B0, 1);
-        ESP_LOGW(TAG, "MESH role: iperf endpoint board1 -> `iperf -c 10.9.9.108` (via relay)");
-    }
-    else if (memcmp(g_mesh_mac, MAC_B2, 6) == 0)
-    {
-        mmwlan_mesh_set_peer_allowlist(MAC_B0, 1);
-        ESP_LOGW(TAG, "MESH role: iperf endpoint board2 (`iperf -s`)");
+        mmwlan_mesh_set_peer_allowlist(MAC_B2, 1); /* far endpoint: peers ONLY board2 (forced 2-hop) */
+        ESP_LOGW(TAG, "MESH role: iperf FAR endpoint board1 (10.9.9.100) via board2");
     }
 #endif
 #ifdef MESH_LINE_RELAY_DEMO
@@ -334,6 +457,20 @@ void app_main(void)
     }
 #endif
 
+    ESP_LOGI(TAG, "Starting mesh (id=\"%s\" chan=%d mac=%02x:%02x:%02x:%02x:%02x:%02x)...",
+             MESH_ID, MESH_S1G_CHAN, g_mesh_mac[0], g_mesh_mac[1], g_mesh_mac[2],
+             g_mesh_mac[3], g_mesh_mac[4], g_mesh_mac[5]);
+    enum mmwlan_status st = mmwlan_mesh_start(&args);
+    if (st != MMWLAN_SUCCESS)
+    {
+        ESP_LOGE(TAG, "==> mmwlan_mesh_start FAILED status=%d", (int)st);
+        return;
+    }
+    ESP_LOGI(TAG, "==> mesh vif up; firmware beaconing periodically on chan %d.", MESH_S1G_CHAN);
+
+    /* Log any peer mesh beacons we hear on the channel. */
+    mmwlan_register_rx_frame_cb(MMWLAN_FRAME_BEACON, peer_beacon_cb, NULL);
+
     /* P4: once a peer link is up, pin a static mesh IP and ping a neighbour. */
     xTaskCreate(mesh_net_task, "mesh_net", 4096, NULL, 5, NULL);
 
@@ -345,12 +482,40 @@ void app_main(void)
      * Open frames with Open+Confirm and reach ESTAB (see umac_mesh_handle_action). The
      * peer link forms automatically once a neighbour (e.g. a Linux mesh node) opens to us. */
     uint32_t s = 0;
+#ifdef MESH_IPERF
+    bool blast_started = false;
+#endif
     for (;;)
     {
         vTaskDelay(pdMS_TO_TICKS(1000));
+#ifdef MESH_IPERF
+        /* TEMP 2026-07-12 — board0 auto-blast: once peered + IP settled (~15 s), fire ONE UDP iperf
+         * client at chronite via the board2 relay so the S3 relay RX-drop counters accumulate WITHOUT an
+         * ESP console (opening it warm-resets the board). RTC-noinit counters survive even if board2 crashes. */
+        if (g_iperf_blast_target != NULL && !blast_started && s >= 15 &&
+            mmwlan_mesh_peer_count(NULL) > 0)
+        {
+            blast_started = true;
+            iperf_cfg_t cfg;
+            memset(&cfg, 0, sizeof(cfg));
+            cfg.type = IPERF_IP_TYPE_IPV4;
+            cfg.flag = IPERF_FLAG_CLIENT | IPERF_FLAG_UDP;
+            cfg.destination_ip4 = esp_ip4addr_aton(g_iperf_blast_target);
+            cfg.sport = IPERF_DEFAULT_PORT;
+            cfg.dport = IPERF_DEFAULT_PORT;
+            cfg.interval = IPERF_DEFAULT_INTERVAL;
+            cfg.time = 60;
+            cfg.bw_lim = 5; /* Mbit/s — enough to congest the half-duplex relay */
+            ESP_LOGW(TAG, "AUTO-BLAST: UDP iperf client -> %s @ 5 Mbit 60 s (S3 relay RX-drop read)",
+                     g_iperf_blast_target);
+            (void)iperf_start(&cfg);
+        }
+#endif
         if (++s % 5 == 0)
         {
             ESP_LOGI(TAG, "mesh alive, uptime=%" PRIu32 "s", s);
+            /* TEMP 2026-07-12 — forward/RX-drop instrumentation dump (relay diagnosis). */
+            dump_fwd_dbg("5s");
         }
     }
 }

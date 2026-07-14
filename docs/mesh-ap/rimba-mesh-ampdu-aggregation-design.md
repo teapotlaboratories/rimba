@@ -299,6 +299,23 @@ after each bench run (flash `rimba-hello` to the ESPs + `ip link set wlan1 down`
   (fix HWMP flapping, or an out-of-RF-range far node) — see the worklog §6.
 
 ### S3 — Relay/forward onto the aggregation-eligible data path (~2–3 days + bench)
+> **✅✅ S3 BLOCKER ROOT-CAUSED + FIXED + ON-AIR CONFIRMED 2026-07-13. Worklog
+> `docs/worklog/2026-07-13-mesh-ampdu-s3-rate-attribution-fix.md`.** The "relay forwards ~0 / ~99.6% of
+> forwarded frames MIC-fail" wall that blocked S3 for weeks was NOT the forward path failing to aggregate
+> (the B6 work below is valid but was never the cause), NOT #20, and NOT a key desync. It was a **TX-rate
+> attribution bug on the multi-hop ORIGIN leg**: a mesh origin unicast to a multi-hop dest is dequeued on
+> the `common_stad` (final dest isn't a direct peer), and `umac_datapath_process_tx_frame` initialized the
+> **rate table + aid on `stad` (=common_stad ≈ MCS0)** while seqno/BA/reorder already keyed on `key_stad`.
+> At MCS0/1 MHz a full-size 4-addr frame exceeds the max PPDU → the MM6108 FW **fragments** it, setting
+> moreFrag in the on-air FC **after** the host SW-CCMP MIC → the next hop MIC-fails ~99.6%, so the relay
+> could never even decrypt the origin frames to forward them. **FIX (`umac_datapath.c` ~:2334/:2350, follows
+> net/mac80211 `tx->sta = sta_info_get(addr1=next_hop)`): init `aid` + `umac_rc_init_rate_table_data` on
+> `key_stad`, not `stad`** (no-op off the multi-hop path). On-air (all-ESP line board0→board2→board1):
+> board2 decrypt **0.4% → 96.5%**, relay now decrypts + forwards, board1 end-to-end. Residual ~3.5% = the
+> mmrc MCS0 rate-chain fallback / cold-start transient (deterministic follow-up: min-MCS floor or MTU cap;
+> the frag-threshold param is vendor-confirmed useless here). This completes the "frame follows the next hop"
+> pattern the S2 work started. The B6 forward-path aggregation below is now UNBLOCKED + measurable.
+>
 > **✅ CODE DONE 2026-07-12 (builds green, adversarially reviewed, NOT bench-verified; uncommitted).** Worklog
 > `docs/worklog/2026-07-12-mesh-ampdu-s3-relay-fwd-aggregation.md`. Landed with **FIX-2** (non-blocking forward,
 > the interrupt-WDT trigger) at the same seam. New `build_mesh_data_frame` allocs the forward on
