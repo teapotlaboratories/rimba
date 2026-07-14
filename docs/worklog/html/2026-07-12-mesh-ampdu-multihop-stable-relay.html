@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh A-MPDU: multi-hop RA-flapping root cause + the throttle ceiling — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-12</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-12</span>
+    <span class="badge">5 min read</span>
+    <span class="badge warn">◑ flapping fixed · throttle-limited</span>
+    <span class="badge bug">mesh · A-MPDU · HWMP</span>
+  </div>
+
+  <h1>Mesh A-MPDU: multi-hop RA-flapping root cause + the throttle ceiling<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">a stable relay kills the flapping — but the 2-hop origin is throttle-limited, so S3 is the real lever</small></h1>
+
+  <p class="lead"><strong>Root cause found + proven.</strong> The ~49% <strong>RA=dest flapping</strong> that polluted
+  the S2 multi-hop capture is <strong>not</strong> an HWMP timing bug — it is the <strong>ESP relay flapping under
+  load</strong> (the interrupt-WDT / GPIO-ISR instability), which invalidates the path so the origin falls back to
+  <code>RA = dest</code>. Swapping in a <strong>stable Pi-5 relay (chronite)</strong> pinned the origin's next hop to
+  <strong>100%</strong> the relay (0% RA=dest) — the flapping vanished entirely. But even then the multi-hop
+  <em>origin</em> does not aggregate, because the 2-hop <strong>downstream throttle</strong> keeps its first-leg queue
+  too shallow. Verified inherent, not a BA/S2 defect: the same origin aggregates <strong>3-MPDU deep at
+  1.7&nbsp;Mbit/s</strong> on a direct single hop. Bench radio-silent after; nothing committed.</p>
+
+  <div class="callout warn">
+    <p class="ct">◑ The honest conclusion — a mixed result</p>
+    <p><strong>The flapping is fixed</strong> (stable relay ⇒ 100% correct next hop), but a big <em>sustained</em>
+    multi-hop A-MPDU number is <strong>not</strong> achievable from the origin — it is throttle-limited, not
+    aggregation-broken. A-MPDU's payoff is on high-rate single-hop legs; the multi-hop goodput lever is
+    <strong>S3 (relay forward-leg aggregation)</strong>, where the relay holds the whole aggregate flow queued.
+    The RA=dest fallback is also a <strong>net/mac80211 divergence</strong> worth fixing (queue-and-discover, not
+    transmit-to-dest). Both threads detailed below.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node err"><div class="t">~49% RA=dest</div><div class="s">S2 capture polluted</div></div>
+      <div class="node"><div class="t">not expiry</div><div class="s">path 30 s ≫ 14 s test</div></div>
+      <div class="node acc"><div class="t">swap relay</div><div class="s">ESP → stable Pi 5</div></div>
+      <div class="node ok"><div class="t">100% next hop</div><div class="s">flapping gone</div></div>
+      <div class="node err"><div class="t">still 0 agg</div><div class="s">downstream throttle</div></div>
+      <div class="node acc"><div class="t">lever = S3</div><div class="s">relay fwd-leg agg</div></div>
+    </div>
+    <figcaption>The chain of the investigation: the RA=dest split was ruled out as path expiry, pinned on the ESP
+    relay's load instability, cured by a stable relay — which then exposed that the surviving limit is a throttle,
+    not S2. So the multi-hop lever is S3, not more S2.</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">100%</div><div class="lbl">RA=chronite with a stable relay — 954/954, <strong>0% RA=dest</strong></div></div>
+    <div class="stat"><div class="num">0</div><div class="lbl">aggregated PPDUs on the throttled 2-hop origin leg</div></div>
+    <div class="stat"><div class="num acc">336</div><div class="lbl">aggregated PPDUs on the direct single-hop control (of 769)</div></div>
+    <div class="stat"><div class="num">30 s</div><div class="lbl">path lifetime ≫ the 14 s test → RA=dest is <strong>not</strong> expiry</div></div>
+  </div>
+
+  <p>This entry is <strong>standalone</strong>: the symptom, the RA=dest code, the relay-swap proof, the throttle
+  control, and teardown are all recorded here. The aggregation mechanism itself lives in
+  <code>docs/mesh-ap/rimba-mesh-ampdu-aggregation-design.md</code> and the S2 worklog, but this log does not depend on
+  them.</p>
+
+  <h2 id="symptom">1 · The symptom carried over from S2</h2>
+  <p>The S2 multi-hop capture (board1 → board0-relay → board2, all-ESP forced line) showed board1's QoS-Data split
+  <strong>~49% RA = board0</strong> (the correct next hop) vs <strong>~49% RA = board2</strong> (the final
+  destination). The RA=dest frames are wasted singletons — board2 drops them by allowlist — that interleave with the
+  good RA=board0 frames and <strong>starve A-MPDU</strong>. S2's BA-on-next-hop mechanism was proven (the ADDBA reaches
+  the next hop), but sustained aggregation never materialised. This worklog explains why.</p>
+
+  <h2 id="code">2 · Where RA=dest comes from (code)</h2>
+  <p><code>umac_datapath_construct_80211_data_header_mesh</code> (<code>umac_datapath.c:3634-3639</code>):</p>
+
+  <pre><code><span class="kw">uint8_t</span> next_hop[DOT11_MAC_ADDR_LEN];
+<span class="kw">if</span> (!<span class="fn">umac_mesh_lookup_next_hop</span>(hdr_8023->dest_addr, next_hop))   <span class="cm">/* no resolved mpath */</span>
+{
+    <span class="fn">mac_addr_copy</span>(next_hop, hdr_8023->dest_addr);                <span class="cm">/* FALLBACK: RA = dest */</span>
+    <span class="fn">umac_mesh_start_discovery</span>(hdr_8023->dest_addr);
+}
+<span class="fn">mac_addr_copy</span>(data_hdr->base.addr1, next_hop);                   <span class="cm">/* RA = next hop (or dest) */</span></code></pre>
+
+  <p>So <strong>RA = dest whenever the mpath to the destination is momentarily absent</strong>. Two facts rule out the
+  obvious "path expired" explanation:</p>
+  <ul>
+    <li><strong>Path lifetime is 30 s</strong> (<code>MESH_PATH_LIFETIME_MS = 30000</code>, <code>umac_mesh.c:379</code>)
+      with a <strong>preemptive refresh</strong> in the final 6 s (<code>MESH_PATH_REFRESH_MS = 6000</code>, mirroring
+      mac80211 <code>mesh_path_refresh</code>). The iperf test is <strong>14 s</strong> — far shorter than the lifetime.</li>
+    <li>So ~49% RA=dest is <strong>not</strong> lifetime expiry. The path is being <strong>repeatedly invalidated</strong>
+      mid-test.</li>
+  </ul>
+
+  <h2 id="rootcause">3 · Root cause — the ESP relay flaps under load</h2>
+  <p>The path is invalidated when its next hop (the relay) is lost / PERR'd. board0, the <strong>ESP relay</strong>, is
+  exactly the node that crash-loops on an <strong>interrupt-WDT in the ESP-IDF GPIO-ISR layer under sustained relay
+  load</strong> (documented in the S2 worklog §5). Every relay hiccup drops board0's mesh link → board1 invalidates the
+  path via board0 → <code>RA = dest</code> until the next PREQ/PREP resolves it → path back → hiccup again. That cycle
+  <em>is</em> the ~49% RA=dest.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 350" role="img" aria-label="Before and after: an ESP relay that flaps under load splits board1's RA ~49/49 between next hop and dest, versus a stable Pi 5 relay that pins RA to 100 percent the relay">
+        <!-- ROW A: BEFORE -->
+        <text x="20" y="40" font-size="13.5" font-weight="700" fill="var(--fg)">Before — ESP relay (board0) flaps under load → path repeatedly invalidated</text>
+
+        <!-- wasted dashed arc board1 -> board2 (RA=dest) -->
+        <path d="M76 58 Q353 -8 630 58" fill="none" stroke="var(--warn)" stroke-width="1.6" stroke-dasharray="5 4"/>
+        <polygon points="624,50 636,50 630,60" fill="var(--warn)"/>
+        <text x="353" y="14" font-size="10.5" text-anchor="middle" fill="var(--warn)">RA=board2 (dest): wasted singleton — dropped by allowlist (~49%)</text>
+
+        <!-- nodes -->
+        <rect x="20"  y="58" width="112" height="44" rx="9" fill="var(--card)" stroke="var(--line)"/>
+        <text x="76"  y="80" font-size="13" font-weight="700" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">board1</text>
+        <text x="76"  y="95" font-size="10.5" text-anchor="middle" fill="var(--muted)">origin (ESP)</text>
+
+        <rect x="250" y="58" width="180" height="44" rx="9" fill="var(--card)" stroke="var(--err)"/>
+        <text x="340" y="80" font-size="13" font-weight="700" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">board0</text>
+        <text x="340" y="95" font-size="10.5" text-anchor="middle" fill="var(--err)">ESP relay — flaps (interrupt-WDT)</text>
+
+        <rect x="560" y="58" width="140" height="44" rx="9" fill="var(--card)" stroke="var(--line)"/>
+        <text x="630" y="80" font-size="13" font-weight="700" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">board2</text>
+        <text x="630" y="95" font-size="10.5" text-anchor="middle" fill="var(--muted)">dest</text>
+
+        <!-- solid arrows -->
+        <line x1="132" y1="80" x2="242" y2="80" stroke="var(--accent)" stroke-width="1.8"/>
+        <polygon points="242,75 242,85 250,80" fill="var(--accent)"/>
+        <text x="187" y="72" font-size="10" text-anchor="middle" fill="var(--accent)">RA=board0 · ~49%</text>
+
+        <line x1="430" y1="80" x2="552" y2="80" stroke="var(--muted)" stroke-width="1.6"/>
+        <polygon points="552,75 552,85 560,80" fill="var(--muted)"/>
+        <text x="495" y="72" font-size="10" text-anchor="middle" fill="var(--muted)">relay fwd leg</text>
+
+        <!-- RA split bar (row A) -->
+        <text x="120" y="115" font-size="10.5" fill="var(--muted)">board1 QoS-Data RA distribution:</text>
+        <rect x="120" y="120" width="284" height="22" rx="4" fill="var(--accent)"/>
+        <rect x="408" y="120" width="284" height="22" rx="4" fill="var(--warn)"/>
+        <text x="262" y="158" font-size="11" text-anchor="middle" fill="var(--fg)">~49% RA=board0 (next hop)</text>
+        <text x="550" y="158" font-size="11" text-anchor="middle" fill="var(--warn)">~49% RA=board2 (dest — wasted)</text>
+
+        <!-- divider -->
+        <line x1="20" y1="182" x2="700" y2="182" stroke="var(--line)" stroke-width="1"/>
+
+        <!-- ROW B: AFTER -->
+        <text x="20" y="206" font-size="13.5" font-weight="700" fill="var(--fg)">After — stable Pi 5 relay (chronite) → path never invalidated</text>
+
+        <rect x="20"  y="220" width="112" height="44" rx="9" fill="var(--card)" stroke="var(--line)"/>
+        <text x="76"  y="242" font-size="13" font-weight="700" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">board1</text>
+        <text x="76"  y="257" font-size="10.5" text-anchor="middle" fill="var(--muted)">origin (ESP)</text>
+
+        <rect x="250" y="220" width="200" height="44" rx="9" fill="var(--card)" stroke="var(--ok)"/>
+        <text x="350" y="242" font-size="13" font-weight="700" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">chronite</text>
+        <text x="350" y="257" font-size="10.5" text-anchor="middle" fill="var(--ok)">Pi 5 relay — stable (mesh_fwding=1)</text>
+
+        <rect x="590" y="220" width="110" height="44" rx="9" fill="var(--card)" stroke="var(--line)"/>
+        <text x="645" y="242" font-size="13" font-weight="700" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">board0</text>
+        <text x="645" y="257" font-size="10.5" text-anchor="middle" fill="var(--muted)">dest (endpoint)</text>
+
+        <line x1="132" y1="242" x2="242" y2="242" stroke="var(--ok)" stroke-width="2"/>
+        <polygon points="242,237 242,247 250,242" fill="var(--ok)"/>
+        <text x="187" y="234" font-size="10" text-anchor="middle" fill="var(--ok)">RA=chronite · 100%</text>
+
+        <line x1="450" y1="242" x2="582" y2="242" stroke="var(--muted)" stroke-width="1.6"/>
+        <polygon points="582,237 582,247 590,242" fill="var(--muted)"/>
+        <text x="516" y="234" font-size="10" text-anchor="middle" fill="var(--muted)">relay fwd leg</text>
+
+        <!-- RA bar (row B) -->
+        <text x="120" y="279" font-size="10.5" fill="var(--muted)">board1 QoS-Data RA distribution:</text>
+        <rect x="120" y="284" width="572" height="22" rx="4" fill="var(--ok)"/>
+        <text x="406" y="322" font-size="11.5" text-anchor="middle" fill="var(--ok)">100% RA=chronite — 954 / 954 · 0% RA=dest</text>
+      </svg>
+    </div>
+    <figcaption>Proof by relay swap, drawn to the numbers. Above: the flapping ESP relay leaves ~49% of board1's
+    QoS-Data addressed to the final destination (wasted singletons). Below: a stable Pi-5 relay pins board1's next hop
+    to chronite on <strong>954 / 954 frames = 100%</strong>, so the RA=dest fallback never fires. The flapping is on
+    the relay's load instability, not on HWMP.</figcaption>
+  </figure>
+
+  <p><strong>Proof — swap the relay.</strong> Reconfigured the line to use a <strong>stable Pi-5 relay</strong> instead
+  of the ESP: <strong>board1 (ESP) → chronite (Linux relay) → board0 (ESP)</strong>, both ESP endpoints allowlisting
+  chronite (a temporary <code>MESH_RELAY_VIA_CHRONITE</code> app toggle; board2 was PPK2-power-gated dead after the
+  dev-host reboot, so board0 served as the 2nd endpoint). chronite runs the same <code>rimba-mesh</code> Linux mesh as
+  the interop test and forwards (<code>mesh_fwding = 1</code>).</p>
+
+  <table>
+    <thead>
+      <tr><th>relay</th><th>board1 QoS-Data RA distribution</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>board0 (ESP, flaps under load)</td><td>~49% RA = next hop · ~49% RA = dest</td></tr>
+      <tr><td><strong>chronite (stable Pi 5)</strong></td><td><strong>954 / 954 = 100% RA = chronite · 0% RA = dest</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>A stable relay ⇒ the path never gets invalidated ⇒ <strong>the flapping vanishes entirely</strong>. That pins the
+  root cause on the ESP relay's load instability, not on HWMP.</p>
+
+  <h2 id="throttle">4 · But the origin still doesn't aggregate — and that's inherent</h2>
+  <p>With the path pinned to chronite, board1 → board0 (via chronite) still measured <strong>0.24&nbsp;Mbit/s,
+  0 aggregated PPDUs</strong> on board1's origin leg. That is <strong>not</strong> a BA/S2 defect — it is the 2-hop
+  <strong>downstream throttle</strong> starving the origin's queue. Proven with a direct single-hop control:</p>
+
+  <table>
+    <thead>
+      <tr><th>flow</th><th>throughput</th><th>board1 aggregation (board1 → chronite)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>multi-hop</strong> board1 → board0 <em>via chronite</em></td><td>0.24 Mbit/s</td><td>954 PPDUs, <strong>0 aggregated</strong></td></tr>
+      <tr><td><strong>direct</strong> board1 → chronite (single hop, <code>-b 3</code>)</td><td><strong>1.7 Mbit/s</strong></td><td>769 PPDUs, <strong>336 aggregated</strong> (dist <code>433×1, 67×2, 268×3, 1×4</code>)</td></tr>
+    </tbody>
+  </table>
+
+  <p>The throttle-vs-unthrottled contrast, throughput bars to scale (max = 1.7 Mbit/s):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">multi-hop 2-hop</span><span class="bar-track"><span class="bar-fill slow" style="width:14.1%"></span></span><span class="val">0.24</span></div>
+    <div class="bar-row"><span class="lbl">direct 1-hop</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">1.7</span></div>
+  </div>
+  <p style="font-size:13.5px;color:var(--muted);margin-top:-.3em">Mbit/s. The 2-hop downstream bottleneck (relay
+  forward leg) caps end-to-end goodput at ~0.24 Mbit/s — about <strong>7×</strong> below the unthrottled single hop.</p>
+
+  <p>board1's BA session to chronite <strong>completes and aggregates 2–3 MPDUs deep</strong> when the flow is a
+  high-rate single hop. In the 2-hop case the downstream bottleneck throttles the end-to-end goodput, so board1's
+  first-leg TX queue rarely holds two frames when a PPDU is built → single MPDUs. <strong>A-MPDU can only aggregate
+  what is already queued</strong>; a throttled origin has nothing to aggregate. The direct-flow PPDU-size distribution,
+  bars to scale (max = 433):</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 460 214" role="img" aria-label="board1 to chronite direct single-hop PPDU size distribution: 433 single, 67 of 2, 268 of 3, 1 of 4 MPDUs">
+      <line x1="30" y1="180" x2="450" y2="180" stroke="var(--line)" stroke-width="1"/>
+      <g font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11" text-anchor="middle">
+        <rect x="60"  y="30"  width="50" height="150" rx="3" fill="var(--muted)" opacity="0.55"/>
+        <text x="85"  y="24"  fill="var(--fg)">433</text><text x="85"  y="196" fill="var(--muted)">1</text>
+        <rect x="150" y="157" width="50" height="23"  rx="3" fill="var(--accent)"/>
+        <text x="175" y="151" fill="var(--fg)">67</text><text x="175" y="196" fill="var(--muted)">2</text>
+        <rect x="240" y="87"  width="50" height="93"  rx="3" fill="var(--accent2)"/>
+        <text x="265" y="81"  fill="var(--fg)">268</text><text x="265" y="196" fill="var(--muted)">3</text>
+        <rect x="330" y="177" width="50" height="3"   rx="1.5" fill="var(--ok)"/>
+        <text x="355" y="171" fill="var(--fg)">1</text><text x="355" y="196" fill="var(--muted)">4</text>
+      </g>
+      <text x="240" y="211" font-size="10.5" text-anchor="middle" fill="var(--muted)">MPDUs per PPDU → count · 336 of 769 PPDUs aggregated (67×2 + 268×3 + 1×4); grey = 433 non-aggregated singles</text>
+    </svg>
+  </div>
+
+  <p>So the unthrottled origin genuinely packs 2–3 MPDUs deep — the throttled multi-hop origin, on identical hardware
+  and the same BA session mechanism, packs none. The limit is queue depth, not aggregation.</p>
+
+  <h2 id="takeaways">5 · Takeaways</h2>
+  <ul>
+    <li><strong>The flapping fix is a stable relay.</strong> On this all-in-RF-range bench the only way to hold a
+      multi-hop path steady is a relay that doesn't flap — a Linux node, or a fix for the ESP relay's interrupt-WDT
+      under load.</li>
+    <li><strong>S2 (multi-hop origin BA) is correct but rarely engages.</strong> The origin is throttle-limited, so its
+      A-MPDU-eligible flag seldom fires deep. A-MPDU's real payoff is on <strong>high-rate single-hop legs</strong> —
+      proven 2–3 MPDU deep both ESP↔ESP and ESP↔Linux.</li>
+    <li><strong>The multi-hop goodput lever is S3</strong> (relay forward-leg aggregation): the <strong>relay</strong>
+      holds the whole aggregate flow queued, so it — not the throttled origin — is where per-hop airtime gets
+      amortised. Prioritise S3 over squeezing more from S2.</li>
+  </ul>
+
+  <div class="callout bug">
+    <p class="ct">⬡ Follow-Linux fix worth doing — <code>RA=dest</code> is a mac80211 divergence</p>
+    <p>The <code>RA = dest</code> fallback (<code>umac_datapath.c:3636</code>) diverges from net/mac80211
+    <code>mesh_nexthop_resolve</code>, which <strong>queues the frame and discovers</strong> instead of transmitting to
+    the final destination. Adopting queue-and-discover would stop a non-peered multi-hop destination from emitting
+    wasted singletons during path gaps — cleaning up exactly the RA=dest pollution seen here, independent of the relay
+    stability fix.</p>
+  </div>
+
+  <h2 id="bench">6 · Bench notes + teardown</h2>
+  <ul>
+    <li>The <strong>dev host rebooted mid-session</strong> (tmpfs <code>/tmp</code> wiped: helper scripts + archived
+      pcaps gone — findings preserved here), and <strong>board2's PPK2 DUT-rail power dropped</strong> on the reboot,
+      so board0 stood in as the 2nd endpoint.</li>
+    <li><strong>Teardown radio-silent:</strong> board0 + board1 → <code>rimba-hello</code>; chronite
+      <code>wpa_supplicant_s1g</code> killed + <code>wlan1</code> down; chronium <code>morse0</code>/<code>wlan1</code>
+      down. The <code>MESH_RELAY_VIA_CHRONITE</code> / interop app toggles were reverted (tree <code>app_main.c</code>
+      back to the <code>MESH_IPERF</code> default). <strong>Nothing committed.</strong></li>
+    <li>See <code>docs/mesh-ap/rimba-mesh-ampdu-aggregation-design.md</code> and the S2 worklog for the aggregation
+      mechanism.</li>
+  </ul>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#symptom">1 · Symptom from S2</a></li>
+    <li><a href="#code">2 · Where RA=dest comes from</a></li>
+    <li><a href="#rootcause">3 · ESP relay flaps</a></li>
+    <li><a href="#throttle">4 · Origin won't aggregate</a></li>
+    <li><a href="#takeaways">5 · Takeaways</a></li>
+    <li><a href="#bench">6 · Bench + teardown</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-12-mesh-ampdu-multihop-stable-relay</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

@@ -21,6 +21,18 @@ loaded module — since `modinfo` isn't on the non-login PATH.)
   `morse_cli`/`hostapd_s1g`/`wpa_supplicant_s1g` all `rel_1_17_8`; BCF unchanged). **Reverted to 1.17.8 on
   2026-07-08** — 1.17.9 was found to REGRESS STA power-save ~2× (see `rimba-halow-ps-esp32-vs-linux-ap.md`),
   so the whole bench (ESP + Linux) is now matched at **1.17.8**.
+- **⚠ SAME RADIO SILICON across the WHOLE bench — ESP and Linux nodes differ only in HOST + carrier board.**
+  Every node (3× ESP32 + 4× Linux) runs a **Morse Micro MM6108** on an **FGH100M / `fgh100mhaamd`** module
+  with the **same `mm6108.bin` 1.17.8** firmware + BCF (`bcf_fgh100mhaamd.bin`). The ESP boards mount that
+  MM6108 module on a **XIAO ESP32-S3** carrier/daughter-board; the Linux nodes mount the **same** module on a
+  Pi 5 HAT / Pi Zero board. The radio chip, RF front end, and firmware are **identical** — only the HOST
+  (ESP32-S3 **morselib** vs Linux **mac80211 + morse_driver**) and the carrier wiring differ.
+  **Diagnostic consequence (don't get this wrong):** when the ESP and a Linux node behave DIFFERENTLY on the
+  same air/channel/config — e.g. the ESP mesh plink flaps while an all-Linux mesh is rock-stable — that
+  isolates to the **HOST STACK (morselib) or the carrier wiring, NOT the radio chip or its firmware**: the
+  Linux node running the *same* MM6108 + *same* fw proves the radio can peer stably. So never attribute an
+  ESP-only mesh/PS/peering behavior to "the MM6108" or "the radio" (nor to "a degraded chip") on the strength
+  of a stable Linux control — the same MM6108 is running fine next to it. It points at the ESP host software.
 
 ### Component versions — matched 1.17.8 (all devices verified 2026-07-08; re-confirmed 2026-07-10)
 
@@ -133,6 +145,33 @@ XIAO ESP32-S3 + FGH100M (MM6108). `BOARD=proto1-fgh100m` for all of them.
 | board1 | `/dev/ttyACM1` | `E0:72:A1:F8:F9:40` | `e2:72:a1:f8:f9:40` | `10.9.9.100` |
 | board2 | `/dev/ttyACM4` | `E0:72:A1:F8:F0:08` | `e2:72:a1:f8:f0:08` | `10.9.9.108` |
 
+**⚠⚠ CRITICAL — board0 + board1 are NOT fully wired to the MM6108; board2 is the ONLY properly-wired ESP node.**
+(Recorded 2026-07-12 from the hardware owner.) The firmware assumes these MM6108 pins (`boards/proto1-fgh100m/sdkconfig.defaults`):
+`RESET_N=GPIO1`, `WAKE=GPIO2`, `SPI_IRQ=GPIO3`, `SPI_CS=GPIO4`, `BUSY=GPIO5`, `SPI_SCK/MISO/MOSI=7/8/9`.
+
+| Board | SPI data (CS/SCK/MISO/MOSI) | RESET_N | SPI_IRQ (GPIO3) | **WAKE (GPIO2)** | **BUSY (GPIO5)** |
+|---|---|---|---|---|---|
+| board0 | ✅ | ✅ | ✅ (assumed — owner listed only WAKE/BUSY as missing; confirm if unsure) | ❌ **not wired** | ❌ **not wired** |
+| board1 | ✅ | ✅ | ✅ (assumed) | ❌ **not wired** | ❌ **not wired** |
+| **board2** | ✅ | ✅ | ✅ | ✅ | ✅ (fully wired) |
+
+**Why this matters:** `WAKE` + `BUSY` are the chip's **power-save / flow-control handshake** — in morselib they are used only in `ps.c`
+(`mmhal_wlan_busy_is_asserted` gates PS transitions `ps.c:51,185`; `mmhal_wlan_wake_assert/deassert` drive the chip awake
+`ps.c:93,115,390,418`), and the data path touches PS via the pageset wakers (`morse_ps_disable/enable(PS_WAKER_PAGESET)`
+in `morse_pagesets_work`). On board0/board1 `BUSY` is an unwired input (shim configures it pull-**down** → always reads
+"not busy") and `WAKE` drives nothing, so the host cannot tell when the MM6108 is busy and cannot actually wake it. Under
+**light/idle** load this is benign (board0/board1 have peered, pinged, relayed, and completed ADDBA in prior sessions), but
+under **sustained load** the broken wake/busy handshake is a strong suspect for SPI comm failures → the driver's 30-failure
+`hw_restart` escalation → the **"relay interrupt-WDT crash"** documented in `[[mesh-relay-intwdt-rootcause]]`. That crash has
+only ever been observed on **board0 as the relay**; board2 (fully wired) stays stable (540 s under the same test, 2026-07-12).
+**So the on-board0 "relay crash" is likely a board0-WIRING artifact, not purely the software forward-path mechanism the
+code-only root-cause analysed — re-open that diagnosis with this in mind.**
+
+**Practical rule:** for any test that exercises **power-save, flow-control, or sustained-load radio behaviour** (incl. a
+relay/forward DUT for the mesh A-MPDU work), use **board2** as the DUT — it is the only ESP that can be trusted to reflect
+real chip behaviour. board0/board1 are usable as **light-load endpoints or spares** only. A properly-wired ESP **relay** test
+therefore needs board2 in the relay role (with Linux nodes and/or board0/board1 as endpoints), not board0.
+
 **⚠ The `/dev/ttyACM*` numbers RE-ENUMERATE** (USB hotplug order) — the column above is a 2026-06-28
 snapshot. **Always identify a board by its efuse MAC, not the ACM number:**
 `python vendor/esp-idf/components/esptool_py/esptool/esptool.py --port /dev/ttyACMx --after hard_reset
@@ -226,6 +265,53 @@ the radio; asserting RESET_N low directly powers the FGH100M down and the floor 
 - **Recovery (not a trap):** D5/GPIO6 is both the flash-hold guard *and* the deep-sleep **wake** source, so
   **driving D5 HIGH (C6 `HOLD_HIGH`) wakes board2 into a flashable FLASH-HOLD idle** (verified). The fw also
   holds a **10 s host-awake window at boot**, so a fresh-boot reflash catches it without the C6 too.
+
+### Power-cycling board0 / board1 remotely — USB hub port power (VBUS)
+
+**Why you need this:** a **warm ESP reset** (esptool `--after hard_reset`, or a pyserial console open — these
+XIAO ESP32-S3s reset on the USB-serial-JTAG DTR/RTS) resets the ESP32 but **does NOT cleanly reset the MM6108**
+— the radio then comes up **garbage**: `Error occured whilst retrieving version info`, chip ID reads
+`0x8200fXXX`→`0x0000`, MAC `00:00:00:00:00:00`, `Channel list not set` → `mmwlan_mesh_start FAILED status=4`
+(`MMWLAN_CHANNEL_LIST_NOT_SET`). Only a **true VBUS power cycle** clears it (RESET_N-low-500 ms and
+`periph_module_reset(PERIPH_SPI2_MODULE)` were both tried in firmware — **neither works**; it's a HW latch).
+board2 is PPK2-powered so a `tools/ppk2_hold.py` off/on fixes it; **board0/board1 are bus-powered**, so you
+cut their VBUS at the USB hub.
+
+**The dev-host hub `7-1` supports per-port power switching** (verified 2026-07-12). Port map (identify boards
+by efuse MAC, not ACM number):
+
+| Board | efuse MAC | usb device | hub port | VBUS control |
+|---|---|---|---|---|
+| board0 | `E0:72:A1:F8:EF:A4` | `7-1.1` | `7-1-port1` | `/sys/bus/usb/devices/7-1:1.0/7-1-port1/disable` |
+| board1 | `E0:72:A1:F8:F9:40` | `7-1.2` | `7-1-port2` | `…/7-1-port2/disable` |
+| board2 | `E0:72:A1:F8:F0:08` | `7-1.3` | `7-1-port3` | *(data only — board2's POWER is the PPK2 rail; use `tools/ppk2_hold.py`)* |
+
+Writing `1` to a port's `disable` cuts VBUS (the board drops off USB); `0` restores it. These sysfs files are
+**root-owned**, so the writes need sudo. Helper: **`tools/esp_usb_power.py <board0|board1> <off|on|cycle> [secs]`**
+(maps board→port; run under sudo). A cold power cycle:
+
+```sh
+sudo tools/esp_usb_power.py board0 cycle 4     # VBUS off 4 s, then on  (clears the MM6108 wedge)
+# or by hand:
+echo 1 | sudo tee /sys/bus/usb/devices/7-1:1.0/7-1-port1/disable   # board0 OFF
+sleep 4
+echo 0 | sudo tee /sys/bus/usb/devices/7-1:1.0/7-1-port1/disable   # board0 ON
+```
+
+**Passwordless setup (optional, do once — lets an agent/CI power-cycle without a password):** install a
+root-owned copy of the helper and a NOPASSWD sudoers rule scoped to just it (run these yourself; they need an
+interactive sudo):
+
+```sh
+sudo install -o root -g root -m 755 tools/esp_usb_power.py /usr/local/sbin/esp_usb_power.py
+echo 'quartz ALL=(root) NOPASSWD: /usr/local/sbin/esp_usb_power.py *' | sudo tee /etc/sudoers.d/esp-usb-power
+sudo chmod 440 /etc/sudoers.d/esp-usb-power && sudo visudo -cf /etc/sudoers.d/esp-usb-power
+# then: sudo /usr/local/sbin/esp_usb_power.py board0 cycle   # no password
+```
+
+**Order matters:** to boot a wedged board clean, **flash first, then power-cycle** — the power-cycle must be the
+last thing before boot so the MM6108 starts from cold (a flash's own `--after hard_reset` is a warm reset and
+would re-wedge it). NB the ESPs re-enumerate on the same or a new `ttyACM*`; re-identify by efuse MAC.
 
 ---
 

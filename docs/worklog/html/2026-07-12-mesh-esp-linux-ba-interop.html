@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP↔Linux mesh Block Ack interop — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-12</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-12</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ interop RESOLVED</span>
+    <span class="badge bug">mesh · A-MPDU · interop</span>
+  </div>
+
+  <h1>ESP↔Linux mesh Block Ack interop<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">the mesh-ID unlock — a live Linux peer accepts the ESP's unprotected ADDBA</small></h1>
+
+  <p class="lead"><strong>Resolved.</strong> On a live bench, a <strong>Linux</strong> 802.11s mesh peer accepts the
+  ESP's now-<strong>unprotected (MFP=no)</strong> Block-Ack ADDBA and completes a BA session with it — the one S1
+  follow-up that had been blocked across two prior attempts. The blocker was never S1G params or MFP: it was a
+  <strong>mesh-ID mismatch</strong> (<code>rimba-mesh</code> vs <code>rimba-smesh</code>). With the IDs matched, board0
+  peered immediately (SAE+AMPE, <code>MFP:no</code>), pinged <strong>45/45</strong>, exchanged an explicit
+  <strong>unprotected NDP ADDBA</strong> (ESP token <code>0x69</code>, answered by Linux with the same token
+  <code>0x69</code>), and aggregated CCMP QoS-Data to the Linux peer at <strong>~1.78&nbsp;Mbit/s</strong>. Bench
+  radio-silent after; <strong>nothing committed</strong>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">mesh-ID matched</div><div class="s">both = rimba-mesh</div></div>
+      <div class="node acc"><div class="t">peer link ESTAB</div><div class="s">SAE+AMPE · MFP:no</div></div>
+      <div class="node acc"><div class="t">ping 45/45</div><div class="s">7–16 ms, 0% loss</div></div>
+      <div class="node ok"><div class="t">unprotected ADDBA</div><div class="s">token 0x69 accepted</div></div>
+      <div class="node ok"><div class="t">A-MPDU on air</div><div class="s">~1.78 Mbit/s (CCMP)</div></div>
+    </div>
+    <figcaption>The S1 cross-vendor chain, end to end. Matching the mesh ID unblocked everything downstream: a full
+    secured peering, then the live Linux peer accepting the ESP's MFP=no ADDBA, then CCMP A-MPDU over the ESP↔Linux
+    link.</figcaption>
+  </figure>
+
+  <div class="callout ok">
+    <p class="ct">✓ The result in one line</p>
+    <p>board0 (ESP) sends an <strong>unprotected</strong> ADDBA Request (dialog token <code>0x69</code>,
+    <code>fc.protected=0</code>) and chronite (Linux) answers with an <strong>unprotected</strong> ADDBA
+    <strong>Response</strong> carrying the <strong>same token <code>0x69</code></strong>. A live
+    <code>net/mac80211</code> mesh peer accepts the ESP's now-MFP=no Block-Ack, validating the S1 change cross-vendor —
+    and then <strong>SW-CCMP + A-MPDU compose against a Linux peer too</strong>, not just ESP↔ESP.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">45/45</div><div class="lbl">ping board0 → chronite (0% loss, 7–16 ms)</div></div>
+    <div class="stat"><div class="num acc">0x69</div><div class="lbl">ADDBA dialog token — Request = Response (matched)</div></div>
+    <div class="stat"><div class="num acc">~1.78</div><div class="lbl">Mbit/s CCMP QoS-Data to Linux (peak 1.90)</div></div>
+    <div class="stat"><div class="num">10</div><div class="lbl">aggregated PPDUs (2 MPDUs each) captured</div></div>
+  </div>
+
+  <p>This entry is <strong>standalone</strong>: the root cause, the exact interop config, every address and frame, the
+  handshake decode, and the bench gotchas needed to re-run it are all here. It closes the S1 follow-up opened in
+  <code>2026-07-11-mesh-ampdu-s1-blockack-rx-routing.md</code>.</p>
+
+  <h2 id="why">Why this was blocked</h2>
+  <p>S1 made the ESP mesh send its Block-Ack management (ADDBA/DELBA) <strong>unprotected</strong> (MFP=no) to match
+  <code>net/mac80211</code>, which runs mesh peers MFP=no. The open interop question was: <strong>does a real Linux
+  mesh peer accept that unprotected ADDBA?</strong> Two earlier attempts failed to even form the ESP↔Linux peering —
+  &ldquo;board0 never heard chronite's beacons, <code>PEER MESH BEACON</code> never fired&rdquo; — and were written off
+  as an S1G-param detail plus late-night bench instability (Pi-Zero brown-outs, a Pi-5 reboot mid-test). Both write-offs
+  were wrong.</p>
+
+  <h2 id="root">Root cause — a mesh-ID mismatch, not S1G params or MFP</h2>
+  <p>The ESP mesh app beacons <code>MESH_ID = "rimba-mesh"</code> (<code>rimba-halow-mesh-perf</code>,
+  <code>app_main.c:34</code>). The Linux <strong>secured-mesh reference config</strong> (<code>wpa-smesh.conf</code>,
+  the <em>all-Linux</em> 4-node mesh) uses <code>ssid = "rimba-smesh"</code>. <code>rimba-mesh</code> &ne;
+  <code>rimba-smesh</code> — a <strong>different 802.11s mesh</strong>. So the ESP heard chronite's S1G beacons at the
+  PHY but dropped them as a <strong>foreign mesh ID</strong> and never opened a peer link. That is exactly the
+  &ldquo;never heard the beacons&rdquo; symptom — a one-character config mismatch.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 640 190" role="img" aria-label="Mesh ID comparison: ESP rimba-mesh versus Linux rimba-smesh, one extra character">
+        <text x="20" y="34" font-size="13" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">ESP  ·  MESH_ID (app_main.c:34)</text>
+        <text x="20" y="66" font-size="26" font-family="ui-monospace,Menlo,Consolas,monospace" letter-spacing="1">
+          <tspan fill="var(--muted)">rimba-</tspan><tspan fill="var(--ok)" font-weight="700">mesh</tspan>
+        </text>
+
+        <text x="20" y="118" font-size="13" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">Linux  ·  ssid (wpa-smesh.conf reference)</text>
+        <text x="20" y="150" font-size="26" font-family="ui-monospace,Menlo,Consolas,monospace" letter-spacing="1">
+          <tspan fill="var(--muted)">rimba-</tspan><tspan fill="var(--err)" font-weight="700">s</tspan><tspan fill="var(--muted)">mesh</tspan>
+        </text>
+
+        <!-- callout on the extra 's' -->
+        <rect x="112" y="129" width="20" height="26" rx="4" fill="none" stroke="var(--err)" stroke-width="1.6"/>
+        <path d="M122 158 L122 172" stroke="var(--err)" stroke-width="1.4"/>
+        <text x="150" y="176" font-size="12.5" fill="var(--err)" font-weight="650" font-family="ui-monospace,Menlo,Consolas,monospace">1 extra char  →  foreign mesh  →  beacons dropped</text>
+      </svg>
+    </div>
+    <figcaption>A single character. The ESP is fixed at <code>rimba-mesh</code>; the Linux <em>secured-mesh</em>
+    reference is <code>rimba-smesh</code>. That one <code>s</code> made it a different 802.11s network.</figcaption>
+  </figure>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Correction — not S1G-param, not MFP</p>
+    <p>The blocker was <strong>not</strong> an S1G BW / <code>sae_pwe</code> / beacon issue, and <strong>not</strong> the
+    MFP policy. MFP=no did not &ldquo;fix&rdquo; or &ldquo;break&rdquo; peering — <strong>it was never reached</strong>:
+    the ESP dropped chronite's beacons at the mesh-ID gate long before any SAE/AMPE or ADDBA exchange. The two prior
+    &ldquo;never heard the beacons&rdquo; failures were this one-character mismatch, misattributed to S1G params and
+    late-night bench instability.</p>
+  </div>
+
+  <h2 id="rig">The rig</h2>
+  <pre><code> board0 (ESP32-S3 + MM6108)                 chronite (Raspberry Pi 5 + MM6108 HAT)
+ rimba-halow-mesh-perf (MESH_LINUX_INTEROP)  wpa_supplicant_s1g, ssid "rimba-mesh"
+ /dev/ttyACM0                                wlan1 = mesh point
+ mesh IP 10.9.9.136                          mesh IP 10.9.9.2
+ mesh MAC e2:72:a1:f8:ef:a4  &lt;== S1G ch27 ==&gt; HaLow MAC 3c:22:7f:37:51:38
+                    secured (SAE + AMPE), MFP=no, freq 5560 (915.5 MHz)
+
+ chronium (Pi 5, dedicated sniffer): wlan1 -&gt; monitor, freq 5560, morse0 up</code></pre>
+
+  <ul>
+    <li><strong>ESP side:</strong> <code>rimba-halow-mesh-perf</code> built with <code>MESH_LINUX_INTEROP</code> — open
+      peering (no allowlist), an auto-ping to chronite <code>10.9.9.2</code>, and the iperf console.</li>
+    <li><strong>Linux side (chronite):</strong> the interop config is the secured-mesh recipe <strong>with the SSID
+      changed to match the ESP</strong>. Brought up with
+      <code>wpa_supplicant_s1g -B -D nl80211 -i wlan1 -c /tmp/wpa-interop.conf</code>, then
+      <code>ip addr add 10.9.9.2/24 dev wlan1</code>.</li>
+  </ul>
+
+  <pre><code>ctrl_interface=/var/run/wpa_supplicant_s1g
+country=US
+user_mpm=1
+network={
+    ssid=<span class="st">"rimba-mesh"</span>            <span class="cm"># &lt;-- MUST match the ESP's MESH_ID</span>
+    mode=<span class="nm">5</span>                       <span class="cm"># WPAS_MODE_MESH</span>
+    key_mgmt=SAE
+    sae_password=<span class="st">"rimbamesh2026"</span>
+    country=<span class="st">"US"</span>
+    op_class=<span class="nm">68</span>                  <span class="cm"># S1G global op-class, ch27 / 1 MHz</span>
+    channel=<span class="nm">27</span>
+    s1g_prim_chwidth=<span class="nm">0</span>
+    s1g_prim_1mhz_chan_index=<span class="nm">0</span>
+    dtim_period=<span class="nm">1</span>                <span class="cm"># required (mesh join bails otherwise)</span>
+    beacon_int=<span class="nm">100</span>
+}</code></pre>
+
+  <h2 id="peering">Result — peering (ESTAB, MFP:no)</h2>
+  <p>With the mesh IDs matched, board0 heard chronite and peered immediately:</p>
+  <ul>
+    <li>board0 console: <code>reply from 10.9.9.2: seq=1..45 time=7–16 ms</code> — <strong>ping 45/45</strong>.</li>
+    <li>chronite <code>iw dev wlan1 station dump</code>: peer <code>e2:72:a1:f8:ef:a4</code> →
+      <code>mesh plink: ESTAB</code>, <code>authenticated: yes</code>, <strong><code>MFP: no</code></strong> — a full
+      SAE+AMPE peering, MFP=no on the Linux side, matching the ESP.</li>
+  </ul>
+
+  <div class="stats">
+    <div class="stat"><div class="num">ESTAB</div><div class="lbl"><code>mesh plink</code> on chronite</div></div>
+    <div class="stat"><div class="num ok">yes</div><div class="lbl"><code>authenticated</code> (SAE+AMPE)</div></div>
+    <div class="stat"><div class="num">MFP: no</div><div class="lbl">Linux station dump — matches the ESP</div></div>
+    <div class="stat"><div class="num acc">~200 KB</div><div class="lbl">rx counted from board0 under load</div></div>
+  </div>
+
+  <h2 id="handshake">The unprotected NDP ADDBA handshake</h2>
+  <p>Reflashed board0 for a fresh BA state and captured from cold on chronium's <code>morse0</code>. The three
+  Block-Ack (category 3) action frames decode as follows.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 760 392" role="img" aria-label="Unprotected NDP ADDBA sequence between board0 (ESP) and chronite (Linux)">
+        <defs>
+          <marker id="arwA" markerWidth="11" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="var(--accent)"/></marker>
+          <marker id="arwM" markerWidth="11" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="var(--muted)"/></marker>
+          <marker id="arwOk" markerWidth="11" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" fill="var(--ok)"/></marker>
+        </defs>
+
+        <!-- peer boxes -->
+        <rect x="55" y="18" width="180" height="50" rx="10" fill="var(--soft)" stroke="var(--accent)"/>
+        <text x="145" y="42" font-size="13.5" font-weight="700" text-anchor="middle" fill="var(--fg)">board0 · ESP</text>
+        <text x="145" y="60" font-size="11.5" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">e2:72:a1:f8:ef:a4</text>
+
+        <rect x="525" y="18" width="190" height="50" rx="10" fill="var(--soft)" stroke="var(--accent)"/>
+        <text x="620" y="42" font-size="13.5" font-weight="700" text-anchor="middle" fill="var(--fg)">chronite · Linux</text>
+        <text x="620" y="60" font-size="11.5" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">3c:22:7f:37:51:38</text>
+
+        <!-- lifelines -->
+        <line x1="145" y1="72" x2="145" y2="352" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="4 5"/>
+        <line x1="620" y1="72" x2="620" y2="352" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="4 5"/>
+
+        <!-- ARROW 1 : board0 -> chronite  #97 -->
+        <text x="18" y="130" font-size="11" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">4.200</text>
+        <text x="382" y="115" font-size="13" font-weight="700" text-anchor="middle" fill="var(--fg)">#97 · NDP ADDBA Request  (action 0x80)</text>
+        <line x1="145" y1="132" x2="620" y2="132" stroke="var(--accent)" stroke-width="2" marker-end="url(#arwA)"/>
+        <text x="382" y="151" font-size="11.5" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">dialog token 0x69 · buffers 16 · SSN 0 · fc.protected = 0</text>
+
+        <!-- ARROW 2 : chronite -> board0  #101 (reverse) -->
+        <text x="18" y="215" font-size="11" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">4.210</text>
+        <text x="382" y="200" font-size="13" font-weight="700" text-anchor="middle" fill="var(--fg)">#101 · NDP ADDBA Request  (reverse, 0x80)</text>
+        <line x1="620" y1="217" x2="145" y2="217" stroke="var(--muted)" stroke-width="2" marker-end="url(#arwM)"/>
+        <text x="382" y="236" font-size="11.5" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">dialog token 0x01 · buffers 64 · SSN 1 · fc.protected = 0</text>
+
+        <!-- ARROW 3 : chronite -> board0  #103 (response, matches #97) -->
+        <text x="18" y="300" font-size="11" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">4.213</text>
+        <text x="382" y="285" font-size="13" font-weight="700" text-anchor="middle" fill="var(--ok)">#103 · NDP ADDBA Response  (action 0x81)</text>
+        <line x1="620" y1="302" x2="145" y2="302" stroke="var(--ok)" stroke-width="2.4" marker-end="url(#arwOk)"/>
+        <text x="382" y="321" font-size="11.5" text-anchor="middle" fill="var(--ok)" font-family="ui-monospace,Menlo,Consolas,monospace">dialog token 0x69 — MATCHES #97 · fc.protected = 0  →  Linux ACCEPTS</text>
+
+        <!-- footer note -->
+        <line x1="18" y1="352" x2="742" y2="352" stroke="var(--line)" stroke-width="1"/>
+        <text x="382" y="374" font-size="11.5" text-anchor="middle" fill="var(--muted)">Both sides use the S1G NDP variant (0x80 / 0x81). Management ADDBA <tspan fill="var(--warn)" font-weight="650">protected = 0 (MFP=no)</tspan> · data QoS-Data <tspan fill="var(--accent)" font-weight="650">protected = 1 (CCMP)</tspan></text>
+      </svg>
+    </div>
+    <figcaption>The headline, drawn to the capture. board0's unprotected ADDBA Request (token <code>0x69</code>) is
+    answered by chronite's unprotected ADDBA Response carrying the <em>same</em> token <code>0x69</code>, +13 ms later.
+    Frame #101 is chronite opening its own reverse-direction session (token <code>0x01</code>). All three are
+    <code>fc.protected = 0</code>.</figcaption>
+  </figure>
+
+  <table>
+    <thead>
+      <tr><th class="num">#</th><th class="num">t (s)</th><th>dir</th><th>frame</th><th>dialog token</th><th>protected</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="num">97</td><td class="num">4.200</td><td>board0 → chronite</td><td><strong>NDP ADDBA Request</strong> (0x80), buffers 16, SSN 0</td><td><code>0x69</code></td><td><strong>No</strong></td></tr>
+      <tr><td class="num">103</td><td class="num">4.213</td><td>chronite → board0</td><td><strong>NDP ADDBA Response</strong> (0x81), buffers 16</td><td><code>0x69</code> (matches #97)</td><td><strong>No</strong></td></tr>
+      <tr><td class="num">101</td><td class="num">4.210</td><td>chronite → board0</td><td>NDP ADDBA Request (0x80), buffers 64, SSN 1</td><td><code>0x01</code></td><td><strong>No</strong></td></tr>
+    </tbody>
+  </table>
+
+  <ul>
+    <li><strong>The headline:</strong> board0 sends an <strong>unprotected</strong> ADDBA Request (token
+      <code>0x69</code>), and chronite answers with an <strong>unprotected</strong> ADDBA <strong>Response</strong>
+      carrying the <strong>same token <code>0x69</code></strong> — a live Linux mesh peer <strong>accepts the ESP's
+      now-unprotected ADDBA</strong>. This directly validates the S1 MFP=no change cross-vendor.</li>
+    <li><strong>Bidirectional:</strong> frame #101 is chronite opening its <strong>own</strong> BA session to board0
+      (token <code>0x01</code>) — Linux originates a reverse-direction session too.</li>
+    <li><strong>Both sides use NDP ADDBA</strong> (S1G <code>0x80</code>/<code>0x81</code>), settling the design doc's
+      open question &ldquo;NDP vs compressed BlockAck&rdquo; — the ESP and Linux agree on the NDP variant.</li>
+  </ul>
+
+  <h2 id="agg">Aggregation under load</h2>
+  <p>Driving <code>iperf -c 10.9.9.2 -u -b 2</code> from board0, chronium captured board0's QoS-Data to chronite:
+  <strong>10 aggregated PPDUs</strong> (2 MPDUs each), consecutive sequence numbers (e.g. 843/844, 847/848, 849/850),
+  DA/RA = chronite, all <strong><code>fc.protected = 1</code> (CCMP)</strong>. Throughput <strong>~1.78 Mbit/s</strong>
+  (peak 1.90). So <strong>SW-CCMP + A-MPDU compose against a Linux peer too</strong>, not just ESP↔ESP. (chronite's
+  <code>station dump</code> counted ~200 KB rx from board0.)</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Encrypt-then-aggregate, cross-vendor</p>
+    <p>The management ADDBA rides <strong>unprotected</strong> (MFP=no, matching <code>net/mac80211</code>), while the
+    data plane is <strong>fully CCMP</strong>: board0's aggregated QoS-Data to the Linux peer is 100%
+    <code>fc.protected = 1</code>. The composition a real secured mesh needs — SW-CCMP encrypt each MPDU, <em>then</em>
+    aggregate the ciphertext MPDUs into one PPDU — now holds against a live Linux peer, at <strong>~1.78 Mbit/s</strong>.</p>
+  </div>
+
+  <h2 id="gotchas">Bench gotchas (reusable)</h2>
+  <ul>
+    <li><strong>Mesh IDs must match exactly.</strong> The ESP is fixed at <code>MESH_ID = "rimba-mesh"</code>; the Linux
+      <em>secured-mesh</em> reference is <code>rimba-smesh</code>. For ESP interop, put the Linux node on
+      <code>rimba-mesh</code>.</li>
+    <li><strong>NetworkManager re-grabs <code>wlan1</code></strong> after a reboot (<code>Device or resource busy</code>
+      on <code>set type monitor</code>/mesh). Release it first: <code>sudo nmcli dev set wlan1 managed no</code>.</li>
+    <li><strong>chronite's SSH rides <code>wlan0</code></strong> (brcmfmac), managed by NetworkManager's own
+      <code>wpa_supplicant</code>. Do <strong>not</strong> <code>pkill -9 wpa_supplicant</code> (kills the SSH path);
+      touch only <code>wlan1</code> and start a separate <code>wpa_supplicant_s1g</code> on it.</li>
+    <li><strong>The ESP's ADDBA is an S1G NDP action</strong> (<code>wlan.fixed.action_code</code> 0x80/0x81), still
+      <code>wlan.fixed.category_code == 3</code>; tshark decodes it as &ldquo;NDP ADDBA Request/Response&rdquo;.</li>
+    <li><strong>The dev host rebooted mid-session</strong> (tmpfs <code>/tmp</code> wiped — helper scripts + archived
+      pcaps lost, though the findings live here), and <strong>board2's PPK2 DUT-rail power dropped</strong> on the
+      reboot. Neither affected the Linux nodes.</li>
+  </ul>
+
+  <h2 id="teardown">Teardown (radio-silent)</h2>
+  <ul>
+    <li>board0 + board1 reflashed to <strong><code>rimba-hello</code></strong>; chronite
+      <code>wpa_supplicant_s1g</code> killed + <code>wlan1</code> down; chronium <code>morse0</code>/<code>wlan1</code>
+      down.</li>
+    <li>The <code>MESH_LINUX_INTEROP</code> app toggle was reverted (the tree's <code>app_main.c</code> is back to the
+      <code>MESH_IPERF</code> default). <strong>Nothing committed.</strong></li>
+    <li>This closes the S1 follow-up: the ESP's unprotected (MFP=no) Block-Ack is accepted by a live Linux mesh peer,
+      and A-MPDU works over the ESP↔Linux link.</li>
+  </ul>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#why">Why this was blocked</a></li>
+    <li><a href="#root">Root cause — mesh-ID</a></li>
+    <li><a href="#rig">The rig</a></li>
+    <li><a href="#peering">Peering — ESTAB, MFP:no</a></li>
+    <li><a href="#handshake">Unprotected NDP ADDBA</a></li>
+    <li><a href="#agg">Aggregation under load</a></li>
+    <li><a href="#gotchas">Bench gotchas</a></li>
+    <li><a href="#teardown">Teardown</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-12-mesh-esp-linux-ba-interop</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

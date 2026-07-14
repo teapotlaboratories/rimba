@@ -263,16 +263,49 @@ after each bench run (flash `rimba-hello` to the ESPs + `ip link set wlan1 down`
   RX reorder engages with no further code. Bench: on-air ADDBA-resp consumed → session flips to
   `UMAC_BA_SUCCESS`; iperf single-hop before/after.
 
-### S2 — Multi-hop local-origin: BA on the next-hop peer stad (~1 day + bench)
-- **Goal:** make `aggr_check` + eligibility use the resolved next-hop peer stad for a non-direct-peer
-  DA instead of `common_stad`.
-- **Touch:** `umac_datapath.c:2206` + `:2271-2274` — pass the `nh_stad` already computed at `:2164-2172`
-  when `tx_is_mesh_frame && !is_multicast && stad == common_stad`.
-- **Linux:** `rx.c:2788`/`:2805` (aggr keyed on `mpath->next_hop`).
-- **Inert/testable:** guarded to the multi-hop mesh case; single-hop unaffected. Bench: on the forced
-  line (`board1→board0→board2`) the originator opens BA on its real next hop; confirm on `morse0`.
+### S2 — Multi-hop local-origin: BA on the next-hop peer stad — ✅ CODE DONE + core mechanism on-air-verified 2026-07-11
+
+> **On-air (secured all-ESP forced line board1→board0→board2, cold capture):** the multi-hop origin now
+> **completes a Block-Ack handshake with its next hop** — ADDBA-req board1→board0 (#428) + ADDBA-resp
+> board0→board1 (#436, +53 ms), both **unprotected** (MFP=no). Before S2 the same flow emitted **zero**
+> on-air ADDBA (self-addressed on `common_stad`). **Sustained A-MPDU on the first-hop leg was NOT achieved**
+> — blocked by the **orthogonal** HWMP path-flapping bug (next hop alternates board0/board2, diluting the
+> queue), not by S2 (single-hop, a no-op under S2, still aggregates). Worklog:
+> `2026-07-11-mesh-ampdu-s2-multihop-nexthop-stad.md`. Uncommitted one-file working-tree change.
+>
+> **The design's 3-line touch below was INCOMPLETE — the correct S2 is 4 edits**, all "use `key_stad`
+> (= the next-hop peer stad already resolved for CCMP keying at `umac_datapath.c:2164-2172`) off the
+> multi-hop mesh path; `key_stad == stad` for single-hop/non-mesh/multicast so all four are no-ops there":
+> 1. `aggr_check` call (~`:2206`) `stad`→`key_stad` — ADDBA on the next hop, not self-addressed.
+> 2. `umac_ba_get_reorder_buffer_size` (~`:2271`) `stad`→`key_stad`.
+> 3. `umac_ba_is_ampdu_permitted` (~`:2272`) `stad`→`key_stad`.
+> 4. **(MISSED by the original sketch)** relocate the `sta_data` binding (was at the top of the fn) to
+>    **after** the key_stad resolution and bind it to `key_stad`, so the **802.11 QoS-data sequence number**
+>    (`:2199-2201`) is drawn from the next-hop peer's per-TID counter. Required for correctness on any
+>    2+-next-hop or mixed single/multi-hop-via-P mesh; the single-next-hop bench rig *masks* its absence.
+>    Follow-Linux: `ieee80211_tx_h_sequence` stamps `seq_ctrl = ieee80211_tx_next_seq(tx->sta, tid)`
+>    (`tx.c:886`, `tx.c:807-815`) with `tx->sta = sta_info_get(addr1 = mpath->next_hop)` (`tx.c:1239-1241`,
+>    `mesh_hwmp.c:1385-1388`) — a per-next-hop-peer counter, NOT per-vif, NOT per-final-dest.
+> - Confirmed **stays on `stad`** (verified, do NOT move): `tx_metadata->aid` (~`:2280`, tx-status→RC
+>   routing, not read by the FW A-MPDU path) and `umac_rc_init_rate_table_data` (~`:2296`, the separate
+>   mesh-RC workstream).
+- **Goal:** make BA setup + eligibility + the QoS-data seqno use the resolved next-hop peer stad for a
+  non-direct-peer DA instead of `common_stad`.
+- **Linux:** `rx.c:2788`/`:2805` (aggr keyed on `mpath->next_hop`); `agg-tx.c:641` (MESH whitelist);
+  `tx.c:886`/`:807-815`/`:1239-1241` + `mesh_hwmp.c:1385-1388` (seqno off the next-hop sta).
+- **Inert/testable:** guarded to the multi-hop mesh case; single-hop unaffected (byte-identical path,
+  `key_stad == stad`). Bench: forced line `board1→board0→board2`; confirm the ADDBA-req/resp to/from the
+  real next hop on `morse0` (done). A *sustained-aggregation* number needs a stable single next-hop path
+  (fix HWMP flapping, or an out-of-RF-range far node) — see the worklog §6.
 
 ### S3 — Relay/forward onto the aggregation-eligible data path (~2–3 days + bench)
+> **✅ CODE DONE 2026-07-12 (builds green, adversarially reviewed, NOT bench-verified; uncommitted).** Worklog
+> `docs/worklog/2026-07-12-mesh-ampdu-s3-relay-fwd-aggregation.md`. Landed with **FIX-2** (non-blocking forward,
+> the interrupt-WDT trigger) at the same seam. New `build_mesh_data_frame` allocs the forward on
+> `MMDRV_PKT_CLASS_DATA_TID0+tid` (MGMT class → `mgmt_q`, never A-MPDUs); `umac_datapath_tx_mesh_keyed_frame`
+> gains per-TID seqno + `aggr_check` + `AMPDU_ENABLED` for the unicast forward (all consistent at TID 0),
+> `mmdrv_tx_frame(txbuf,!fwd_aggregate)` channel select, and a non-blocking drop-gate hoisted to the top.
+> Behind `MESH_FWD_DATA_AGGREGATE` (default 1) for bench A/B. In-place-forward deferred.
 - **Goal:** forwarded unicast aggregates per next-hop link (the dominant relay-goodput win). Naturally
   combined with the independent **in-place-forward** optimization at the same seam.
 - **Touch:** `umac_mesh_forward_data` (`umac_mesh.c:2566`) + `umac_datapath_tx_mesh_keyed_frame`
@@ -323,8 +356,8 @@ code-map as the code lands.
 | RX reorder buffer (`umac_datapath.c:1000-1309`; fields `umac_datapath_data.h:95`/`:97`) | Exists — generic, auto-engages | `__ieee80211_start_rx_ba_session` `agg-rx.c:235`; reorder release in `rx.c` |
 | Recipient session — `umac_ba_rx_addba_req` (`umac_ba.c:286`, cap check `:311`) | Exists (unreachable until S1) | `ieee80211_process_addba_request` `agg-rx.c:435` → `__ieee80211_start_rx_ba_session` |
 | Mesh state gating — keep unconditional CONNECTED (`get_state_ibss` `:3670`) | Exists — correct as-is | `mesh_plink.c:542` (`wme=true`); pre-authorized peer |
-| **Multi-hop next-hop BA target** (`nh_stad`, `umac_datapath.c:2164-2172`) | **ADD (S2)** | aggr keyed on `mpath->next_hop` `rx.c:2788`/`:2805` |
-| **Relay re-inject onto data path** — `umac_mesh_forward_data` (`umac_mesh.c:2566`) | **ADD (S3)** | `ieee80211_rx_h_mesh_fwding` (`set_qos_hdr` + re-inject, TID preserved) |
+| **Multi-hop next-hop BA target** — **✅ S2 code done 2026-07-11**: `aggr_check`/`reorder_buf_size`/`is_ampdu_permitted` + the QoS-data seqno all keyed on `key_stad` (= `nh_stad` from `umac_datapath.c:2164-2172`); on-air ADDBA req+resp to/from the real next hop | Wired | aggr keyed on `mpath->next_hop` `rx.c:2788`/`:2805`; seqno off `tx->sta`=next hop `tx.c:886`/`:1239-1241`, `mesh_hwmp.c:1385-1388` |
+| **Relay re-inject onto data path** — `umac_mesh_forward_data` (`umac_mesh.c:2573`) → DATA-class `build_mesh_data_frame` + `umac_datapath_tx_mesh_keyed_frame` per-TID seqno/`aggr_check`/`AMPDU_ENABLED` — **✅ S3 code done 2026-07-12** | Wired | `ieee80211_rx_h_mesh_forward` (`set_qos_hdr` + re-inject into data TX path, TID preserved) |
 | Per-TID FW AMPDU param (`skbq.c:832`/`:845`/`:847`) | Exists | `morse_driver/mac.c:1021` (`tid_params`), cap `mac.c:78` (`DOT11AH_BA_MAX_MPDU_PER_AMPDU=32`) |
 | **BA teardown** — `umac_ba_session_deinit` (`umac_ba.c:427`) | **ADD wire into `mesh_peer_free` (S4)** | `ieee80211_sta_tear_down_BA_sessions` on `sta_info` removal |
 | Peer AMPDU-cap gate / `ampdu_mss` (S5) | **ADD** | `mac.c:4701-4703` (peer cap), `mac.c:1156` (`ampdu_mss`) |

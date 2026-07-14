@@ -23,6 +23,12 @@ Most important rules:
   internal IDs (task/backlog/bug numbers) backticked in Markdown (`` `#20` ``; in
   commit messages drop the `#`). Scan before pushing. See
   [AGENTS.md → Cross-references in PR and commit text](AGENTS.md#cross-references-in-pr-and-commit-text).
+- **Build (and flash) only via `make … APP=… BOARD=…`, never bare `idf.py`.** The
+  `Makefile` applies the board overlay (`boards/<BOARD>/sdkconfig.defaults`) that sets the
+  MM6108 pins and `CONFIG_HALOW_COUNTRY_CODE`. A bare `idf.py build` falls back to country
+  `"??"`, and morselib then **refuses to boot the radio** ("Channel list not set") — which
+  masquerades as dead hardware (garbage chip id, MAC `00:00:00`). Bench boards are
+  `BOARD=proto1-fgh100m`. See [AGENTS.md → Building](AGENTS.md#building--always-via-make-never-bare-idfpy).
 - **Verify every change** with a hardware or unit test; if you can't, document
   why. See [AGENTS.md → Verifying changes](AGENTS.md#verifying-changes).
 - **Always on-air-verify radio frames** — capture every frame the ESP transmits on
@@ -35,6 +41,11 @@ Most important rules:
   new-code ↔ Linux mapping (`file:line` ↔ `file:line`) + a deliberate-divergences
   section. Verify every cited line by grepping both trees; never cite from memory. See
   [AGENTS.md → Porting Linux code](AGENTS.md#porting-linux-code).
+- **Keep a worklog and update it AS YOU GO** — for any non-trivial, multi-step
+  investigation/implementation, maintain `docs/worklog/YYYY-MM-DD-<slug>.md` and append each
+  finding/measurement/decision/dead-end/next-step at the time it happens, not once at the end,
+  so the thread survives context loss and keeps the *why* + the failures. See
+  [AGENTS.md → Worklogs — write and update as you go](AGENTS.md#worklogs--write-and-update-as-you-go).
 - **Every worklog gets an HTML render** — when you add or substantially edit a
   `docs/worklog/*.md`, hand-author its companion `docs/worklog/html/<name>.html`
   (self-contained — no external files; copy the exemplar's inline `<style>` — visuals + a

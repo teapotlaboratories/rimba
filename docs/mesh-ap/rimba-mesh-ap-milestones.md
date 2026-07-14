@@ -359,7 +359,7 @@ Legend: ✅ implemented · 🟡 partial/minimal · ⬜ not implemented · n/a no
 | Open on heard candidate beacon (initiator) | ✅ | ✅ | from S1G-beacon discovery |
 | Retransmit / holding timers (retry, MaxRetries) | ✅ | ✅ | + interval jitter |
 | Stale-session guard (peer reboot → close/reopen) | ✅ | ✅ | llid-echo mismatch |
-| Peer-inactivity expiry (link-failure detection) | ✅ | ✅ | ESTAB idle > 6 s → Close + flush paths (`ieee80211_sta_expire`) |
+| Peer-inactivity expiry (link-failure detection) | ✅ | ✅ | ESTAB idle > `plink_timeout` **1800 s** (= Linux `MESH_DEFAULT_PLINK_TIMEOUT`, `ieee80211_sta_expire`) → Close + flush paths; `last_rx` refreshed on beacon **+ any received data frame**. Was **6 s / beacon-only** — ~300× too aggressive, flapped → fresh SAE on marginal RX; matched to Linux 2026-07-12. [liveness code-map](rimba-mesh-plink-liveness-codemap.md) · [worklog](../worklog/2026-07-12-mesh-peering-flap-bisect-no-regression.md) |
 | `user_mpm` vs driver MPM | both | driver/host | ESP runs MPM in morselib |
 | Max peer links | configurable | 🟡 4 | small fixed table |
 | **Authenticated peering (AMPE/SAE)** | ✅ | ✅ | secured mesh (host SW-CCMP) — [§Mesh security](#mesh-security--sae--ampe--ccmp-p6c) |

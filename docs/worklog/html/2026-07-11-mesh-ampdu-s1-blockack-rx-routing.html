@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh A-MPDU S1: Block Ack RX routing + mesh MFP=no — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-11</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-11</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ single-hop A-MPDU on-air</span>
+    <span class="badge bug">mesh · A-MPDU · datapath</span>
+  </div>
+
+  <h1>Mesh A-MPDU S1: Block Ack RX routing + mesh MFP=no<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">the Block-Ack handshake finally completes on a mesh vif</small></h1>
+
+  <p class="lead"><strong>S1 = code done + on-air verified.</strong> S0 proved the MM6108 firmware
+  <em>will</em> pack 4-address mesh QoS-data into on-air A-MPDUs when the host marks frames eligible. The one
+  missing piece was the host-side <strong>Block-Ack session</strong> — and it could never complete because inbound
+  Block-Ack action frames were dropped on the mesh RX path. Two edits fix it (route <code>BLOCK_ACK</code> to the BA
+  state machine + set the mesh <strong>MFP=no</strong>), and single-hop secured-mesh A-MPDU lights up:
+  <code>board1→board0</code> now emits real A-MPDUs — consecutive-seq QoS-Data sharing one PPDU — driven by a BA
+  handshake that completes.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">S0 = GO</div><div class="s">chip aggregates mesh data</div></div>
+      <div class="node err"><div class="t">handshake gap</div><div class="s">ADDBA resp dropped</div></div>
+      <div class="node acc"><div class="t">edit 1</div><div class="s">route BLOCK_ACK → BA</div></div>
+      <div class="node acc"><div class="t">edit 2</div><div class="s">mesh MFP=no</div></div>
+      <div class="node ok"><div class="t">A-MPDU on air</div><div class="s">real BA session</div></div>
+    </div>
+    <figcaption>S0 left one gap: the Block-Ack handshake never completed on a mesh vif. Two RX drops were in the way —
+    a routing drop and a robust-management drop — cleared by the two S1 edits.</figcaption>
+  </figure>
+
+  <div class="callout ok">
+    <p class="ct">✓ The result in one line</p>
+    <p>With <code>BLOCK_ACK</code> action RX routed to the BA state machine and mesh peers set <strong>MFP=no</strong>,
+    the originator's BA session flips to <code>UMAC_BA_SUCCESS</code> and <code>board1→board0</code> aggregates
+    <strong>CCMP-encrypted</strong> mesh QoS-Data on air. Two commits on <code>feat/mesh-ampdu-s1-blockack-rx</code>
+    (morselib inside <code>mm-esp32-halow</code>): <code>1d44edfa</code> + <code>7fdba0c9</code>; rimba PR #33 /
+    mm-esp32-halow PR #23, both <strong>DRAFT</strong>. Nothing on <code>main</code>.</p>
+  </div>
+
+  <p>Self-contained: every mechanism, address, anchor and capture reading needed to re-run and re-verify S1 is here.
+  The full staged plan (S0–S5) and the Linux code-map live in
+  <code>docs/mesh-ap/rimba-mesh-ampdu-aggregation-design.md</code>, but this worklog does not depend on it.</p>
+
+  <h2 id="s0">Where S0 left it — the handshake was the only gap</h2>
+  <p>S0 (see <code>2026-07-11-mesh-ampdu-s0-fw-capability-spike.md</code>) proved two things on hardware:</p>
+  <ul>
+    <li><strong>S0a:</strong> the firmware advertises <code>AMPDU_cap = 1</code> for a <strong>mesh</strong> vif, so
+      the datapath's aggregation-eligibility gates are open.</li>
+    <li><strong>S0b:</strong> with the per-frame A-MPDU-eligible flag <em>force-set</em> (bypassing the BA handshake),
+      the MM6108 really packs mesh QoS-data into multi-MPDU PPDUs on air, and does so on <strong>CCMP-encrypted</strong>
+      frames (host SW-CCMP composes with A-MPDU).</li>
+  </ul>
+  <p>So the chip does the aggregation; the host only has to (1) run the Block-Ack session handshake, (2) set the
+  per-frame eligible flag, (3) reorder on RX. (2) and (3) already exist and work for STA/AP. <strong>S1 is (1):</strong>
+  make the handshake actually complete on a mesh vif.</p>
+
+  <h2 id="drops">Why the handshake couldn't complete — two RX drops</h2>
+  <p>A Block-Ack session is negotiated with ADDBA request/response action frames. The originator side already fired an
+  ADDBA on-air for a single-hop mesh peer today (the eligibility path reaches <code>umac_ba_session_init</code> for a
+  peer stad), <strong>but the peer's ADDBA response never reached the BA state machine</strong> — so the originator
+  session never flipped to <code>UMAC_BA_SUCCESS</code> and <code>umac_ba_is_ampdu_permitted</code> stayed false
+  forever. Two separate drops were in the way, both on the mesh RX path:</p>
+
+  <div class="callout err">
+    <p class="ct">✗ Drop 1 — routing</p>
+    <p>On a mesh vif, ACTION frames go to <code>umac_mesh_handle_action</code> (<code>umac_mesh.c</code>), which
+    handles only <code>DOT11_CATEGORY_MESH</code> (HWMP path selection) and <code>DOT11_CATEGORY_SELF_PROTECTED</code>
+    (MPM/AMPE peering) and <code>return</code>s for everything else. The generic dispatcher that routes
+    <code>DOT11_ACTION_CATEGORY_BLOCK_ACK</code> → <code>umac_ba_process_rx_frame</code> is on the STA/AP path and was
+    <strong>never reached for a mesh vif</strong>. So ADDBA req/resp and DELBA were silently dropped.</p>
+  </div>
+
+  <div class="callout err">
+    <p class="ct">✗ Drop 2 — robust-management (secured mesh only)</p>
+    <p>Block-Ack is a <em>robust</em> action category. morselib mesh set every peer stad
+    <code>MMWLAN_PMF_REQUIRED</code>, so <code>pmf_is_required()</code> was true and the unprotected-robust-management
+    RX gate (<code>umac_datapath.c</code>, ~<code>:373</code>) dropped the peer's ADDBA before routing could even
+    matter — because a MFP=no Linux/ESP peer <em>sends</em> ADDBA in the clear.</p>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">⌘ The interesting one — a protection asymmetry</p>
+    <p>Drop 2 was a cross-implementation mismatch: morselib was transmitting robust mesh management (ADDBA/DELBA,
+    unicast PREP) <strong>CCMP-protected</strong>, while <code>net/mac80211</code> runs mesh peers <strong>MFP=no</strong>
+    and sends the same frames <strong>unprotected</strong>. That asymmetry breaks interop too, not just A-MPDU.</p>
+  </div>
+
+  <h2 id="fix">The fix — 2 edits, follow-Linux</h2>
+
+  <h3 id="edit1">Edit 1 — route <code>BLOCK_ACK</code> action RX to the BA state machine (<code>1d44edfa</code>)</h3>
+  <p>In <code>umac_datapath_process_rx_mgmt_frame_mesh</code> (<code>umac_datapath.c</code>), before handing an ACTION
+  frame to <code>umac_mesh_handle_action</code>, peel off <code>DOT11_ACTION_CATEGORY_BLOCK_ACK</code> and dispatch it
+  to <code>umac_ba_process_rx_frame</code>, <strong>keyed on the transmitting peer's stad</strong> resolved from the
+  frame's SA (A2 = the transmitting neighbour):</p>
+
+  <pre><code><span class="kw">if</span> (subtype == <span class="nm">DOT11_FC_SUBTYPE_ACTION</span>)
+{
+    <span class="kw">const struct</span> dot11_action *action =
+        (<span class="kw">const struct</span> dot11_action *)<span class="fn">mmpkt_get_data_start</span>(rxbufview);
+    <span class="kw">if</span> (action-&gt;field.category == <span class="nm">DOT11_ACTION_CATEGORY_BLOCK_ACK</span>)
+    {
+        <span class="kw">struct</span> umac_sta_data *peer_stad = <span class="fn">umac_mesh_get_peer_stad</span>(<span class="fn">dot11_get_sa</span>(header));
+        <span class="kw">if</span> (peer_stad != <span class="nm">NULL</span>)
+        {
+            <span class="fn">umac_ba_process_rx_frame</span>(peer_stad, <span class="fn">mmpkt_get_data_start</span>(rxbufview),
+                                     <span class="fn">mmpkt_get_data_length</span>(rxbufview));
+        }
+        <span class="kw">return</span>;
+    }
+    <span class="fn">umac_mesh_handle_action</span>(umacd, rxbufview);
+}</code></pre>
+
+  <p>The BA agreement is <strong>per-link</strong>, so the stad is resolved per-frame from the SA (not the mesh common
+  stad passed in). ADDBA req <strong>and</strong> resp now take this same path (an earlier draft split
+  req→mesh/resp→sta and had an asymmetry; both go through <code>_mesh</code> now).</p>
+  <p style="font-size:13.5px;color:var(--muted)"><strong>Follow-Linux:</strong> <code>net/mac80211/rx.c</code>
+  <code>ieee80211_rx_h_action</code> <code>case WLAN_CATEGORY_BACK</code> (reached for a <code>MESH_POINT</code> vif) →
+  <code>ieee80211_process_addba_request</code> / <code>…_resp</code> / <code>…_delba</code>.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 356" role="img" aria-label="Mesh ACTION RX dispatch before and after: BLOCK_ACK dropped in umac_mesh_handle_action versus peeled off and routed to the BA state machine">
+        <!-- BEFORE -->
+        <text x="16" y="24" font-size="13.5" font-weight="700" fill="var(--err)">BEFORE — BLOCK_ACK never reaches the BA state machine</text>
+
+        <rect x="16"  y="40" width="150" height="50" rx="8" fill="var(--card)" stroke="var(--line)"/>
+        <text x="91" y="62" font-size="12" text-anchor="middle" fill="var(--fg)">RX ACTION</text>
+        <text x="91" y="78" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">mesh vif</text>
+
+        <rect x="222" y="40" width="196" height="50" rx="8" fill="var(--card)" stroke="var(--line)"/>
+        <text x="320" y="60" font-size="11.5" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">umac_mesh_handle_action</text>
+        <text x="320" y="78" font-size="10.5" text-anchor="middle" fill="var(--muted)">MESH + SELF_PROTECTED only</text>
+
+        <rect x="474" y="40" width="140" height="50" rx="8" fill="var(--err-bg)" stroke="var(--err)"/>
+        <text x="544" y="61" font-size="12" text-anchor="middle" fill="var(--err)" font-family="ui-monospace,Menlo,Consolas,monospace">default: return</text>
+        <text x="544" y="78" font-size="10.5" text-anchor="middle" fill="var(--err)">BLOCK_ACK dropped</text>
+
+        <line x1="166" y1="65" x2="220" y2="65" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+        <line x1="418" y1="65" x2="472" y2="65" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+        <text x="358" y="112" font-size="11.5" fill="var(--err)">→ ADDBA resp lost · session never <tspan font-family="ui-monospace,Menlo,Consolas,monospace">UMAC_BA_SUCCESS</tspan></text>
+
+        <line x1="16" y1="140" x2="704" y2="140" stroke="var(--line)" stroke-width="1"/>
+
+        <!-- AFTER -->
+        <text x="16" y="172" font-size="13.5" font-weight="700" fill="var(--ok)">AFTER — peel BLOCK_ACK off, key it to the peer stad</text>
+
+        <rect x="16"  y="188" width="132" height="52" rx="8" fill="var(--card)" stroke="var(--line)"/>
+        <text x="82" y="210" font-size="12" text-anchor="middle" fill="var(--fg)">RX ACTION</text>
+        <text x="82" y="226" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">mesh vif</text>
+
+        <rect x="176" y="188" width="150" height="52" rx="8" fill="var(--soft)" stroke="var(--accent)"/>
+        <text x="251" y="208" font-size="11" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">category ==</text>
+        <text x="251" y="222" font-size="11" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">BLOCK_ACK ?</text>
+        <text x="251" y="236" font-size="10" text-anchor="middle" fill="var(--accent)">peel off</text>
+
+        <rect x="354" y="188" width="168" height="52" rx="8" fill="var(--soft)" stroke="var(--accent)"/>
+        <text x="438" y="208" font-size="11" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">peer_stad =</text>
+        <text x="438" y="222" font-size="11" text-anchor="middle" fill="var(--fg)" font-family="ui-monospace,Menlo,Consolas,monospace">get_peer_stad(SA)</text>
+        <text x="438" y="236" font-size="10" text-anchor="middle" fill="var(--accent)">A2 = neighbour, per-link</text>
+
+        <rect x="550" y="188" width="154" height="52" rx="8" fill="var(--ok-bg)" stroke="var(--ok)"/>
+        <text x="627" y="210" font-size="10.5" text-anchor="middle" fill="var(--ok)" font-family="ui-monospace,Menlo,Consolas,monospace">umac_ba_</text>
+        <text x="627" y="224" font-size="10.5" text-anchor="middle" fill="var(--ok)" font-family="ui-monospace,Menlo,Consolas,monospace">process_rx_frame</text>
+
+        <line x1="148" y1="214" x2="174" y2="214" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+        <line x1="326" y1="214" x2="352" y2="214" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+        <line x1="522" y1="214" x2="548" y2="214" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+        <text x="16" y="264" font-size="11.5" fill="var(--ok)">→ ADDBA req + resp both routed · session flips <tspan font-family="ui-monospace,Menlo,Consolas,monospace">UMAC_BA_SUCCESS</tspan> · A-MPDU permitted</text>
+
+        <text x="16" y="292" font-size="10.5" fill="var(--muted)">Non-BLOCK_ACK ACTION (HWMP MESH, SELF_PROTECTED MPM/AMPE) still falls through to</text>
+        <text x="16" y="308" font-size="10.5" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">umac_mesh_handle_action</text>
+        <text x="230" y="308" font-size="10.5" fill="var(--muted)"> — only BLOCK_ACK is peeled off first.</text>
+
+        <defs>
+          <marker id="ar" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption>The dispatch change. Before: <code>umac_mesh_handle_action</code> handles only MESH and
+    SELF_PROTECTED and <code>return</code>s for BLOCK_ACK. After: BLOCK_ACK is peeled off, keyed to the per-link peer
+    stad resolved from the frame SA, and handed to <code>umac_ba_process_rx_frame</code>.</figcaption>
+  </figure>
+
+  <h3 id="edit2">Edit 2 — mesh MFP=no: send Block Ack / PREP unprotected (<code>7fdba0c9</code>)</h3>
+  <p>Root-fix the protection asymmetry: set the mesh peer stads <strong>and</strong> the common stad
+  <code>MMWLAN_PMF_DISABLED</code> instead of <code>MMWLAN_PMF_REQUIRED</code>, in <code>mesh_peer_alloc</code> and
+  <code>mmwlan_mesh_start</code> (<code>umac_mesh.c</code>). Guarded by <code>MMWLAN_MESH_SEC_PHASE1</code>:</p>
+
+  <pre><code><span class="fn">umac_sta_data_set_security</span>(p-&gt;stad, <span class="nm">MMWLAN_SAE</span>, <span class="nm">MMWLAN_PMF_DISABLED</span>);   <span class="cm">/* was PMF_REQUIRED */</span></code></pre>
+
+  <p><code>security_type</code> stays <strong>SAE</strong>, so the pairwise/group keys are still installed and
+  <strong>DATA stays CCMP-encrypted</strong>. Only <code>pmf_is_required()</code> flips to false, which does two things
+  at once:</p>
+  <ul>
+    <li><strong>TX:</strong> all mesh management (HWMP PREQ/PREP, MPM/AMPE, Block-Ack ADDBA/DELBA) is now sent
+      <strong>in the clear</strong>, matching the peer.</li>
+    <li><strong>RX:</strong> <code>pmf_is_required()</code> false ⇒ the unprotected-robust-management drop is skipped
+      <em>wholesale</em> — which makes the interim per-category exemption (<code>frame_is_block_ack_action</code>)
+      <strong>unnecessary, so it was removed</strong>. Net S1 = routing + MFP=no, two files.</li>
+  </ul>
+  <p style="font-size:13.5px;color:var(--muted)"><strong>Follow-Linux:</strong> a mesh peer's <code>sta</code> is
+  MFP=no (<code>iw station dump</code> → <code>MFP: no</code>; the Linux mesh has no <code>ieee80211w</code>), so
+  <code>net/mac80211/tx.c</code> protects management only for <code>WLAN_STA_MFP</code> and
+  <code>ieee80211_drop_unencrypted_mgmt</code> is likewise gated on <code>WLAN_STA_MFP</code>. morselib now matches:
+  mesh management unprotected, data CCMP.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 640 316" role="img" aria-label="ADDBA on-air protection before and after MFP=no, and DATA unchanged CCMP">
+        <text x="16" y="22" font-size="13" font-weight="700" fill="var(--fg)">Robust management — ADDBA / DELBA / unicast PREP</text>
+
+        <!-- BEFORE mgmt -->
+        <text x="16" y="52" font-size="11.5" fill="var(--err)" font-weight="650">before</text>
+        <rect x="74"  y="38" width="118" height="30" rx="4" fill="var(--accent)"/>
+        <text x="133" y="57" font-size="10.5" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">fc.protected=1</text>
+        <rect x="194" y="38" width="104" height="30" rx="4" fill="var(--err-bg)" stroke="var(--err)"/>
+        <text x="246" y="57" font-size="10.5" text-anchor="middle" fill="var(--err)" font-family="ui-monospace,Menlo,Consolas,monospace">cat ?? (enc)</text>
+        <rect x="300" y="38" width="230" height="30" rx="4" fill="var(--muted)" opacity=".35"/>
+        <text x="415" y="57" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">CCMP ciphertext body</text>
+        <text x="536" y="57" font-size="14" fill="var(--err)">✗</text>
+        <text x="74" y="86" font-size="10.5" fill="var(--err)">empty category → dropped at robust-mgmt RX gate (~<tspan font-family="ui-monospace,Menlo,Consolas,monospace">umac_datapath.c:373</tspan>)</text>
+
+        <!-- AFTER mgmt -->
+        <text x="16" y="122" font-size="11.5" fill="var(--ok)" font-weight="650">after</text>
+        <rect x="74"  y="108" width="118" height="30" rx="4" fill="var(--accent)"/>
+        <text x="133" y="127" font-size="10.5" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">fc.protected=0</text>
+        <rect x="194" y="108" width="104" height="30" rx="4" fill="var(--accent2)"/>
+        <text x="246" y="127" font-size="10.5" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">cat 3 (BA)</text>
+        <rect x="300" y="108" width="230" height="30" rx="4" fill="var(--muted)" opacity=".2"/>
+        <text x="415" y="127" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">cleartext action body</text>
+        <text x="536" y="128" font-size="14" fill="var(--ok)">✓</text>
+        <text x="74" y="156" font-size="10.5" fill="var(--ok)">category 3 in the clear → accepted → routed to the BA state machine</text>
+
+        <line x1="16" y1="180" x2="624" y2="180" stroke="var(--line)" stroke-width="1"/>
+
+        <!-- DATA unchanged -->
+        <text x="16" y="208" font-size="13" font-weight="700" fill="var(--fg)">Data — QoS-Data (unchanged)</text>
+        <text x="16" y="240" font-size="11.5" fill="var(--muted)" font-weight="650">both</text>
+        <rect x="74"  y="226" width="118" height="30" rx="4" fill="var(--accent)"/>
+        <text x="133" y="245" font-size="10.5" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">fc.protected=1</text>
+        <rect x="194" y="226" width="336" height="30" rx="4" fill="var(--muted)" opacity=".35"/>
+        <text x="362" y="245" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">CCMP ciphertext (SW-CCMP) — unchanged</text>
+        <text x="536" y="246" font-size="13" fill="var(--muted)">=</text>
+        <text x="74" y="274" font-size="10.5" fill="var(--muted)">keys still installed (<tspan font-family="ui-monospace,Menlo,Consolas,monospace">security_type = SAE</tspan>); only <tspan font-family="ui-monospace,Menlo,Consolas,monospace">pmf_is_required()</tspan> flips</text>
+        <text x="16" y="302" font-size="10.5" fill="var(--muted)">HWMP PREQ/PREP are likewise <tspan font-family="ui-monospace,Menlo,Consolas,monospace">protected=0</tspan> in capture — the same MFP=no change.</text>
+      </svg>
+    </div>
+    <figcaption>MFP=no is directly visible on air. Before: tshark shows the ADDBA as an Action frame with an
+    <strong>empty category</strong> (encrypted body). After: it decodes as <strong>category 3</strong>,
+    <code>fc.protected = 0</code> — sent in the clear — while DATA stays <code>protected = 1</code> (CCMP).</figcaption>
+  </figure>
+
+  <h2 id="verify">On-air verification</h2>
+  <p><strong>Rig.</strong> Two ESP32-S3 + MM6108 boards as direct secured-mesh peers on S1G ch27 (915.5 MHz);
+  chronium (Pi 5) as the passive monitor (<code>wlan1</code>→monitor, freq 5560, capture on <code>morse0</code>). The
+  mesh is <strong>secured</strong> — the perf app requests <code>MMWLAN_OPEN</code> but morselib forces
+  SAE+PMF-policy+SW-CCMP via compile-time <code>MMWLAN_MESH_SEC_PHASE1=1</code> (SAE pw <code>rimbamesh2026</code>).
+  A-MPDU has no radiotap field on <code>morse0</code>, so aggregation is detected by <strong>shared TSFT (one PPDU) +
+  consecutive <code>wlan.seq</code></strong> — the standing method from S0.</p>
+
+  <p><strong>Result.</strong> Verified 2026-07-11, re-confirmed this session on a fresh bench,
+  <code>board1→board0</code> direct, <code>10.9.9.100</code>→<code>10.9.9.136</code>, UDP 2 Mbit/s × 14 s:</p>
+
+  <table>
+    <thead>
+      <tr><th>signal</th><th>before S1</th><th>after S1</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>board1 Block-Ack action frames on air</td>
+        <td>none complete (resp dropped)</td>
+        <td><strong>ADDBA req+resp exchanged</strong> (category 3), <code>fc.protected = 0</code></td>
+      </tr>
+      <tr>
+        <td>board1 QoS-Data aggregation</td>
+        <td>single MPDUs</td>
+        <td><strong>A-MPDU</strong> — QoS-Data with consecutive <code>wlan.seq</code> sharing one PPDU TSFT (e.g. 202/203, 207/208, 210/211)</td>
+      </tr>
+      <tr>
+        <td>DATA protection</td>
+        <td>CCMP</td>
+        <td><strong>CCMP unchanged</strong> (<code>fc.protected = 1</code>)</td>
+      </tr>
+      <tr>
+        <td>SAE/AMPE peering + ping</td>
+        <td>ok</td>
+        <td>ok (5/5)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p><strong>Fresh-session capture readings</strong> (this session, positive control) — of board1's QoS-Data frames:</p>
+  <div class="stats">
+    <div class="stat"><div class="num acc">644</div><div class="lbl">board1 QoS-Data frames captured</div></div>
+    <div class="stat"><div class="num ok">15</div><div class="lbl">PPDUs carried 2 aggregated MPDUs (consecutive seq, RA = board0)</div></div>
+    <div class="stat"><div class="num ok">4</div><div class="lbl">Block-Ack action frames (category 3)</div></div>
+    <div class="stat"><div class="num acc">0</div><div class="lbl"><code>fc.protected</code> on the BA action frames — MFP=no confirmed</div></div>
+  </div>
+  <p>The 15 aggregated PPDUs had RA = board0 (<code>e2:72:a1:f8:ef:a4</code>) and <code>fc.protected = 1</code> (data
+  still CCMP); the 4 Block-Ack action frames were all <code>fc.protected = 0</code>, addressed between board1 and its
+  real peer board0. So the handshake completes and the chip aggregates the encrypted MPDUs — exactly the S0b
+  behaviour, now driven by the <strong>real BA session</strong> rather than a force.</p>
+
+  <h2 id="gotcha">Bench gotcha — aggregation depth is environmental</h2>
+  <p>A-MPDU aggregation <strong>depth</strong> is RF/thermal-sensitive and degrades over a long bench session (hours +
+  many reflashes). A first MFP-build run looked like a regression (<code>217 → 13/0</code> aggregated PPDUs) — but an
+  <strong>A/B in the same RF window</strong> showed the <em>prior</em> protected-ADDBA build degraded identically
+  (<code>217 → ~34</code>). So it was <strong>environmental, not the fix</strong>. Same-window aggregated-PPDU counts,
+  bars to scale (max = 217):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">S0 fresh bench</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="val">217</span></div>
+    <div class="bar-row"><span class="lbl">prior build · late</span><span class="bar-track"><span class="bar-fill slow" style="width:15.7%"></span></span><span class="val">~34</span></div>
+    <div class="bar-row"><span class="lbl">MFP build · late</span><span class="bar-track"><span class="bar-fill slow" style="width:6.0%"></span></span><span class="val">13/0</span></div>
+  </div>
+  <div class="callout warn">
+    <p class="ct">⚠ Rule</p>
+    <p>Always A/B a depth drop against the prior build <strong>in the same RF window</strong> before calling it a
+    regression. Treat the <em>presence</em> of aggregation + the <em>ADDBA addressing/protection</em> as the robust
+    signal, and <em>depth</em> as the noisy one.</p>
+  </div>
+
+  <h2 id="followups">Follow-ups</h2>
+  <ul>
+    <li><strong>ESP↔Linux BA interop capture</strong> — still blocked by bench HW across two attempts (this session
+      and the S1 commit session): cross-vendor SAE peering wouldn't form and both Pi-Zero mesh nodes brown-out on
+      radio-up; the Pi-5 (chronite) also rebooted mid-test under late-night bench load. Retry on a fully-rested,
+      freshly-rebooted bench. The ESP↔Linux mesh <em>has</em> worked before
+      (<code>mesh-status-p4-esp-linux-ping</code>), so it's achievable — likely an S1G-param/config detail, not the
+      MFP policy (MFP=no did <strong>not</strong> fix peering).</li>
+    <li><strong>S2 (multi-hop next-hop stad)</strong> and <strong>S3 (relay onto the data path)</strong> — the
+      remaining aggregation stages; see the design doc.</li>
+  </ul>
+
+  <h2 id="teardown">Teardown (radio-silent)</h2>
+  <ul>
+    <li>Per the standing rule, after the bench runs: all ESP boards reflashed to <code>rimba-hello</code>
+      (radio-silent) and chronium <code>wlan1</code> down.</li>
+    <li><strong>Nothing committed to <code>main</code></strong>; S1 lives on the two draft PR branches
+      (rimba PR #33 / mm-esp32-halow PR #23).</li>
+  </ul>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#s0">Where S0 left it</a></li>
+    <li><a href="#drops">Two RX drops</a></li>
+    <li><a href="#fix">The fix — 2 edits</a></li>
+    <li><a href="#edit1">Edit 1 — route BLOCK_ACK</a></li>
+    <li><a href="#edit2">Edit 2 — mesh MFP=no</a></li>
+    <li><a href="#verify">On-air verification</a></li>
+    <li><a href="#gotcha">Bench gotcha</a></li>
+    <li><a href="#followups">Follow-ups</a></li>
+    <li><a href="#teardown">Teardown</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-11-mesh-ampdu-s1-blockack-rx-routing</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

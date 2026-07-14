@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S3 relay forward drop root-cause: host SW-CCMP MIC failure — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-12</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-12</span>
+    <span class="badge">10 min read</span>
+    <span class="badge ok">✓ root cause found</span>
+    <span class="badge bug">mesh · A-MPDU · SW-CCMP</span>
+  </div>
+
+  <h1>S3 relay forward drop root-cause: host SW-CCMP MIC failure<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">root cause = pairwise MTK <strong>key mismatch</strong> (board0 encrypts under a different key than board2 decrypts) · AAD + addresses match</small></h1>
+
+  <p class="lead">The ESP relay (board2) drops <strong>~99%</strong> of forward-intended mesh data frames at the host
+  SW-CCMP decrypt <em>before</em> they ever reach the forward call, so the relay forwards ~0 sustained data and
+  S3's forward-leg A-MPDU can't be measured. The read that was blocked for several sessions is now done: the drop
+  is a <strong>CCMP MIC failure</strong> (not replay), and it is <strong>specific to the multi-hop A4≠TA forward</strong> —
+  single-hop SW-CCMP + A-MPDU decrypts 99.4% fine. The host TX chain is exonerated, and the revived on-air capture
+  shows board0's forward frames are <strong>valid on the wire</strong>. A dual-side CCMP dump then <strong>pinned
+  the root cause</strong>: board0 <em>encrypts</em> the forward frame under
+  <code>key=6f 1d 9d 9c 48 af d6 49</code> while board2 <em>decrypts</em> under
+  <code>key=91 bd e3 64 a0 a4 40 5a</code> — the AAD (masked-FC + A1/A2/A3/A4 + QoS) is <strong>identical</strong>
+  on both sides, only the <strong>key differs</strong>. The board0↔board2 pairwise MTK is <strong>not
+  synchronized</strong>, so the MIC never verifies. The crypto recipe and the mesh header addresses were first
+  verified to follow mac80211, so the recipe is not at fault; the open item is now the <strong>mechanism</strong> —
+  an asymmetric AMPE MTK rekey/install under peering churn.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Root cause found — pairwise MTK key mismatch</p>
+    <p>The dual-side CCMP dump settles it. Capturing board0's <strong>encrypt</strong> and board2's
+    <strong>decrypt</strong> of the same unicast multi-hop frame: the <strong>AAD matches byte-for-byte</strong>
+    (masked-FC + A1=board2 + A2=board0 + A3=chronite + A4=board0 + QoS) but the <strong>key differs</strong> —
+    board0 <code>key=6f 1d 9d 9c 48 af d6 49</code> vs board2 <code>key=91 bd e3 64 a0 a4 40 5a</code>. So the
+    board0↔board2 pairwise MTK is <strong>not synchronized</strong> → the MIC never verifies → the ~99% forward
+    drop. This overturns the earlier "same correct key both sides" assumption (that was inferred from the correct
+    key_stad <em>selection</em>; the actual key <em>bytes</em> differ). The AES-CCM itself is fine (RFC-3610 KAT
+    passes; single-hop = 99.4% where the same peering had synced keys). The crypto recipe + mesh header addresses
+    were verified to follow mac80211, so the recipe is not at fault. <strong>Open item</strong> = the mechanism:
+    a leading candidate is an asymmetric AMPE MTK rekey/install under peering churn. Nothing committed; bench left
+    radio-silent.</p>
+  </div>
+
+  <h2 id="tldr">TL;DR</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num">2084</div><div class="lbl"><code>mesh_seen</code> (multi-hop forward run)</div></div>
+    <div class="stat"><div class="num err" style="color:var(--err)">2058</div><div class="lbl"><code>sw_ccmp_fail</code> at host decrypt</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">2052</div><div class="lbl"><code>mic</code> failures (the ~99%)</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl"><code>replay</code> failures</div></div>
+    <div class="stat"><div class="num">26</div><div class="lbl"><code>decrypt_ok</code> (1.2%)</div></div>
+  </div>
+
+  <ul>
+    <li>On a <code>board0 → board2(relay) → chronite</code> UDP blast, board2's RTC <code>RX-DBG</code> shows the
+      ~99% early-host-RX drop is <strong>host SW-CCMP decrypt failure</strong>, and the split counter pins it as a
+      <strong>CCMP MIC failure, not replay</strong>:
+      <code>mesh_seen=2084 sw_ccmp_fail=2058 (mic=2052 replay=0) no_decrypt=0 decrypt_ok=26</code>.</li>
+    <li>MIC failure ⇒ <strong>key / AAD / nonce mismatch</strong> between what board0 encrypted and what board2
+      decrypts. An earlier rate-dependence argument had guessed <em>replay</em>; the measurement overturned it and it
+      is logged as a refuted hypothesis rather than trusted.</li>
+    <li>The decisive single-hop vs multi-hop A/B settles it: single-hop <strong>99.4% OK</strong>, multi-hop forward
+      <strong>1.2% OK</strong>. SW-CCMP + A-MPDU compose fine; the failure is specific to the multi-hop forward frame
+      (A4≠TA, A3=DA≠A1=RA).</li>
+    <li>The per-link-MTK key hypothesis is <strong>tested and refuted</strong> (§6): a key_stad confirmation run
+      recorded <code>multihop=2297 nh_null=30 nh_eq_stad=0 nh_ok=2267</code> — board0 encrypts <strong>98.7%</strong>
+      of multi-hop frames under the correct next-hop link key. So it is <strong>not the key selection</strong>.</li>
+    <li><strong>Root cause (§7):</strong> the dual-side CCMP dump shows the <strong>AAD matches</strong> on both
+      sides (addresses / masked-FC / QoS all identical) but the <strong>key differs</strong> — board0
+      <code>key=6f 1d 9d 9c 48 af d6 49</code>, board2 <code>key=91 bd e3 64 a0 a4 40 5a</code>. The board0↔board2
+      pairwise <strong>MTK is not synchronized</strong>, so the MIC never verifies. It is <strong>not the AAD /
+      A3</strong> and <strong>not the recipe</strong> (both verified to follow mac80211).</li>
+    <li>Open: the <strong>mechanism</strong> — leading candidate is an <strong>asymmetric AMPE MTK rekey/install
+      under peering churn</strong> (single-hop had stable peering + synced keys → 99.4%; the multi-hop runs
+      churned). Next: confirm which key is stale and fix the rekey path.</li>
+  </ul>
+
+  <h2 id="mic-not-replay">1 · The drop bucket: MIC failure, not replay</h2>
+
+  <p>The split instrumentation (temp, in-tree) added <code>FDBG_RX_SW_MIC_FAIL</code> / <code>FDBG_RX_SW_REPLAY_FAIL</code>
+  incremented at the two <code>return false</code> points inside <code>umac_datapath_sw_ccmp_decrypt</code>
+  (<code>umac_datapath.c</code>): the <code>mesh_ccmp_decrypt(...) != 0</code> MIC-failure return, and the
+  <code>!ccmp_is_valid(...)</code> replay return. The app <code>dump_fwd_dbg</code> prints <code>(mic=.. replay=..)</code>.
+  RTC-noinit counters survive the read's warm reset. On the 2026-07-12 multi-hop forward run:</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">MIC failure</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">2052</span></div>
+    <div class="bar-row"><span class="lbl">replay failure</span><span class="bar-track"><span class="bar-fill" style="width:0.1%"></span></span><span class="val">0</span></div>
+    <div class="bar-row"><span class="lbl">decrypt OK</span><span class="bar-track"><span class="bar-fill fast" style="width:1.27%"></span></span><span class="val">26</span></div>
+  </div>
+
+  <p>So it is unambiguously a <strong>MIC failure</strong> — a key / AAD / nonce mismatch — and not a replay-window
+  reject. <code>decrypt_ok=26</code> (a few pass) first suggested the passing few were non-aggregated singletons and
+  the failing ~2052 were A-MPDU-aggregated multi-hop-origin frames, i.e. that SW-CCMP might not compose with FW
+  A-MPDU on the S2 origin leg. The single-hop A/B (§2) refutes that composition idea and re-points the cause at the
+  multi-hop forward specifically.</p>
+
+  <h2 id="ab">2 · The decisive A/B: single-hop vs multi-hop</h2>
+
+  <p>The cheap, non-flaky test: point board0's auto-blast at <strong>board2's own IP (10.9.9.108)</strong> instead of
+  chronite → board0→board2 <strong>DIRECT</strong> (single-hop, board2 = dest, still aggregates per S1), no chronite,
+  no 2-hop non-determinism. Same 5 Mbit blast, same board2, same in-tree instrumentation. The result is the headline.</p>
+
+  <table>
+    <thead><tr><th>Run</th><th class="num">mesh_seen</th><th class="num">sw_ccmp_fail</th><th class="num">mic</th><th class="num">replay</th><th class="num">decrypt_ok</th><th class="num">OK %</th></tr></thead>
+    <tbody>
+      <tr><td>single-hop board0→board2 direct</td><td class="num">3315</td><td class="num">23</td><td class="num">21</td><td class="num">0</td><td class="num">3292</td><td class="num"><strong>99.4%</strong></td></tr>
+      <tr><td>multi-hop forward (→ chronite)</td><td class="num">2084</td><td class="num">2058</td><td class="num">2052</td><td class="num">0</td><td class="num">26</td><td class="num"><strong>1.2%</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>Decrypt success rate, single-hop vs multi-hop forward — same board2, same crypto path, same aggregation:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">single-hop</span><span class="bar-track"><span class="bar-fill fast" style="width:99.4%"></span></span><span class="val">99.4% OK · 3292 / mic 21</span></div>
+    <div class="bar-row"><span class="lbl">multi-hop fwd</span><span class="bar-track"><span class="bar-fill slow" style="width:1.2%"></span></span><span class="val">1.2% OK · 26 / mic 2052</span></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ What the A/B proves</p>
+    <p>Single-hop <code>PLINK-DBG estab=1 close=0</code> (stable peering) ⇒ the earlier peering-churn idea is REFUTED
+    (stable <em>and</em> works single-hop). SW-CCMP + A-MPDU <strong>compose fine under load</strong> — the ~1.8 Mbps
+    S1 result stands. The ~99% MIC failure is <strong>specific to the multi-hop FORWARD frame</strong> (A4≠TA,
+    A3=DA≠A1=RA). The only AAD delta from the working single-hop case is A3=DA=chronite ≠ A1 — so board0 must be
+    putting a different address on-air than the AAD it encrypted over, or the mesh layer rewrites an address after
+    encrypt.</p>
+  </div>
+
+  <h2 id="topology">3 · The rig + the forced 2-hop</h2>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">board0</div><div class="s">client · UDP blast</div></div>
+      <div class="node err"><div class="t">board2</div><div class="s">relay / DUT · RX-DBG</div></div>
+      <div class="node"><div class="t">chronite</div><div class="s">Linux · <code>rimba-mesh</code> · ch27</div></div>
+    </div>
+    <figcaption>board0 (auto-blast → 10.9.9.2, temp <code>g_iperf_blast_target</code> + static ARP, no ESP console) →
+      board2 (the only fully-wired ESP, RTC-noinit counters survive the warm reset) → chronite (SAE far endpoint).
+      For the single-hop A/B, board0's target is retargeted to board2's own IP (10.9.9.108) so board2 is the dest.</figcaption>
+  </figure>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Bench-harness gotchas (so the next run is faster)</p>
+    <p><strong>The forced 2-hop is NON-DETERMINISTIC.</strong> All nodes are in RF range; board0 sometimes peers
+    chronite <em>directly</em> and HWMP routes direct → board2 sees ~4 frames instead of ~2000. Root: the app sets
+    board0's peer allowlist AFTER mesh peering can already begin (startup race), so an early chronite peer slips
+    through before the allowlist applies. Workaround: re-boot board0 and retry until board2 <code>mesh_seen ≈ 2000</code>;
+    proper fix = set the allowlist before <code>mmwlan_mesh_start</code>. (The peer-<em>creation</em> paths are all
+    gated on the allowlist already — beacon-open <code>umac_mesh.c:1673</code>, inbound-OPEN dropped on secured mesh,
+    inbound-SAE dropped if no peer — so a <code>mesh_peer_alloc</code> allowlist gate is redundant once the allowlist
+    is set; the hole is purely the timing.)</p>
+    <p><strong>chronite (Pi5) reboots mid-blast</strong>, wiping <code>/tmp</code> (tmpfs) including
+    <code>wpa-interop.conf</code> → the mesh won't come back until the config is re-pushed. Re-push it and bring wlan1
+    up again.</p>
+  </div>
+
+  <h2 id="exonerated">4 · Host TX chain — exonerated</h2>
+
+  <p>The header build was traced and the whole host TX chain reviewed against the working single-hop path. Every step
+  is symmetric with the case that decrypts 99.4%:</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">A1 = next-hop</div><div class="lbl">board2 · <code>umac_datapath.c:3701</code></div></div>
+    <div class="stat"><div class="num acc">A2 = us</div><div class="lbl">board0 · <code>:3702</code></div></div>
+    <div class="stat"><div class="num acc">A3 = DA</div><div class="lbl">chronite · <code>:3703</code></div></div>
+    <div class="stat"><div class="num acc">A4 = SA</div><div class="lbl">board0 · <code>:3706</code></div></div>
+  </div>
+
+  <ul>
+    <li><strong>Header build.</strong> <code>umac_datapath_construct_80211_data_header_mesh</code>
+      (<code>umac_datapath.c:3673</code>) builds the 4-addr mesh header BEFORE <code>process_tx_frame</code> encrypts,
+      with A1=next_hop (board2), A2=us (board0), A3=DA (chronite), A4=SA (board0). No post-encrypt rewrite — the
+      <code>addr1=bssid</code> clobber at <code>:2030</code> is in the <em>STA</em> builder
+      <code>..._header_sta</code>, not the mesh path. The CCMP-header offset is identical single vs multi (both are
+      4-addr QoS, TO_DS+FROM_DS both set, <code>:3691</code>), and the Mesh Control header is inside the encrypted
+      body (not the AAD, and after the CCMP header) so its size doesn't shift the ccmp_hdr offset.</li>
+    <li><strong>AAD + nonce recipe.</strong> <code>mesh_ccmp_encrypt</code> and <code>mesh_ccmp_decrypt</code>
+      (<code>ccmp.c:290</code>/<code>:304</code>) both call the SAME <code>mesh_ccmp_aad_nonce(hdr, ccmp_hdr, …)</code>
+      (<code>ccmp.c:212</code>) — a faithful port of hostap <code>wlantest/ccmp.c</code> <code>ccmp_aad_nonce</code>.
+      The AAD <strong>masks out every volatile field</strong>: FC subtype/retry/pwr-mgmt/more-data bits
+      (<code>ccmp.c:226</code>/<code>:239</code>), the 802.11 sequence number (<code>:248</code>, keeps only Frag#),
+      and QoS ack-policy/EOSP/A-MSDU bits (<code>:257-260</code>, keeps only the TID). So a normal FW header rewrite
+      during A-MPDU framing (seqno, ack policy) does NOT change the AAD. Unmasked/kept: FC-normalized, A1/A2/A3, A4
+      (4-addr), TID, and the PN (from ccmp_hdr).</li>
+    <li><strong>Crypto flags.</strong> A mesh SW-CCMP frame gets <code>MMDRV_TX_FLAG_AMPDU_ENABLED</code>
+      (<code>umac_datapath.c:2306</code>) but NOT <code>MMDRV_TX_FLAG_HW_ENC</code> (only the else/HW branch sets it,
+      <code>:2291</code>) — so the FW aggregates the already-host-encrypted frame without re-crypting it. Correct
+      SW-CCMP + A-MPDU combination.</li>
+    <li><strong>Key.</strong> The key board0 uses for a forward (key_stad=board2) is the SAME board0↔board2 pairwise
+      key that decrypts the working single-hop case.</li>
+  </ul>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Conclusion — the differing bytes are on-air, not in host code</p>
+    <p>Neither the key, the AAD recipe, the crypto flags, nor the header addresses obviously differ from the single-hop
+    path that works — and it is the SAME chain that decrypts 99.4% single-hop. So the MIC failure is NOT a visible
+    host-code asymmetry: board0's ON-AIR multi-hop frame must differ from the bytes it encrypted the AAD over — an
+    FW-level interaction between the multi-hop-origin 4-address forward and A-MPDU aggregation.</p>
+  </div>
+
+  <h2 id="onair">5 · On-air capture — the forward frames are valid</h2>
+
+  <p>The monitor was revived. chronium is the dedicated sniffer (<code>CONFIG_MORSE_MONITOR=y</code>, Pi5
+  reset-patched); tuned to S1G ch27 (<code>iw dev wlan1 set type monitor</code> → <code>freq 5560</code>,
+  <code>morse0</code> up — verified <code>channel 112 (5560 MHz)</code> and <code>morse_cli -i wlan1 channel</code> →
+  915500 kHz) it captured board0's TA (<code>e2:72:a1:f8:ef:a4</code>) over a ~90 s multi-hop blast. (Config gotcha:
+  bring wlan1 up / tune in <em>separate</em> steps — a combined pkill+down+type+up+freq script hung the driver;
+  step-by-step worked.)</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">920</div><div class="lbl">board0 DATA-4addr forward frames captured</div></div>
+    <div class="stat"><div class="num"><code>00 01</code></div><div class="lbl">QoS ctrl on every frame — TID 0 + Mesh-Control-Present</div></div>
+    <div class="stat"><div class="num ok">0x04c5 → 0x04da</div><div class="lbl">CCMP PN present + monotonically incrementing</div></div>
+  </div>
+
+  <p>Every field board2 needs to decrypt is present and correct on the wire:</p>
+
+  <table>
+    <thead><tr><th>Frame field</th><th>On-air value</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>A1 (RA)</td><td>board2</td><td>next hop — confirms multi-hop, no direct route</td></tr>
+      <tr><td>A2 (TA)</td><td>board0</td><td>us (transmitter)</td></tr>
+      <tr><td>A3 (DA)</td><td>chronite</td><td>final destination</td></tr>
+      <tr><td>A4 (SA)</td><td>board0</td><td>origin (source)</td></tr>
+      <tr><td>QoS control</td><td><code>00 01</code></td><td>TID 0 + Mesh-Control-Present bit set</td></tr>
+      <tr><td>CCMP header</td><td><code>c5 04 00 20 00 00 00 00</code></td><td>PN 0x04c5, keyid 0, ExtIV set</td></tr>
+      <tr><td>CCMP PN</td><td>0x04c5 → 0x04da …</td><td>present + monotonically incrementing</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <p class="ct">✓ Frames are on-air valid — blank-PN / address / format all ruled out</p>
+    <p>All 920 frames carry A1=board2 (RA), A2=board0 (TA), A3=chronite (DA), A4=board0 (SA) — confirmed multi-hop,
+    no direct. QoS ctrl <code>00 01</code> on every frame (TID 0 + Mesh-Control-Present). The CCMP header has a
+    present PN that increments (0x04c5 → 0x04da …), keyid 0, ExtIV set — so the "blank / duplicate-PN" idea is
+    REFUTED for the first instance of each PN. There ARE retransmit duplicates (e.g. 0x04da ×3), but those would be
+    <em>replay</em> fails and replay=0, so the MIC failures are not the duplicates. ⇒ the on-air header + CCMP look
+    fully decryptable — the mismatch is invisible on the wire (in what board0 encrypted the AAD over, or the key),
+    not a malformed frame.</p>
+  </div>
+
+  <div class="callout">
+    <p class="ct">💡 Hypothesis that motivated the next run — per-link MTK key mis-selection <span class="badge err" style="margin-left:.4em">refuted §6</span></p>
+    <p>In AMPE mesh each peer LINK has its own MTK: the board0↔board2 key ≠ the board0↔chronite key (see the comment
+    at <code>umac_datapath.c:3606</code> — "the MTK is per <em>link</em> (next hop), not per final DA"). The TX
+    <code>stad</code> is resolved by the DEST (chronite); S2 overrides the crypto key to the NEXT-HOP via
+    <code>key_stad = umac_mesh_get_peer_stad(ra)</code> (<code>:2182</code>) and encrypts with it
+    (<code>sw_ccmp_encrypt(key_stad, …)</code> <code>:2281</code>, key_id taken from key_stad <code>:2206</code>).
+    <strong>If <code>key_stad</code> ever fails to override to the next-hop (board2) and stays = stad (chronite),
+    board0 encrypts with the board0↔chronite MTK while board2 decrypts with the board0↔board2 MTK → MIC fail —
+    99% multi-hop, 0% single-hop</strong> (where dest == next-hop, so the key is right regardless). This exactly
+    matches the single-hop-works / multi-hop-fails result. The static code <em>looks</em> correct
+    (<code>ra</code>=A1=board2 from the header builder, <code>get_peer_stad(board2)</code> should resolve) and the
+    on-air A1=board2, so the discrepancy is hidden — it needs instrumentation to confirm which key was actually used.
+    <strong>That instrumentation was run (§6) and it clears the key.</strong></p>
+  </div>
+
+  <h2 id="keystad">6 · key_stad confirmation — the per-link-MTK idea, refuted</h2>
+
+  <p>To settle whether board0 ever encrypts a multi-hop forward with the wrong link's MTK, temp RTC counters
+  (<code>FDBG_TX_MULTIHOP</code> / <code>NH_NULL</code> / <code>NH_EQ_STAD</code> / <code>NH_OK</code>) were added to
+  board0's <code>process_tx_frame</code>, recording per mesh multi-hop unicast whether <code>key_stad</code> overrode
+  to a distinct next-hop peer stad. board0 RTC after a <strong>2297-frame</strong> multi-hop blast:</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num">2297</div><div class="lbl"><code>multihop</code> unicasts encrypted</div></div>
+    <div class="stat"><div class="num ok">2267</div><div class="lbl"><code>nh_ok</code> — next-hop key used (98.7%)</div></div>
+    <div class="stat"><div class="num" style="color:var(--warn)">30</div><div class="lbl"><code>nh_null</code> — no next-hop stad (1.3%)</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl"><code>nh_eq_stad</code> — key_stad == dest stad</div></div>
+  </div>
+
+  <p>The split, to scale — the next-hop key was selected on essentially every frame:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">nh_ok</span><span class="bar-track"><span class="bar-fill fast" style="width:98.7%"></span></span><span class="val">2267 · 98.7%</span></div>
+    <div class="bar-row"><span class="lbl">nh_null</span><span class="bar-track"><span class="bar-fill slow" style="width:1.3%"></span></span><span class="val">30 · 1.3%</span></div>
+    <div class="bar-row"><span class="lbl">nh_eq_stad</span><span class="bar-track"><span class="bar-fill" style="width:0.1%"></span></span><span class="val">0</span></div>
+  </div>
+
+  <div class="callout">
+    <p class="ct">✕ Refuted — it is NOT the key selection</p>
+    <p><code>nh_ok = 2267 (98.7%)</code> means board0 encrypts ~99% of multi-hop frames under the correct next-hop
+    (board2) link key — the <strong>same</strong> key that decrypts single-hop at 99.4% — yet board2 still MIC-fails
+    ~99% of them. Only 30 (1.3%) fell back to a null next-hop, and <code>nh_eq_stad=0</code> means the key was never
+    left equal to the dest (chronite) stad. 30 fallbacks is <strong>far too few</strong> to explain the ~2052 MIC
+    failures. The per-link-MTK <em>mis-selection</em> hypothesis is <strong>refuted</strong>: board0 picks the right
+    next-hop stad, the AAD recipe is symmetric, and the on-air header is valid — and it still fails.</p>
+    <p><strong>Reconciled with §7:</strong> selecting the right next-hop <em>stad</em> is not the same as installing
+    the right <em>key bytes</em>. The dual-side dump in §7 shows board0 and board2 hold <strong>different MTK
+    bytes</strong> for the same link — so this run's "same correct key both sides" was inferred from the correct
+    <em>selection</em>, but the actual key material was desynced. The bug is the MTK <em>sync</em>, not the
+    key_stad <em>selection</em>.</p>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Instrumentation gotcha</p>
+    <p>board0's VBUS cold-cycle does not reliably register as <code>ESP_RST_POWERON</code>, so the RTC-noinit counters
+    read stale garbage once <code>FDBG_COUNT</code> had grown. Fixed by bumping <code>MESH_FWD_DBG_MAGIC</code> to
+    force a zero on a magic mismatch. (board2's PPK2 power-off drains RTC cleanly, so its counters were fine
+    throughout.)</p>
+  </div>
+
+  <div class="callout">
+    <p class="ct">→ Decisive next step — dual-side byte dump (executed, §7)</p>
+    <p>With selection, recipe, and on-air all clear, the one thing left un-instrumented is the actual
+    <strong>key bytes</strong>. Log the exact <strong>AAD + key + nonce + MIC</strong> that board0 uses to ENCRYPT a
+    multi-hop frame and that board2 uses to DECRYPT it, and diff them — the first differing byte pins it. This dump
+    was run, and it pins the root cause: the AAD matches but the <strong>key differs</strong> (§7).</p>
+  </div>
+
+  <h2 id="rootcause">7 · Root cause — pairwise MTK key mismatch</h2>
+
+  <p>The dual-side dump was run with a temp <code>mmwlan_ccmp_dbg_capture</code> (filter fixed to unicast A1 — a
+  first pass caught group frames, incidentally showing chronite's GROUP frames also MIC-fail at board2). It logs, for
+  the same unicast multi-hop frame, what board0 <strong>encrypts</strong> and what board2 <strong>decrypts</strong>.
+  Before trusting it, the crypto + addressing were verified to follow mac80211 (chronite <code>~/halow/rpi-linux</code>).</p>
+
+  <div class="callout">
+    <p class="ct">✓ First: the recipe + addressing follow mac80211 — so it is NOT the recipe</p>
+    <p>The AAD recipe <code>mesh_ccmp_aad_nonce</code> matches mac80211 <code>ccmp_gcmp_aad</code>
+    (<code>wpa.c:318</code>), and the mesh header <code>construct_80211_data_header_mesh</code> matches
+    <code>ieee80211_fill_mesh_addresses</code> (<code>mesh.c:851</code>: A1=next-hop, A2=SA, A3=DA, A4=SA). Both
+    sides build the AAD and the addresses identically and correctly — so the MIC failure is <strong>not</strong> a
+    crypto-recipe or address-layout bug.</p>
+  </div>
+
+  <p>The capture then shows exactly where the two sides diverge — the <strong>key</strong>, and only the key:</p>
+
+  <table>
+    <thead><tr><th>Field</th><th>board0 · <strong>ENCRYPT</strong></th><th>board2 · <strong>DECRYPT</strong></th><th>Match?</th></tr></thead>
+    <tbody>
+      <tr><td>masked FC</td><td>same</td><td>same</td><td><strong>✓ match</strong></td></tr>
+      <tr><td>A1 (RA)</td><td>board2</td><td>board2</td><td><strong>✓ match</strong></td></tr>
+      <tr><td>A2 (TA)</td><td>board0</td><td>board0</td><td><strong>✓ match</strong></td></tr>
+      <tr><td>A3 (DA)</td><td>chronite</td><td>chronite</td><td><strong>✓ match</strong></td></tr>
+      <tr><td>A4 (SA)</td><td>board0</td><td>board0</td><td><strong>✓ match</strong></td></tr>
+      <tr><td>QoS control</td><td>same</td><td>same</td><td><strong>✓ match</strong></td></tr>
+      <tr><td><strong>CCMP key</strong></td><td><code>6f 1d 9d 9c 48 af d6 49</code></td><td><code>91 bd e3 64 a0 a4 40 5a</code></td><td><strong>✕ DIFFERS</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>So the entire AAD — masked-FC, A1=board2, A2=board0, A3=chronite, A4=board0, QoS — is <strong>identical</strong>
+  on both sides. The one thing that differs is the <strong>key bytes</strong>. board0 encrypts under one key and
+  board2 decrypts under another → the MIC computed over the ciphertext can never match → the ~99% forward drop.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Root cause — the board0↔board2 pairwise MTK is not synchronized</p>
+    <p>board0's encrypt key <code>6f 1d 9d 9c 48 af d6 49</code> ≠ board2's decrypt key
+    <code>91 bd e3 64 a0 a4 40 5a</code> for the <em>same</em> link. The pairwise MTK the two peers hold for the
+    board0↔board2 link is <strong>desynchronized</strong>, so every forward frame MIC-fails at board2. This
+    <strong>overturns</strong> the earlier "same correct key both sides" assumption — that was inferred from the
+    correct key_stad <em>selection</em> (§6, <code>nh_ok=98.7%</code>), but the actual installed key <em>bytes</em>
+    are different. The AES-CCM primitive is fine (RFC-3610 KAT passes; single-hop = 99.4% where the same peering had
+    synced keys), and the recipe + addressing follow mac80211. The bug is purely the <strong>key synchronization</strong>.</p>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Leading mechanism (to confirm) + next step — asymmetric AMPE rekey under peering churn</p>
+    <p>The single-hop A/B ran with <strong>stable</strong> peering (<code>close=0</code>) → keys stayed in sync
+    (99.4%); the multi-hop runs ran with <strong>churn</strong> (<code>estab</code> climbing / <code>close&gt;0</code>).
+    AMPE re-derives the MTK on each re-peer, so a re-SAE / re-AMPE that installs the new MTK
+    <strong>asymmetrically</strong> desyncs the pairwise key. This ties the forward drop back to the peering
+    instability that opened this thread — the plink-liveness fix (fewer re-peers) should reduce it, but the real fix
+    is a <strong>symmetric AMPE MTK install/rekey</strong> (follow hostap <code>mesh_rsn</code> / <code>wpa_auth</code>
+    key-install ordering). <strong>Next:</strong> confirm which key (<code>6f 1d 9d…</code> vs
+    <code>91 bd e3…</code>) is the stale one — board0's own board2-MTK vs a stale / other-peer MTK — and whether it
+    changes across a re-key, then fix the rekey path.</p>
+  </div>
+
+  <h2 id="status">8 · Status + the honest open item</h2>
+
+  <ul>
+    <li><strong>Answered:</strong> the S3 relay's ~99% forward-frame drop is a host SW-CCMP <strong>MIC failure</strong>
+      (mic=2052, replay=0), and it is <strong>specific to the multi-hop A4≠TA forward</strong> — single-hop
+      SW-CCMP + A-MPDU decrypts 99.4% fine.</li>
+    <li><strong>Exonerated</strong> (static + single-hop A/B): the host TX header build, AAD/nonce recipe, crypto
+      flags, and key selection <em>as written</em>.</li>
+    <li><strong>On-air:</strong> capture done — 920 board0 multi-hop frames are valid on the wire (A1=board2,
+      QoS <code>00 01</code>, CCMP PN present + incrementing 0x04c5→0x04da). Blank-PN / address / format ruled out;
+      the mismatch is off-wire (key or AAD).</li>
+    <li><strong>Refuted:</strong> the per-link MTK key <em>mis-selection</em>. The key_stad confirmation run
+      (<code>multihop=2297 nh_null=30 nh_eq_stad=0 nh_ok=2267</code>, <strong>98.7% nh_ok</strong>) shows board0
+      <em>selects</em> the correct next-hop stad ~99% of the time. It is <strong>not the key selection</strong> —
+      but selecting the right stad is not the same as holding the right key bytes (see next).</li>
+    <li><strong>Root cause (§7):</strong> the dual-side CCMP dump shows the <strong>AAD matches</strong> byte-for-byte
+      (masked-FC + A1=board2 + A2=board0 + A3=chronite + A4=board0 + QoS) but the <strong>key differs</strong> —
+      board0 <code>6f 1d 9d 9c 48 af d6 49</code> vs board2 <code>91 bd e3 64 a0 a4 40 5a</code>. The board0↔board2
+      pairwise <strong>MTK is not synchronized</strong> → the MIC never verifies. The AAD / A3 is <strong>not</strong>
+      the issue; the crypto recipe + addressing follow mac80211 (<code>ccmp_gcmp_aad</code> <code>wpa.c:318</code>,
+      <code>ieee80211_fill_mesh_addresses</code> <code>mesh.c:851</code>).</li>
+    <li><strong>Open (the mechanism):</strong> why the MTK desyncs — leading candidate is an <strong>asymmetric AMPE
+      rekey/install under peering churn</strong> (single-hop = stable peering + synced keys → 99.4%; multi-hop runs
+      churned). Next: confirm which key is stale + whether it changes across a re-key, then fix the rekey path
+      (symmetric AMPE MTK install, following hostap <code>mesh_rsn</code> / <code>wpa_auth</code>).</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0">Bench radio-silent after (all ESPs → <code>rimba-hello</code>, chronite
+  wlan1 down). Temp instrumentation in-tree (MIC/replay split, auto-blast rig with single-hop target). Nothing
+  committed.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#tldr">TL;DR</a></li>
+    <li><a href="#mic-not-replay">1 · MIC failure, not replay</a></li>
+    <li><a href="#ab">2 · Single-hop vs multi-hop A/B</a></li>
+    <li><a href="#topology">3 · The rig + forced 2-hop</a></li>
+    <li><a href="#exonerated">4 · Host TX chain exonerated</a></li>
+    <li><a href="#onair">5 · On-air capture — frames valid</a></li>
+    <li><a href="#keystad">6 · key_stad — per-link-MTK refuted</a></li>
+    <li><a href="#rootcause">7 · Root cause — MTK key mismatch</a></li>
+    <li><a href="#status">8 · Status + open item</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-12-mesh-s3-swccmp-mic-forward-drop</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

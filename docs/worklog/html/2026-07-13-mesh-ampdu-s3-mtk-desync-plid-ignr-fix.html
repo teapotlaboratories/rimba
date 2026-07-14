@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S3 MTK desync + plid-IGNR — and the "??" that looked like dead hardware — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)} .stat .num.err{color:var(--err)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:150px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-fill.bad{background:linear-gradient(90deg,#e05a4a,#c0392b)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err);background:var(--err-bg)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* key pill (mono) */
+.keys{display:flex;flex-wrap:wrap;gap:12px;margin:1.2em 0}
+.keybox{flex:1 1 240px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;box-shadow:var(--shadow)}
+.keybox .who{font-size:12px;color:var(--muted);margin-bottom:5px}
+.keybox .val{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:14px;font-weight:650;letter-spacing:.02em}
+.keybox.enc{border-left:4px solid var(--accent)} .keybox.enc .val{color:var(--accent)}
+.keybox.dec{border-left:4px solid var(--err)} .keybox.dec .val{color:var(--err)}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:110px 1fr auto}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-13</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-13</span>
+    <span class="badge">9 min read</span>
+    <span class="badge warn">⚑ mixed result</span>
+    <span class="badge bug">mesh · A-MPDU · S3 · build</span>
+  </div>
+
+  <h1>The <code>"??"</code> that looked like dead hardware<br>
+    <small style="font-weight:600;color:var(--muted);font-size:1.05rem">S3 MTK desync + plid-IGNR fix — and two corrections</small></h1>
+
+  <p class="lead">Set out to verify a follow-Linux fix for the S3 relay forward-drop (a pairwise MTK key
+  desync). Two things turned out wrong, and both are worth more than the fix: a <strong>build-config
+  mistake</strong> masqueraded for a whole bench session as <em>dead radio hardware</em>, and once that was
+  cleared, the <strong>plid-IGNR fix did not actually fix S3</strong>. The one solid win: every board is
+  healthy, and there's now a firm build rule so this can't recur.</p>
+
+  <div class="callout err">
+    <p class="ct">⚑ Correction 1 — "dead MM6108 / degraded silicon / power" was a build bug</p>
+    <p>Every firmware was built with bare <code>idf.py</code>, which ships
+    <code>CONFIG_HALOW_COUNTRY_CODE="??"</code>. morselib (<code>umac_interface.c:266</code>)
+    <strong>refuses to bring up the radio</strong> when the country is <code>"??"</code> — it returns
+    <code>MMWLAN_CHANNEL_LIST_NOT_SET</code> <em>before</em> it ever talks to the chip. The symptom is
+    indistinguishable from dead hardware (garbage chip id, MAC <code>00:00:00</code>, version
+    <code>UNAVAILABLE</code>). Building via <strong><code>make … BOARD=proto1-fgh100m</code></strong>
+    (country <code>US</code>) booted every board on the first try. <strong>The hardware was fine all along.</strong></p>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚑ Correction 2 — the plid-IGNR fix does not fix S3</p>
+    <p>Re-verified on a proper build: the multi-hop forward still MIC-fails <strong>99.3%</strong>
+    (<code>sw_ccmp_fail=2061/2075</code>), keys still desynced, and the failure is <strong>immediate from
+    ESTAB, not after a re-peer</strong> — so the plid re-peer guard targets the wrong mechanism. It stays as
+    a legitimate hardening; S3 stays open with a sharper lead.</p>
+  </div>
+
+  <h2 id="the-tell">The tell: garbage that <em>varied</em></h2>
+  <p>The chip id printed as <code>0x8200f5e7</code>, then <code>0x8200d052</code>, then <code>0x0000</code>
+  across reads — it <em>changed</em>. That's the fingerprint of uninitialised memory, not a real register
+  read: <code>mmwlan_get_version</code> was failing and leaving the struct un-populated. The BCF still
+  parsed (<code>mf16858</code>) because that's a host-side blob parse, not a chip transaction. The chip was
+  never being spoken to.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node">bare <code>idf.py&nbsp;build</code><div class="s">no board overlay</div></div>
+      <div class="node err">country <code>"??"</code><div class="s">component default</div></div>
+      <div class="node err">radio refused<div class="s">"Channel list not set"</div></div>
+      <div class="node err">version UNAVAIL<div class="s">MAC 00:00:00, garbage id</div></div>
+      <div class="node err">"dead hardware"<div class="s">the misdiagnosis</div></div>
+    </div>
+    <figcaption>A single missing config value cascaded into a hardware-shaped symptom that survived cold cycles, module swaps, and three boards.</figcaption>
+  </figure>
+
+  <p>The fix is to build through the <code>Makefile</code>, which layers the board overlay
+  (<code>boards/proto1-fgh100m/sdkconfig.defaults</code> → the MM6108 pins, partition,
+  <em>and</em> <code>country="US"</code>) via <code>SDKCONFIG_DEFAULTS</code>:</p>
+
+<pre><code><span class="cm"># wrong — drops the board overlay, ships country "??"</span>
+idf.py build
+
+<span class="cm"># right — layers boards/proto1-fgh100m/sdkconfig.defaults (country US, pins, partition)</span>
+make build APP=rimba-halow-mesh-perf BOARD=proto1-fgh100m
+</code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ Correctly built, every board boots — the radios are healthy</p>
+    <div class="stats" style="margin:.6em 0 .2em">
+      <div class="stat"><div class="num ok">0x0306</div><div class="lbl">chip id = MM6108A1</div></div>
+      <div class="stat"><div class="num ok">1.17.8</div><div class="lbl">fw version (matches bench)</div></div>
+      <div class="stat"><div class="num ok">3 / 3</div><div class="lbl">boards boot + peer</div></div>
+      <div class="stat"><div class="num ok">rc=0</div><div class="lbl">SPI chip-id read, 0 retries</div></div>
+    </div>
+    <p style="margin:.3em 0 0">Real MAC <code>bc:2a:33:96:b2:92</code>; chronite (Linux mesh) sees all three ESPs peered at &minus;3…&minus;25 dBm.</p>
+  </div>
+
+  <h2 id="misdiagnosed">What the build bug contaminated</h2>
+  <p>Every test that ran on a <code>"??"</code> build had a non-functional radio, so its "still fails"
+  result only re-proved the country gate — it established nothing about the real cause:</p>
+  <table>
+    <thead><tr><th>Claim / test</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>"board2 MM6108 hardware-dead / degraded silicon"</td><td>✗ false — <code>"??"</code> build</td></tr>
+      <tr><td>"3 boards fail = common physical cause / 5 V sag / boot brownout"</td><td>✗ false — the "common cause" was the build</td></tr>
+      <tr><td>Pristine-baseline test ("committed code also fails → not the code")</td><td>✗ void — pristine build was also <code>"??"</code></td></tr>
+      <tr><td>STA-to-AP test ("mode-independent → physical")</td><td>✗ void — STA build was <code>"??"</code></td></tr>
+      <tr><td>SPI clock 40→10 MHz; flash 2 MB→16 MB + full erase</td><td>✗ void — country gate fires first</td></tr>
+      <tr><td>board1 HaLow module swap ("still fails with fresh module")</td><td>✗ void — reflashed another <code>"??"</code> build</td></tr>
+      <tr><td>MTK-desync key dump, plink-liveness, all-Linux AP+STA control</td><td>✓ valid — ran on working radios</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><p class="ct">⚠ Suspect by association</p><p>Earlier-session notes about a
+  "warm-reset-wedge / degraded ESP MM6108s" carry the <em>same</em> <code>"??"</code> signature
+  (<code>CHANNEL_LIST_NOT_SET</code>, garbage id, MAC <code>00:00:00</code>) and may also be this build bug
+  rather than a real hardware wedge — re-check the build method before trusting them.</p></div>
+
+  <h2 id="plid-fix">The plid-IGNR fix — kept as hardening, not the S3 cause</h2>
+  <p>The fix itself follows mac80211 exactly. Its premise: the per-pair MTK is derived <strong>once</strong>
+  at plink ESTAB and never re-derived, but <code>umac_mesh_handle_peering_action</code> unconditionally
+  learns a re-peering peer's new nonce/plid — so a peer that restarts can leave the two ends on different
+  MTK epochs. The guard mirrors <code>mesh_plink.c:1077-1088</code>: ignore an OPEN/CONFIRM whose plid ≠ the
+  recorded plid (<code>OPN_IGNR</code>/<code>CNF_IGNR</code>), <em>before</em> learning the new plid/nonce.</p>
+  <p>That is a real, correct improvement — but the S3 forward-drop <strong>is not a re-peer desync</strong>,
+  so it doesn't move the needle here. The fix stays in the tree as follow-Linux hardening.</p>
+
+  <h2 id="s3-open">S3 is still open — the real lead</h2>
+  <p>On a proper build, the multi-hop forward board0 → board2(relay) → chronite still fails at the relay's
+  host SW-CCMP decrypt:</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">board2 decrypt OK</span><span class="bar-track"><span class="bar-fill fast" style="width:0.7%"></span></span><span class="val">14 / 2075</span></div>
+    <div class="bar-row"><span class="lbl">board2 MIC fail</span><span class="bar-track"><span class="bar-fill bad" style="width:99.3%"></span></span><span class="val">2061 / 2075</span></div>
+  </div>
+
+  <p>The dual-side CCMP dump shows the same forward frame (A1=board2, A2=board0, A3=chronite) encrypted and
+  decrypted under <strong>different keys</strong> — the board0↔board2 MTK the two ends use for the forward
+  do not match:</p>
+
+  <div class="keys">
+    <div class="keybox enc"><div class="who">board0 encrypts forward with</div><div class="val">6f 1d 9d 9c 48 af d6 49</div></div>
+    <div class="keybox dec"><div class="who">board2 decrypts with</div><div class="val">7e 58 66 27 00 89 00 51</div></div>
+  </div>
+
+  <p>But single-hop board0 → board2 <em>direct</em> works, so that MTK <strong>is</strong> synced — meaning
+  the <strong>forward path selects the wrong key</strong>. board0's <code>TX-DBG</code> confirms it:
+  <code>nh_eq_stad=2930</code> forwarded frames encrypted with the wrong per-link key. The leading
+  hypothesis: the forward encrypts under the <strong>destination (chronite) MTK</strong> instead of the
+  <strong>next-hop (board2) MTK</strong> — the S2 <code>key_stad</code> override in
+  <code>umac_datapath</code>, not AMPE derivation and not the plid re-peer.</p>
+
+  <div class="callout"><p class="ct">⚠ Confound to fix before re-diagnosing</p><p>The bench boards are too
+  close (&minus;3…&minus;25 dBm), so board0 peers chronite <em>directly</em> and therefore <em>has</em> a
+  chronite key to grab by mistake. A clean re-diagnosis needs a <strong>forced true-multi-hop topology</strong>
+  where board0 cannot reach chronite directly.</p></div>
+
+  <h2 id="disposition">Disposition</h2>
+  <ul>
+    <li><strong>Hardware:</strong> healthy — board0/1/2 all boot (chip <code>0x0306</code>), board1's swapped module included.</li>
+    <li><strong>Build workflow:</strong> ruled — always <code>make … BOARD=proto1-fgh100m</code>; never bare <code>idf.py</code> (<code>.ai/AGENTS.md</code> §Building).</li>
+    <li><strong>plid-IGNR fix:</strong> kept as follow-Linux hardening; uncommitted; does not resolve S3.</li>
+    <li><strong>S3 forward-drop:</strong> re-opened with a sharper lead — the forward <code>key_stad</code> selection, to be re-examined on a forced multi-hop rig.</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0">Bench radio-silent after (all three ESPs powered off, chronite <code>wlan1</code> down).</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#the-tell">The tell: varying garbage</a></li>
+    <li><a href="#misdiagnosed">What it contaminated</a></li>
+    <li><a href="#plid-fix">The plid-IGNR fix</a></li>
+    <li><a href="#s3-open">S3 still open — the lead</a></li>
+    <li><a href="#disposition">Disposition</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-13-mesh-ampdu-s3-mtk-desync-plid-ignr-fix</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
