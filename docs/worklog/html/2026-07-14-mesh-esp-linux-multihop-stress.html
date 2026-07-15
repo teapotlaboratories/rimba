@@ -272,14 +272,27 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
   <ul>
     <li><strong>Pillar A (§3, Linux endpoint) REFUTED</strong> — a HW-crypto Linux node <strong>can be a
     multi-hop mesh endpoint</strong>. The 07-11 "0" was likely a raw-socket measurement flaw.</li>
-    <li><strong>Pillar B (§1, an ESP FW in HW-crypto as the RECEIVER) NOT re-tested tonight, STILL STANDS</strong>
-    — 07-11 measured it at the app layer (0/76 vs a same-rig SW-CCMP control 61/61, crypto-flag-only). Tonight's
-    ESPs ran shipping SW-CCMP, so this pillar was never re-created.</li>
+    <li><strong>Pillar B (§1, an ESP FW in HW-crypto as the RECEIVER) RE-TESTED + CONFIRMED (it stands)</strong>
+    — same <code>MESH_LINE_RELAY_DEMO</code> rig (board1→board0-relay→board2), only <code>g_mesh_sw_crypto</code>
+    flipped, current tree: <strong>HW-crypto board2 = 0/55</strong> vs <strong>SW-CCMP control = 53/54 (98%)</strong>
+    — clean app-layer A/B, reproducing 07-11's 0/76-vs-61/61. The ESP FW withholds the HW-decrypted A4≠TA
+    forward.</li>
   </ul>
-  <p>So the memory's "impossible on <em>both</em> stacks / SW-CCMP the only answer for everyone" is
-  <strong>over-generalized</strong>. Corrected: Linux nodes are not single-hop-only. Practical answer unchanged
-  — the ESPs use SW-CCMP regardless. To fully close: re-run the §1 all-ESP HW-crypto-receiver rig
-  (<code>g_mesh_sw_crypto=false</code>) on the current tree.</p>
+  <div class="callout bug">
+    <p class="ct">🔄 The 2026-07-11 "universal" verdict is REVERSED — it's an ESP-vs-Linux host difference</p>
+    <p>Same MM6108 silicon + fw 1.17.8, same SW-CCMP-encrypted A4≠TA forward arriving at a HW-crypto receiver:
+    <strong>Linux morse_driver DELIVERS it (99–100%, Pillar A), ESP morselib WITHHOLDS it (0/55, Pillar B)</strong>.
+    So #20 is not a universal FW wall — it's a receiver-host-driver difference. The 07-11 "Linux ALSO withholds"
+    (the basis for "universal / morselib faithfully follows Linux / nothing to fix") was the measurement flaw,
+    so the <strong>original "morselib withholds but Linux delivers" premise is vindicated</strong>, and the "fix
+    morselib to match Linux" direction re-opens (subtler than command/order/BCF/INSTALL_KEY, already exonerated
+    — likely an RX-side A4-delivery config morse_driver sets that morselib doesn't; the FW clearly <em>can</em>
+    deliver, since Linux gets it).</p>
+  </div>
+  <p><strong>Practical answer unchanged:</strong> the ESPs use host SW-CCMP — with no FW mesh key the FW
+  delivers protected frames raw (no A4 gate) → host decrypts, which is exactly why the defrag-before-decrypt fix
+  + the whole SW-CCMP path work and are unaffected. HW-crypto ESP mesh would be more efficient but needs the
+  morselib RX difference found first — a future optimization, not a blocker.</p>
 
   <h2 id="results">Stress results</h2>
   <table>
