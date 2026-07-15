@@ -75,6 +75,16 @@ host-bound**, and A-MPDU directly amortizes the per-frame preamble/IFS/backoff/A
 dominates. The just-merged SW-CCMP bulk-AES work removed the crypto ceiling, which is exactly what
 makes airtime the top remaining limiter.
 
+> **S3 residual — ✅ SOLVED 2026-07-14 (defrag-before-decrypt, bench-VERIFIED):** the *host* fragmentation
+> attempt (fragment→encrypt, halow `9c7daabd`) was bench-proven broken (the MM6108 FW re-headers any
+> host-submitted `frag# > 0` MPDU — a hard FW wall, `#20`-family) and **reverted**. The residual is fixed by
+> the OPPOSITE order — **defrag-before-decrypt**: the host submits ONE whole frame (no `frag#>0` handed to the
+> FW), the FW fragments it (*encrypt→fragment*), and on RX the host **reassembles the raw fragments then
+> decrypts the whole once**. Bench PASS: single-hop 131/131, multi-hop board0→board2→board1 143/146 (~98%),
+> both directions, `ccmp_fail=0`, no crashes; toggle-off = whole/A-MPDU at high rate + rare natural frag
+> handled. The min-MCS floor / MTU cap was NOT needed. Detail: worklog
+> `../worklog/2026-07-14-mesh-defrag-before-decrypt-PASS.md` + `rimba-mesh-frag-codemap.md`.
+
 ---
 
 ## 2. Corrected blocker-map
@@ -334,6 +344,69 @@ after each bench run (flash `rimba-hello` to the ESPs + `ip link set wlan1 down`
 - **Inert/testable:** largest change — land behind a mesh config flag (reuse the `umac_config` pattern)
   so it can toggle back to today's mgmt-class forward. Bench: 2-hop iperf before/after (baseline
   ~0.03–0.06 Mbps) + on-air A-MPDU on the relay egress.
+
+#### S3 residual (full-size non-aggregated frames) — DECISION: host fragmentation is a FW wall; use MTU-cap / min-MCS floor
+
+> **⛔ DECISION 2026-07-14 — host 802.11 fragmentation (fragment→encrypt) is ABANDONED for mesh SW-CCMP;
+> it is bench-proven incompatible with this firmware. The deterministic residual fix is a min-MCS floor or
+> mesh-vif MTU cap (so a SW-CCMP frame never needs fragmenting), NOT host fragmentation.**
+>
+> The S3 residual (any full-size mesh SW-CCMP frame whose rate/size won't fit one PPDU — e.g. cold-start /
+> pre-BA / rate-fallback — gets FW-fragmented after the host CCMP MIC, so the peer MIC-fails) was first
+> pursued via **host fragmentation** (mirror net/mac80211 fragment→encrypt: split into <728 B FCS-less
+> MPDUs, per-fragment PN/MIC/moreFrag, non-aggregated). Implemented + adversarially reviewed + committed as
+> halow `9c7daabd` (rimba `2bb61d2`); code-map `rimba-mesh-frag-codemap.md`.
+>
+> **Bench-verified 2026-07-14 = BROKEN.** Worklog `docs/worklog/2026-07-14-mesh-frag-bench-verify.md`
+> (forced all-ESP line board0→board2(relay)→board1). board0 host-fragments correctly (`TXsent=252` = 3
+> fragments/ping; on-air **frag0 is perfect**), but the **MM6108 FW re-processes every MPDU with
+> `fragment_number > 0`** — off-air it prepends a byte-identical **duplicate 32-byte MAC header** (CCMP
+> header shoved to offset 64), sets Retry, clears MoreFrags → corrupts the CCMP AAD → the relay MIC-fails
+> **~64%** (158/248), reassembles **0** MSDUs, forwards nothing; pings dead. Control (fix off, A-MPDU sends
+> full-size frames **whole**) delivers **100+ pings end-to-end** once the BA session is up → the rig is
+> sound and the failure is the fragment path; the fix is also **ineffective** (its residual = cold-start
+> pre-BA frames = exactly what gets mangled + lost).
+>
+> **Follow-Linux cross-check (both trees, VERY HIGH confidence) = a hard FW wall, `#20`-family.** Linux
+> never host-fragments on this FW: `ieee80211_tx_h_fragment` skips host frag under `SUPPORTS_TX_FRAG`
+> (`net/mac80211/tx.c:967-968`) + defaults to `DONTFRAG`; morse_driver sets `SUPPORTS_TX_FRAG` from the FW
+> `HW_FRAGMENT` cap (`morse_driver/mac.c:6835-6836`); fragmentation is FW-owned via a **global threshold**
+> command. There is **no per-frame "already-fragmented / raw / leave-it-alone" field** in the host→FW TX
+> descriptor in EITHER tree (`skb_header.h:57-71` / morselib `mmdrv.h:609-619`), so the hypothesized
+> morselib gap-flag does not exist. **Crypto mode (verified 2026-07-14):** the bench Linux nodes run **HW
+> crypto** (`no_hwcrypt=N` live on chronite/chronium/chronosalt; `morse_mac_ops_set_key` HW-offloads CCMP,
+> `mac.c:5141-5230`), which is **single-hop-only for encrypted traffic** — `#20` blocks the HW-crypto
+> multi-hop forward — so there is **no working multi-hop-encrypted Linux mesh to follow**. mac80211 also
+> **never host-fragments by default** (`frag_threshold=-1` → `DONTFRAG` on every unicast, `tx.c:1275-1279`);
+> it relies on the FW to fragment, which is correct only under HW crypto. Forcing Linux to SW crypto
+> (`no_hwcrypt=1`) for multi-hop would hit the **same wall** the ESP does. (Earlier phrasing "Linux uses HW
+> crypto to sidestep this" was imprecise + self-contradictory vs `#20` — the accurate statement is that the
+> ESP's SW-CCMP multi-hop mesh is territory Linux does not operate in, so there is no reference and no
+> host-side fragmentation fix on this FW.)
+>
+> **On-air confirmed 2026-07-14.** Secured single-hop Linux mesh (HW crypto), forced MCS0 + a 512 B frag
+> threshold → the **FW fragmented a 1400 B ping into 4 CLEAN fragments** (MoreFrags 1,1,1,0, per-fragment
+> CCMP + consecutive PN, **CCMP at offset 32 = single-header**, len 528 — vs the ESP's frag>0 double-header,
+> CCMP at offset 64, len 763) and it **delivered 61/70 (87%)** vs the ESP relay's 0%. Under HW crypto the FW
+> owns fragment→encrypt and gets it right; the ESP fails only because SW-CCMP forces the host to encrypt,
+> which the FW then re-headers. Worklog `2026-07-14-mesh-frag-bench-verify.md` → "On-air confirmation".
+>
+> **Actions:** (1) `9c7daabd` **REVERTED** 2026-07-14 (`git revert --no-commit`, staged, builds green,
+> commit held for after-hours). (2) An MTU-cap / min-MCS floor was scoped but is **NOT** being shipped —
+> see the update below.
+>
+> **UPDATE 2026-07-14 (ESP verification of the reverted mesh) — the revert IS the practical fix; MTU-cap is
+> unnecessary.** Measured (Linux, same FW): a full-MTU frame at **MCS0/1 MHz goes WHOLE (1566 B)** — MCS0 is
+> NOT where a normal frame fragments; the mesh only fragments when it drops BELOW MCS0 (the 1 MHz repetition
+> mode, single-PPDU budget ~728–740 B — so `728` was right for the *worst* rate, not MCS0). On the **reverted
+> ESP mesh** (no host frag, real conditions, full-size multi-hop): **fragmentation is RARE — 1 fragmented
+> frame in 20 s (~0.24%) vs 410 whole**; ~86% ping success on a *marginal* MCS0/MCS2 bench link where the
+> ~14% loss is low-rate RF loss, not fragmentation; on a good link (MCS7) fragmentation is **zero**. So the
+> revert removes the *systematic* breakage (Test A/B *forced* every frame to fragment; unforced, the FW
+> fragments almost nothing). **An MTU cap is overkill** for a &lt;0.3% weak-link edge (it caps every frame).
+> **A min-MCS floor** (keep the RC off the ~728-budget bottom rate) is the right *optional* weak-link
+> hardening, but needs the fragmenting rate pinned and the payoff is small — a future item, not a bolt-on.
+> Worklog `docs/worklog/2026-07-14-mesh-frag-bench-verify.md` → "Revert + ESP verification".
 
 ### S4 — BA teardown / lifecycle (~1 day)
 - **Goal:** no leaked sessions / stale DELBA on peer loss or path change.

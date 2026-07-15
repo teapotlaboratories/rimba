@@ -168,12 +168,33 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>57</b> worklogs · 2026-06-17 – 2026-07-12</p>
+<p class="stat"><b>60</b> worklogs · 2026-06-17 – 2026-07-14</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">31</span></h2>
+<h2>July 2026 <span class="mcount">34</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-14-mesh-esp-linux-multihop-stress.html">
+<div class="card-date">2026-07-14</div>
+<div class="card-title">ESP↔Linux 3-hop mesh stress + a #20 counter-example</div>
+<div class="card-ex">A forced 3-hop line board0→board1→board2→chronite (HW-crypto Linux endpoint), stress-tested 30 min one-directional and 20 min bidirectional. Delivery held ~99–100% both ways: chronite→board0 99.82% (8987/9003) over 30 min, board0→chronite 100% (3000/3000) + chronite→board0 99.37% (2998/3017) over 20 min, zero crashes, no heap leak, avg ~48 ms over 3 hops. Encryption verified on all four nodes (chronite key_mgmt=SAE + CCMP; ESPs MMWLAN_SAE + drop-plaintext; ~15k frames flowed both ways so all were CCMP-protected). TWO findings: (1) a clean COUNTER-EXAMPLE to the #20 "universal FW limitation" — a HW-crypto Linux node (no_hwcrypt=N verified) received thousands of multi-hop A4≠TA forwards at the application layer, contradicting "HW-crypto mesh multi-hop is impossible"; likely the 2026-07-11 proof (10 forwards, raw-socket saw 0) was confounded — flagged for reconciliation. (2) An early board0 esp_ping stall at 200ms+200ms (~10/s through board0) was pure TX saturation, not a mesh fault — clean at 400ms (3000/3000). No firmware change; the defrag-before-decrypt fix was untouched. Radio-silent after.</div>
+<div class="card-meta">6 min · ✓ stress PASS · #20 counter-example · mesh · ESP↔Linux</div>
+</a>
+
+<a class="card" href="2026-07-14-mesh-defrag-before-decrypt-PASS.html">
+<div class="card-date">2026-07-14</div>
+<div class="card-title">Mesh SW-CCMP defrag-before-decrypt: bench PASS — the proper large-frame fix</div>
+<div class="card-ex">Large secured (SW-CCMP) 802.11s mesh frames now traverse the mesh — single-hop, multi-hop relay, and both directions — by letting the MM6108 FW fragment them (encrypt→fragment) and having the host REASSEMBLE the raw fragments before decrypt. The opposite order (host fragmentation, fragment→encrypt, halow 9c7daabd) was bench-broken and reverted. Fix in umac_datapath.c: a reorder bypass so a fragment skips the BA reorder buffer (all fragments share one seq#), plus a reassemble-then-decrypt branch in after_reorder (datapath_defrag → sw_ccmp_decrypt on the whole). Two bugs found + fixed: (1) the reassembled CCMP AAD lost the QoS Control (datapath_defrag re-prepends only the 30-byte MAC header, but mesh_ccmp_aad_nonce reads the QoS at hdr[30] = CCMP PN) → save [MAC+QoS] contiguously into aad_hdr, reset MoreFrags+frag#=0, pass as the AAD header; (2) mmdrv_get_rx_metadata asserts (metadata!=NULL, "RX frames only") on the defrag-alloc reassembled buffer, crash-looping the relay + endpoints → set rx_metadata=NULL. Bench (all-ESP, forced FW frag + 1400 B pings): single-hop 131/131 (100%), multi-hop board0→board2(relay)→board1 143/146 (~98%), every fragment reassembled AND decrypted (reasm==decok, ccmp_fail=0) at all four RX points, both directions, zero crashes. Toggle OFF = whole/A-MPDU at high rate (FRAG seen 767→10) with the rare natural fragmentation handled too. On-air (chronium morse0) confirmed the FW fragments host mesh frames into 3 MPDUs (shared seq#, incrementing frag#). MTU-cap / min-MCS floor NOT needed. Temp scaffold stripped, app restored, radio-silent.</div>
+<div class="card-meta">6 min · ✓ bench-VERIFIED PASS · 2 bugs fixed · mesh · SW-CCMP · fragmentation</div>
+</a>
+
+<a class="card" href="2026-07-14-mesh-frag-bench-verify.html">
+<div class="card-date">2026-07-14</div>
+<div class="card-title">Mesh host-fragmentation bench-verify: the committed fix is broken (a firmware wall)</div>
+<div class="card-ex">On-air verification of the committed but untested host 802.11 fragmentation fix for mesh SW-CCMP (fragment→encrypt, halow 9c7daabd). Verdict: NOT verified — broken on this firmware. On the forced all-ESP line board0→board2(relay)→board1, board0 fragments correctly (TXsent=252 = 3 host fragments/ping), but the relay MIC-fails ~64% (158/248), reassembles ZERO MSDUs, forwards nothing — every ping times out. The chronium morse0 capture pins it: fragment 0 is perfect ([MAC hdr | CCMP | cipher]), but every fragment with fragment_number>0 carries a byte-identical DUPLICATE of its own 32-byte MAC header (CCMP header shoved to offset 64), with Retry set and MoreFrags cleared. The host encrypt emits a correct single fragment and the builder is identical per index, so the FW adds the extra header AFTER encryption, only for frag#>0 — corrupting the CCMP AAD → MIC fail → no reassembly. A control run with the fix off (Test B: A-MPDU sends full-size frames WHOLE) delivers 100+ pings end-to-end once the BA session is up, proving the rig is sound and isolating the failure to the fragment path — and showing the fix is ineffective (the residual it targets, cold-start pre-BA frames, is exactly where its fragments are lost). A follow-Linux source cross-check (both trees) confirms it's a hard FW wall, #20-family: Linux never host-fragments on this FW (mac80211 defers via SUPPORTS_TX_FRAG/HW_FRAGMENT + DONTFRAG; fragmentation is FW-owned via a global threshold), and NO per-frame "already-fragmented" flag exists in the host↔FW descriptor in either tree. Recommend: abandon host fragmentation, cap the mesh MTU / floor the min-MCS so a SW-CCMP frame is never fragmented (frag#=0 always); revert or gate 9c7daabd. Left radio-silent.</div>
+<div class="card-meta">7 min · ✗ fix NOT verified — broken on-air · mesh · SW-CCMP · fragmentation</div>
+</a>
 
 <a class="card" href="2026-07-13-mesh-ampdu-s3-mtk-desync-plid-ignr-fix.html">
 <div class="card-date">2026-07-13</div>

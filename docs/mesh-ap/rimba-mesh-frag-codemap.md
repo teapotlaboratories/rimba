@@ -1,5 +1,25 @@
 # Mesh host-side 802.11 fragmentation (fragment-before-encrypt) — design + code-map
 
+> **⛔ BENCH-REFUTED 2026-07-14 — this approach does NOT work on the MM6108 firmware; the code below is
+> committed (halow `9c7daabd`) but ABANDONED.** On-air verification (worklog
+> `docs/worklog/2026-07-14-mesh-frag-bench-verify.md`) proved the firmware **re-processes any host-submitted
+> MPDU with `fragment_number > 0`**: it prepends a byte-identical duplicate 32-byte MAC header (pushing the
+> CCMP header to offset 64), sets Retry, clears MoreFrags → corrupts the CCMP AAD → the receiver MIC-fails
+> ~64% of fragments and reassembles none. **fragment 0 transmits perfectly**, so the fragment→encrypt
+> algorithm here is structurally correct (and the 728 B FCS-less threshold was right — frag0 is <728 on
+> air); the FW is the wall. A follow-Linux source cross-check (both trees) confirms **Linux never
+> host-fragments on this FW** (mac80211 defers via `SUPPORTS_TX_FRAG` / FW `HW_FRAGMENT` + default
+> `DONTFRAG`; fragmentation is FW-owned via a global threshold) and that **no per-frame "leave-it-alone"
+> descriptor flag exists to add** — a hard FW wall in the `#20` family. **DECISION (updated 2026-07-14):**
+> `9c7daabd` reverted; the residual is solved by the OPPOSITE order — **defrag-before-decrypt**: let the FW
+> fragment (*encrypt→fragment*, the host submits ONE whole frame so no `frag#>0` is ever handed to the FW TX
+> path), then on RX **reassemble the raw fragments and decrypt the whole once**. This is now **bench-VERIFIED
+> PASS** (single- + multi-hop, both directions) — see
+> [`../worklog/2026-07-14-mesh-defrag-before-decrypt-PASS.md`](../worklog/2026-07-14-mesh-defrag-before-decrypt-PASS.md).
+> The min-MCS-floor / MTU-cap idea was NOT needed. The design below is retained for the historical record +
+> as the reference for why *host* fragmentation is infeasible here (the ESP FW's TX path, unlike the Linux
+> driver's, re-owns any frag#>0 MPDU it is handed — which is exactly why defrag-before-decrypt hands it none).
+
 **Why.** The ESP mesh uses host software CCMP for 802.11s frames (the MM6108 HW crypto can't do the mesh
 4-address per-peer keying). When a host-encrypted frame is larger than the single-PPDU limit at its TX rate,
 the **MM6108 FW fragments it *after* the host computed the CCMP MIC over the whole (unfragmented) frame**,

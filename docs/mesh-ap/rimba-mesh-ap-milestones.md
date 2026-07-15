@@ -823,6 +823,21 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   the aggregated frames are 100% `protected=1` → **SW-CCMP composes with A-MPDU, validated**). The ADDBA is sent
   CCMP-protected on the all-ESP mesh, so the routing edit is the critical path and the unprotected-BA exemption
   was not exercised. Follow-ups: ADDBA byte-diff vs Linux; then S2 (multi-hop) + S3 (relay).
+  **Update 2026-07-12/13:** S2 (multi-hop next-hop stad) + S3 (relay retag) code done; the S3 relay
+  forward-drop was root-caused to a **TX-rate attribution bug** (aid/rate on `stad` not `key_stad`) and
+  FIXED (on-air board2 decrypt 0.4%→96.5%, end-to-end board0→board2→board1) — committed. **✅ S3 residual —
+  SOLVED 2026-07-14 (defrag-before-decrypt, bench-VERIFIED):** the residual (full-size pre-BA / rate-fallback
+  frames the MM6108 FW fragments *after* the host CCMP MIC) is fixed by the OPPOSITE order to the abandoned
+  host-fragmentation attempt. **Host 802.11 fragmentation (halow `9c7daabd`, fragment→encrypt) was
+  bench-proven BROKEN** (the FW re-headers any host-submitted `frag# > 0` MPDU — a hard FW wall, `#20`-family)
+  and **reverted**. Instead, **defrag-before-decrypt**: the host submits ONE whole frame (no `frag#>0` ever
+  handed to the FW), the FW fragments it (*encrypt→fragment*), and on RX the host **reassembles the raw
+  fragments then decrypts the whole once**. Bench PASS: single-hop 131/131, multi-hop (board0→board2→board1)
+  143/146 (~98%), both directions, every fragment reassembled+decrypted (`ccmp_fail=0`), no crashes; with
+  forcing off, large frames go whole/A-MPDU at high rate and the rare natural fragmentation (~0.2%) is handled
+  too. Two bench-found bugs fixed (QoS-Control omitted from the reassembled CCMP AAD; `mmdrv_get_rx_metadata`
+  assert on the defrag-alloc buffer). Detail: worklog `2026-07-14-mesh-defrag-before-decrypt-PASS.md` +
+  `rimba-mesh-frag-codemap.md`. The min-MCS-floor / MTU-cap idea was NOT needed.
 - ✅ **Mesh SW-CCMP bulk-DMA AES-CCM — DONE 2026-07-11** (worklog `2026-07-11-esp32-mesh-swccmp-bulk-aes.md`).
   Root-caused the host SW-CCMP relay crypto cost: the CCM ran AES **one 16-byte ECB block at a time**
   (~187 single-block HW-AES ops per 1442 B frame, each paying the full `esp_aes`
