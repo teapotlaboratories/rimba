@@ -47,11 +47,40 @@ round-trips), which is stronger than a raw-socket count:
   forwards) ~99%+.
 
 chronite is confirmed **HW crypto** (`no_hwcrypt=N`), so this is NOT the "SW-crypto Linux delivers" case the
-#20 memory already allows. **Needs reconciliation** — likely the original #20 result was confounded (tiny
-10-forward sample + a raw-socket wlan1 capture that may not reflect kernel delivery), or the 2-hop-vs-3-hop
-/ current-tree differs. Either way, **multi-hop encrypted ESP→Linux mesh demonstrably works here**, so #20's
-"universal / impossible" framing is too strong. Recommend re-running the exact original #20 rig
-(board1→board0→chronite with an application-layer probe, not just a raw socket) to settle it.
+#20 memory already allows. This was flagged for reconciliation — now done (below).
+
+### #20 RECONCILIATION (same night, bench + adversarial-verified) — HALF-refuted
+
+Re-ran the **exact** 2026-07-11 rig and a control, measuring app-layer **and** the original raw-socket
+method simultaneously:
+
+| Rig | relay | app-layer (board1→chronite) | raw-socket (chronite kernel RX of board1's forwards) |
+|-----|-------|------------------------------|------------------------------------------------------|
+| **A** (reproduces 07-11) | board0 (not-fully-wired, the original) | **231/233 = 99%** | **223** ICMP requests (07-11 saw **0**) |
+| **B** (control) | board2 (fully-wired) | **233/233 = 100%** | **225** |
+
+Topology verified from chronite's side both rigs: board1 `LISTEN`/`BLOCKED` (never an ESTAB peer), mpath to
+board1 via the relay `HOP_COUNT 2` — so board1's frames reach chronite ONLY as an A4=board1≠TA=relay forward.
+**Adversarial-verified airtight:** on a secured mesh a forwarded unicast is re-keyed under the *next-hop*
+pairwise MTK (`umac_datapath.c:2911`), and board1 holds a pairwise key only with board0 — so a *decrypted*
+board1-sourced ICMP at chronite's kernel is cryptographically impossible unless it arrived as the forward;
+and chronite emitting 223 replies is L3-reception proof independent of the capture method.
+
+**Verdict — #20 is HALF-refuted:**
+- **Pillar A (§3, Linux endpoint) REFUTED.** A HW-crypto Linux node **CAN be a multi-hop mesh endpoint**
+  (receives A4≠TA forwards fine). The 07-11 "0" was **likely a raw-socket measurement flaw** (a since-fixed
+  board0 pre-S3 TX issue can't be fully excluded without re-running the exact 07-11 firmware, but S3's
+  frag-MIC is SW-CCMP-only + irrelevant to chronite's HW decrypt, and no rate change turns a 100% withhold
+  into 99% delivery — so measurement flaw is favored).
+- **Pillar B (§1, all-ESP, an ESP FW in HW-crypto as the RECEIVER) NOT re-tested tonight, STILL STANDS.**
+  07-11 measured that pillar at the **app layer** (0/76 vs a same-rig SW-CCMP control 61/61, crypto-flag-only,
+  S3-independent). Tonight's ESPs ran shipping SW-CCMP with the HW-crypto gate only at chronite, so §1 was
+  never re-created. An ESP-FW post-HW-decrypt A4≠TA gate may still block HW-crypto ESP↔ESP multi-hop.
+
+So the memory's "universal / impossible on **both** stacks / SW-CCMP is the only answer for everyone" is
+**over-generalized**. Corrected: Linux nodes are not single-hop-only. The **practical answer is unchanged** —
+the ESPs use SW-CCMP regardless (they can't do HW-crypto mesh 4-address keying). To fully close: re-run the
+§1 all-ESP HW-crypto-receiver rig (`g_mesh_sw_crypto=false`) on the current S2/S3 tree.
 
 ## Stress results
 

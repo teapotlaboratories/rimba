@@ -250,11 +250,36 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
     stronger than a raw-socket count): board0→chronite <strong>3000/3000</strong>, chronite→board0
     <strong>~99%</strong>. chronite is confirmed HW crypto (<code>no_hwcrypt=N</code>), so this is NOT the
     "SW-crypto Linux delivers" case #20 already allows.</p>
-    <p><strong>Needs reconciliation</strong> — likely the 2026-07-11 result was confounded (tiny 10-forward
-    sample + a raw-socket wlan1 capture that may not reflect kernel delivery), or 2-hop-vs-3-hop /
-    current-tree differs. Either way, multi-hop encrypted ESP→Linux mesh <strong>demonstrably works</strong>
-    here. Recommend re-running the exact original rig with an application-layer probe to settle it.</p>
   </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Reconciled (same night, bench + adversarial-verified) — HALF-refuted</p>
+    <p>Re-ran the <strong>exact</strong> 2026-07-11 rig (board1→board0-relay→chronite) + a fully-wired-relay
+    control (board2), measuring app-layer <em>and</em> the original raw-socket method at once:</p>
+  </div>
+  <table>
+    <thead><tr><th>Rig</th><th>relay</th><th>app-layer (board1→chronite)</th><th>raw-socket (chronite kernel RX)</th></tr></thead>
+    <tbody>
+      <tr><td>A (reproduces 07-11)</td><td>board0 (not-fully-wired, the original)</td><td><strong>231/233 = 99%</strong></td><td><strong>223</strong> requests (07-11 saw <strong>0</strong>)</td></tr>
+      <tr><td>B (control)</td><td>board2 (fully-wired)</td><td><strong>233/233 = 100%</strong></td><td><strong>225</strong></td></tr>
+    </tbody>
+  </table>
+  <p>Topology verified both rigs (board1 <code>LISTEN</code>/<code>BLOCKED</code>, mpath <code>HOP_COUNT 2</code>
+  via the relay). Adversarial-verified airtight: a forwarded unicast is re-keyed under the <em>next-hop</em>
+  pairwise MTK, and board1 holds a key only with board0 — so a <em>decrypted</em> board1-sourced ICMP at
+  chronite's kernel is cryptographically impossible unless it arrived as the A4≠TA forward; and chronite
+  emitting 223 replies is L3-reception proof independent of the capture method.</p>
+  <ul>
+    <li><strong>Pillar A (§3, Linux endpoint) REFUTED</strong> — a HW-crypto Linux node <strong>can be a
+    multi-hop mesh endpoint</strong>. The 07-11 "0" was likely a raw-socket measurement flaw.</li>
+    <li><strong>Pillar B (§1, an ESP FW in HW-crypto as the RECEIVER) NOT re-tested tonight, STILL STANDS</strong>
+    — 07-11 measured it at the app layer (0/76 vs a same-rig SW-CCMP control 61/61, crypto-flag-only). Tonight's
+    ESPs ran shipping SW-CCMP, so this pillar was never re-created.</li>
+  </ul>
+  <p>So the memory's "impossible on <em>both</em> stacks / SW-CCMP the only answer for everyone" is
+  <strong>over-generalized</strong>. Corrected: Linux nodes are not single-hop-only. Practical answer unchanged
+  — the ESPs use SW-CCMP regardless. To fully close: re-run the §1 all-ESP HW-crypto-receiver rig
+  (<code>g_mesh_sw_crypto=false</code>) on the current tree.</p>
 
   <h2 id="results">Stress results</h2>
   <table>
