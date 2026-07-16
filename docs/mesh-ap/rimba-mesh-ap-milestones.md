@@ -419,6 +419,13 @@ forwarding). None of this is production behaviour — it only forces a line on a
 **RF-forcing does *not* work here:** even at 1 dBm (`tx_max_power_mbm` / `mmwlan_override_max_tx_power`)
 board1↔board2 stays ~−52 dBm, ~40 dB above sensitivity — the boards are too close, so the allowlist
 is still required for a multi-hop demo (#23).
+**⚠ Artifact this manufactures (verified 2026-07-15):** with the allowlist forcing board1↔board2 to be
+non-*data*-peers while they're in RF range, board1 still HEARS board2 → HWMP adopts the lower-metric direct
+path, which the allowlist then silently drops → the origin `RA=dest` fallback (`umac_datapath.c:3761`) fires
+and the next hop appears to "flap" between the relay and the destination. This is NOT an HWMP bug (the
+dedup/SN fix + the ESTAB metric gate are both in place) — it's the harness. For a clean sustained multi-hop
+throughput/aggregation bench, use a genuine out-of-RF far node, not the in-range allowlist. See the HWMP
+routing-residuals backlog item + [[mesh-p6c-airtime-and-hwmp-flapping]].
 
 ### On-air frame verification (chronium monitor)
 Every ESP mesh frame type was captured **on the air by a third node** — chronium as a
@@ -782,7 +789,26 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
 - ☐ **P6c mesh hardening** — rate-derived **airtime metric** (currently a fixed per-hop cost,
   unverifiable on a single-path forced line), **RANN/root** mode, **proxy/gate (`mpp`)** so the
   Mesh-gate can bridge AP leaves onto the mesh, **mesh power save**. Derive each from
-  `net/mac80211/mesh*.c` + `morse_driver/mesh.c`.
+  `net/mac80211/mesh*.c` + `morse_driver/mesh.c`. *(UPDATE 2026-07-15: the airtime metric is no longer
+  fixed — real per-peer rate control (mmrc-learned airtime) is committed (halow `838b23c2`) + bench-verified
+  ~2.2× throughput; memory [[mesh-real-rc-feasible-design]]. Airtime **metric/path-selection** effect still
+  wants a ≥6-node convergence bench.)*
+- ☐ **HWMP routing residuals (D1 small / D4 bigger)** — the "path-flapping bug" is **RESOLVED: no production
+  bug** (re-verified 2026-07-15, 3-lens adversarial workflow vs the local Linux `mesh_hwmp.c`). The
+  per-reply-SN/no-dedup bug was fixed 07-02 (halow `b677d9a3`) AND the ESTAB metric gate already exists
+  (`mesh_last_hop_metric` :2339 → `MESH_METRIC_MAX` for a non-peer, == Linux); the 07-11 A-MPDU-S2 "flapping"
+  was a **forced-topology bench artifact** (allowlist + all-in-RF-range, see the Forced-topology note above).
+  Two real, separate residuals: **D1 ✅ IMPLEMENTED + bench-verified 2026-07-15 (UNCOMMITTED in the halow
+  working tree — needs review + commit)** — a mesh unicast to a dest with no HWMP path AND not a direct peer
+  is now DROPPED + discovery kicked (helper `umac_datapath_mesh_frame_undeliverable`, gating both mesh TX
+  paths in `umac_datapath_process_tx_frame`) instead of blasting `RA=dest` (follow Linux `mesh_nexthop_resolve`;
+  EAPOL + multicast exempt so peering/ARP untouched). Regression PASS: single-hop iperf 0.46 Mbit/s (peering +
+  direct traffic intact); multi-hop origination board1→board0→board2 ramps to **1.66 Mbit/s** (dropping the
+  artifact `RA=dest` frames lets the origin hold the relay path). **D4** — no tx-status→PERR self-heal for a
+  silent black-hole/asymmetric
+  next-hop (Linux `fail_avg`→`LINK_FAIL_THRESH(95)`→`mesh_plink_broken`; the hook exists at
+  `umac_datapath.c:2938` beside `umac_rc_feedback`; needs the EWMA ported exactly + a convergence bench;
+  would NOT cure the flapping). Memory [[mesh-p6c-airtime-and-hwmp-flapping]].
 - ☐ **SAE hardening residual** — a *well-formed* forged Commit still tears a live link down (hostap
   itself reaches `ap_free_sta` for any such frame), so closing it fully needs a **non-hostap rate-limit
   on ACCEPTED-state reauth** (a deliberate divergence from the line-by-line port, deferred); plus the
