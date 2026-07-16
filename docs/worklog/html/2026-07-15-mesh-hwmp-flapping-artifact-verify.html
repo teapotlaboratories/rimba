@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HWMP path-flapping: a test artifact, not a bug — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-15</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-15</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ resolved — no production bug</span>
+    <span class="badge bug">mesh · HWMP · routing</span>
+  </div>
+
+  <h1>HWMP path-flapping: a <em>test artifact</em>, not a production bug<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">3-lens verify vs Linux <code style="font-size:.95em">mesh_hwmp.c</code> · no code changed · D1/D4 residuals recorded</small></h1>
+
+  <p class="lead"><strong>Status: RESOLVED — no production HWMP flapping bug.</strong> A 3-lens adversarial
+  workflow comparing morselib's HWMP against the pinned Linux <code>net/mac80211/mesh_hwmp.c</code> reference
+  settled the long-standing question. No code changed (pure analysis); two real, separate, non-flapping
+  residuals (<strong>D1</strong> small / <strong>D4</strong> bigger) recorded as backlog.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Verdict — the 07-11 flapping is a FORCED-TOPOLOGY TEST ARTIFACT (proven)</p>
+    <p>The anti-flap logic is a faithful Linux port and the ESTAB metric gate already exists. The oscillation was
+    <strong>manufactured by the bench-only peer allowlist</strong>, which creates a state
+    (<em>in-RF-range + HWMP-heard + not a data peer</em>) that <strong>cannot occur in an auto-peering
+    mesh</strong>. The proximate RA-flip was the origin <code>RA=dest</code> fallback — not route-learning.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">3</div><div class="lbl">independent lenses + a synthesis</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">lines changed (pure analysis)</div></div>
+    <div class="stat"><div class="num">~319 / ~221</div><div class="lbl">the 07-11 RA split that started it</div></div>
+    <div class="stat"><div class="num">2</div><div class="lbl">real residuals (D1, D4)</div></div>
+    <div class="stat"><div class="num ok">10/9</div><div class="lbl">metric hysteresis (~11%)</div></div>
+    <div class="stat"><div class="num ok">1.66</div><div class="lbl">Mbit/s multi-hop after D1</div></div>
+  </div>
+
+  <h2 id="question">The question</h2>
+  <p>The <code>mesh-p6c-airtime-and-hwmp-flapping</code> memory says the HWMP multi-path flapping bug
+  (per-reply <code>target_sn</code> + no PREQ reply-dedup) was <strong>fixed 2026-07-02</strong>
+  (halow <code>b677d9a3</code>). Yet the A-MPDU <strong>S2</strong> work (2026-07-11, worklog
+  <code>2026-07-11-mesh-ampdu-s2-multihop-nexthop-stad.md</code> §4) still saw board1's next-hop to board2
+  alternate — and called it "the known flapping bug." <strong>Real residual, or a test artifact?</strong></p>
+
+  <p>The observed split on the first-hop leg (bars to scale, ~319 as the reference):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">RA = board0</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">~319 · correct relay</span></div>
+    <div class="bar-row"><span class="lbl">RA = board2</span><span class="bar-track"><span class="bar-fill slow" style="width:69.3%"></span></span><span class="val">~221 · the final dest</span></div>
+  </div>
+
+  <h2 id="method">Method</h2>
+  <p><strong>3 independent lenses</strong> — port-fidelity vs Linux · artifact-vs-real-bug judge ·
+  self-healing-gap analyst — reading the <em>actual files</em>: morselib <code>umac_mesh.c</code> +
+  <code>umac_datapath.c</code>, and a local copy of Linux <code>mesh_hwmp.c</code> /
+  <code>mesh_pathtbl.c</code> / <code>mesh.h</code> (scp'd from chronite's <code>~/halow/rpi-linux</code>).
+  Then a synthesis that verified the load-bearing anchors and <strong>self-corrected one lens</strong>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">port-fidelity</div><div class="s">vs Linux HWMP</div></div>
+      <div class="node"><div class="t">artifact judge</div><div class="s">artifact vs real bug</div></div>
+      <div class="node"><div class="t">self-healing gap</div><div class="s">analyst</div></div>
+      <div class="node acc"><div class="t">synthesis</div><div class="s">verify anchors · correct a lens</div></div>
+    </div>
+    <figcaption>The synthesis pass verified every load-bearing anchor against the real files and overturned the artifact-steelman lens's claim that no ESTAB metric gate existed.</figcaption>
+  </figure>
+
+  <h2 id="verdict">Verdict — the three proofs</h2>
+
+  <h3>1 · Anti-flap logic is a faithful Linux port</h3>
+  <p><code>mesh_path_update</code> (<code>umac_mesh.c:1984</code>) == <code>hwmp_route_info_get</code>:
+  stale-SN reject + adopt only via <strong>same-next-hop</strong> OR when the metric <strong>beats by
+  10/9 (~11%) hysteresis</strong>, applied <em>independently of the SN test</em>. Two genuine similar-metric
+  paths <strong>cannot</strong> flap through this compare.</p>
+
+  <h3>2 · The ESTAB metric gate already exists</h3>
+  <div class="callout warn">
+    <p class="ct">⚠ This corrects the "artifact-steelman" lens, which wrongly claimed there was none</p>
+    <p><code>mesh_last_hop_metric</code> (<code>umac_mesh.c:2339</code>) returns <code>MESH_METRIC_MAX</code>
+    for a <strong>non-peer</strong> transmitter — exactly like Linux <code>airtime_link_metric_get</code>
+    non-ESTAB → MAX. So a route learned via a non-peer gets a <strong>saturated</strong> metric and
+    <strong>loses</strong> the compare to any real relay path.</p>
+  </div>
+
+  <h3>3 · The oscillation is manufactured by the bench allowlist</h3>
+  <p><code>mesh_peer_allowed</code> (<code>umac_mesh.c:517</code>) is a <strong>bench-only</strong> gate — it
+  returns true for everyone when <code>count==0</code>, i.e. <strong>off in production</strong>. It creates
+  "<strong>in-RF-range + HWMP-heard + not a data peer</strong>," which cannot occur in an auto-peering mesh
+  (in-range → MPM-peers → real 1-hop path; out-of-range → never hears the PREP). The proximate RA-flip is the
+  <strong>origin <code>RA=dest</code> fallback</strong> (<code>umac_datapath.c:3761</code>), not
+  route-learning.</p>
+
+  <h2 id="topology">The manufactured state, drawn</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 760 320" role="img" aria-label="Forced-topology triangle: board1 originates to board2 via relay board0; the board1–board2 edge is in RF range and HWMP-heard but forbidden as a data peer by the bench allowlist.">
+      <text x="20" y="24" font-size="12" font-weight="700" fill="currentColor" opacity=".65" letter-spacing="1">FORCED BENCH TOPOLOGY — <tspan fill="#d9534f">mesh_peer_allowed</tspan> ACTIVE</text>
+
+      <!-- edges: the two allowlisted MPM data-peer links -->
+      <line x1="145" y1="196" x2="368" y2="105" stroke="#2fae6b" stroke-width="2.5"/>
+      <line x1="392" y1="105" x2="615" y2="196" stroke="#2fae6b" stroke-width="2.5"/>
+      <!-- forbidden edge -->
+      <line x1="150" y1="215" x2="610" y2="215" stroke="#d9534f" stroke-width="2.5" stroke-dasharray="7 6"/>
+
+      <!-- edge labels -->
+      <text x="205" y="140" font-size="12.5" font-weight="650" fill="#2fae6b">MPM data peer</text>
+      <text x="205" y="156" font-size="11.5" fill="#888">allowlisted · real 1-hop</text>
+      <text x="470" y="140" font-size="12.5" font-weight="650" fill="#2fae6b">MPM data peer</text>
+      <text x="470" y="156" font-size="11.5" fill="#888">allowlisted · real 1-hop</text>
+
+      <!-- nodes -->
+      <g>
+        <rect x="55" y="176" width="100" height="44" rx="10" fill="rgba(47,111,235,0.10)" stroke="#2f6feb" stroke-width="2"/>
+        <text x="105" y="197" font-size="14" font-weight="700" text-anchor="middle" fill="currentColor">board1</text>
+        <text x="105" y="212" font-size="11" text-anchor="middle" fill="#888">origin</text>
+      </g>
+      <g>
+        <rect x="330" y="62" width="100" height="44" rx="10" fill="rgba(26,138,74,0.14)" stroke="#2fae6b" stroke-width="2"/>
+        <text x="380" y="83" font-size="14" font-weight="700" text-anchor="middle" fill="currentColor">board0</text>
+        <text x="380" y="98" font-size="11" text-anchor="middle" fill="#888">relay</text>
+      </g>
+      <g>
+        <rect x="605" y="176" width="100" height="44" rx="10" fill="rgba(47,111,235,0.10)" stroke="#2f6feb" stroke-width="2"/>
+        <text x="655" y="197" font-size="14" font-weight="700" text-anchor="middle" fill="currentColor">board2</text>
+        <text x="655" y="212" font-size="11" text-anchor="middle" fill="#888">final dest</text>
+      </g>
+
+      <!-- forbidden edge annotation -->
+      <rect x="228" y="228" width="304" height="62" rx="9" fill="rgba(192,57,43,0.10)" stroke="#d9534f" stroke-width="1.5"/>
+      <text x="380" y="247" font-size="12.5" font-weight="700" text-anchor="middle" fill="#d9534f">in RF range · HWMP PREP heard</text>
+      <text x="380" y="264" font-size="12.5" font-weight="700" text-anchor="middle" fill="#d9534f">but NOT a data peer</text>
+      <text x="380" y="281" font-size="11" text-anchor="middle" fill="#888">manufactured by the bench allowlist — impossible in production</text>
+
+      <!-- consequence -->
+      <text x="20" y="309" font-size="12" fill="currentColor" opacity=".8">⇒ board1 has no HWMP next-hop entry for board2 at times ⇒ origin falls back to <tspan font-weight="700">RA=dest</tspan> (<tspan font-family="ui-monospace,monospace" font-size="11">umac_datapath.c:3761</tspan>) ⇒ the ~221-frame RA-flip</text>
+    </svg>
+  </div>
+  <p style="text-align:center;color:var(--muted);font-size:13px;margin-top:-.4em">Nodes and edges are exactly the rig the worklog describes (board1 originates → board0 relays → board2), plus the allowlist-forbidden board1↔board2 edge that only the bench can create.</p>
+
+  <p>In a <strong>real auto-peering mesh</strong> that middle state has no home — the two possible cases are
+  mutually exclusive and neither flaps:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">in RF range</div><div class="s">hears the peer</div></div>
+      <div class="node ok"><div class="t">MPM-peers</div><div class="s">becomes a data peer</div></div>
+      <div class="node ok"><div class="t">real 1-hop path</div><div class="s">no flap</div></div>
+    </div>
+    <div class="flow">
+      <div class="node"><div class="t">out of RF range</div><div class="s">no reception</div></div>
+      <div class="node err"><div class="t">never hears the PREP</div><div class="s">no route learned</div></div>
+      <div class="node ok"><div class="t">relay path only</div><div class="s">no flap</div></div>
+    </div>
+    <figcaption>Auto-peering collapses "in-range" and "not a data peer" into a contradiction. Only the bench allowlist can hold both at once.</figcaption>
+  </figure>
+
+  <h2 id="residuals">Two real, separate residuals (backlog — NOT the flapping)</h2>
+
+  <h3>D1 (small) — the origin <code>RA=dest</code> fallback</h3>
+  <p>The local-origin header builder <code>umac_datapath_construct_80211_data_header_mesh</code>
+  (<code>umac_datapath.c:3761-3766</code>) transmits <code>RA=dest</code> when
+  <code>umac_mesh_lookup_next_hop</code> fails, instead of buffer+PREQ like Linux
+  <code>mesh_nexthop_resolve</code> (<code>mesh_hwmp.c:1239-1287</code>). Correct only when dest is a direct
+  peer (<code>umac_mesh_get_peer_stad(dest)!=NULL</code>); for a <strong>multi-hop-only dest</strong> it
+  wastes airtime blasting an unreachable RA + loses first packets before discovery.</p>
+  <ul>
+    <li>The <strong>forward</strong> path already drops-and-discovers — <strong>only the origin path
+      diverges</strong>.</li>
+    <li>Fix = mirror it (peer-check → <code>RA=dest</code>; else drop/queue + discover); the <code>void</code>
+      in-place header builder means the fix touches the <strong>caller</strong>
+      (<code>umac_datapath.c:2180</code>), so a small refactor.</li>
+    <li><strong>Not yet bench-confirmed as production-impacting</strong> (reasoned + worklog §4 only).</li>
+  </ul>
+
+  <h3>D4 (bigger, separate hardening) — no tx-status → PERR self-heal</h3>
+  <p>No tx-status → path-invalidation in the mesh datapath; <code>umac_mesh_invalidate_paths_via</code>
+  (<code>umac_mesh.c:2260</code>, the <code>mesh_plink_broken</code> body → PERR) fires <strong>only on MPM
+  peer-link teardown</strong>. There is <strong>no analog</strong> of Linux
+  <code>ieee80211s_update_metric</code> → <code>fail_avg</code> EWMA → <code>LINK_FAIL_THRESH(95)</code> →
+  <code>mesh_plink_broken</code> self-heal — so a silent black-hole / asymmetric next-hop
+  <strong>never self-heals</strong>:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">update_metric</div><div class="s">tx-status feedback</div></div>
+      <div class="node acc"><div class="t">fail_avg</div><div class="s">EWMA</div></div>
+      <div class="node acc"><div class="t">fail thresh</div><div class="s">&gt; 95</div></div>
+      <div class="node ok"><div class="t">plink_broken</div><div class="s">→ PERR · self-heal</div></div>
+    </div>
+    <figcaption>The Linux <code>ieee80211s_update_metric</code> → <code>fail_avg</code> → <code>LINK_FAIL_THRESH(95)</code> → <code>mesh_plink_broken</code> self-heal chain. In morselib only the last stage exists — and only via MPM teardown, never from tx-status.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Feasible:</strong> hook at <code>umac_datapath_process_tx_status_queue</code>
+      (<code>umac_datapath.c:2938</code>) beside <code>umac_rc_feedback</code>
+      (<code>umac_datapath.c:2986</code>) — add a per-peer <code>fail_avg</code> EWMA
+      (<strong>port Linux smoothing exactly or it self-thrashes under normal MCS0 retries</strong>),
+      invalidate on <strong>&gt;95</strong>.</li>
+    <li><strong>Bonus:</strong> makes P6c's structurally-0 airtime <code>err</code> term honest.</li>
+    <li><strong>Would NOT cure the 07-11 flapping</strong> — the allowlist-dropped frames hardware-ACK
+      <em>above</em> the drop → tx-status = SUCCESS → no fail-avg fires.</li>
+    <li>Needs a <strong>convergence bench</strong>.</li>
+  </ul>
+
+  <h2 id="d1-impl">D1 — implemented + bench-verified (same day)</h2>
+  <p>Added <code>umac_datapath_mesh_frame_undeliverable(h8023, is_eapol)</code> in
+  <code>umac_datapath.c</code> (<strong>+36 lines</strong>), gating <strong>both</strong> mesh TX paths in
+  <code>umac_datapath_process_tx_frame</code>. A mesh frame is dropped when <em>all</em> of these hold:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">unicast</div><div class="s">not multicast</div></div>
+      <div class="node acc"><div class="t">not EAPOL</div><div class="s">peering survives</div></div>
+      <div class="node acc"><div class="t">no HWMP path</div><div class="s"><code>!umac_mesh_lookup_next_hop</code></div></div>
+      <div class="node acc"><div class="t">dest not a peer</div><div class="s"><code>get_peer_stad(dest)==NULL</code></div></div>
+      <div class="node err"><div class="t">DROP</div><div class="s">kick discovery</div></div>
+    </div>
+    <figcaption>All four conditions must hold to drop. Otherwise the frame falls through unchanged.</figcaption>
+  </figure>
+
+  <p>The drop path: <strong>kick discovery → <code>goto error</code> → release + return
+  <code>MMWLAN_SUCCESS</code></strong> (= consumed), instead of falling through to the builder's
+  <code>RA=dest</code>. Direct-peer dests <strong>still get <code>RA=dest</code></strong> via the builder's own
+  fallback (correct, single-hop). Follows Linux <code>mesh_nexthop_resolve</code> — <strong>we drop rather than
+  buffer</strong>, because there is no mesh pending queue.</p>
+
+  <h4>Verification</h4>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">single-hop<br>board2→board0</span><span class="bar-track"><span class="bar-fill" style="width:27.7%"></span></span><span class="val">0.46 Mbit/s</span></div>
+    <div class="bar-row"><span class="lbl">multi-hop avg<br>board1→board0→board2</span><span class="bar-track"><span class="bar-fill fast" style="width:42.2%"></span></span><span class="val">0.70 Mbit/s</span></div>
+    <div class="bar-row"><span class="lbl">multi-hop peak<br>board1→board0→board2</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">1.66 Mbit/s</span></div>
+  </div>
+  <p style="font-size:13px;color:var(--muted);margin-top:-.6em">Bars to scale against the 1.66 Mbit/s peak. These are
+  two <em>different</em> rigs — a regression control and the multi-hop case — not a before/after of one flow.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Both checks pass</p>
+    <ul style="margin:.2em 0">
+      <li><strong>Regression — single-hop board2→board0 (direct peers):</strong> iperf <strong>0.46
+        Mbit/s</strong>. Peering completed + direct traffic flows → D1 does <strong>not</strong> drop EAPOL /
+        direct-peer / has-path frames.</li>
+      <li><strong>Multi-hop origination board1→board0→board2</strong> (board1 originates to a
+        <strong>non-peer</strong>): works, ramps to <strong>1.66 Mbit/s</strong> (<strong>0.70</strong> avg).
+        Dropping the artifact <code>RA=dest</code> frames lets board1 hold the relay path cleanly — D1
+        <em>incidentally mitigates</em> the forced-rig oscillation on the origin side.</li>
+    </ul>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Status at time of writing</p>
+    <p><strong>UNCOMMITTED</strong> in the halow submodule working tree (<code>umac_datapath.c</code>, +36) —
+    for review + commit (never auto-commit). <strong>No app change.</strong> Bench radio-silent afterward.</p>
+  </div>
+
+  <div class="callout">
+    <p class="ct">↻ Update after this worklog was written</p>
+    <p><strong>D1 has since landed.</strong> It was reviewed and merged the same day (2026-07-15) as
+    <code>teapotlaboratories/mm-esp32-halow#23</code> + <code>rimba#33</code> — the "UNCOMMITTED" status above
+    is preserved as written and reflects the state at the moment of the worklog, not today.</p>
+  </div>
+
+  <h2 id="disposition">Disposition</h2>
+  <ul>
+    <li><strong>No product fix needed for the <em>flapping</em></strong> (artifact). <strong>D1</strong> — the
+      origin <code>RA=dest</code> weakness the bench surfaced — is now fixed.</li>
+    <li>The <strong>S2/S3 A-MPDU multi-hop bench should still use a genuine out-of-RF far node</strong>, not the
+      in-range allowlist (which manufactures the HWMP-reachable-but-data-forbidden inconsistency).</li>
+    <li><strong>D4</strong> (tx-status→PERR self-heal) = separate hardening, own convergence bench —
+      <strong>stays backlog</strong>.</li>
+    <li><strong>Recorded:</strong> milestones Backlog (HWMP routing-residuals item, D1 marked done) + the
+      Forced-topology test note; memory <code>mesh-p6c-airtime-and-hwmp-flapping</code>. Workflow run
+      <code>wf_4d9e1f2c-337</code>.</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#question">The question</a></li>
+    <li><a href="#method">Method — 3 lenses</a></li>
+    <li><a href="#verdict">Verdict — three proofs</a></li>
+    <li><a href="#topology">The manufactured state</a></li>
+    <li><a href="#residuals">Residuals D1 · D4</a></li>
+    <li><a href="#d1-impl">D1 implemented + verified</a></li>
+    <li><a href="#disposition">Disposition</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-15-mesh-hwmp-flapping-artifact-verify</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

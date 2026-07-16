@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh A-MPDU S3: RTC-noinit drop counters + FIX-1; bench read blocked — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+<style>
+/* Page-local: the "what happened AFTER this worklog" retro-update block.
+   Deliberately styled apart from the doc's own callouts — this is NOT part of the
+   original entry, it is a later correction attached to it. */
+.update{margin:1.6em 0;border:1px dashed var(--accent2);border-left:4px solid var(--accent2);
+  border-radius:10px;background:color-mix(in srgb,var(--bug-bg) 70%,transparent);padding:1em 1.15em}
+.update .ut{font-weight:720;color:var(--accent2);margin:0 0 .1em;display:flex;align-items:center;gap:.5em;
+  font-size:.98rem}
+.update .ustamp{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+  border:1px solid var(--line);border-radius:20px;padding:1px 8px;background:var(--card)}
+.update ol{margin:.6em 0 0;padding-left:1.25em} .update li{margin:.5em 0}
+.update>:last-child{margin-bottom:0}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-12</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-12</span>
+    <span class="badge">8 min read</span>
+    <span class="badge ok">✓ (a) done</span>
+    <span class="badge warn">⚠ (b) unverified</span>
+    <span class="badge err">✗ (c) blocked</span>
+    <span class="badge bug">mesh · A-MPDU S3 · RTC-noinit · FIX-1</span>
+  </div>
+
+  <h1>Mesh A-MPDU S3: RTC-noinit drop counters + FIX-1 implemented<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">…and the bench read is blocked</small></h1>
+
+  <p class="lead"><strong>Phase:</strong> 802.11s mesh throughput — A-MPDU aggregation (S3 relay forward-leg) —
+  unblocking the RX-drop read. <strong>Author:</strong> Aldwin. Three tasks: (a) make the forward/RX-drop counters
+  survive the relay crash-reboot so the ~99 % early-host-RX drop can be read <em>after</em> the crash; (b) implement
+  FIX-1 (bus-preserving <code>hw_restart</code>) so board2 stays up under load; (c) one bench run to name the exact
+  RX drop bucket (allowlist / plaintext / hw-ccmp / sw-ccmp / no-decrypt).</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Status — partial: two built, the actual read never happened</p>
+    <p><strong>(a) DONE + hardware-validated. (b) IMPLEMENTED + builds green</strong> (toggle default OFF,
+    bench-unverified). <strong>(c) BLOCKED</strong> — board2's mesh plink flaps (peers then drops, never stable) so
+    no traffic flows through the relay to accumulate the counters. The block is a bench/board2-stability issue,
+    <strong>proven independent of the instrumentation</strong>. <strong>Nothing committed. Bench left
+    radio-silent.</strong></p>
+    <p style="color:var(--muted);font-size:14px">This entry is <strong>standalone</strong>.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">reset 11</div><div class="lbl">counters PRESERVED across the crash-reboot</div></div>
+    <div class="stat"><div class="num acc">11</div><div class="lbl">FIX-1 edits, all in <code>components/halow</code></div></div>
+    <div class="stat"><div class="num">0x1753e0</div><div class="lbl">bin — fits 0x177000, builds green</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">8 / 5</div><div class="lbl">plinks established / closed (board2 ↔ chronite)</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">0</div><div class="lbl"><code>restart_attempts</code> — all 3 cold-boot runs</div></div>
+    <div class="stat"><div class="num ok">8/8</div><div class="lbl">all-Linux control ping — 0 % loss, 0 flaps</div></div>
+  </div>
+
+  <h2 id="tldr">0 · TL;DR</h2>
+  <ul>
+    <li><strong>RTC-noinit counters work.</strong> <code>g_mesh_fwd_dbg[]</code> + a magic canary now live in the APP
+      as <code>RTC_NOINIT_ATTR</code> (morselib refs them <code>extern</code>). They survive the INT-WDT panic-reboot
+      (SW reset keeps RTC RAM — confirmed <code>ESP_SYSTEM_PANIC_PRINT_REBOOT=y</code>, delay 0), zero on a true
+      power-on / magic-mismatch, and dump once at boot + every 5 s. On-air proven:
+      <code>FWD-DBG counters PRESERVED across reset_reason=11</code> + a clean boot dump.</li>
+    <li><strong>FIX-1 implemented</strong> exactly per the adversarially-verified design (a bus-preserving "soft
+      restart" reusing the persistent SPI2_HOST bus across a chip reset + FW reload), 11 edits, <strong>builds
+      green</strong>. Gated behind <code>CONFIG_HALOW_SOFT_HW_RESTART</code> / runtime
+      <code>g_mmdrv_soft_hw_restart</code>, <strong>default OFF</strong> — it is delicate bus code that is not yet
+      bench-verified, so the tree behaves exactly as before until the toggle is flipped.</li>
+    <li><strong>The read is blocked</strong> by board2 mesh instability (below), not by any of this session's code.</li>
+  </ul>
+
+  <hr>
+
+  <h2 id="rtc">1 · RTC-noinit forward/RX-drop counters (task a) — DONE + validated</h2>
+
+  <p>Problem from the prior pass: the <code>g_mesh_fwd_dbg[FDBG_COUNT]</code> counters were plain globals, so the
+  INT-WDT crash-reboot zeroed them before they could be read → the earlier run only ever saw
+  <strong><code>rx_reached=6</code></strong> (the ~5 s since the last boot), never the accumulated total.</p>
+
+  <p>Fix (all TEMP instrumentation, uncommitted):</p>
+  <ul>
+    <li>Moved the counter <strong>storage</strong> out of morselib into the app
+      (<code>firmware/rimba-halow-mesh-perf/main/app_main.c</code>) as
+      <code>RTC_NOINIT_ATTR uint32_t g_mesh_fwd_dbg[FDBG_COUNT]</code> +
+      <code>RTC_NOINIT_ATTR uint32_t g_mesh_fwd_dbg_magic</code>. morselib (<code>umac_mesh.c</code>) keeps only the
+      <code>extern</code> + the getter; the ESP-specific RTC attribute stays in the app.</li>
+    <li>On boot: <code>esp_reset_reason() == ESP_RST_POWERON</code> OR magic-mismatch → <code>memset</code> the array
+      + set the magic (clean session); else PRESERVE (accumulate across the crash-reboot loop). A PPK2 power-cycle
+      (<code>reflash_hello</code>) is a true power-on → clean slate; the INT-WDT panic reboot is a SW reset → RTC RAM
+      preserved.</li>
+    <li>Dump <code>FWD-DBG[boot]</code> / <code>RX-DBG[boot]</code> <strong>once at boot</strong> (before the radio
+      can crash the board) plus the periodic 5 s dump, via a shared <code>dump_fwd_dbg()</code> helper — so even a
+      fast crash-boot surfaces the surviving totals.</li>
+  </ul>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 700 300" width="700" role="img" aria-label="RTC-noinit counter lifecycle: at boot, a true power-on or magic mismatch memsets the counters and sets the magic, while an INT-WDT software reset preserves RTC RAM and accumulates; both paths dump once at boot and every 5 seconds">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#888"/>
+          </marker>
+        </defs>
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+          <!-- boot -->
+          <rect x="270" y="8" width="160" height="40" rx="9" fill="rgba(47,111,235,.12)" stroke="#2f6feb" stroke-width="1.5"/>
+          <text x="350" y="27" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">boot</text>
+          <text x="350" y="41" text-anchor="middle" font-size="10.5" font-family="ui-monospace,Menlo,Consolas,monospace" fill="#888">esp_reset_reason()</text>
+          <line x1="350" y1="48" x2="350" y2="66" stroke="#888" stroke-width="1.5" marker-end="url(#a1)"/>
+
+          <!-- decision -->
+          <rect x="200" y="68" width="300" height="42" rx="9" fill="rgba(136,136,136,.10)" stroke="#888" stroke-width="1.5"/>
+          <text x="350" y="86" text-anchor="middle" font-size="12" font-weight="650" fill="currentColor">ESP_RST_POWERON  OR  magic mismatch ?</text>
+          <text x="350" y="102" text-anchor="middle" font-size="10.5" font-family="ui-monospace,Menlo,Consolas,monospace" fill="#888">g_mesh_fwd_dbg_magic</text>
+
+          <!-- branches -->
+          <path d="M350,110 L350,124 L150,124 L150,140" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#a1)"/>
+          <path d="M350,110 L350,124 L550,124 L550,140" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#a1)"/>
+          <text x="230" y="120" text-anchor="middle" font-size="10.5" font-weight="650" fill="#888">YES</text>
+          <text x="470" y="120" text-anchor="middle" font-size="10.5" font-weight="650" fill="#888">NO</text>
+
+          <!-- left: clean -->
+          <rect x="20" y="142" width="260" height="76" rx="9" fill="rgba(26,138,74,.12)" stroke="#1a8a4a" stroke-width="1.5"/>
+          <text x="150" y="161" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">CLEAN SESSION</text>
+          <text x="150" y="178" text-anchor="middle" font-size="11" font-family="ui-monospace,Menlo,Consolas,monospace" fill="#888">memset(g_mesh_fwd_dbg) + set magic</text>
+          <text x="150" y="195" text-anchor="middle" font-size="11" fill="#888">PPK2 power-cycle (reflash_hello)</text>
+          <text x="150" y="211" text-anchor="middle" font-size="11" fill="#888">= a true power-on</text>
+
+          <!-- right: preserve -->
+          <rect x="420" y="142" width="260" height="76" rx="9" fill="rgba(138,63,252,.12)" stroke="#8a3ffc" stroke-width="1.5"/>
+          <text x="550" y="161" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">PRESERVE + ACCUMULATE</text>
+          <text x="550" y="178" text-anchor="middle" font-size="11" fill="#888">INT-WDT panic reboot = SW reset</text>
+          <text x="550" y="195" text-anchor="middle" font-size="11" fill="#888">→ RTC RAM survives</text>
+          <text x="550" y="211" text-anchor="middle" font-size="11" font-family="ui-monospace,Menlo,Consolas,monospace" fill="#888">reset_reason=11</text>
+
+          <!-- join -->
+          <path d="M150,218 L150,236 L350,236 L350,252" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#a1)"/>
+          <path d="M550,218 L550,236 L350,236 L350,252" fill="none" stroke="#888" stroke-width="1.5"/>
+
+          <rect x="180" y="254" width="340" height="40" rx="9" fill="rgba(47,111,235,.12)" stroke="#2f6feb" stroke-width="1.5"/>
+          <text x="350" y="272" text-anchor="middle" font-size="12" font-weight="650" font-family="ui-monospace,Menlo,Consolas,monospace" fill="currentColor">dump_fwd_dbg()</text>
+          <text x="350" y="287" text-anchor="middle" font-size="10.5" fill="#888">once at boot (before the radio can crash it) + every 5 s</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The RTC-noinit counter lifecycle, exactly as implemented in <code>app_main.c</code>. Built from §1's
+    described branch — no invented states.</figcaption>
+  </figure>
+
+  <div class="callout ok">
+    <p class="ct">✓ Validated on hardware</p>
+    <p>A boot showed <code>FWD-DBG counters PRESERVED across reset_reason=11 (crash-reboot)</code> and a clean
+    <code>FWD-DBG[boot] ... =0 ... RX-DBG[boot] ... =0</code> line. Builds green (bin fits the
+    <code>SINGLE_APP_LARGE</code> partition).</p>
+  </div>
+
+  <h2 id="fix1">2 · FIX-1 (task b) — IMPLEMENTED, builds green, toggle default OFF, bench-unverified</h2>
+
+  <p>Design produced by a 4-phase agent workflow (3 mappers → synthesis → 3 adversarial red-team lenses → finalize),
+  grounded in the ESP teardown map + ESP-IDF intr semantics + a Linux <code>morse_driver</code> follow-verify.
+  <strong>FIX-1 = a bus-preserving soft restart invoked ONLY from <code>hw_restart_evt_handler</code></strong> that
+  reuses the persistent ESP <code>SPI2_HOST</code> bus + <code>spi_handle</code> + <code>bus_lock</code> +
+  <code>spi_irq_semb</code> + BOTH GPIO ISR handlers across a chip reset + FW reload, dropping exactly the
+  <strong>6 host-teardown calls</strong> the INT-WDT root cause blamed (<code>spi_bus_free</code>/<code>spi_bus_initialize</code>
+  = <code>esp_intr_free</code>/<code>alloc</code> → cross-core <code>esp_ipc</code> holding the ISR-shared global
+  intr-alloc spinlock <strong>&gt;300 ms</strong>). <code>morse_trns_start/stop</code> and
+  <code>mmhal_wlan_init/deinit</code> are <strong>never touched</strong>, so genuine first-boot/shutdown are
+  byte-for-byte unchanged.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t"><code>hw_restart_evt_handler</code></div><div class="s">umac_mmdrv_shim.c</div></div>
+      <div class="node acc"><div class="t"><code>g_mmdrv_soft_hw_restart</code></div><div class="s">? soft : legacy</div></div>
+      <div class="node ok"><div class="t">soft restart</div><div class="s">chip reset + FW reload<br>over the LIVE bus</div></div>
+    </div>
+    <figcaption>The single branch FIX-1 adds (edit 11). Preserved across the reset:
+    <code>SPI2_HOST</code>, <code>spi_handle</code>, <code>bus_lock</code>, <code>spi_irq_semb</code>, both GPIO ISR
+    handlers. Dropped: the 6 host-teardown calls. Untouched: <code>morse_trns_start/stop</code>,
+    <code>mmhal_wlan_init/deinit</code>.</figcaption>
+  </figure>
+
+  <h3>11 edits (all in <code>components/halow</code>, uncommitted)</h3>
+  <ol>
+    <li><code>Kconfig</code> — new <code>config HALOW_SOFT_HW_RESTART</code> (<strong>default n</strong>; the design
+      chose <code>y</code>, deviated to <code>n</code> because the path is unverified — see §3).</li>
+    <li><code>.../transport/morse_transport.h</code> — declare <code>morse_trns_soft_start</code> /
+      <code>morse_trns_soft_stop</code>.</li>
+    <li><code>.../internal/mmdrv.h</code> — declare <code>mmdrv_soft_restart</code> + <code>extern bool
+      g_mmdrv_soft_hw_restart</code>.</li>
+    <li><code>.../transport/sdio.c</code> <code>morse_trns_reset</code> — <strong>fix a pre-existing
+      <code>bus_lock</code> leak</strong> on the sdio-startup-fail early return (<code>:699</code>): it returned with
+      <code>bus_lock</code> held. Harmless on the full path (stop deletes the mutex), but the soft path PRESERVES
+      <code>bus_lock</code>, so without this a transient glitch would wedge the bus. Now releases.</li>
+    <li><code>.../transport/sdio.c</code> <code>morse_trns_soft_stop</code> (NEW) — the task-quiesce half of
+      <code>morse_trns_stop</code> ONLY (mask SPI_IRQ, stop + <strong>join</strong> the spi_irq worker); OMITS the
+      <code>bus_lock</code>/<code>semb</code> delete + <code>mmhal_wlan_deinit</code>.</li>
+    <li><code>.../transport/sdio.c</code> <code>morse_trns_soft_start</code> (NEW) — <code>morse_trns_reset</code>
+      over the live bus + recreate the spi_irq worker + re-arm CCCR IEN/BIC (claim/release-wrapped);
+      <strong>self-unwinds</strong> (joins its own worker) on any failure so a soft_start failure can never leave the
+      recreated task derefing a memset'd <code>driver_data</code>. Does NOT re-register/re-enable SPI_IRQ (persists;
+      re-enabled by <code>mmdrv_init</code>) and NOT call <code>mmhal_wlan_init</code>.</li>
+    <li><code>components/shims/mmhal_wlan.c</code> — invariant comment on
+      <code>mmhal_wlan_register_spi_irq_handler</code>: only <code>gpio_isr_handler_add</code> sets the per-pin
+      <code>int_ena</code>; the soft path must never remove the SPI_IRQ handler or it silently kills RX
+      (<code>int_ena=0</code>) with no crash.</li>
+    <li><code>.../driver/driver.c</code> — <code>#include "sdkconfig.h"</code> + file-scope <code>bool
+      g_mmdrv_soft_hw_restart</code> (compile-time default from the Kconfig) + <code>static bool
+      g_mmdrv_bus_persistent</code>.</li>
+    <li><code>.../driver/driver.c</code> <code>mmdrv_init</code>/<code>mmdrv_deinit</code> — gate EXACTLY the 3
+      transport call-sites (<code>morse_trns_start</code>@init, <code>morse_trns_stop</code>@error-unwind,
+      <code>morse_trns_stop</code>@deinit) on <code>g_mmdrv_bus_persistent</code>; everything else
+      byte-unchanged.</li>
+    <li><code>.../driver/driver.c</code> <code>mmdrv_soft_restart</code> (NEW) — sets
+      <code>g_mmdrv_bus_persistent=true</code>, runs the verbatim <code>mmdrv_deinit()</code>+<code>mmdrv_init()</code>
+      bodies (only the transport primitive swaps), clears it. Carries the residual-risk INVARIANT comment (umac-core
+      must serialize this vs first-boot/shutdown).</li>
+    <li><code>.../umac/umac_mmdrv_shim.c</code> <code>hw_restart_evt_handler</code> — branch:
+      <code>g_mmdrv_soft_hw_restart</code> ? soft : legacy.</li>
+  </ol>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Red-team majors merged (and one refuted)</p>
+    <p><strong>Merged:</strong> the <code>morse_trns_reset</code> <code>bus_lock</code> leak (#4), and the
+    <code>soft_start</code> self-unwind (#6).</p>
+    <p><strong>Dropped as refuted:</strong> FIX-1b (a guard against <code>gpio_install_isr_service</code>) —
+    <code>mmhal_os.c:28</code> already holds RESET_N low before the <code>:32</code> install, and that install arms no
+    per-pin interrupt.</p>
+  </div>
+
+  <p><strong>Builds green</strong> (<code>Project build complete</code>, bin <code>0x1753e0</code> fits
+  <code>0x177000</code>). <strong>Not bench-verified.</strong></p>
+
+  <h2 id="default-off">3 · Why default OFF (deviation from the design's default <code>y</code>)</h2>
+  <p>The design set the Kconfig default to <code>y</code> (confident, adversarially verified). I shipped it
+  <strong>default <code>n</code></strong> because:</p>
+  <ol>
+    <li>it is delicate SPI-bus-teardown code where subtle bugs hide,</li>
+    <li>the bench could not verify it this session (§4), and</li>
+    <li>the design itself flags a residual concurrency risk (<code>g_mmdrv_bus_persistent</code> needs umac-core
+      serialization — grep-verify before enabling) and a Linux follow-verify that is <em>"convention, grep-verify on
+      chronite before merge"</em>.</li>
+  </ol>
+  <p>Default <code>n</code> keeps the tree behaving exactly as today; enabling FIX-1 is one flag flip
+  (<code>CONFIG_HALOW_SOFT_HW_RESTART=y</code>, or set the runtime <code>g_mmdrv_soft_hw_restart</code>)
+  <strong>paired with the on-bench validation hooks</strong>: RTC-noinit
+  <code>restart_attempts</code>/<code>restart_completions</code>/<code>boot_count</code>, a non-owner-core canary task
+  watching for a <strong>&gt;300 ms</strong> inter-edge gap, and a deterministic driver firing N restarts
+  back-to-back.</p>
+
+  <h2 id="blocked">4 · Bench read (task c) — BLOCKED; the block is NOT the instrumentation</h2>
+
+  <p>Rig intended: board0 (client) → board2 (relay/DUT, only fully-wired ESP) → chronite (Linux far endpoint,
+  <code>rimba-mesh</code>, SAE <code>rimbamesh2026</code>, ch27, 10.9.9.2). What actually happened:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">board0</div><div class="s">client</div></div>
+      <div class="node acc"><div class="t">board2 — RELAY / DUT</div><div class="s">only fully-wired ESP</div></div>
+      <div class="node err"><div class="t">chronite</div><div class="s">Linux far endpoint<br>ch27 · 10.9.9.2</div></div>
+    </div>
+    <figcaption>The intended rig. It never carried traffic: board2's plink to chronite would not stay up, so the
+    counters stayed 0.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>board2's mesh plink FLAPS.</strong> A cleanly PPK2-cold-booted board2 has a <strong>healthy
+      chip</strong> — its SAE + AMPE peering with chronite <strong>ESTABLISHES</strong> (chronite log:
+      <em>"mesh plink with e2:72:a1:f8:f0:08 established"</em>, 8×) — but the plink <strong>closes</strong>
+      repeatedly (<strong>8 established / 5 closed</strong>, ~1 per 20-30 s; station dump shows <strong>0 peers most
+      of the time</strong>; ping <strong>100 % loss</strong>). No stable plink → no routing → no data traffic → the
+      RX/forward counters stay 0 → the drop cannot be measured. This is board2's known intermittent instability (the
+      interrupt-WDT / RA flap), now seen even without forward load in the current bench state. <strong>FIX-1 is the
+      candidate fix</strong> and is the reason to flip it on next: if the flap is the <code>hw_restart</code>
+      crash-loop, FIX-1 should stop it.</li>
+    <li><strong>Instrumentation exonerated.</strong> chronite (independent Linux firmware) also needed a mesh restart
+      to beacon, and the ESP↔chronite peering <strong>crypto succeeds</strong> — the failure is at the
+      plink-stability layer, not in the RTC-noinit counters or the S3 code.</li>
+  </ul>
+
+  <h2 id="gotchas">5 · Bench gotchas nailed this session (save the next session hours)</h2>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Serial reader — this corrects the bench doc</p>
+    <p>The safe non-reset combo on these XIAO ESP32-S3 native-USB boards is <strong><code>dtr=False</code> /
+    <code>rts=False</code></strong> (clean run: EN high, IO0 high). The doc's <code>dtr=True</code>/<code>rts=False</code>
+    HOLDS IO0 LOW → a reset drops into DOWNLOAD mode = <strong>silent</strong> (the boards looked dead for a while).
+    Tools left in the session scratchpad: <code>safe_read.py</code> (<code>dtr=False/rts=False</code>),
+    <code>reset_read.py</code> (connect-then-pulse-reset-into-app, captures the full boot incl. the RTC boot dump).</p>
+  </div>
+
+  <div class="callout err">
+    <p class="ct">✗ Opening the USB-JTAG console WARM-RESETS the board — and that wedges the MM6108</p>
+    <p>(<code>USB_UART_CHIP_RESET</code>, <code>reset_reason=11</code>.) A warm reset leaves the MM6108 GARBAGE
+    (<em>"Error retrieving version info - 3"</em>, chip ID <code>0x0000</code>, MAC <code>00:..:00</code>,
+    <em>"Channel list not set"</em>) → <code>mmwlan_mesh_start FAILED status=4</code>
+    (= <code>MMWLAN_CHANNEL_LIST_NOT_SET</code>). Only a real POWER-CYCLE heals it.</p>
+    <p>So: cold-boot board2 (PPK2) and <strong>do not console it during a run</strong> — read its RTC counters from
+    the boot dump on the <em>next</em> boot (RTC survives). board0/board1 can't be PPK2-cold-booted, so once
+    warm-reset-wedged they can't be un-wedged remotely.</p>
+  </div>
+
+  <ul>
+    <li><strong><code>pkill</code>/<code>pgrep</code>/<code>awk</code> self-match bit me 3×</strong> (exit 144): any
+      pattern containing the literal script name matches your OWN shell's cmdline → self-kill. Kill the PPK2 hold by
+      exact PID (or an <code>awk</code> pattern the command doesn't contain literally). Killing
+      <code>tools/ppk2_hold.py</code> powers board2 OFF (its cleanup toggles DUT off); restarting the hold cold-boots
+      board2.</li>
+    <li><strong>chronium <code>morse0</code> monitor delivered 0 frames</strong> this session despite live on-air
+      traffic (proven by chronite's wpa log seeing the ESPs) — the monitor is broken / needs re-setup. <strong>Do NOT
+      trust "0 frames = dead air".</strong></li>
+  </ul>
+
+  <h2 id="next">6 · Next steps</h2>
+  <ol>
+    <li><strong>Recover the bench</strong> (physical is fine): a full clean reset of all nodes; re-verify the chronium
+      <code>morse0</code> monitor works (it delivered 0 frames — needs re-setup) so on-air state is observable
+      non-invasively.</li>
+    <li><strong>Test whether FIX-1 stops board2's flap</strong> — build <code>CONFIG_HALOW_SOFT_HW_RESTART=y</code>,
+      flash board2, PPK2 cold-boot, watch the plink via chronite (0 flaps = FIX-1 is the fix, and the read is
+      unblocked). Add the §3 RTC-noinit restart telemetry + non-owner-core canary before trusting it.</li>
+    <li><strong>Run the read</strong>: with a stable board2 relay, blast board0→board2→chronite (or drive from
+      chronite so no ESP console is needed), then read board2's RTC <code>RX-DBG[boot]</code> to name the ~99 % drop
+      bucket (allowlist / plaintext / hw-ccmp / sw-ccmp / no-decrypt), per the prior diagnosis
+      (<code>docs/worklog/2026-07-12-...</code> A-MPDU chain + the design doc §S3/B6).</li>
+    <li>Grep-verify on chronite the FIX-1 Linux-provenance + the umac-core serialization residual risk before enabling
+      FIX-1 for real.</li>
+  </ol>
+
+  <h2 id="fix1-bench">7 · FIX-1 ON-BENCH TEST (toggle=y) — <code>hw_restart</code> never fires at idle; FIX-1 not the flap fix</h2>
+
+  <p>Enabled FIX-1 (<code>CONFIG_HALOW_SOFT_HW_RESTART=y</code> → runtime <code>g_mmdrv_soft_hw_restart=true</code>)
+  + added minimal RTC telemetry (the design's edit 12, minimal): <code>g_hwr_boot_count</code> (app_main entries — a
+  crash-reboot loop climbs it), <code>g_hwr_attempts</code> (<code>hw_restart_evt_handler</code> entries),
+  <code>g_hwr_completions</code> (restarts that returned). Flashed board2, PPK2-cold-booted, ran it against a live
+  chronite mesh, read the RTC counters via the boot dump.</p>
+
+  <p><strong>Three cold-boot runs, and <code>restart_attempts=0</code> EVERY time</strong>
+  (<code>hw_restart_evt_handler</code> never entered), with <code>boot_count</code> staying at cold-boot + my
+  console-read resets only (no crash-reboots):</p>
+
+  <table>
+    <thead>
+      <tr><th>Run</th><th>Build</th><th class="num">boot_count</th><th class="num">restart_attempts</th><th>Plink outcome (chronite log)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>A</strong></td><td>FIX-1, no telemetry</td><td class="num">—</td><td class="num">0</td><td>peered + flapped <strong>8 established / 5 closed</strong>, then went quiet</td></tr>
+      <tr><td><strong>B</strong></td><td>FIX-1 + telemetry</td><td class="num">3</td><td class="num">0</td><td>board2 established <strong>0 new plinks</strong> — did NOT peer</td></tr>
+      <tr><td><strong>C</strong></td><td>fresh chronite + cold-boot board2</td><td class="num">2</td><td class="num">0</td><td>delta <strong>0 establishes</strong> — board2 again did NOT peer</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <p class="ct">✓ Conclusions (definitive from <code>restart_attempts=0</code> + <code>boot_count</code> low)</p>
+    <ol style="margin:.2em 0">
+      <li><strong>board2 does NOT crash-loop / <code>hw_restart</code> at idle</strong> — so the mesh-plink flap
+        (Run A) and the general non-peering are a <strong>mesh peering / SAE-MPM-layer</strong> problem, NOT the
+        INT-WDT <code>hw_restart</code> crash. The prior sessions' assumption that <em>"board2 flapping == the
+        interrupt-WDT crash-loop"</em> does NOT hold at idle (no forward load). The INT-WDT crash is a
+        <strong>forward-load</strong> phenomenon; the idle flap is separate.</li>
+      <li><strong>FIX-1 is not the fix for what blocks the read</strong>, and it could not be <strong>exercised</strong>
+        on-bench: it only runs on a <code>hw_restart</code>, which never fired — the bench never reached the
+        sustained-forward-load state that triggers the crash (the peering never stabilized enough to carry load).
+        FIX-1 <strong>builds, boots, and runs cleanly</strong> (board2 ran the FIX-1=y firmware for 60 s with zero
+        crashes / regressions), but its crash-fixing behaviour remains <strong>unverified</strong>.</li>
+      <li><strong>board2's mesh is degrading over the session</strong> — it peered+flapped in Run A then would not
+        peer at all in Runs B/C (consistent with the known RF/thermal marginality on a long bench session, and
+        possibly the MM6108 wearing through repeated reflash + cold-boot cycles).</li>
+    </ol>
+  </div>
+
+  <p><strong>Revised next steps:</strong> (i) the read is blocked by the <strong>idle mesh-plink instability</strong>
+  (peer→close / won't peer) — diagnose that at the MPM/SAE layer (needs a working chronium <code>morse0</code> monitor
+  to capture the peering frames, and/or an all-ESP line where peering is more reliable), NOT via FIX-1. (ii) FIX-1
+  still needs a <strong>loaded</strong> relay to exercise its target crash — only reachable once the idle flap is
+  fixed and a client can push sustained traffic. (iii) The <code>boot_count</code>/<code>restart_attempts</code> RTC
+  telemetry is the right instrument for both — <strong>keep it</strong>.</p>
+
+  <div class="callout">
+    <p class="ct">📻 After every test: radio-silent</p>
+    <p><code>rimba-hello</code> on all ESPs + <code>ip link set wlan1 down</code> on the Linux nodes. This session
+    ended radio-silent (board0/1/2 = <code>rimba-hello</code>; chronite + chronium <code>wlan1</code> down; board2
+    stays PPK2-powered running hello = silent). The FIX-1 toggle was reverted to default OFF (the <code>=y</code>
+    removed from the gitignored app sdkconfig). <strong>Nothing committed.</strong></p>
+  </div>
+
+  <h2 id="localize">8 · Localizing the plink flap — it's ESP-side; ESP↔ESP test inconclusive (bench chips degraded)</h2>
+
+  <p>Since the flap (not FIX-1's crash) is what blocks the read, localized WHERE the mesh peering breaks.</p>
+
+  <h3>All-Linux control — ROCK STABLE</h3>
+  <p>chronite ↔ chronogen, same secured config <code>rimba-mesh</code> / SAE / ch27, same air:
+  <strong>0 establish / 0 close over 90 s</strong>, peer <strong>-45 dBm</strong> active (inactive <strong>92 ms</strong>),
+  ping <strong>8/8 0 % loss</strong>.</p>
+
+  <p>Same air, same config, same 90 s window — the two arms of the control:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">Linux↔Linux ping</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">8/8 · 0 % loss</span></div>
+    <div class="bar-row"><span class="lbl">ESP↔Linux ping</span><span class="bar-track"><span class="bar-fill slow" style="width:0%"></span></span><span class="val">0 % delivered · 100 % loss</span></div>
+    <div class="bar-row"><span class="lbl">Linux↔Linux closes</span><span class="bar-track"><span class="bar-fill fast" style="width:0%"></span></span><span class="val">0 closed / 0 established</span></div>
+    <div class="bar-row"><span class="lbl">ESP↔Linux closes</span><span class="bar-track"><span class="bar-fill slow" style="width:62.5%"></span></span><span class="val">5 closed / 8 established</span></div>
+  </div>
+  <p style="font-size:13.5px;color:var(--muted);margin-top:-.6em">Bars to scale: ping rows = fraction delivered
+  (8/8 = 100 %, 0 % vs 100 % loss); close rows = closes as a fraction of establishes (5/8 = 62.5 %; the Linux control
+  had neither).</p>
+
+  <div class="callout err">
+    <p class="ct">✗ The flap is NOT environmental — it is ESP-side</p>
+    <p>Earlier chronite logs for the ESP peer showed <strong>established → "MPM closing plink" → "deauthenticated due
+    to inactivity"</strong>: the ESP <strong>ESTABLISHES then goes SILENT</strong> (stops maintaining the plink) and
+    chronite times it out.</p>
+    <p><strong>NB</strong> the ESP↔Linux mesh WAS stable earlier (<strong>ping 45/45, same day</strong>) →
+    regression/condition; suspect the recent S1 <strong>MFP=no</strong> (touched mesh peering security) + S2/S3.</p>
+  </div>
+
+  <figure>
+    <div class="flow vert">
+      <div class="node ok"><div class="t">plink established</div><div class="s">SAE + AMPE crypto SUCCEEDS (8× on-air)</div></div>
+      <div class="node err"><div class="t">ESP goes SILENT</div><div class="s">stops maintaining the plink</div></div>
+      <div class="node err"><div class="t">"MPM closing plink"</div><div class="s">chronite: deauthenticated due to inactivity</div></div>
+    </div>
+    <figcaption>The failure signature chronite logged for the ESP peer. The crypto layer is exonerated — the break is
+    at plink maintenance.</figcaption>
+  </figure>
+
+  <h3>ESP↔ESP test (to split native-vs-interop) — INCONCLUSIVE</h3>
+  <p>Added mesh-plink RTC telemetry (<code>g_plink_estab</code>/<code>g_plink_close</code>: <code>umac_mesh.c</code>
+  ESTAB sites <strong><code>:2969</code></strong> / <strong><code>:2987</code></strong> + <code>mesh_peer_free</code>
+  teardown; dumped <code>"PLINK-DBG"</code> — stable peer ⇒ <code>estab=1</code>, flap ⇒ climbs). Ran board2
+  (cold-boot) ↔ board0 (flash), chronite DOWN, 90 s: <strong>both <code>estab=0</code></strong> — neither peered.
+  board0's MM6108 came up <strong>garbage</strong> (version-info error, chip ID <code>0x0000</code>,
+  <code>CHANNEL_LIST_NOT_SET</code>, <code>mesh_start FAILED=4</code>) even on a plain flash-boot, and board2's
+  cold-boot mesh had gone unreliable (peered in this session's first run, not since). <strong>Root: the ESP MM6108s
+  have DEGRADED over a very long, abuse-heavy session</strong> (dozens of reflash + cold-boot + thermal cycles), and
+  board0/board1 have NO power-cycle path (only board2 is PPK2-cold-bootable). So native-vs-interop could not be
+  measured.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Adjacent ESP finding — a warm ESP reset does NOT cleanly reset the MM6108</p>
+    <p>It comes back garbage (version-info error, <code>CHANNEL_LIST_NOT_SET</code>); only a real POWER cycle heals
+    it. <code>mmhal_wlan_hard_reset</code>'s RESET_N pulse (<strong>5 ms low / 20 ms high</strong>) may be
+    insufficient after the chip has been running. ESP-side, adjacent to FIX-1's chip-reset-over-bus work, and
+    possibly related to the peering marginality.</p>
+  </div>
+
+  <p><strong>Next (needs a FRESH bench — physical power-cycle ALL nodes + cool-down):</strong> (1) redo the ESP↔ESP
+  plink test with the telemetry already in place → native ESP MPM bug vs cross-vendor interop; (2) bisect the
+  ESP↔Linux flap against the last-good tree, MFP=no first; (3) fix the chronium <code>morse0</code> monitor (0 frames
+  this session) to capture the ESP's MPM/SAE/keepalive frames vs the stable Linux exchange. Then the RX-drop read +
+  FIX-1-under-load become reachable.</p>
+
+  <hr>
+
+  <div class="update" id="update">
+    <p class="ut">🔄 Later update — what happened AFTER this entry was written <span class="ustamp">not part of the original worklog</span></p>
+    <p style="color:var(--muted);font-size:14px;margin-top:.2em">The entry above is preserved exactly as written on
+    2026-07-12. Both of its open threads were later closed — and both landed differently than the entry expected:</p>
+    <ol>
+      <li><strong>The ~99 % drop was root-caused and FIXED on 2026-07-13 — and it was never an RX drop-bucket
+        mystery.</strong> It is a <strong>TX-rate-attribution bug</strong>: a multi-hop mesh <em>origin</em> frame was
+        sent at <code>common_stad</code>'s <strong>untrained MCS0</strong> → the MM6108 FW <strong>fragments</strong>
+        the full-size frame → <code>moreFrag</code> breaks the host SW-CCMP MIC → the relay MIC-fails ~99.6 %. The fix
+        (init aid + rate table on <code>key_stad</code>, the next hop, not <code>stad</code>) took board2's decrypt
+        from 0.4 % → 96.5 % on-air. So the drop bucket §4/§6 set out to name turned out to be
+        <strong>sw-ccmp</strong>, for a TX-side reason. See
+        <a href="2026-07-13-mesh-ampdu-s3-rate-attribution-fix.html">2026-07-13 — S3 rate-attribution fix</a>.</li>
+      <li><strong>FIX-1 was A/B'd on 2026-07-15 and REMOVED rather than shipped.</strong> Its mechanism <em>works</em>
+        — SPI re-inits <strong>8 → 2</strong>, a clean single-variable demonstration — but the <strong>baseline arm
+        never crashed either</strong>, so there was no benefit to demonstrate. Worse: <strong>no mesh node can
+        recover from any <code>hw_restart</code> today</strong> (there is no <code>umac_mesh_handle_hw_restarted</code>),
+        so <strong>both</strong> A/B arms went permanently deaf ~4 s after the first restart. FIX-1 is archived at
+        halow tag <code>archive/fix1-implementation</code>, backlogged to be paired with a mesh
+        <code>hw_restart</code> handler. See
+        <a href="2026-07-15-mesh-fix1-hw-restart-verify.html">2026-07-15 — FIX-1 <code>hw_restart</code> verify</a>.
+        This does <em>not</em> contradict §7 — §7 already concluded FIX-1 was neither the flap fix nor exercisable;
+        the 07-15 run finally exercised it (synthetically) and closed it out.</li>
+    </ol>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#tldr">0 · TL;DR</a></li>
+    <li><a href="#rtc">1 · RTC-noinit counters ✓</a></li>
+    <li><a href="#fix1">2 · FIX-1 implemented</a></li>
+    <li><a href="#default-off">3 · Why default OFF</a></li>
+    <li><a href="#blocked">4 · Bench read — BLOCKED</a></li>
+    <li><a href="#gotchas">5 · Bench gotchas</a></li>
+    <li><a href="#next">6 · Next steps</a></li>
+    <li><a href="#fix1-bench">7 · FIX-1 on-bench (toggle=y)</a></li>
+    <li><a href="#localize">8 · Localizing the plink flap</a></li>
+    <li><a href="#update">🔄 Later update</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-12-mesh-ampdu-s3-rtc-noinit-fix1-bench-block</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
