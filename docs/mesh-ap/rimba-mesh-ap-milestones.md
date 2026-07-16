@@ -359,7 +359,7 @@ Legend: ✅ implemented · 🟡 partial/minimal · ⬜ not implemented · n/a no
 | Open on heard candidate beacon (initiator) | ✅ | ✅ | from S1G-beacon discovery |
 | Retransmit / holding timers (retry, MaxRetries) | ✅ | ✅ | + interval jitter |
 | Stale-session guard (peer reboot → close/reopen) | ✅ | ✅ | llid-echo mismatch |
-| Peer-inactivity expiry (link-failure detection) | ✅ | ✅ | ESTAB idle > 6 s → Close + flush paths (`ieee80211_sta_expire`) |
+| Peer-inactivity expiry (link-failure detection) | ✅ | ✅ | ESTAB idle > `plink_timeout` **1800 s** (= Linux `MESH_DEFAULT_PLINK_TIMEOUT`, `ieee80211_sta_expire`) → Close + flush paths; `last_rx` refreshed on beacon **+ any received data frame**. Was **6 s / beacon-only** — ~300× too aggressive, flapped → fresh SAE on marginal RX; matched to Linux 2026-07-12. [liveness code-map](rimba-mesh-plink-liveness-codemap.md) · [worklog](../worklog/2026-07-12-mesh-peering-flap-bisect-no-regression.md) |
 | `user_mpm` vs driver MPM | both | driver/host | ESP runs MPM in morselib |
 | Max peer links | configurable | 🟡 4 | small fixed table |
 | **Authenticated peering (AMPE/SAE)** | ✅ | ✅ | secured mesh (host SW-CCMP) — [§Mesh security](#mesh-security--sae--ampe--ccmp-p6c) |
@@ -419,6 +419,13 @@ forwarding). None of this is production behaviour — it only forces a line on a
 **RF-forcing does *not* work here:** even at 1 dBm (`tx_max_power_mbm` / `mmwlan_override_max_tx_power`)
 board1↔board2 stays ~−52 dBm, ~40 dB above sensitivity — the boards are too close, so the allowlist
 is still required for a multi-hop demo (#23).
+**⚠ Artifact this manufactures (verified 2026-07-15):** with the allowlist forcing board1↔board2 to be
+non-*data*-peers while they're in RF range, board1 still HEARS board2 → HWMP adopts the lower-metric direct
+path, which the allowlist then silently drops → the origin `RA=dest` fallback (`umac_datapath.c:3761`) fires
+and the next hop appears to "flap" between the relay and the destination. This is NOT an HWMP bug (the
+dedup/SN fix + the ESTAB metric gate are both in place) — it's the harness. For a clean sustained multi-hop
+throughput/aggregation bench, use a genuine out-of-RF far node, not the in-range allowlist. See the HWMP
+routing-residuals backlog item + [[mesh-p6c-airtime-and-hwmp-flapping]].
 
 ### On-air frame verification (chronium monitor)
 Every ESP mesh frame type was captured **on the air by a third node** — chronium as a
@@ -782,7 +789,54 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
 - ☐ **P6c mesh hardening** — rate-derived **airtime metric** (currently a fixed per-hop cost,
   unverifiable on a single-path forced line), **RANN/root** mode, **proxy/gate (`mpp`)** so the
   Mesh-gate can bridge AP leaves onto the mesh, **mesh power save**. Derive each from
-  `net/mac80211/mesh*.c` + `morse_driver/mesh.c`.
+  `net/mac80211/mesh*.c` + `morse_driver/mesh.c`. *(UPDATE 2026-07-15: the airtime metric is no longer
+  fixed — real per-peer rate control (mmrc-learned airtime) is committed (halow `838b23c2`) + bench-verified
+  ~2.2× throughput; memory [[mesh-real-rc-feasible-design]]. Airtime **metric/path-selection** effect still
+  wants a ≥6-node convergence bench.)*
+- ☐ **HWMP routing residuals (D1 small / D4 bigger)** — the "path-flapping bug" is **RESOLVED: no production
+  bug** (re-verified 2026-07-15, 3-lens adversarial workflow vs the local Linux `mesh_hwmp.c`). The
+  per-reply-SN/no-dedup bug was fixed 07-02 (halow `b677d9a3`) AND the ESTAB metric gate already exists
+  (`mesh_last_hop_metric` :2339 → `MESH_METRIC_MAX` for a non-peer, == Linux); the 07-11 A-MPDU-S2 "flapping"
+  was a **forced-topology bench artifact** (allowlist + all-in-RF-range, see the Forced-topology note above).
+  Two real, separate residuals: **D1 ✅ IMPLEMENTED + bench-verified + COMMITTED 2026-07-15 (halow `5ac5f33b`,
+  rimba `43ae003`)** — a mesh unicast to a dest with no HWMP path AND not a direct peer
+  is now DROPPED + discovery kicked (helper `umac_datapath_mesh_frame_undeliverable`, gating both mesh TX
+  paths in `umac_datapath_process_tx_frame`) instead of blasting `RA=dest` (follow Linux `mesh_nexthop_resolve`;
+  EAPOL + multicast exempt so peering/ARP untouched). Regression PASS: single-hop iperf 0.46 Mbit/s (peering +
+  direct traffic intact); multi-hop origination board1→board0→board2 ramps to **1.66 Mbit/s** (dropping the
+  artifact `RA=dest` frames lets the origin hold the relay path). **D4** — no tx-status→PERR self-heal for a
+  silent black-hole/asymmetric
+  next-hop (Linux `fail_avg`→`LINK_FAIL_THRESH(95)`→`mesh_plink_broken`; the hook exists at
+  `umac_datapath.c:2938` beside `umac_rc_feedback`; needs the EWMA ported exactly + a convergence bench;
+  would NOT cure the flapping). Memory [[mesh-p6c-airtime-and-hwmp-flapping]].
+- ☐ **Mesh hw-restart recovery (prerequisite) + FIX-1 (bus-preserving restart, REMOVED from the tree)** —
+  **one item, in this order.** *(1) The blocker:* **a mesh node cannot survive ANY hw_restart.**
+  `hw_restart_evt_handler` (`umac_mmdrv_shim.c:68`) restores scan + STA only, and
+  `umac_interface_reinstall_vif` is called **exclusively** with `UMAC_INTERFACE_STA`
+  (`umac_connection.c:1660`) — there is no `umac_mesh_handle_hw_restarted`, so once the chip reset wipes its
+  vifs nothing re-adds the mesh vif / re-runs SET_MESH_CONFIG / reinstalls keys / restarts beaconing, and the
+  node goes **silently deaf**. Bench-proven 2026-07-15: server receive rate → 0.00 Mbit/s ~4 s after the first
+  forced restart, never recovers, in **both** A/B arms. Fix = mirror `umac_connection_handle_hw_restarted` for
+  mesh. *(2) FIX-1 itself was **removed** from the halow branch 2026-07-15* (halow `a4653862`; byte-identical to its
+  pre-`b0ea9f6a` state across all 7 files). **Its implementation is archived at the halow tag
+  `archive/fix1-implementation` (= `391eb528`, the pre-removal tip) — `git show archive/fix1-implementation`
+  to recover it; the tag's annotation carries the A/B result + the three load-bearing invariants** (int_ena is
+  set only by `gpio_isr_handler_add` → removing the SPI_IRQ handler on the soft path silently kills RX;
+  `soft_start` must join its worker before returning or a failure unwind derefs a memset'd `driver_data`;
+  `bus_lock` must be released on the reset path). Removed after an A/B on board2: its **mechanism works** (SPI re-inits 8 → 2 = the bus is
+  genuinely preserved) but the **baseline never crashed either** (0 crashes both arms, 6 full teardowns under
+  load) ⇒ **no demonstrated benefit**, and while (1) is unfixed it is a **trap** (enabling it converts a
+  self-healing crash-reboot into a silent permanent zombie). NOT closed as unnecessary: the 07-12 record has
+  properly-wired **board2 crash-looping on INT-WDT intermittently**, and the fatal `esp_intr_alloc` frame may
+  actually sit at **boot** (`gpio_install_isr_service`) rather than in the restart teardown FIX-1 targets — so
+  "needed?" and "unnecessary?" are BOTH unproven. Verdict rests on n=1 restart-under-load per arm (traffic dies
+  after restart #1 → restarts 2-6 ran idle), which is near-zero power against an intermittent fault. Revisit
+  only after (1), which is what enables the real rig: dozens of loaded restarts, A/B the crash rate. Worklog
+  `2026-07-15-mesh-fix1-hw-restart-verify.md`; memory [[mesh-relay-intwdt-rootcause]]. **NB (bonus finding):**
+  under load the periodic health check **never runs** (`skbq.c:333` refreshes `last_checked` on every successful
+  chip transaction → `should_skip` defers forever; measured 38 skips / 3 checks) — a loaded relay reaches a
+  restart ONLY via the 30-comm-failure escalation, which weakens the old "relay = restart-frequency amplifier"
+  framing.
 - ☐ **SAE hardening residual** — a *well-formed* forged Commit still tears a live link down (hostap
   itself reaches `ap_free_sta` for any such frame), so closing it fully needs a **non-hostap rate-limit
   on ACCEPTED-state reauth** (a deliberate divergence from the line-by-line port, deferred); plus the
@@ -803,11 +857,41 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   universal answer. Worklog `2026-07-11-mesh-20-linux-also-withholds-fw-limitation.md`. Close unless Morse
   ships an FW fix.)**
 - ☐ **Mesh A-MPDU aggregation — the dominant remaining relay-throughput limiter (NEXT).** Mesh sends single
-  MPDUs (memory `mesh-no-ampdu-aggregation`); per-frame preamble/IFS/backoff/ACK caps relay goodput
-  (~0.04 Mbit/s 2-hop) independent of CPU. Now that SW-CCMP crypto is cheap (below), **this is the ceiling.**
-  Multi-day core-RX + host-goodput feature (previously spiked/deprioritized); gate is `aggr_check`'s
-  `MMWLAN_STA_CONNECTED` check. Smaller optional win first: **in-place mesh forward** (rewrite headers on the
-  RX mmpkt vs `build_mgmt_frame` alloc+copy in `umac_mesh_forward_data`).
+  MPDUs; per-frame preamble/IFS/backoff/ACK caps single-flow + relay goodput (~0.04 Mbit/s 2-hop) and, now
+  that SW-CCMP crypto is cheap (below), **this is the airtime ceiling.** **Re-scoped 2026-07-11** (verified
+  feasibility + staged plan + Linux code-map: **`docs/mesh-ap/rimba-mesh-ampdu-aggregation-design.md`**;
+  memory `mesh-no-ampdu-aggregation`): **feasible ~6–10 d, and the old blocker-map was stale.** The
+  `MMWLAN_STA_CONNECTED` check is **not** the blocker — mesh's `get_sta_state` returns CONNECTED
+  unconditionally (`umac_datapath.c:3386-3390`) so single-hop already fires ADDBA on-air; and A-MPDU is
+  **FW-assembled**, not host-assembled (host only sets `MMDRV_TX_FLAG_AMPDU_ENABLED`, `:2274`, consumed at
+  `skbq.c:832/:845`). The **real unlock is routing inbound `BLOCK_ACK` action frames** to the BA handler on a
+  mesh vif (`umac_mesh_handle_action` drops them; `:273-274` never reached) **+** a PMF/robust-mgmt exemption
+  on a secured mesh (`:372-374`) — after which single-hop A-MPDU lights up. Staged **S0** FW go/no-go spike →
+  **S1** BLOCK_ACK RX routing → **S2** multi-hop next-hop stad (avoid the self-addressed `common_stad`) →
+  **S3** relay data-path retag (the relay win; combine with the **in-place mesh forward** — rewrite headers
+  on the RX mmpkt vs `build_mgmt_frame` alloc+copy in `umac_mesh_forward_data`) → **S4** teardown → **S5**
+  polish. **Status 2026-07-11 (bench; PRs `teapotlaboratories/mm-esp32-halow#23` + `teapotlaboratories/rimba#33`,
+  draft): S0 = GO** (FW advertises mesh AMPDU cap + on-air A-MPDU proven for 4-addr mesh data, worklog
+  `2026-07-11-mesh-ampdu-s0-fw-capability-spike.md`); **S1 code done + SECURED-mesh on-air verified** (real
+  A-MPDU from a completed BA session, no force; the mesh is SAE+PMF+SW-CCMP via `MMWLAN_MESH_SEC_PHASE1=1`, and
+  the aggregated frames are 100% `protected=1` → **SW-CCMP composes with A-MPDU, validated**). The ADDBA is sent
+  CCMP-protected on the all-ESP mesh, so the routing edit is the critical path and the unprotected-BA exemption
+  was not exercised. Follow-ups: ADDBA byte-diff vs Linux; then S2 (multi-hop) + S3 (relay).
+  **Update 2026-07-12/13:** S2 (multi-hop next-hop stad) + S3 (relay retag) code done; the S3 relay
+  forward-drop was root-caused to a **TX-rate attribution bug** (aid/rate on `stad` not `key_stad`) and
+  FIXED (on-air board2 decrypt 0.4%→96.5%, end-to-end board0→board2→board1) — committed. **✅ S3 residual —
+  SOLVED 2026-07-14 (defrag-before-decrypt, bench-VERIFIED):** the residual (full-size pre-BA / rate-fallback
+  frames the MM6108 FW fragments *after* the host CCMP MIC) is fixed by the OPPOSITE order to the abandoned
+  host-fragmentation attempt. **Host 802.11 fragmentation (halow `9c7daabd`, fragment→encrypt) was
+  bench-proven BROKEN** (the FW re-headers any host-submitted `frag# > 0` MPDU — a hard FW wall, `#20`-family)
+  and **reverted**. Instead, **defrag-before-decrypt**: the host submits ONE whole frame (no `frag#>0` ever
+  handed to the FW), the FW fragments it (*encrypt→fragment*), and on RX the host **reassembles the raw
+  fragments then decrypts the whole once**. Bench PASS: single-hop 131/131, multi-hop (board0→board2→board1)
+  143/146 (~98%), both directions, every fragment reassembled+decrypted (`ccmp_fail=0`), no crashes; with
+  forcing off, large frames go whole/A-MPDU at high rate and the rare natural fragmentation (~0.2%) is handled
+  too. Two bench-found bugs fixed (QoS-Control omitted from the reassembled CCMP AAD; `mmdrv_get_rx_metadata`
+  assert on the defrag-alloc buffer). Detail: worklog `2026-07-14-mesh-defrag-before-decrypt-PASS.md` +
+  `rimba-mesh-frag-codemap.md`. The min-MCS-floor / MTU-cap idea was NOT needed.
 - ✅ **Mesh SW-CCMP bulk-DMA AES-CCM — DONE 2026-07-11** (worklog `2026-07-11-esp32-mesh-swccmp-bulk-aes.md`).
   Root-caused the host SW-CCMP relay crypto cost: the CCM ran AES **one 16-byte ECB block at a time**
   (~187 single-block HW-AES ops per 1442 B frame, each paying the full `esp_aes`

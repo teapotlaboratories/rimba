@@ -168,12 +168,103 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>48</b> worklogs · 2026-06-17 – 2026-07-11</p>
+<p class="stat"><b>60</b> worklogs · 2026-06-17 – 2026-07-14</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">21</span></h2>
+<h2>July 2026 <span class="mcount">34</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-14-mesh-esp-linux-multihop-stress.html">
+<div class="card-date">2026-07-14</div>
+<div class="card-title">ESP↔Linux 3-hop mesh stress + a #20 counter-example</div>
+<div class="card-ex">A forced 3-hop line board0→board1→board2→chronite (HW-crypto Linux endpoint), stress-tested 30 min one-directional and 20 min bidirectional. Delivery held ~99–100% both ways: chronite→board0 99.82% (8987/9003) over 30 min, board0→chronite 100% (3000/3000) + chronite→board0 99.37% (2998/3017) over 20 min, zero crashes, no heap leak, avg ~48 ms over 3 hops. Encryption verified on all four nodes (chronite key_mgmt=SAE + CCMP; ESPs MMWLAN_SAE + drop-plaintext; ~15k frames flowed both ways so all were CCMP-protected). TWO findings: (1) a clean COUNTER-EXAMPLE to the #20 "universal FW limitation" — a HW-crypto Linux node (no_hwcrypt=N verified) received thousands of multi-hop A4≠TA forwards at the application layer, contradicting "HW-crypto mesh multi-hop is impossible"; likely the 2026-07-11 proof (10 forwards, raw-socket saw 0) was confounded — flagged for reconciliation. (2) An early board0 esp_ping stall at 200ms+200ms (~10/s through board0) was pure TX saturation, not a mesh fault — clean at 400ms (3000/3000). No firmware change; the defrag-before-decrypt fix was untouched. Radio-silent after.</div>
+<div class="card-meta">6 min · ✓ stress PASS · #20 counter-example · mesh · ESP↔Linux</div>
+</a>
+
+<a class="card" href="2026-07-14-mesh-defrag-before-decrypt-PASS.html">
+<div class="card-date">2026-07-14</div>
+<div class="card-title">Mesh SW-CCMP defrag-before-decrypt: bench PASS — the proper large-frame fix</div>
+<div class="card-ex">Large secured (SW-CCMP) 802.11s mesh frames now traverse the mesh — single-hop, multi-hop relay, and both directions — by letting the MM6108 FW fragment them (encrypt→fragment) and having the host REASSEMBLE the raw fragments before decrypt. The opposite order (host fragmentation, fragment→encrypt, halow 9c7daabd) was bench-broken and reverted. Fix in umac_datapath.c: a reorder bypass so a fragment skips the BA reorder buffer (all fragments share one seq#), plus a reassemble-then-decrypt branch in after_reorder (datapath_defrag → sw_ccmp_decrypt on the whole). Two bugs found + fixed: (1) the reassembled CCMP AAD lost the QoS Control (datapath_defrag re-prepends only the 30-byte MAC header, but mesh_ccmp_aad_nonce reads the QoS at hdr[30] = CCMP PN) → save [MAC+QoS] contiguously into aad_hdr, reset MoreFrags+frag#=0, pass as the AAD header; (2) mmdrv_get_rx_metadata asserts (metadata!=NULL, "RX frames only") on the defrag-alloc reassembled buffer, crash-looping the relay + endpoints → set rx_metadata=NULL. Bench (all-ESP, forced FW frag + 1400 B pings): single-hop 131/131 (100%), multi-hop board0→board2(relay)→board1 143/146 (~98%), every fragment reassembled AND decrypted (reasm==decok, ccmp_fail=0) at all four RX points, both directions, zero crashes. Toggle OFF = whole/A-MPDU at high rate (FRAG seen 767→10) with the rare natural fragmentation handled too. On-air (chronium morse0) confirmed the FW fragments host mesh frames into 3 MPDUs (shared seq#, incrementing frag#). MTU-cap / min-MCS floor NOT needed. Temp scaffold stripped, app restored, radio-silent.</div>
+<div class="card-meta">6 min · ✓ bench-VERIFIED PASS · 2 bugs fixed · mesh · SW-CCMP · fragmentation</div>
+</a>
+
+<a class="card" href="2026-07-14-mesh-frag-bench-verify.html">
+<div class="card-date">2026-07-14</div>
+<div class="card-title">Mesh host-fragmentation bench-verify: the committed fix is broken (a firmware wall)</div>
+<div class="card-ex">On-air verification of the committed but untested host 802.11 fragmentation fix for mesh SW-CCMP (fragment→encrypt, halow 9c7daabd). Verdict: NOT verified — broken on this firmware. On the forced all-ESP line board0→board2(relay)→board1, board0 fragments correctly (TXsent=252 = 3 host fragments/ping), but the relay MIC-fails ~64% (158/248), reassembles ZERO MSDUs, forwards nothing — every ping times out. The chronium morse0 capture pins it: fragment 0 is perfect ([MAC hdr | CCMP | cipher]), but every fragment with fragment_number>0 carries a byte-identical DUPLICATE of its own 32-byte MAC header (CCMP header shoved to offset 64), with Retry set and MoreFrags cleared. The host encrypt emits a correct single fragment and the builder is identical per index, so the FW adds the extra header AFTER encryption, only for frag#>0 — corrupting the CCMP AAD → MIC fail → no reassembly. A control run with the fix off (Test B: A-MPDU sends full-size frames WHOLE) delivers 100+ pings end-to-end once the BA session is up, proving the rig is sound and isolating the failure to the fragment path — and showing the fix is ineffective (the residual it targets, cold-start pre-BA frames, is exactly where its fragments are lost). A follow-Linux source cross-check (both trees) confirms it's a hard FW wall, #20-family: Linux never host-fragments on this FW (mac80211 defers via SUPPORTS_TX_FRAG/HW_FRAGMENT + DONTFRAG; fragmentation is FW-owned via a global threshold), and NO per-frame "already-fragmented" flag exists in the host↔FW descriptor in either tree. Recommend: abandon host fragmentation, cap the mesh MTU / floor the min-MCS so a SW-CCMP frame is never fragmented (frag#=0 always); revert or gate 9c7daabd. Left radio-silent.</div>
+<div class="card-meta">7 min · ✗ fix NOT verified — broken on-air · mesh · SW-CCMP · fragmentation</div>
+</a>
+
+<a class="card" href="2026-07-13-mesh-ampdu-s3-mtk-desync-plid-ignr-fix.html">
+<div class="card-date">2026-07-13</div>
+<div class="card-title">The "??" that looked like dead hardware: S3 MTK desync + plid-IGNR fix, and two corrections</div>
+<div class="card-ex">Set out to verify a follow-Linux fix for the S3 relay forward-drop (a pairwise MTK key desync); two things turned out wrong and mattered more than the fix. (1) A whole "MM6108 won't boot / degraded silicon / physical power" thread was a MISDIAGNOSIS: every firmware was built with bare idf.py, which ships CONFIG_HALOW_COUNTRY_CODE="??", and morselib (umac_interface.c:266) REFUSES to bring up the radio on "??" — returning "Channel list not set" before touching the chip, so version reads UNAVAILABLE, the chip id prints as varying uninitialised garbage (0x8200f5e7→0x8200d052→0x0000), and the MAC reads 00:00:00 — indistinguishable from dead hardware. Building via `make BOARD=proto1-fgh100m` (country US) booted every board first try: chip id 0x0306 (MM6108A1), fw 1.17.8, real MAC, rc=0 SPI read. All three boards (incl. board1's swapped module) are healthy — the hardware was fine all along. New rule added: always build via make…BOARD, never bare idf.py. This voids the pristine-baseline, STA, SPI-clock, flash-size, and module-swap tests (all ran on "??" radios). (2) The plid-IGNR fix does NOT fix S3: on a proper build the multi-hop forward still MIC-fails 99.3% (board2 sw_ccmp_fail=2061/2075), keys still desynced (board0 enc 6f1d9d9c…, board2 dec 7e586627…), and the failure is immediate from ESTAB, not after a re-peer — so the plid re-peer guard is the wrong mechanism (kept as hardening). Sharper lead: board0 TX-DBG nh_eq_stad=2930 = forwards encrypted with the wrong per-link key; since single-hop works, the forward path selects the destination (chronite) MTK instead of the next-hop (board2) MTK — the S2 key_stad override, to re-examine on a forced true-multi-hop rig.</div>
+<div class="card-meta">9 min · ⚑ mixed — build bug ruled, S3 reopened · mesh · A-MPDU · build</div>
+</a>
+
+<a class="card" href="2026-07-12-mesh-s3-swccmp-mic-forward-drop.html">
+<div class="card-date">2026-07-12</div>
+<div class="card-title">S3 relay forward drop root-cause: host SW-CCMP MIC failure</div>
+<div class="card-ex">ROOT CAUSE FOUND: a pairwise MTK key mismatch. The relay drops ~99% of forward-intended mesh frames at the host SW-CCMP decrypt — a CCMP MIC failure, not replay (mesh_seen=2084, mic=2052, replay=0, decrypt_ok=26). The single-hop A/B localizes it: single-hop board0→board2 direct decrypts 99.4%, the multi-hop forward only 1.2%. Host TX chain (header build, symmetric AAD, AMPDU flags) exonerated; the morse0 capture shows the 920 board0 forward frames are on-air valid; and a key_stad run shows board0 SELECTS the correct next-hop stad (98.7% nh_ok). The dual-side CCMP dump then pins it: the AAD matches byte-for-byte (masked-FC + A1=board2 + A2=board0 + A3=chronite + A4=board0 + QoS) but the KEY differs — board0 encrypts under 6f 1d 9d 9c 48 af d6 49, board2 decrypts under 91 bd e3 64 a0 a4 40 5a. The board0↔board2 pairwise MTK is not synchronized, so the MIC never verifies. Crypto recipe + addressing verified to follow mac80211 (ccmp_gcmp_aad wpa.c:318, ieee80211_fill_mesh_addresses mesh.c:851), so it is not the AAD/A3 or the recipe. Open: the mechanism — leading candidate is an asymmetric AMPE MTK rekey/install under peering churn (single-hop = stable peering, synced keys; multi-hop = churn). Fix = symmetric AMPE MTK install.</div>
+<div class="card-meta">10 min · ✓ root cause found · mesh · A-MPDU · SW-CCMP</div>
+</a>
+
+<a class="card" href="2026-07-12-mesh-peering-flap-bisect-no-regression.html">
+<div class="card-date">2026-07-12</div>
+<div class="card-title">Mesh peering-flap bisection: NO regression in the uncommitted A-MPDU layers</div>
+<div class="card-ex">The reported ESP↔Linux plink flap is not a regression in the uncommitted S2/S3/RTC/FIX-1/telemetry. Code + independent adversarial re-audit find the layers idle-peering-neutral (0/5 suspects survive); a same-board2 A/B has current-tree and clean 7fdba0c9 both hold rock-stable (flaps 0/0, connected 686 s+, RTC close=0). The "45/45 known-good" control was confounded; residual is the committed MPM keepalive gap (6 s vs Linux 1800 s), fixed and held under a 2088-frame relay load. The S3 RX-drop read is now answered: 2080/2088 forwarded frames drop in host SW-CCMP decrypt (99.6%), not the allowlist.</div>
+<div class="card-meta">8 min · ✓ resolved — no regression · mesh · A-MPDU · peering</div>
+</a>
+
+<a class="card" href="2026-07-12-mesh-ampdu-s3-relay-fwd-aggregation.html">
+<div class="card-date">2026-07-12</div>
+<div class="card-title">Mesh A-MPDU S3: relay forward-leg aggregation + FIX-2</div>
+<div class="card-ex">The forwarded unicast now rides the per-TID data path (DATA-class alloc + next-hop BA + AMPDU_ENABLED) so the FW A-MPDUs it — the multi-hop-goodput lever (B6). Same seam makes the forward non-blocking (FIX-2), removing the evtloop stall that armed the relay interrupt-WDT. Code done, builds green, 3 review findings fixed; not bench-verified.</div>
+<div class="card-meta">6 min · ✓ code done · builds green · mesh · A-MPDU · S3 · FIX-2</div>
+</a>
+
+<a class="card" href="2026-07-12-mesh-relay-intwdt-rootcause.html">
+<div class="card-date">2026-07-12</div>
+<div class="card-title">ESP mesh-relay Interrupt-WDT crash: code-only root cause</div>
+<div class="card-ex">Software bug, not a hardware wall. The relay's mesh-forward blocks 1000 ms inside the driver-task bus_lock, starving the SPI worker until 30 comm failures escalate to a full hw_restart whose SPI-host teardown (esp_intr_alloc via IPC) trips the interrupt watchdog. Relay = frequency amplifier, not a distinct crash class. Six ranked follow-Linux fixes.</div>
+<div class="card-meta">7 min · ✓ root-caused · software bug · mesh · relay · INT-WDT</div>
+</a>
+
+<a class="card" href="2026-07-12-mesh-esp-linux-ba-interop.html">
+<div class="card-date">2026-07-12</div>
+<div class="card-title">ESP↔Linux mesh Block Ack interop — the mesh-ID unlock</div>
+<div class="card-ex">A one-char mesh-ID mismatch (rimba-mesh vs rimba-smesh) was the whole blocker. Matched, a live Linux mesh peer accepts the ESP's unprotected NDP ADDBA (token 0x69) and CCMP A-MPDU runs at ~1.78 Mbit/s.</div>
+<div class="card-meta">6 min · ✓ interop RESOLVED · mesh · A-MPDU · interop</div>
+</a>
+
+<a class="card" href="2026-07-12-mesh-ampdu-multihop-stable-relay.html">
+<div class="card-date">2026-07-12</div>
+<div class="card-title">Mesh A-MPDU: multi-hop RA-flapping root cause + the throttle ceiling</div>
+<div class="card-ex">A stable Pi-5 relay kills the ~49% RA=dest flapping (100% correct next hop) — proving the ESP relay's load instability was the cause. But the 2-hop origin stays throttle-limited; the real A-MPDU lever is S3.</div>
+<div class="card-meta">6 min · ◑ flapping fixed · throttle-limited · mesh · A-MPDU · HWMP</div>
+</a>
+
+<a class="card" href="2026-07-11-mesh-ampdu-s0-fw-capability-spike.html">
+<div class="card-date">2026-07-11</div>
+<div class="card-title">Mesh A-MPDU S0: firmware go/no-go spike</div>
+<div class="card-ex">The Stage-0 hardware spike that gates the whole 802.11s mesh A-MPDU feature. Two questions: does the MM6108 firmware advertise A-MPDU capability for a mesh vif, and will the chip emit a real on-air A-MPDU for 4-address mesh QoS-data if the host force-marks the frames eligible? Both = GO — the mesh vif reports AMPDU_cap=1 and</div>
+<div class="card-meta">7 min · ✓ S0 GO (both halves) · mesh · A-MPDU · datapath</div>
+</a>
+
+<a class="card" href="2026-07-11-mesh-ampdu-s1-blockack-rx-routing.html">
+<div class="card-date">2026-07-11</div>
+<div class="card-title">Mesh A-MPDU S1: Block Ack RX routing + mesh MFP=no</div>
+<div class="card-ex">Two edits — route BLOCK_ACK action RX to the BA state machine, and set mesh peers MFP=no — complete the Block-Ack handshake, so single-hop secured-mesh A-MPDU lights up on air.</div>
+<div class="card-meta">6 min · ✓ single-hop A-MPDU on-air · mesh · A-MPDU · datapath</div>
+</a>
+
+<a class="card" href="2026-07-11-mesh-ampdu-s2-multihop-nexthop-stad.html">
+<div class="card-date">2026-07-11</div>
+<div class="card-title">Mesh A-MPDU S2: multi-hop next-hop stad Block Ack</div>
+<div class="card-ex">A multi-hop origin now completes its Block Ack with the next hop (ADDBA #428/#436) — proven on air — but sustained aggregation stays blocked by an orthogonal HWMP path-flapping bug, not S2.</div>
+<div class="card-meta">7 min · ◑ handshake proven · aggregation blocked · mesh · A-MPDU · datapath</div>
+</a>
 
 <a class="card" href="2026-07-11-esp32-mesh-swccmp-bulk-aes.html">
 <div class="card-date">2026-07-11</div>

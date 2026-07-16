@@ -144,6 +144,44 @@ to add AI attribution anywhere else. Everything above still holds for all code, 
 messages, PRs, and other docs: the *artifacts* carry no AI self-reference; only those
 README notes disclose the project's nature.
 
+## Building — always via `make`, never bare `idf.py`
+
+**Always build (and flash) through the repo `Makefile`, with an explicit board.**
+The board is what makes a firmware actually work:
+
+```sh
+make build  APP=rimba-halow-mesh BOARD=proto1-fgh100m      # build
+make flash  APP=rimba-halow-mesh BOARD=proto1-fgh100m PORT=/dev/ttyACM0
+make flash-monitor APP=… BOARD=… PORT=…
+```
+
+`make` layers `boards/<BOARD>/sdkconfig.defaults` (then the app's own
+`sdkconfig.defaults`) into the build via `SDKCONFIG_DEFAULTS`, and puts output in
+`build/<APP>/<BOARD>/`. The board overlay is **load-bearing** — it sets the chip
+target, the **MM6108 GPIO pin map**, the app partition, the firmware/BCF files,
+**and `CONFIG_HALOW_COUNTRY_CODE`** (e.g. `proto1-fgh100m` → `"US"`).
+
+**Never run bare `idf.py build` / `idf.py -DIDF_TARGET=… build` in the app dir.**
+It bypasses the board overlay, so the build falls back to component defaults —
+most damagingly **`CONFIG_HALOW_COUNTRY_CODE="??"`**. morselib
+(`umac/interface/umac_interface.c`, the `strncmp(country_code, "??")` gate)
+**refuses to bring up the radio when the country is `"??"`** — it returns
+`MMWLAN_CHANNEL_LIST_NOT_SET` *before* it ever talks to the MM6108. The symptom is
+insidious: the BCF still parses (host-side), but `mmwlan_get_version` returns
+`UNAVAILABLE`, the chip id prints as uninitialised garbage, the MAC reads
+`00:00:00:00:00:00`, and every STA/mesh call fails — which looks exactly like dead
+hardware. It is not: it's a `"??"` country from a non-`make` build. (This burned a
+whole bench session in 2026-07-13 before the country code was spotted; a correct
+`make … BOARD=proto1-fgh100m` build read chip id `0x0306` / fw 1.17.8 / a real MAC
+on the first try.)
+
+Default board is `proto1`; the FGH100M/`fgh100mhaamd` bench boards
+(board0/1/2) are **`proto1-fgh100m`**. If you must invoke `idf.py` directly for
+some reason, pass the board overlay yourself
+(`-D SDKCONFIG_DEFAULTS=boards/<BOARD>/sdkconfig.defaults`) and verify
+`CONFIG_HALOW_COUNTRY_CODE` in the generated `sdkconfig` is a real country, not
+`"??"`, before trusting any HaLow result.
+
 ## Verifying changes
 
 **Every change must be verified — by a hardware test or a unit test, whichever
@@ -251,6 +289,27 @@ done until its code map exists.
 
 Model: `docs/mesh-ap/rimba-mesh-80211s-code-map.md` (separate, function-level, verified)
 and the in-doc "Code map" tables in `docs/mesh-ap/rimba-mesh-ap-milestones.md`.
+
+## Worklogs — write and update as you go
+
+**For any non-trivial, multi-step investigation or implementation, keep a worklog
+(`docs/worklog/YYYY-MM-DD-<slug>.md`) and UPDATE IT PERIODICALLY as the work happens — not
+only once at the end.** The worklog is a running record, not a final report written from memory.
+
+- **Append at each meaningful checkpoint** — a confirmed finding, a measurement/number, a
+  decision and its reason, a dead-end (and why it was abandoned), a refuted hypothesis, a
+  hardware/bench result, or a next-step. Write it while it's fresh, before moving on.
+- **Why:** long agentic runs lose context (summarization, crashes, a new session). A worklog
+  updated as you go means the thread survives — a resumed session (or a human) can pick up
+  exactly where you were, with the evidence, instead of reconstructing it. It also stops the
+  end-of-task write-up from quietly dropping the dead-ends and the *why*.
+- **Standalone + honest** (as everywhere): each worklog is self-contained — never de-dup its
+  findings into "see other doc" pointers — and records what was actually tried/measured,
+  including what failed and what is still unverified, not a cleaned-up highlight reel.
+- **Keep the companion HTML render current** at meaningful checkpoints (see below) — not
+  necessarily every small append, but whenever a section's findings/numbers materially change,
+  refresh the render + its index card in the same spirit as the `.md`.
+- Trivial one-shot changes don't need a worklog (same bar as the "Plan first" TODO rule).
 
 ## Worklog HTML renders
 

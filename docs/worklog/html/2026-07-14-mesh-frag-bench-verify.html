@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh host-fragmentation: on-air bench verification — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)} .stat .num.err{color:var(--err)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+/* byte-layout blocks (frame structure diagram) */
+.frame{display:flex;flex-wrap:wrap;gap:0;margin:.5em 0;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.frame .seg{border:1px solid var(--line);border-right:0;padding:8px 10px;text-align:center;min-width:70px}
+.frame .seg:last-child{border-right:1px solid var(--line);border-radius:0 8px 8px 0}
+.frame .seg:first-child{border-radius:8px 0 0 8px}
+.frame .seg .sn{font-weight:680;display:block} .frame .seg .sb{font-size:10.5px;color:var(--muted);margin-top:2px}
+.frame .seg.hdr{background:var(--soft);color:var(--accent)}
+.frame .seg.ccmp{background:var(--ok-bg);color:var(--ok)}
+.frame .seg.dup{background:var(--err-bg);color:var(--err);border-color:var(--err)}
+.frame .seg.body{background:color-mix(in srgb,var(--line) 40%,transparent)}
+.frame-lbl{font-size:12.5px;font-weight:650;margin:.9em 0 .2em;display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-14</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-14</span>
+    <span class="badge">7 min read</span>
+    <span class="badge err">✗ fix NOT verified — broken on-air</span>
+    <span class="badge ok">✓ A-MPDU control PASS</span>
+    <span class="badge bug">mesh · SW-CCMP · fragmentation</span>
+  </div>
+
+  <h1>Mesh host-fragmentation: on-air bench verification<br><small style="font-weight:600;color:var(--muted);font-size:1.05rem">the committed fix is broken — the MM6108 firmware re-processes host-built fragments</small></h1>
+
+  <p class="lead">Bench-verified the committed but untested host 802.11 fragmentation fix for mesh SW-CCMP
+  (fragment→encrypt, halow <code>9c7daabd</code>). Verdict: <strong>NOT verified — it is broken on this
+  firmware.</strong> The first fragment goes out perfectly; every fragment past it is corrupted by the FW.
+  A control run with the fix disabled (A-MPDU sends full-size frames <em>whole</em>) delivers 100+ pings
+  end-to-end, proving the rig is sound and isolating the failure to the fragment path. A follow-Linux
+  source cross-check (both trees) confirms this is a hard firmware wall in the <code>#20</code> family,
+  not a fixable morselib flag.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">252</div><div class="lbl">fragment MPDUs TX'd (=3× / ping) — host frags correctly</div></div>
+    <div class="stat"><div class="num err">~64%</div><div class="lbl">MIC-fail at the relay (158 / 248)</div></div>
+    <div class="stat"><div class="num err">0</div><div class="lbl">fragmented MSDUs reassembled, either test</div></div>
+    <div class="stat"><div class="num ok">100+</div><div class="lbl">ping replies once A-MPDU-whole takes over (Test B)</div></div>
+  </div>
+
+  <h2 id="setup">The test</h2>
+  <p>A forced all-ESP line, board2 as the relay (it is the only fully-wired ESP DUT). board0 large-auto-pings
+  board1 (1400&nbsp;B, 200&nbsp;ms) <em>through</em> board2; a temp toggle forces mesh unicast non-A-MPDU so
+  every full-size mesh SW-CCMP frame deterministically takes the host fragmentation path. RX/TX counters
+  (<code>g_frag_dbg[]</code>) dump over the console; chronium's <code>morse0</code> monitor captures the
+  frames off-air.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">board0</div><div class="s">origin · 10.9.9.136</div></div>
+      <div class="node ok"><div class="t">board2</div><div class="s">relay · fully wired</div></div>
+      <div class="node acc"><div class="t">board1</div><div class="s">far · 10.9.9.100</div></div>
+    </div>
+    <figcaption>Forced line via peer allowlist. A 1400&nbsp;B ping → a ~1490&nbsp;B FCS-less mesh MPDU, well
+    over the 728&nbsp;B single-PPDU limit → host-fragmented into 3.</figcaption>
+  </figure>
+
+  <h2 id="test-a">Test A — force fragmentation: <span style="color:var(--err)">FAIL</span></h2>
+
+  <div class="callout err">
+    <p class="ct">✗ The relay MIC-fails ~2 of every 3 fragments and never reassembles</p>
+    <p>board0 fragments correctly (<code>TXorigin=84, TXsent=252</code> = exactly 3 fragments/ping). But the
+    relay board2 reads <code>RXmesh=248 RXfrag=238 mic_fail=158 decrypt_ok=89 <b>reasm=0 fwd_reached=0</b></code> —
+    it decrypts only ~36% of fragments, reassembles <b>none</b>, forwards <b>nothing</b>. board1 gets no
+    traffic; pings all time out.</p>
+  </div>
+
+  <p>The <strong>~2 : 1 fail : ok ratio</strong> is the tell: a 3-fragment frame = 2 full fragments + 1 small
+  remainder; the 2 full ones fail, the small one decrypts. The on-air capture shows exactly why.</p>
+
+  <h3>On-air root cause — fragments <code>i &gt; 0</code> are double-headered</h3>
+  <p>Decoding the 4-address QoS-Data mesh frames off <code>morse0</code> (raw hex, one ping = seq 421):</p>
+
+  <div class="diagram">
+    <div class="frame-lbl"><span class="badge ok">✓ correct</span> frag 0 &nbsp;·&nbsp; len 731 &nbsp;·&nbsp; MoreFrags=1</div>
+    <div class="frame">
+      <div class="seg hdr"><span class="sn">MAC hdr</span><span class="sb">32 B · 4-addr QoS</span></div>
+      <div class="seg ccmp"><span class="sn">CCMP</span><span class="sb">8 B · PN@ off 32</span></div>
+      <div class="seg body"><span class="sn">ciphertext + MIC</span><span class="sb">687 B</span></div>
+    </div>
+
+    <div class="frame-lbl"><span class="badge err">✗ broken</span> frag 1 &nbsp;·&nbsp; len 763 &nbsp;·&nbsp; MoreFrags=<b>0</b> · Retry=<b>1</b></div>
+    <div class="frame">
+      <div class="seg hdr"><span class="sn">MAC hdr</span><span class="sb">32 B</span></div>
+      <div class="seg dup"><span class="sn">DUP MAC hdr</span><span class="sb">+32 B · byte-identical</span></div>
+      <div class="seg ccmp"><span class="sn">CCMP</span><span class="sb">8 B · PN@ off <b>64</b></span></div>
+      <div class="seg body"><span class="sn">ciphertext + MIC</span><span class="sb">687 B</span></div>
+    </div>
+
+    <div class="frame-lbl"><span class="badge err">✗ broken</span> frag 2 &nbsp;·&nbsp; len 168 &nbsp;·&nbsp; MoreFrags=0</div>
+    <div class="frame">
+      <div class="seg hdr"><span class="sn">MAC hdr</span><span class="sb">32 B</span></div>
+      <div class="seg dup"><span class="sn">DUP MAC hdr</span><span class="sb">+32 B</span></div>
+      <div class="seg ccmp"><span class="sn">CCMP</span><span class="sb">8 B</span></div>
+      <div class="seg body"><span class="sn">cipher + MIC</span><span class="sb">92 B</span></div>
+    </div>
+  </div>
+
+  <p>Every fragment with <code>fragment_number &gt; 0</code> carries a <strong>byte-identical duplicate of its
+  own 32-byte MAC header</strong>, pushing the CCMP header to offset 64. The host encrypt
+  (<code>umac_datapath_sw_ccmp_encrypt</code>) emits a correct single-headered frame, and the builder code is
+  identical for every fragment index — so the extra header is added <strong>after host encryption, on the
+  FW/TX path</strong>, and <strong>only</strong> for frag# &gt; 0 (frag 0 is untouched; the FW also sets Retry
+  and clears MoreFrags). The prepended header corrupts the CCMP AAD/length the receiver reconstructs → MIC
+  fails → the fragment set never completes → no reassembly → no forwarding.</p>
+
+  <h2 id="test-b">Test B — toggle off: A-MPDU sends full-size frames whole: <span style="color:var(--ok)">PASS</span></h2>
+
+  <p>Same rig, fragmentation forced off. This is the control that validates the rig <em>and</em> shows the
+  practical path works.</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">t 6–17 s · cold start</span>
+      <div class="bar-track"><div class="bar-fill slow" style="width:8%"></div></div>
+      <span class="val">pings 1–11 time out</span></div>
+    <div class="bar-row"><span class="lbl">~t 17 s · BA up</span>
+      <div class="bar-track"><div class="bar-fill fast" style="width:44%"></div></div>
+      <span class="val">first reply (seq 12)</span></div>
+    <div class="bar-row"><span class="lbl">t 17–50 s · steady</span>
+      <div class="bar-track"><div class="bar-fill fast" style="width:100%"></div></div>
+      <span class="val">100+ replies · RTT ~70–130 ms</span></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Recovery is unambiguous</p>
+    <p>At cold start the fix fires <em>naturally</em> (the BA session isn't up, so <code>ampdu_eligible=false</code>)
+    — board0 fragments 2 frames and those fail exactly as in Test A. Once the BA session establishes,
+    <code>TXorigin</code> <b>freezes at 2</b>: fragmentation stops, frames go whole/aggregated, board2 forwards
+    them (<code>fwd_reached</code> 0→<b>223</b>), and board0 gets 100+ replies. <code>reasm</code> stays 0
+    throughout — whole frames need no reassembly.</p>
+  </div>
+
+  <p>This also exposes the fix's real problem: the residual case it exists for — cold-start / pre-BA full-size
+  frames — is <em>exactly</em> where its fragments get mangled and lost. It neither helps nor hurts versus
+  letting the FW fragment them; it just adds a broken path.</p>
+
+  <h2 id="follow-linux">Follow-Linux cross-check — it's a firmware wall</h2>
+  <p>The morse <strong>Linux</strong> driver runs the same MM6108 + 1.17.8 firmware. Does it host-fragment
+  successfully where the ESP can't? No — <strong>Linux never host-fragments on this firmware</strong>, and
+  neither stack has any per-frame "already-fragmented / leave-it-alone" flag:</p>
+
+  <table>
+    <thead><tr><th>Fact</th><th>Evidence (grep, both trees)</th></tr></thead>
+    <tbody>
+      <tr><td>mac80211 skips host fragmentation under <code>SUPPORTS_TX_FRAG</code>; defaults to <code>DONTFRAG</code></td>
+          <td><code>net/mac80211/tx.c:967-968, 964, 1275-1280</code></td></tr>
+      <tr><td><code>SUPPORTS_TX_FRAG</code> set straight from the FW <code>HW_FRAGMENT</code> capability bit</td>
+          <td><code>morse_driver/mac.c:6835-6836</code>; cap <code>capabilities.h:86</code></td></tr>
+      <tr><td>Fragmentation is FW-owned via a <em>global threshold</em> command — host sends whole MPDUs</td>
+          <td><code>mac.c:5632</code> → <code>command.c:2387</code>; morselib mirror <code>umac.c:1598</code></td></tr>
+      <tr><td>No fragment / raw / seq field in the host→FW TX descriptor — <em>either</em> tree</td>
+          <td>Linux <code>skb_header.h:243-251,57-71</code> · morselib <code>mmdrv.h:609-619</code></td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Crypto mode — verified live + source (2026-07-14).</strong> The bench Linux nodes run
+  <strong>HW crypto</strong> (<code>no_hwcrypt=N</code> on chronite/chronium/chronosalt; <code>set_key</code>
+  HW-offloads CCMP, <code>mac.c:5141-5230</code>). Under HW crypto the FW does fragment→encrypt in the correct
+  order — but <code>#20</code> blocks the HW-crypto multi-hop <em>forward</em>, so <strong>default Linux mesh
+  is single-hop-only for encrypted traffic and there is no working multi-hop-encrypted Linux mesh</strong>.
+  So there is <strong>no Linux precedent</strong> for the ESP's case (SW-CCMP multi-hop). And mac80211
+  <strong>never host-fragments by default</strong> (<code>frag_threshold=-1</code> → <code>DONTFRAG</code> on
+  every unicast). Forcing Linux to SW crypto (<code>no_hwcrypt=1</code>) for multi-hop would hit the
+  <em>same</em> wall. (An earlier "Linux uses HW crypto to sidestep this" phrasing was imprecise and
+  self-contradictory vs <code>#20</code> — the accurate statement is that the ESP operates where Linux does
+  not, so there is no reference and no host-side fragmentation fix on this firmware.)</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ On-air confirmed (2026-07-14) — under HW crypto the FW fragments cleanly and delivers</p>
+    <p>Secured single-hop Linux mesh chronite↔chronogen (HW crypto), forced MCS0 + a 512&nbsp;B frag
+    threshold → the <strong>FW fragmented a 1400&nbsp;B ping into 4 clean fragments</strong>: MoreFrags
+    1,1,1,0, incrementing frag#, constant seq#, each 528&nbsp;B with its own CCMP header + consecutive PN
+    (82,83,84,85). Raw hex of <code>frag=1</code>: <strong>CCMP header at offset 32</strong> (<code>58 01 00
+    20 …</code>) = single-header — vs the ESP's frag&gt;0 double-header (CCMP at offset 64, len 763). And it
+    <strong>delivered 61/70 (87%)</strong> — chronogen reassembled + replied — vs the ESP relay's
+    <strong>0%</strong>. Same silicon + FW; the only difference is <em>who encrypts</em>: Linux = the FW
+    (HW crypto owns fragment→encrypt, gets it right); ESP = the host (SW-CCMP → the FW re-headers frag&gt;0).
+    This closes the last inference: the "never fragment" (MTU-cap / min-MCS) path is confirmed as the only
+    option for the ESP's SW-CCMP mesh.</p>
+  </div>
+
+  <h2 id="recommendation">Conclusion &amp; recommendation</h2>
+  <div class="callout bug">
+    <p class="ct">Host fragment→encrypt is fundamentally incompatible with this firmware</p>
+    <p>A hard FW limitation in the <code>#20</code> family, not a morselib logic bug — the encrypt + builder
+    emit a correct single fragment; the FW mangles the multi-fragment burst. Confidence: VERY HIGH on the
+    descriptor-level facts, HIGH on the conclusion.</p>
+  </div>
+  <p><strong>Deterministic path:</strong> abandon host fragmentation for mesh SW-CCMP and keep every full-size
+  frame <strong>under the single-PPDU limit so it is never fragmented at all</strong> — a <strong>mesh-vif
+  MTU cap</strong> (the host never hands down a frame that would need fragmenting) or a <strong>min-MCS
+  floor</strong> on the mesh RC (a full frame always fits one PPDU at the worst rate). Either keeps
+  <code>frag#=0</code> always. Meanwhile A-MPDU-whole already carries the steady-state mesh fine. The
+  committed <code>9c7daabd</code> host-fragmentation fix should be <strong>reverted or gated off</strong> —
+  left in the tree for the owner's review, not reverted here.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Revert + ESP verification (2026-07-14) — the revert IS the practical fix; MTU-cap unnecessary</p>
+    <p><code>9c7daabd</code> <strong>reverted</strong> (staged, builds green). Then verified what the reverted
+    mesh actually does — and the "MTU-cap is needed" premise turned out much narrower than the <em>forced</em>
+    Test A/B implied. Measured (Linux, same FW): a full-MTU frame at <strong>MCS0/1 MHz goes WHOLE (1566 B)</strong>
+    — MCS0 is not where a normal frame fragments; the mesh only fragments when it drops <em>below</em> MCS0
+    (the 1 MHz repetition mode, single-PPDU budget ~728–740 B — so <code>728</code> was right for the
+    <em>worst</em> rate, not MCS0). On the <strong>reverted ESP mesh</strong> (real conditions, full-size
+    multi-hop): <strong>fragmentation is rare — 1 frame in 20 s (~0.24%) vs 410 whole</strong>; ~86% ping on a
+    marginal MCS0/MCS2 bench link where the ~14% loss is low-rate RF, not fragmentation; a good link (MCS7) =
+    <strong>zero</strong> fragmentation. So the revert removes the <em>systematic</em> breakage.
+    <strong>An MTU cap is overkill</strong> (caps every frame for a &lt;0.3% weak-link edge); a
+    <strong>min-MCS floor</strong> is the right <em>optional</em> weak-link hardening (future item, not a
+    bolt-on).</p>
+  </div>
+
+  <h2 id="method">Method &amp; disposition</h2>
+  <ul>
+    <li><strong>Rig:</strong> board0 <code>/dev/ttyACM0</code>, board1 <code>ACM1</code>, board2 <code>ACM4</code>
+    (PPK2-powered). Build only via <code>make … BOARD=proto1-fgh100m</code> (country US verified). Temp toggle
+    <code>g_mesh_force_no_ampdu</code> forces the fragment path; <code>g_frag_dbg[]</code> counters
+    (mesh_seen / frag_seen / mic_fail / decrypt_ok / reasm / fwd_reached, TX origin/fwd/sent) dumped by the app.</li>
+    <li><strong>Adversarial pre-bench review</strong> (4-lens workflow) caught one real counter-attribution bug
+    (mic_fail also hit by the protected-PREP decrypt path) — fixed by gating on the DATA counter space before
+    flashing.</li>
+    <li><strong>On-air:</strong> chronium <code>morse0</code> monitor, ch27, 4-addr QoS-Data decode + raw hex.</li>
+    <li><strong>Left the bench radio-silent:</strong> all three ESPs on <code>rimba-hello</code> (banner + zero
+    <code>mmwlan</code> lines confirmed), chronium + chronite <code>wlan1</code> down. Temp instrumentation
+    stripped; stripped tree rebuilds green.</li>
+  </ul>
+  <p style="color:var(--muted);font-size:14px">Full worklog: <code>docs/worklog/2026-07-14-mesh-frag-bench-verify.md</code>.
+  Related: the RC-on-<code>key_stad</code> S3 fix this residual followed, and <code>#20</code>
+  (HW-crypto mesh multi-hop is a universal FW limitation).</p>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#setup">The test</a></li>
+    <li><a href="#test-a">Test A — FAIL</a></li>
+    <li><a href="#test-b">Test B — PASS (control)</a></li>
+    <li><a href="#follow-linux">Follow-Linux cross-check</a></li>
+    <li><a href="#recommendation">Conclusion + recommendation</a></li>
+    <li><a href="#method">Method &amp; disposition</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-14-mesh-frag-bench-verify</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

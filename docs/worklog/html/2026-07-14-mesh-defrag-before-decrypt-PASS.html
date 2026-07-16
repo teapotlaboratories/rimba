@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh SW-CCMP defrag-before-decrypt — bench PASS — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)} .stat .num.err{color:var(--err)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+/* byte-layout blocks (frame structure diagram) */
+.frame{display:flex;flex-wrap:wrap;gap:0;margin:.5em 0;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.frame .seg{border:1px solid var(--line);border-right:0;padding:8px 10px;text-align:center;min-width:70px}
+.frame .seg:last-child{border-right:1px solid var(--line);border-radius:0 8px 8px 0}
+.frame .seg:first-child{border-radius:8px 0 0 8px}
+.frame .seg .sn{font-weight:680;display:block} .frame .seg .sb{font-size:10.5px;color:var(--muted);margin-top:2px}
+.frame .seg.hdr{background:var(--soft);color:var(--accent)}
+.frame .seg.ccmp{background:var(--ok-bg);color:var(--ok)}
+.frame .seg.dup{background:var(--err-bg);color:var(--err);border-color:var(--err)}
+.frame .seg.body{background:color-mix(in srgb,var(--line) 40%,transparent)}
+.frame-lbl{font-size:12.5px;font-weight:650;margin:.9em 0 .2em;display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-14</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-14</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ bench-VERIFIED PASS</span>
+    <span class="badge bug">2 bugs found &amp; fixed</span>
+    <span class="badge">mesh · SW-CCMP · fragmentation</span>
+  </div>
+
+  <h1>Mesh SW-CCMP defrag-before-decrypt: bench PASS<br><small style="font-weight:600;color:var(--muted);font-size:1.05rem">the proper large-frame fix — let the FW fragment, reassemble the raw fragments, then decrypt the whole</small></h1>
+
+  <p class="lead">Large secured (SW-CCMP) 802.11s mesh frames now traverse the mesh — single-hop, multi-hop
+  relay, and both directions — with the MM6108 firmware fragmenting them (<em>encrypt&nbsp;→&nbsp;fragment</em>)
+  and the host <strong>reassembling the raw fragments before decrypt</strong>. The opposite order — host
+  fragmentation (<em>fragment&nbsp;→&nbsp;encrypt</em>, halow <code>9c7daabd</code>) — was bench-proven broken
+  and reverted. Two real bugs surfaced on the way and were fixed. All-ESP rig, radio-silent afterward.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">131/131</div><div class="lbl">single-hop replies (100%), 3 frags/frame all reassembled+decrypted</div></div>
+    <div class="stat"><div class="num ok">143/146</div><div class="lbl">multi-hop board0→board2→board1 (~98%), both directions</div></div>
+    <div class="stat"><div class="num acc">0</div><div class="lbl">CCMP failures — <code>reasm == decok</code> at every hop</div></div>
+    <div class="stat"><div class="num acc">0</div><div class="lbl">crashes / asserts, relay + endpoints</div></div>
+  </div>
+
+  <h2 id="problem">The problem</h2>
+  <p>A mesh SW-CCMP unicast frame larger than the 1&nbsp;MHz / MCS0 single-PPDU limit is <strong>fragmented by
+  the MM6108 firmware <em>after</em></strong> the host computed the one CCMP MIC over the whole (unfragmented)
+  frame. The FW replicates the MAC header per fragment but leaves the CCMP header only on fragment&nbsp;0 and
+  the MIC only on the last fragment. So each fragment is <strong>not independently decryptable</strong>, and
+  the existing RX order (decrypt-then-defrag, correct for host-side <em>fragment&nbsp;→&nbsp;encrypt</em>)
+  drops them.</p>
+
+  <div class="frame-lbl">What the FW puts on air (a 1400&nbsp;B ping → 3 MPDUs, one shared seq#):</div>
+  <div class="frame">
+    <div class="seg hdr"><span class="sn">MAC hdr</span><span class="sb">frag#0 · MF=1</span></div>
+    <div class="seg ccmp"><span class="sn">CCMP</span><span class="sb">8 B · PN</span></div>
+    <div class="seg body"><span class="sn">cipher&nbsp;0</span><span class="sb">part 1</span></div>
+  </div>
+  <div class="frame">
+    <div class="seg hdr"><span class="sn">MAC hdr</span><span class="sb">frag#1 · MF=1</span></div>
+    <div class="seg body"><span class="sn">cipher&nbsp;1</span><span class="sb">part 2</span></div>
+  </div>
+  <div class="frame">
+    <div class="seg hdr"><span class="sn">MAC hdr</span><span class="sb">frag#2 · MF=0</span></div>
+    <div class="seg body"><span class="sn">cipher&nbsp;2</span><span class="sb">part 3</span></div>
+    <div class="seg ccmp"><span class="sn">MIC</span><span class="sb">8 B</span></div>
+  </div>
+
+  <div class="callout">
+    <p class="ct">Two candidate fixes — one broken, one works</p>
+    <p><strong>Host fragmentation</strong> (fragment&nbsp;→&nbsp;encrypt, committed as <code>9c7daabd</code>) —
+    <span style="color:var(--err)">reverted</span>. The FW re-headers any host-built <code>frag#&gt;0</code>
+    MPDU (deemed "not permitted by the 802.11 protocol", per the morse Linux driver), breaking the
+    per-fragment MIC. See <a href="2026-07-14-mesh-frag-bench-verify.html">the sibling worklog</a>.</p>
+    <p><strong>Defrag-before-decrypt</strong> (this worklog) — let the FW fragment (the host submits ONE whole
+    frame, so no <code>frag#&gt;0</code> is ever handed to the FW TX path), then on RX <strong>reassemble the
+    raw still-encrypted fragments and decrypt the whole once</strong>. This is the fix that works.</p>
+  </div>
+
+  <h2 id="fix">The fix</h2>
+  <p>All in <code>components/halow&nbsp;…/umac/datapath/umac_datapath.c</code>:</p>
+  <ol>
+    <li><strong>Reorder bypass.</strong> A fragment (MoreFragments set, or fragment number ≠ 0) skips the
+    A-MPDU reorder buffer. All fragments of a frame share ONE sequence number, so the BA window would drop the
+    2nd+ fragment as "outdated". No-op for unfragmented frames.</li>
+    <li><strong>Reassemble-then-decrypt branch</strong>, gated to a <em>protected, FW-raw-delivered, mesh
+    SW-CCMP, unicast, fragment</em>: call <code>datapath_defrag</code> to reassemble the raw ciphertext, then
+    run <code>sw_ccmp_decrypt</code> on the whole reassembled frame once. Everything else keeps the normal
+    decrypt-then-defrag path.</li>
+  </ol>
+
+  <h3 id="bug1">Bug&nbsp;1 — the reassembled decrypt omitted the QoS Control from the AAD</h3>
+  <div class="callout bug">
+    <p class="ct">🐛 found by adversarial review, pre-flash</p>
+    <p><code>datapath_defrag</code> re-prepends only the 30-byte MAC header
+    (<code>dot11_data_hdr_get_len</code> excludes the separate 2-byte QoS Control, peeled from the view
+    earlier). But <code>mesh_ccmp_aad_nonce</code> reads the QoS/TID byte <strong>contiguously at
+    <code>hdr[30]</code></strong>. In the reassembled buffer that byte is the CCMP header's PN0 → the AAD +
+    nonce were wrong → MIC failed on essentially every frame.</p>
+    <p><strong>Fix:</strong> before <code>datapath_defrag</code>, copy <code>[MAC header + QoS]</code> (still
+    adjacent in the fragment buffer) into a local <code>aad_hdr[32]</code>, clear MoreFragments and set
+    fragment#&nbsp;=&nbsp;0 on that copy (both resets are <em>required</em> — <code>mesh_ccmp_aad_nonce</code>
+    masks neither), and pass <code>aad_hdr</code> as the AAD header. The reassembled view still supplies the
+    CCMP header + ciphertext + MIC.</p>
+  </div>
+
+  <h3 id="bug2">Bug&nbsp;2 — <code>mmdrv_get_rx_metadata</code> asserted on the reassembled buffer</h3>
+  <div class="callout bug">
+    <p class="ct">🐛 found on-bench — an <code>MMOSAL Assert</code> crash-loop</p>
+    <p>board2 (relay AND single-hop endpoint) crash-looped the moment it processed a fragmented frame — the
+    <code>reasm</code> counter reached 1, then the board reset, before <code>decok</code>. The mangled
+    <code>libmorse</code> symbols pointed only at <code>umac_datapath_process</code>; the RX-side counters
+    localized it to <strong>between reassembly-complete and the decrypt call</strong> — the line
+    <code>rx_metadata = mmdrv_get_rx_metadata(rxbuf)</code>.</p>
+    <p><strong>Root cause:</strong> <code>mmdrv_get_rx_metadata</code> does <code>MMOSAL_ASSERT(metadata !=
+    NULL)</code> and is documented "for RX frames only". The reassembled buffer is a
+    <code>mmdrv_alloc_mmpkt_for_defrag</code> buffer with <strong>no RX metadata</strong> → NULL → assert →
+    reset. (<code>datapath_defrag</code> had also already released the original rxbuf, so the old
+    <code>rx_metadata</code> dangled.)</p>
+    <p><strong>Fix:</strong> <code>rx_metadata = NULL</code> after reassembly — it is not read again on the
+    reassembled path (mirrors the normal decrypt-then-defrag path). This was also the multi-hop relay crash.</p>
+  </div>
+
+  <h2 id="method">Bench method</h2>
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">board0</div><div class="s">origin · .136</div></div>
+      <div class="node ok"><div class="t">board2</div><div class="s">relay · fully wired</div></div>
+      <div class="node acc"><div class="t">board1</div><div class="s">far · .100</div></div>
+    </div>
+    <figcaption>Forced-topology allowlist. <code>mmwlan_set_fragment_threshold(700)</code> + 1400&nbsp;B pings
+    @ 200&nbsp;ms make the FW fragment every full-size frame into 3.</figcaption>
+  </figure>
+  <p>Temp RX counters (<code>mmwlan_dbg_*</code> globals, <code>mmwlan*</code>-prefixed to survive the library
+  mangler): <code>seen</code> (fragments entering the branch), <code>f0</code> / <code>last</code>,
+  <code>reasm</code> (<code>datapath_defrag</code> completed), <code>decok</code> (whole-frame decrypt OK), +
+  <code>ccmp_fail</code>; dumped via <code>mmwlan_get_umac_stats</code> on the app heartbeat. The observable is
+  board0's ICMP reply rate — a reply means every reassemble-then-decrypt on the path succeeded. (Clean peering
+  needs all boards flashed fresh together; a lone reflash flaps the peer link.)</p>
+
+  <h2 id="results">Results</h2>
+  <table>
+    <thead><tr><th>Test</th><th>board0 replies</th><th>relay (board2)</th><th>far (board1)</th><th>asserts</th></tr></thead>
+    <tbody>
+      <tr><td>Single-hop 1400&nbsp;B forced-frag</td><td><strong>131 / 131 (100%)</strong></td><td><code>reasm=130 decok=130 ccmp_fail=0</code></td><td>idle</td><td>0</td></tr>
+      <tr><td>Multi-hop 1400&nbsp;B forced-frag</td><td><strong>143 / 146 (~98%)</strong></td><td><code>reasm=255 decok=255</code> (both legs, forwards)</td><td><code>reasm=128 decok=128</code></td><td>0</td></tr>
+      <tr><td>Toggle OFF (no forced frag)</td><td><strong>117 / 121 (~97%)</strong></td><td><code>FRAG seen 767→10</code> (mostly whole/A-MPDU) <code>reasm=3 decok=3</code></td><td><code>reasm=1 decok=1</code></td><td>0</td></tr>
+    </tbody>
+  </table>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">single-hop</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">131/131 · 100%</span></div>
+    <div class="bar-row"><span class="lbl">multi-hop</span><span class="bar-track"><span class="bar-fill fast" style="width:98%"></span></span><span class="val">143/146 · ~98%</span></div>
+    <div class="bar-row"><span class="lbl">toggle off</span><span class="bar-track"><span class="bar-fill fast" style="width:97%"></span></span><span class="val">117/121 · ~97%</span></div>
+  </div>
+
+  <ul>
+    <li><strong>Every fragment reassembles AND decrypts</strong> (<code>reasm == decok</code>,
+    <code>ccmp_fail = 0</code>) at all four RX points (relay ×2, far, origin), in both directions. A full-size
+    frame fragments into 3 MPDUs.</li>
+    <li><strong>On-air (chronium morse0 monitor):</strong> the FW <em>does</em> fragment host-built mesh
+    SW-CCMP frames — 3 MPDUs sharing one sequence number, incrementing fragment#, MoreFragments on all but the
+    last. (An earlier worry that the FW refuses to fragment host frames was a peer-flap confound, not a size
+    limit.)</li>
+    <li><strong>Toggle OFF confirms the whole-frame / A-MPDU path is untouched</strong> by the
+    <code>is_fragment</code> bypass: without the forced threshold, ~97% of large frames go whole (A-MPDU) at
+    high rate; the rare natural FW-fragmentation (~0.2%, the real-world case) is handled by the same reassemble
+    path.</li>
+  </ul>
+
+  <h2 id="soak">10-minute soak</h2>
+  <p>Re-flashed all three fresh (multi-hop forced-frag) with cumulative counters + a heap watch, ran
+  <strong>600&nbsp;s continuous</strong>. Stability, leak, and no-silent-failure check:</p>
+  <div class="stats">
+    <div class="stat"><div class="num ok">99.86%</div><div class="lbl">ping 2952/2956 — all 4 timeouts in the first 15 s (cold-start)</div></div>
+    <div class="stat"><div class="num acc">~11.8 K</div><div class="lbl">reassemble-decrypt cycles, <code>reasm==decok</code> every one</div></div>
+    <div class="stat"><div class="num acc">0</div><div class="lbl">CCMP failures · rxq/txq drops · crashes/reboots</div></div>
+    <div class="stat"><div class="num ok">flat</div><div class="lbl">heap across ~26 K fragments — no leak</div></div>
+  </div>
+  <table>
+    <thead><tr><th>node</th><th>fragments</th><th>reassemblies</th><th>decok</th><th>ccmp_fail</th><th>heap free (start→end)</th></tr></thead>
+    <tbody>
+      <tr><td>board0 origin</td><td>8&nbsp;856</td><td>2&nbsp;952</td><td>2&nbsp;952</td><td>0</td><td>8.619M → 8.621M</td></tr>
+      <tr><td>board2 relay</td><td>17&nbsp;716</td><td>5&nbsp;905</td><td>5&nbsp;905</td><td>0</td><td>8.624M → 8.622M</td></tr>
+      <tr><td>board1 far</td><td>8&nbsp;859</td><td>2&nbsp;953</td><td>2&nbsp;953</td><td>0</td><td>8.625M (flat)</td></tr>
+    </tbody>
+  </table>
+  <p>Each board logged an unbroken 119-heartbeat chain (uptime 5&nbsp;s → 595&nbsp;s) — <strong>all three ran
+  continuously for the full 10&nbsp;minutes, zero crashes.</strong> <code>reasm == decok</code> held on every
+  heartbeat (no silent decrypt failures), heap stayed flat (no leak from the <code>datapath_defrag</code>
+  buffers), and steady-state ping was effectively 100% after the cold-start peering settled.</p>
+
+  <h2 id="conclusion">Conclusion</h2>
+  <div class="callout ok">
+    <p class="ct">✓ Defrag-before-decrypt is the proper, bench-verified fix</p>
+    <p>It works for both FW-forced and naturally-occurring fragmentation, single- and multi-hop, both
+    directions, no crashes. The committed <code>9c7daabd</code> host-fragmentation path is reverted (it added a
+    broken path with no benefit); the min-MCS floor / MTU cap idea was <strong>not needed</strong>. Fix lives
+    in <code>components/halow</code> <code>umac_datapath.c</code>; temp scaffold + counters stripped, app
+    restored, rebuilds green.</p>
+  </div>
+
+  <h2 id="gotchas">Gotchas (reusable)</h2>
+  <ul>
+    <li><code>mmdrv_get_rx_metadata</code> <strong>asserts</strong> on any buffer without RX metadata — never
+    call it on a <code>datapath_defrag</code> (reassembled) buffer.</li>
+    <li>The reassembled decrypt needs a <strong>contiguous <code>[MAC header + QoS]</code></strong> AAD header;
+    <code>datapath_defrag</code> re-prepends only the MAC header.</li>
+    <li>morselib globals must be <strong><code>mmwlan*</code>-prefixed</strong> to survive the
+    <code>librarymangler</code> protected-symbol list — needed to read temp instrumentation from the app.</li>
+    <li><code>reasm == decok, ccmp_fail == 0</code> at every hop is the pass signature; <code>reasm &gt;
+    decok</code> = decrypt bug, <code>reasm = 0</code> with <code>seen &gt; 0</code> = reassembly not completing
+    (missing last fragment / seq mismatch).</li>
+  </ul>
+
+  <p style="color:var(--muted);font-size:14px">Full worklog:
+  <code>docs/worklog/2026-07-14-mesh-defrag-before-decrypt-PASS.md</code>. Code-map:
+  <code>docs/mesh-ap/rimba-mesh-frag-codemap.md</code>. The broken host-fragmentation investigation it
+  supersedes: <a href="2026-07-14-mesh-frag-bench-verify.html">2026-07-14-mesh-frag-bench-verify</a>.</p>
+
+  <p style="color:var(--muted);font-size:14px"><strong>Radio-silent:</strong> all 3 ESPs on
+  <code>rimba-hello</code>; chronium <code>wlan1</code> + <code>morse0</code> down.</p>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#problem">The problem</a></li>
+    <li><a href="#fix">The fix</a></li>
+    <li><a href="#bug1">Bug 1 — QoS AAD</a></li>
+    <li><a href="#bug2">Bug 2 — rx_metadata assert</a></li>
+    <li><a href="#method">Bench method</a></li>
+    <li><a href="#results">Results</a></li>
+    <li><a href="#soak">10-minute soak</a></li>
+    <li><a href="#conclusion">Conclusion</a></li>
+    <li><a href="#gotchas">Gotchas</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-14-mesh-defrag-before-decrypt-PASS</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

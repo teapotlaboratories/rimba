@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh A-MPDU S3: relay forward-leg aggregation + FIX-2 — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.4rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:92px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-12</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-12</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ code done · builds green</span>
+    <span class="badge bug">mesh · A-MPDU · S3 · FIX-2</span>
+  </div>
+
+  <h1>Mesh A-MPDU S3: relay forward-leg aggregation + FIX-2<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">route the forwarded unicast onto the aggregating data path — and stop it blocking the evtloop</small></h1>
+
+  <p class="lead"><strong>Code done, builds green, adversarially reviewed (3 findings found + fixed), not yet
+  bench-verified.</strong> The relay's forwarded unicast now rides the <strong>per-TID data path</strong> (DATA-class
+  alloc + next-hop BA session + <code>AMPDU_ENABLED</code>) so the firmware A-MPDUs it — the dominant multi-hop-goodput
+  lever (B6). At the same seam, <strong>FIX-2</strong> makes the forward <strong>non-blocking</strong>, removing the
+  1000&nbsp;ms evtloop stall that armed the relay interrupt-WDT crash. Mirrors net/mac80211
+  <code>ieee80211_rx_h_mesh_forward</code> (re-inject into the data TX path, TID preserved). Uncommitted, stacked on S1/S2.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Why the data-class alloc is the decisive move</p>
+    <p><code>MMDRV_PKT_CLASS_MGMT</code> routes to the <code>mgmt_q</code> (<code>pageset.c:202</code>,
+    <code>tx_mgmt_handler</code>) which <strong>never A-MPDUs</strong>; <code>MMDRV_PKT_CLASS_DATA_TIDx</code> routes to the
+    aggregating <code>tx_data_handler</code>. Today's forward is built mgmt-class, so it can't aggregate no matter what
+    flags it carries. The new <code>build_mesh_data_frame</code> allocs it DATA-class; the rest (seqno, BA, AMPDU flag,
+    channel) all line up at <strong>TID 0</strong>.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node">RX (evtloop)</div>
+      <div class="node acc"><div class="t">forward</div><div class="s">DATA_TID0 alloc</div></div>
+      <div class="node acc"><div class="t">aggr_check</div><div class="s">BA on next hop</div></div>
+      <div class="node acc"><div class="t">AMPDU_ENABLED</div><div class="s">tid 0 · per-TID seq</div></div>
+      <div class="node ok"><div class="t">DATA channel</div><div class="s">FW A-MPDUs it</div></div>
+    </div>
+    <figcaption>The forwarded unicast now traverses the same aggregation-eligible steps as a local-origin frame,
+    keyed on the next-hop peer stad (which S2 already set up). A blocking drop-gate at the top (FIX-2) means a
+    congested forward drops before any of this — never stamping a seqno or opening a BA session it can't use.</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">5</div><div class="lbl">files changed (frame builder, mesh, datapath, header)</div></div>
+    <div class="stat"><div class="num ok">TID 0</div><div class="lbl">pkt-class · metadata-tid · seqno · BA · wire-QoS all agree</div></div>
+    <div class="stat"><div class="num err">3</div><div class="lbl">review findings — all verified + fixed</div></div>
+    <div class="stat"><div class="num ok">green</div><div class="lbl">esp32s3 build · 0 warnings on changed files</div></div>
+  </div>
+
+  <h2 id="shipped">1 · What shipped</h2>
+  <p>FIX-2 and S3 land together at the forward seam. A compile-time toggle <code>MESH_FWD_DATA_AGGREGATE</code>
+  (default 1) gates the S3 aggregation for bench A/B; FIX-2's non-blocking behaviour is unconditional (you never
+  want to toggle back into the crash).</p>
+  <table>
+    <thead><tr><th>File</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td><code>frame_constructor.c</code> + <code>frames_common.h</code></td><td>New <code>build_mesh_data_frame()</code> — allocs on <code>MMDRV_PKT_CLASS_DATA_TID0+tid</code> instead of MGMT.</td></tr>
+      <tr><td><code>umac_mesh.h</code></td><td>Toggle <code>MESH_FWD_DATA_AGGREGATE</code> (=1) + <code>MESH_FWD_TID</code> (=0).</td></tr>
+      <tr><td><code>umac_mesh.c</code></td><td><code>umac_mesh_forward_data</code> allocs DATA-class when the toggle is on.</td></tr>
+      <tr><td><code>umac_datapath.c</code></td><td><code>umac_datapath_tx_mesh_keyed_frame</code>: FIX-2 non-blocking gate at the top; S3 per-TID seqno + <code>aggr_check</code> + tid 0 + AMPDU-eligibility for the unicast forward; channel routing.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The unicast aggregation retag (mirrors the local-origin path)</h3>
+  <pre><code><span class="cm">// for a forwarded UNICAST (key_type == PAIRWISE; stad = next-hop peer):</span>
+seqno  = sta_data-&gt;tx_seq_num_spaces[<span class="nm">0</span>]        <span class="cm">// per-TID, on the next hop (not baseline)</span>
+<span class="fn">umac_datapath_aggr_check</span>(umacd, stad, <span class="nm">0</span>, ssc)  <span class="cm">// open BA session on the next hop</span>
+tx_metadata-&gt;tid = <span class="nm">0</span>
+tx_metadata-&gt;flags |= AMPDU_ENABLED  <span class="fn">if</span> <span class="fn">umac_ba_is_ampdu_permitted</span>(stad, <span class="nm">0</span>)
+<span class="fn">mmdrv_tx_frame</span>(txbuf, <span class="kw">!fwd_aggregate</span>)          <span class="cm">// is_mgmt=false → DATA channel (aggregates)</span></code></pre>
+  <p>Group re-broadcast (<code>key_type == GROUP</code>) is untouched: baseline seqno, no aggregation, MGMT channel.
+  SW-CCMP-per-MPDU is preserved and composes with A-MPDU (validated in S0/S1). The next-hop-keyed seqno is not just
+  correct but <em>required</em> — TA is always our mesh MAC, so the next hop keeps one <code>(TA=us, TID 0)</code>
+  reorder window that local-origin and forwarded traffic must share.</p>
+
+  <h2 id="review">2 · Adversarial review — 3 findings, all fixed</h2>
+  <table>
+    <thead><tr><th>Finding</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Blocking ADDBA inline.</strong> <code>aggr_check</code> fires ADDBA via the <em>blocking</em> <code>tx_mgmt_frame</code>, left retryable per-frame on paused-TX failure (<code>umac_ba.c:275-282</code>).</td><td><strong>Hoist the non-blocking drop-gate to the top</strong> — a paused forward drops before reaching <code>aggr_check</code>.</td></tr>
+      <tr><td><strong><code>mmdrv_tx_frame</code>'s 2nd arg is <code>is_mgmt</code>, not "blocking."</strong> Flipping it unconditionally routed the GROUP broadcast to the ack-expecting DATA queue.</td><td><code>mmdrv_tx_frame(txbuf, !fwd_aggregate)</code> — group + fallback stay on MGMT. Comment corrected.</td></tr>
+      <tr><td><strong>SN burned on congestion-drop</strong> → next-hop reorder gap.</td><td>Same gate-hoist — the drop now precedes the seqno stamp.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Deferred (noted, not defects):</strong> TID preservation flattened to 0 (Linux preserves <code>skb-&gt;priority</code>; acceptable — the wire was already TID 0); <code>IMMEDIATE_REPORT</code> + <code>AMPDU_ENABLED</code> coexist on the forward (bench A/B whether it inhibits aggregation); in-place-forward (design §S3 calls it independent).</p>
+
+  <div class="callout warn">
+    <p class="ct">◑ Discovered during this pass — the forward runs in the evtloop, not <code>bus_lock</code></p>
+    <p>Verifying the review corrected the interrupt-WDT root-cause worklog: <code>umac_datapath_rx_frame</code>
+    <strong>queues</strong> the RX frame + wakes the umac-core <code>evtloop</code> task (<code>:1945-1947</code>) —
+    the forward runs there, holding <strong>no</strong> <code>bus_lock</code>. The blocking forward stalls the evtloop,
+    not the SPI worker. Verdict + fixes unchanged; the root-cause worklog's Stage 1 was corrected.</p>
+  </div>
+
+  <h2 id="build">3 · Build + status</h2>
+  <p><code>idf.py build</code> of <code>firmware/rimba-halow-mesh-perf</code> (esp32s3, IDF v5.4.2): <strong>Project build
+  complete</strong> — compiles, links, packages a valid image, <strong>zero warnings on any changed file</strong>. (The
+  debug image overflows the default 1 MB single-app partition — pre-existing packaging config, unrelated; built green
+  with <code>SINGLE_APP_LARGE</code>.) <strong>Not bench-verified</strong> (bench radio-silent; board2 PPK2-unpowered).
+  Nothing committed.</p>
+
+  <h2 id="bench">4 · Bench validation plan (not yet run)</h2>
+  <ul>
+    <li><strong>S3 aggregation on relay egress:</strong> capture the forward leg on chronium <code>morse0</code> — expect
+      consecutive-seq QoS-Data MPDUs sharing a PPDU TSFT where today's mgmt-class forward shows only singletons. 2-hop
+      iperf before/after (<code>MESH_FWD_DATA_AGGREGATE</code> 0 vs 1, same RF window).</li>
+    <li><strong>FIX-2 crash:</strong> load-sweep the relay; expect no <code>hw_restart</code> / INT_WDT. Instrument via
+      RTC-noinit <code>hw_restart_count</code> + forward-wait-timeout counters (relay has no usable console).</li>
+    <li><strong>Correctness:</strong> end-to-end ping/iperf through the relay stays lossless-ish (drops only under genuine
+      congestion, by design); GROUP re-broadcast (ARP/bcast) still reaches the mesh.</li>
+    <li><strong>After every test:</strong> radio-silent — <code>rimba-hello</code> to all ESPs + <code>wlan1</code> down on Linux.</li>
+  </ul>
+  <p>See <code>docs/mesh-ap/rimba-mesh-ampdu-aggregation-design.md</code> §5 S3, the interrupt-WDT root-cause worklog
+  (why FIX-2 matters), and the S1/S2 worklogs (the BA machinery S3 rides).</p>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#shipped">1 · What shipped</a></li>
+    <li><a href="#review">2 · Review — 3 fixes</a></li>
+    <li><a href="#build">3 · Build + status</a></li>
+    <li><a href="#bench">4 · Bench plan</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-12-mesh-ampdu-s3-relay-fwd-aggregation</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

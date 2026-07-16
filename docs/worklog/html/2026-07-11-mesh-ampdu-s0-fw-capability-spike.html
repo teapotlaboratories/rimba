@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh A-MPDU S0 firmware go/no-go spike — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-11</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-11</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">✓ S0 GO (both halves)</span>
+    <span class="badge bug">mesh · A-MPDU · datapath</span>
+  </div>
+
+  <h1>Mesh A-MPDU S0 firmware go/no-go spike<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">the MM6108 does aggregate 4-addr mesh QoS-data on air</small></h1>
+
+  <p class="lead"><strong>Stage 0 = GO, both halves.</strong> A throwaway hardware spike to answer the two questions
+  that gate the whole 802.11s mesh A-MPDU feature: (a) does the firmware advertise A-MPDU capability for a
+  <strong>mesh</strong> vif, and (b) will the chip emit a real <strong>on-air A-MPDU</strong> for 4-address mesh
+  QoS-data if the host force-marks the frames eligible? Answer to both: <strong>yes</strong>. The mesh vif reports
+  <code>AMPDU_cap = 1</code>, and the capture shows genuine multi-MPDU PPDUs — 3 subframes with consecutive sequence
+  numbers sharing one PPDU timestamp, up to 7 MPDUs deep in the return direction.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">S0a probe</div><div class="s">AMPDU_cap=1</div></div>
+      <div class="node acc"><div class="t">gates open</div><div class="s">CONNECTED + cap</div></div>
+      <div class="node acc"><div class="t">S0b force</div><div class="s">flag mesh data</div></div>
+      <div class="node ok"><div class="t">on-air A-MPDU</div><div class="s">3–7 MPDU/PPDU</div></div>
+      <div class="node ok"><div class="t">GO</div><div class="s">S1 = BA handshake</div></div>
+    </div>
+    <figcaption>Both eligibility gates a mesh frame must clear are already open in firmware/config; forcing the
+    per-frame flag proves the silicon packs the subframes. The only missing piece is the host-side Block-Ack
+    handshake (Stage 1).</figcaption>
+  </figure>
+
+  <div class="callout ok">
+    <p class="ct">✓ The result in one line</p>
+    <p>The MM6108 firmware (fw <code>1.17.8</code>) <strong>does assemble on-air A-MPDUs for 4-address mesh
+    QoS-data</strong> when the host marks the frames eligible. So A-MPDU is a firmware capability the host only has to
+    <em>enable</em> — not a firmware change. Temp spike code reverted; both boards back on <code>rimba-hello</code>;
+    sniffer <code>wlan1</code> down; nothing committed.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">1</div><div class="lbl"><code>AMPDU_cap</code> on the mesh vif</div></div>
+    <div class="stat"><div class="num acc">217</div><div class="lbl">aggregated PPDUs (board1), ~46% of frames</div></div>
+    <div class="stat"><div class="num acc">7</div><div class="lbl">MPDUs/PPDU peak (board0 dir)</div></div>
+    <div class="stat"><div class="num">1.27</div><div class="lbl">Mbit/s peak vs ~0.2 baseline (≈6×)</div></div>
+  </div>
+
+  <p>Self-contained: rig, every address, the capability read, the capture method and every group reading, and the
+  reverted instrumentation are all recorded here so the spike can be re-run cold. Full staged plan (S0–S3) and
+  code-map live in <code>docs/mesh-ap/rimba-mesh-ampdu-aggregation-design.md</code>, but this worklog does not depend
+  on it.</p>
+
+  <h2 id="why">Why now — the crypto ceiling just moved</h2>
+  <p>Today the mesh datapath sends <strong>single MPDUs</strong>: one PPDU per frame, each paying full preamble + IFS +
+  backoff + ACK overhead. Until yesterday the <em>other</em> ceiling was host-side SW-CCMP crypto cost; the
+  just-merged bulk-DMA AES-CCM work (<code>esp_mesh_ccm_ae/ad</code>, ~14–28× faster crypto under load) removed it.
+  With crypto no longer the bottleneck, <strong>per-frame airtime is the throughput limiter</strong>, and A-MPDU
+  aggregation is the lever that amortises it across many subframes in one PPDU.</p>
+
+  <p>A prior feasibility study rewrote the stale blocker-map. Its two load-bearing claims, which S0 exists to confirm
+  on hardware:</p>
+  <ul>
+    <li><strong>The CONNECTED gate is NOT the blocker.</strong> The mesh datapath's <code>get_sta_state</code> returns
+      <code>CONNECTED</code> unconditionally, so the aggregation eligibility check's first gate is already satisfied
+      for mesh frames. (The old blocker-map claimed a <code>MMWLAN_STA_CONNECTED</code> gate blocked it — stale.)</li>
+    <li><strong>A-MPDU is assembled by the MM6108 FIRMWARE, not the host.</strong> The host only (1) sets a per-frame
+      "A-MPDU eligible" flag, (2) runs the Block-Ack session handshake, and (3) reorders on RX. The chip does the
+      subframe packing.</li>
+  </ul>
+  <p>If both hold, the feature is a bounded host-side project, not a firmware change — and S0 is the cheap experiment
+  that proves the firmware side before committing to it.</p>
+
+  <h2 id="s0a">S0a — capability probe: <code>AMPDU_cap = 1</code> on the mesh vif</h2>
+  <p><strong>Method.</strong> A temporary <code>printf</code> in morselib, immediately after the per-vif capability
+  fetch — <code>umac_interface.c:321</code>,
+  <code>mmdrv_get_capabilities(data-&gt;vif_id, &amp;data-&gt;capabilities)</code> — printing the two values the
+  aggregation eligibility check reads, plus the vif type. Built <code>rimba-halow-mesh-perf</code>, flashed board1
+  (efuse MAC <code>e0:72:a1:f8:f9:40</code>, <code>/dev/ttyACM1</code>), read the boot log over serial.</p>
+
+  <pre><code><span class="nm">S0PROBE</span> vif=0 type=?? <span class="st">AMPDU_cap=1</span> <span class="st">ampdu_enabled=1</span></code></pre>
+
+  <div class="callout">
+    <p class="ct">The <code>type=??</code> is the tell, not a bug</p>
+    <p><code>umac_interface_type_to_str</code> has <strong>no case</strong> for <code>UMAC_INTERFACE_MESH</code>
+    (= 32), so it falls to <code>default: "??"</code>. NONE / STA / AP / IBSS all have named cases — so the only vif
+    that prints <code>??</code> <em>is</em> the mesh one. This line is unambiguously the mesh vif, and it reports
+    <code>AMPDU_cap = 1</code> with global <code>ampdu_enabled = 1</code>.</p>
+  </div>
+
+  <p>Consequence for the datapath: the eligibility check's <strong>second</strong> gate,
+  <code>MORSE_CAP_SUPPORTED(..., AMPDU)</code> at <code>umac_datapath.c:2044</code>, <strong>passes</strong> for a
+  mesh vif. Combined with the CONNECTED gate already passing, both gates a mesh frame must clear are open in
+  firmware/config today. <strong>S0a verdict: GO.</strong></p>
+
+  <h2 id="s0b">S0b — on-air emission: the chip aggregates mesh QoS-data</h2>
+
+  <h3>The force (temporary, reverted)</h3>
+  <p>To isolate the single question "<em>will the chip aggregate mesh data if told to</em>" from the missing BA
+  handshake, a temporary force in <code>umac_datapath.c</code> (~<code>:2272</code>, inside
+  <code>umac_datapath_process_tx_frame</code>, gated on <code>tx_is_mesh_frame</code>):</p>
+  <ul>
+    <li>unconditionally set <code>MMDRV_TX_FLAG_AMPDU_ENABLED</code> on mesh unicast data, and</li>
+    <li>force <code>tid_max_reorder_buf_size = 8</code></li>
+  </ul>
+  <p>i.e. make mesh frames A-MPDU-eligible <strong>without</strong> the BA session that would normally precede
+  aggregation. Not a shippable path — a probe of the silicon's willingness to pack subframes.</p>
+
+  <h3 id="rig">Rig — secured mesh (SAE + PMF + host SW-CCMP), two direct peers + a dedicated sniffer</h3>
+  <p><code>rimba-halow-mesh-perf</code> runs <code>args = {0}</code> → <code>args.security_type = MMWLAN_OPEN</code>,
+  but the mesh <strong>ignores that</strong>: morselib gates mesh security on the compile-time
+  <code>MMWLAN_MESH_SEC_PHASE1</code>, which defaults to <strong>1</strong> (<code>umac_mesh.c:439-440</code>) and
+  sets every mesh peer stad to <code>MMWLAN_SAE</code> / <code>MMWLAN_PMF_REQUIRED</code>
+  (<code>umac_mesh.c:607</code>) with the SAE password hardcoded <code>"rimbamesh2026"</code>
+  (<code>umac_mesh.c:81</code>). So peering did a full SAE+AMPE handshake and the data frames are
+  <strong>CCMP-encrypted</strong> — on-air, board1's QoS-Data is 100% <code>wlan.fc.protected = 1</code>.</p>
+
+  <pre><code> board0 (relay)                                board1
+ rimba-halow-mesh-perf                          rimba-halow-mesh-perf
+ /dev/ttyACM0                                   /dev/ttyACM1
+ mesh IP 10.9.9.136                             mesh IP 10.9.9.100
+ mesh MAC e2:72:a1:f8:ef:a4  &lt;== S1G ch27 ==&gt;   mesh MAC e2:72:a1:f8:f9:40
+                          direct peers, freq 5560 (915.5 MHz)
+
+ chronium (Pi 5, dedicated sniffer)
+ wlan1 -&gt; monitor, freq 5560, morse0 up, tcpdump -i morse0 -w cap.pcap</code></pre>
+
+  <ul>
+    <li><strong>Peering confirmed</strong> before load: <code>ping board1 → board0</code> = <strong>5/5, 0% loss</strong>
+      (~21–31 ms steady, 526 ms first/warm packet).</li>
+    <li><strong>Monitor bring-up (chronium):</strong> <code>sudo iw dev wlan1 set type monitor</code>,
+      <code>sudo iw dev wlan1 set freq 5560</code>, <code>ip link set morse0 up</code>,
+      <code>tcpdump -i morse0 -w cap.pcap</code>.</li>
+  </ul>
+
+  <h3>Traffic — saturate the TX queue so frames can back up</h3>
+  <p><code>board1: iperf -c 10.9.9.136 -u -b 2 -t 14</code> — UDP, <strong>2 Mbit/s offered</strong> (~10× the real
+  link) for 14 s. Over-offering keeps the TX queue non-empty: A-MPDU can only aggregate frames <em>already queued</em>
+  when a PPDU is built, so the queue has to back up for any aggregation to happen.</p>
+
+  <p>iperf throughput (3-second intervals) vs the ~0.2 Mbit/s single-MPDU baseline — the jump is corroborating, but
+  the proof is in the capture:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">baseline</span><span class="bar-track"><span class="bar-fill slow" style="width:15.7%"></span></span><span class="val">~0.20</span></div>
+    <div class="bar-row"><span class="lbl">0–3 s</span><span class="bar-track"><span class="bar-fill" style="width:46.5%"></span></span><span class="val">0.59</span></div>
+    <div class="bar-row"><span class="lbl">3–6 s</span><span class="bar-track"><span class="bar-fill" style="width:96.1%"></span></span><span class="val">1.22</span></div>
+    <div class="bar-row"><span class="lbl">6–9 s · peak</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">1.27</span></div>
+    <div class="bar-row"><span class="lbl">9–12 s</span><span class="bar-track"><span class="bar-fill" style="width:18.9%"></span></span><span class="val">0.24</span></div>
+    <div class="bar-row"><span class="lbl">12–14 s</span><span class="bar-track"><span class="bar-fill" style="width:17.3%"></span></span><span class="val">0.22</span></div>
+  </div>
+  <p style="font-size:13.5px;color:var(--muted);margin-top:-.3em">Mbit/s, bars to scale (max = 1.27). Avg
+  0.71 Mbit/s, peak 1.27 Mbit/s ≈ <strong>6×</strong> the single-MPDU baseline.</p>
+
+  <h3 id="detect">Detecting aggregation without a radiotap A-MPDU field</h3>
+  <p>The morse0 radiotap header does <strong>not</strong> expose an A-MPDU status field to tshark, so aggregation
+  can't be read off a flag. It was detected instead by <strong>TSFT clustering + consecutive sequence numbers</strong>:</p>
+  <ul>
+    <li>MPDUs transmitted inside one A-MPDU ride in <strong>one PPDU</strong>, so they share the <strong>exact same
+      <code>radiotap.mactime</code></strong> (the µs TSFT of the PPDU).</li>
+    <li>A genuine aggregate additionally carries <strong>consecutive <code>wlan.seq</code></strong> — the MAC hands
+      the queued frames to the aggregator in sequence order.</li>
+  </ul>
+  <p>So: group QoS-Data by identical TSFT; any group of size ≥ 2 is one multi-MPDU PPDU; consecutive
+  <code>wlan.seq</code> inside the group is the airtight signature. Reusable method for this sniffer.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 760 330" role="img" aria-label="Single-MPDU PPDUs versus one A-MPDU PPDU of three subframes sharing one TSFT">
+        <!-- legend key -->
+        <g font-size="12" font-family="ui-monospace,Menlo,Consolas,monospace">
+          <rect x="470" y="12" width="14" height="12" rx="2" fill="var(--muted)" opacity="0.5"/>
+          <text x="490" y="22" fill="var(--muted)">preamble/PHY hdr</text>
+          <rect x="618" y="12" width="14" height="12" rx="2" fill="var(--accent)"/>
+          <text x="638" y="22" fill="var(--muted)">MPDU</text>
+        </g>
+
+        <!-- ROW A: single-MPDU PPDUs -->
+        <text x="20" y="30" font-size="13.5" font-weight="700" fill="var(--fg)">Single-MPDU (baseline) — 711 PPDUs, each pays full overhead</text>
+
+        <!-- ppdu 1 -->
+        <rect x="20"  y="46" width="20" height="46" rx="3" fill="var(--muted)" opacity="0.5"/>
+        <rect x="40"  y="46" width="78" height="46" rx="3" fill="var(--accent)"/>
+        <rect x="118" y="58" width="16" height="22" rx="3" fill="var(--muted)" opacity="0.35"/>
+        <text x="79" y="74" font-size="12" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">seq 788</text>
+        <text x="79" y="108" font-size="11" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">TSFT 188346837</text>
+        <text x="126" y="102" font-size="10" text-anchor="middle" fill="var(--muted)">ACK</text>
+
+        <!-- ppdu 2 -->
+        <rect x="216" y="46" width="20" height="46" rx="3" fill="var(--muted)" opacity="0.5"/>
+        <rect x="236" y="46" width="78" height="46" rx="3" fill="var(--accent)"/>
+        <rect x="314" y="58" width="16" height="22" rx="3" fill="var(--muted)" opacity="0.35"/>
+        <text x="275" y="74" font-size="12" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">seq 791</text>
+        <text x="275" y="108" font-size="11" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">TSFT 188364744</text>
+        <text x="322" y="102" font-size="10" text-anchor="middle" fill="var(--muted)">ACK</text>
+
+        <!-- ppdu 3 -->
+        <rect x="412" y="46" width="20" height="46" rx="3" fill="var(--muted)" opacity="0.5"/>
+        <rect x="432" y="46" width="78" height="46" rx="3" fill="var(--accent)"/>
+        <rect x="510" y="58" width="16" height="22" rx="3" fill="var(--muted)" opacity="0.35"/>
+        <text x="471" y="74" font-size="12" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">seq 794</text>
+        <text x="471" y="108" font-size="11" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,Menlo,Consolas,monospace">TSFT (distinct)</text>
+        <text x="518" y="102" font-size="10" text-anchor="middle" fill="var(--muted)">ACK</text>
+
+        <text x="540" y="76" font-size="20" fill="var(--muted)">···</text>
+
+        <!-- divider -->
+        <line x1="20" y1="150" x2="740" y2="150" stroke="var(--line)" stroke-width="1"/>
+
+        <!-- ROW B: one A-MPDU PPDU -->
+        <text x="20" y="182" font-size="13.5" font-weight="700" fill="var(--fg)">One A-MPDU PPDU — 3 subframes, consecutive seq, ONE shared TSFT</text>
+
+        <!-- single preamble -->
+        <rect x="20" y="200" width="20" height="52" rx="3" fill="var(--muted)" opacity="0.5"/>
+        <!-- 3 subframes -->
+        <rect x="40"  y="200" width="120" height="52" rx="3" fill="var(--accent)"/>
+        <rect x="162" y="200" width="120" height="52" rx="3" fill="var(--accent2)"/>
+        <rect x="284" y="200" width="120" height="52" rx="3" fill="var(--accent)"/>
+        <text x="100" y="230" font-size="12.5" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">seq 794</text>
+        <text x="222" y="230" font-size="12.5" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">seq 795</text>
+        <text x="344" y="230" font-size="12.5" text-anchor="middle" fill="#fff" font-family="ui-monospace,Menlo,Consolas,monospace">seq 796</text>
+        <!-- single ACK (block ack) -->
+        <rect x="408" y="212" width="18" height="28" rx="3" fill="var(--muted)" opacity="0.35"/>
+        <text x="417" y="262" font-size="10" text-anchor="middle" fill="var(--muted)">BA</text>
+
+        <!-- shared-TSFT bracket -->
+        <path d="M40 268 L40 276 L404 276 L404 268" fill="none" stroke="var(--ok)" stroke-width="1.6"/>
+        <text x="222" y="296" font-size="12" text-anchor="middle" fill="var(--ok)" font-family="ui-monospace,Menlo,Consolas,monospace">radiotap.mactime = 188379322  (identical for all 3)</text>
+        <text x="222" y="314" font-size="11.5" text-anchor="middle" fill="var(--muted)">same SA=board1 / DA=board0 / TA=board1, len 1624 · one preamble + one ACK amortised over 3 MPDUs</text>
+      </svg>
+    </div>
+    <figcaption>The core evidence, drawn to the numbers. Above: single-MPDU PPDUs, each with its own preamble, ACK and
+    distinct TSFT (711 of them). Below: one real A-MPDU — subframes seq 794/795/796 packed into one PPDU sharing the
+    exact TSFT <code>188379322</code>, so a single preamble + ACK covers all three.</figcaption>
+  </figure>
+
+  <h3 id="capture">Capture results</h3>
+  <p><strong>3498 frames</strong> total on morse0. Of board1's transmissions, <strong>1310 were QoS-Data</strong>
+  (subtype <code>0x28</code>). Grouping those by shared TSFT:</p>
+
+  <table>
+    <thead>
+      <tr><th>PPDU size (MPDUs)</th><th class="num">count</th><th class="num">frames covered</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1 (single)</td><td class="num">711</td><td class="num">711</td></tr>
+      <tr><td>2</td><td class="num">52</td><td class="num">104</td></tr>
+      <tr><td>3</td><td class="num">165</td><td class="num">495</td></tr>
+      <tr><td><strong>aggregated (≥2)</strong></td><td class="num"><strong>217</strong></td><td class="num"><strong>599</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>217 aggregated PPDUs</strong> carried 599 of the 1310 QoS-Data frames — <strong>~46% of board1's mesh
+  QoS-data went out aggregated.</strong> Board1 PPDU-size distribution, bars to scale (max = 711):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">1 MPDU</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">711</span></div>
+    <div class="bar-row"><span class="lbl">2 MPDU</span><span class="bar-track"><span class="bar-fill fast" style="width:7.3%"></span></span><span class="val">52</span></div>
+    <div class="bar-row"><span class="lbl">3 MPDU</span><span class="bar-track"><span class="bar-fill fast" style="width:23.2%"></span></span><span class="val">165</span></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Airtight confirmation — three independent groups</p>
+    <p>Three separate shared-TSFT groups, each exactly 3 QoS-Data frames with <strong>consecutive</strong> sequence
+    numbers, identical <code>SA=board1 / DA=board0 / TA=board1</code>, identical length 1624:</p>
+    <table style="margin:.5em 0">
+      <thead><tr><th>TSFT (µs)</th><th>seq numbers</th><th class="num">MPDUs</th></tr></thead>
+      <tbody>
+        <tr><td><code>188379322</code></td><td><code>794, 795, 796</code></td><td class="num">3</td></tr>
+        <tr><td><code>188364744</code></td><td><code>791, 792, 793</code></td><td class="num">3</td></tr>
+        <tr><td><code>188346837</code></td><td><code>788, 789, 790</code></td><td class="num">3</td></tr>
+      </tbody>
+    </table>
+    <p>Consecutive <code>wlan.seq</code> + identical PPDU timestamp + identical addresses on three independent groups =
+    a real A-MPDU. Coincidence is excluded: three unrelated frames cannot share a µs-exact TSFT <em>and</em> be
+    sequential <em>and</em> share all three addresses by chance.</p>
+  </div>
+
+  <p><strong>board0's return direction aggregated even deeper</strong> — its QoS-Data PPDU-size distribution reaches
+  <strong>7 MPDUs per PPDU</strong>. Counts (bars to scale, max = 131):</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 480 210" role="img" aria-label="board0 QoS-Data PPDU size distribution, 1 to 7 MPDUs">
+      <line x1="30" y1="180" x2="460" y2="180" stroke="var(--line)" stroke-width="1"/>
+      <!-- bars: 131,50,27,11,13,14,4 scaled to 150px at max 131 -->
+      <g font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11" text-anchor="middle">
+        <rect x="42"  y="30"  width="36" height="150" rx="3" fill="var(--accent)"/>
+        <text x="60"  y="24"  fill="var(--fg)">131</text><text x="60"  y="196" fill="var(--muted)">1</text>
+        <rect x="102" y="123" width="36" height="57"  rx="3" fill="var(--accent)"/>
+        <text x="120" y="117" fill="var(--fg)">50</text><text x="120" y="196" fill="var(--muted)">2</text>
+        <rect x="162" y="149" width="36" height="31"  rx="3" fill="var(--accent)"/>
+        <text x="180" y="143" fill="var(--fg)">27</text><text x="180" y="196" fill="var(--muted)">3</text>
+        <rect x="222" y="167" width="36" height="13"  rx="3" fill="var(--accent2)"/>
+        <text x="240" y="161" fill="var(--fg)">11</text><text x="240" y="196" fill="var(--muted)">4</text>
+        <rect x="282" y="165" width="36" height="15"  rx="3" fill="var(--accent2)"/>
+        <text x="300" y="159" fill="var(--fg)">13</text><text x="300" y="196" fill="var(--muted)">5</text>
+        <rect x="342" y="164" width="36" height="16"  rx="3" fill="var(--accent2)"/>
+        <text x="360" y="158" fill="var(--fg)">14</text><text x="360" y="196" fill="var(--muted)">6</text>
+        <rect x="402" y="175" width="36" height="5"   rx="3" fill="var(--ok)"/>
+        <text x="420" y="169" fill="var(--fg)">4</text><text x="420" y="196" fill="var(--muted)">7</text>
+      </g>
+      <text x="245" y="208" font-size="11" text-anchor="middle" fill="var(--muted)">MPDUs per PPDU  →  count</text>
+    </svg>
+  </div>
+
+  <p>So the chip aggregates in <strong>both directions</strong> and depth is not pinned at 3. <strong>S0b verdict:
+  GO.</strong></p>
+
+  <h2 id="conclusion">Conclusion — feature is a GO; Stage 1 is the host BA handshake</h2>
+  <ul>
+    <li><strong>S0a:</strong> the firmware advertises A-MPDU for a mesh vif (<code>AMPDU_cap = 1</code>), so the
+      datapath's eligibility gates are open.</li>
+    <li><strong>S0b:</strong> given eligible frames, the chip really packs mesh QoS-data into multi-MPDU PPDUs on air
+      (3 MPDUs board1→board0, up to 7 board0→board1).</li>
+  </ul>
+  <p>This confirms the feasibility study's core claim: <strong>A-MPDU assembly is a firmware capability the host only
+  has to <em>enable</em>.</strong> The only missing piece is the host-side <strong>Block-Ack handshake</strong> — the
+  S1 work: routing inbound <code>BLOCK_ACK</code> action frames to the BA state machine, and (for a secured mesh) a
+  PMF exemption so the BA action frames are accepted. Nothing in S0 required a firmware change — which is exactly why
+  the spike ran first.</p>
+
+  <h2 id="caveats">Caveats — stated honestly</h2>
+  <div class="callout warn">
+    <p class="ct">⚠ Caveats + residuals — stated honestly</p>
+    <ul style="margin:.2em 0">
+      <li><strong>SW-CCMP + A-MPDU composition is demonstrated on-air (positive result).</strong> The mesh was
+        secured (see the rig), so the forced A-MPDUs were themselves CCMP-encrypted: the firmware aggregated
+        <strong>CCMP-protected</strong> 4-address mesh QoS-Data (board1's QoS-Data was 100%
+        <code>wlan.fc.protected = 1</code>). So the composition a real secured mesh needs — SW-CCMP encrypt each
+        MPDU, <em>then</em> aggregate the ciphertext MPDUs into one PPDU — is already shown here, not deferred. Honest
+        residual: aggregation depth was still modest (3–7 MPDUs) and this was an all-ESP mesh.</li>
+      <li><strong>Modest depth (3–7 MPDUs).</strong> Two likely limiters, neither a blocker: the <strong>1 MHz S1G
+        A-MPDU duration cap</strong> and a <strong>shallow TX queue</strong> at these rates. Deeper aggregation needs
+        higher offered load and/or wider bandwidth — a Stage-2/3 tuning question, not a go/no-go one.</li>
+      <li><strong>Force ≠ handshake.</strong> S0b bypassed the BA session, so the throughput is an <em>optimistic</em>
+        proxy (a real deployment pays BA setup/teardown and receiver reorder). It shows the ceiling exists and is
+        reachable, not the steady-state number.</li>
+    </ul>
+  </div>
+
+  <h2 id="gotchas">Bench method gotchas (reusable)</h2>
+  <ul>
+    <li><strong>iperf <code>-b</code> wants a bare integer in Mbit/s.</strong> <code>-b 2</code> is accepted;
+      <code>-b 2M</code> is <strong>rejected</strong> by this iperf build.</li>
+    <li><strong><code>iw</code> is not on chronium's non-login-shell PATH.</strong> Invoke it as <code>sudo iw …</code>
+      from a non-interactive SSH command, or it is "command not found".</li>
+    <li><strong>pyserial reset-on-open is flaky on these XIAO ESP32-S3 boards.</strong> Drive the REPL with
+      <code>dtr=True, rts=False</code> plus a long pre-send read delay to absorb any boot glitch.</li>
+    <li><strong>No A-MPDU radiotap field on morse0.</strong> Detect aggregation by <strong>TSFT clustering +
+      consecutive <code>wlan.seq</code></strong> — the standing method for this sniffer.</li>
+  </ul>
+
+  <h2 id="teardown">Teardown (radio-silent) + next steps</h2>
+  <ul>
+    <li>Temporary spike code reverted — morselib tree clean (the <code>umac_interface.c</code> probe
+      <code>printf</code> and the <code>umac_datapath.c</code> force both removed).</li>
+    <li>board0 + board1 reflashed to <strong><code>rimba-hello</code></strong> (radio-silent).</li>
+    <li>chronium <strong><code>wlan1</code> down</strong>. <strong>Nothing committed.</strong></li>
+  </ul>
+  <p><strong>Stage 1 (not started):</strong> implement the host BA handshake (route inbound <code>BLOCK_ACK</code>
+  action frames to a BA state machine; originate ADDBA per mesh peer/TID; tear down on timeout) → secured-mesh PMF
+  exemption → re-run S0b's capture method under the <strong>real BA handshake</strong> (not the force) to re-confirm
+  encrypt-then-aggregate at depth — the forced path already shows the composition on-air (see Caveats) → characterise
+  depth vs offered load and bandwidth once aggregation is BA-gated rather than forced.
+  Full staged plan and code-map: <code>docs/mesh-ap/rimba-mesh-ampdu-aggregation-design.md</code>.</p>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#why">Why now — crypto moved</a></li>
+    <li><a href="#s0a">S0a — capability probe</a></li>
+    <li><a href="#s0b">S0b — on-air emission</a></li>
+    <li><a href="#rig">The rig</a></li>
+    <li><a href="#detect">Detecting aggregation</a></li>
+    <li><a href="#capture">Capture results</a></li>
+    <li><a href="#conclusion">Conclusion — GO</a></li>
+    <li><a href="#caveats">Caveats</a></li>
+    <li><a href="#gotchas">Bench gotchas</a></li>
+    <li><a href="#teardown">Teardown + next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-11-mesh-ampdu-s0-fw-capability-spike</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

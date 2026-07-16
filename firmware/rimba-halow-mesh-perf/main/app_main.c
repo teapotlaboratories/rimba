@@ -268,20 +268,11 @@ void app_main(void)
     args.beacon_interval_tu = 100;
     args.max_plinks = MESH_MAX_PLINKS;
 
-    ESP_LOGI(TAG, "Starting mesh (id=\"%s\" chan=%d mac=%02x:%02x:%02x:%02x:%02x:%02x)...",
-             MESH_ID, MESH_S1G_CHAN, g_mesh_mac[0], g_mesh_mac[1], g_mesh_mac[2],
-             g_mesh_mac[3], g_mesh_mac[4], g_mesh_mac[5]);
-    enum mmwlan_status st = mmwlan_mesh_start(&args);
-    if (st != MMWLAN_SUCCESS)
-    {
-        ESP_LOGE(TAG, "==> mmwlan_mesh_start FAILED status=%d", (int)st);
-        return;
-    }
-    ESP_LOGI(TAG, "==> mesh vif up; firmware beaconing periodically on chan %d.", MESH_S1G_CHAN);
-
-    /* Log any peer mesh beacons we hear on the channel. */
-    mmwlan_register_rx_frame_cb(MMWLAN_FRAME_BEACON, peer_beacon_cb, NULL);
-
+    /* Forced-topology allowlist MUST be configured BEFORE mmwlan_mesh_start. mesh_start begins beaconing
+     * and RX immediately; an empty allowlist (count==0) allows-all (mesh_peer_allowed()), so any neighbour
+     * beacon/OPEN arriving in the window between start and a later allowlist call could form a direct plink
+     * to a node we intend to reach multi-hop — which would defeat the forced line and skew a multi-hop
+     * measurement. Setting the allowlist first closes that race. */
 #ifdef MESH_LINUX_INTEROP
     /* No allowlist -> peer with anyone (incl. the Linux node). Ping chronite so we originate a
      * PREQ for it (-> Linux PREP) and so chronite builds a path to us (-> Linux PERR on break). */
@@ -333,6 +324,20 @@ void app_main(void)
         ESP_LOGW(TAG, "MESH role: endpoint board2 (responder)");
     }
 #endif
+
+    ESP_LOGI(TAG, "Starting mesh (id=\"%s\" chan=%d mac=%02x:%02x:%02x:%02x:%02x:%02x)...",
+             MESH_ID, MESH_S1G_CHAN, g_mesh_mac[0], g_mesh_mac[1], g_mesh_mac[2],
+             g_mesh_mac[3], g_mesh_mac[4], g_mesh_mac[5]);
+    enum mmwlan_status st = mmwlan_mesh_start(&args);
+    if (st != MMWLAN_SUCCESS)
+    {
+        ESP_LOGE(TAG, "==> mmwlan_mesh_start FAILED status=%d", (int)st);
+        return;
+    }
+    ESP_LOGI(TAG, "==> mesh vif up; firmware beaconing periodically on chan %d.", MESH_S1G_CHAN);
+
+    /* Log any peer mesh beacons we hear on the channel. */
+    mmwlan_register_rx_frame_cb(MMWLAN_FRAME_BEACON, peer_beacon_cb, NULL);
 
     /* P4: once a peer link is up, pin a static mesh IP and ping a neighbour. */
     xTaskCreate(mesh_net_task, "mesh_net", 4096, NULL, 5, NULL);

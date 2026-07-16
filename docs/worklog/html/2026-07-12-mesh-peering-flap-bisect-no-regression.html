@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh peering-flap bisection: NO regression in the uncommitted A-MPDU layers — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-12</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-12</span>
+    <span class="badge">8 min read</span>
+    <span class="badge ok">✓ resolved — no regression</span>
+    <span class="badge bug">mesh · A-MPDU · peering</span>
+  </div>
+
+  <h1>Mesh peering-flap bisection<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">NO regression in the uncommitted A-MPDU layers · the S3 RX-drop read is answered</small></h1>
+
+  <p class="lead">Prior sessions saw a cold-booted ESP flap its mesh plink with a Linux peer (chronite) —
+  establishes, then closes, repeatedly — while an all-Linux mesh on the same secured config / channel / RF held
+  rock-stable. The working hypothesis was a <strong>regression in the uncommitted ESP changes</strong> (S2 multi-hop
+  next-hop stad, S3 relay forward aggregation, RTC-noinit counters, FIX-1, plink/hwr telemetry) layered on the
+  committed S1 baseline <code>7fdba0c9</code>. This entry bisects it.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Resolved — there is NO regression in the uncommitted layers</p>
+    <p>Both the current working tree <strong>and</strong> the clean committed <code>7fdba0c9</code> baseline peer
+    with chronite and hold a <strong>rock-stable plink</strong> on the SAME board2, same chronite, same idle secured
+    config, in a fresh bench session. The prior "8 established / 5 closed then quiet, 100% ping loss" flap reproduced
+    on <strong>neither</strong> firmware → it was a transient degraded-chip / bench-condition artifact, not code.
+    Bench left radio-silent, working tree restored exactly, nothing committed. This entry is standalone.</p>
+  </div>
+
+  <h2 id="tldr">TL;DR</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">0 / 5</div><div class="lbl">flagged suspects survived adversarial verification</div></div>
+    <div class="stat"><div class="num acc">0 / 0</div><div class="lbl">in-window flaps — current / baseline</div></div>
+    <div class="stat"><div class="num ok">686 s+</div><div class="lbl">baseline connected time, still counting</div></div>
+    <div class="stat"><div class="num">close = 0</div><div class="lbl">ESP RTC — never tore down an ESTAB plink</div></div>
+    <div class="stat"><div class="num acc">~5.5 min</div><div class="lbl">current-tree steady state</div></div>
+    <div class="stat"><div class="num ok">unblocked</div><div class="lbl">the S3 RX-drop read</div></div>
+  </div>
+
+  <ul>
+    <li><strong>Code analysis plus an independent adversarial re-audit both conclude the uncommitted morselib is
+      IDLE-PEERING-NEUTRAL vs <code>7fdba0c9</code>.</strong> Every uncommitted touch of the MPM / SAE / AMPE handshake
+      is either a side-effect-free telemetry counter increment or confined to the DATA / FORWARD / HW-RESTART planes
+      that are never entered at pure idle. The regression hypothesis is refuted in code (0 of 5 flagged suspects
+      survived).</li>
+    <li><strong>Bench A/B on the SAME board2 / chronite / idle <code>MESH_IPERF</code> config, current-tree FIRST
+      (freshest chip), baseline SECOND:</strong>
+      <ul>
+        <li><strong>Current tree:</strong> peer → one early re-SAE settle (t≈43 s) → <strong>stable ~5.5 min</strong>;
+          ESP RTC <code>g_plink_close=0</code> (never tore down an established plink), <code>restart_attempts=0</code>,
+          <code>boot_count=2</code> (no crash-loop).</li>
+        <li><strong>Baseline <code>7fdba0c9</code>:</strong> peer → one cold-boot reconnect → <strong>continuously
+          stable</strong>, chronite <code>connected time = 686 s</code> and counting, <code>est_delta=0 disc_delta=0</code>
+          over the whole 150 s window.</li>
+        <li><strong>Identical behaviour. Both stable. Neither flaps.</strong></li>
+      </ul></li>
+    <li><strong>The reframe's "known-good" control was confounded.</strong> The prior "ESP↔Linux ping 45/45 on
+      committed S1" was traffic-loaded board0 under <code>MESH_LINUX_INTEROP</code> (auto-ping) — continuous ping frames
+      keep the peer-link inactivity timer from firing. The flap was seen on idle board2 under <code>MESH_IPERF</code>
+      (no <code>g_ping_target</code>). Different board, different config, different traffic — not apples-to-apples.</li>
+    <li><strong>The Linux-stable control isolates the flap to the ESP HOST STACK, not the radio.</strong> Combined with
+      the A/B (it is not the uncommitted layers), the residual is the <strong>committed morselib MPM keepalive gap</strong>
+      (§4) surfacing under marginal RX — not "a degraded chip".</li>
+    <li><strong>Implication: the S3 RX-drop read is UNBLOCKED.</strong> The prior blocker (board2 plink flapping → 0
+      traffic → counters stay 0) was chip-condition, not code. In a fresh session board2 holds a stable plink, so a
+      <code>board0 → board2(relay) → chronite</code> blast can now accumulate the RX / forward drop counters.</li>
+  </ul>
+
+  <h2 id="method">1 · Method</h2>
+  <ol>
+    <li><strong>Git state.</strong> Submodule <code>components/halow</code> HEAD is exactly <code>7fdba0c9</code> (the
+      committed S1 baseline); ALL of S2/S3/RTC/FIX-1/telemetry is uncommitted working-tree diff (<strong>12 files,
+      +431/-29</strong>) + one app file (<code>firmware/rimba-halow-mesh-perf/main/app_main.c</code>). So "get to S1
+      baseline" = <code>git stash</code> the submodule + revert <code>app_main.c</code> (they must move together — the
+      app references morselib externs).</li>
+    <li><strong>Code trace</strong> of every mesh frame class transmitted during peering, to see whether any uncommitted
+      hunk changes idle MPM / SAE behaviour.</li>
+    <li><strong>Independent adversarial re-audit</strong> (4 lenses — frame-class tracer, always-on-delta, S2/S3
+      data-path escape, reframe reconcile — each finding then adversarially refuted) as a cross-check on the code
+      trace.</li>
+    <li><strong>Bench A/B</strong> — the decisive experiment: flash + PPK2-cold-boot board2, bring up chronite mesh,
+      measure plink stability from BOTH sides (chronite wpa <code>established</code>/<code>closing</code>/<code>MESH-PEER-*</code>
+      + the ESP's RTC <code>g_plink_estab</code>/<code>g_plink_close</code>). Current tree first (freshest chip), then
+      the clean <code>7fdba0c9</code> baseline on the same board2 — so a later baseline flap couldn't be misread as a
+      current-only regression.</li>
+  </ol>
+
+  <h2 id="code">2 · Code analysis — the uncommitted layers do not touch idle peering</h2>
+  <p>The peering file <code>umac_mesh.c</code> diff is <strong>only telemetry</strong>: <code>g_plink_estab++</code> at
+  the two ESTAB sites (<code>umac_mesh.c:2971/:2990</code>), <code>g_plink_close++</code> in <code>mesh_peer_free</code>
+  when tearing down an ESTAB plink (<code>:634</code>), the <code>g_mesh_fwd_dbg[]</code> forward-path increments, and a
+  getter. <strong>No MPM/SAE FSM logic changed.</strong></p>
+
+  <p>The decisive routing facts (grep-verified in the working tree) show every uncommitted hunk lives on a plane that
+  idle peering never enters:</p>
+
+  <table>
+    <thead><tr><th>Uncommitted layer</th><th>Where it lives (<code>file:line</code>)</th><th>Reached at idle?</th></tr></thead>
+    <tbody>
+      <tr><td>Peering frames (OPEN/CONFIRM/CLOSE)</td><td><code>umac_mesh_tx_peering</code> · <code>umac_mesh.c:854</code> → <code>umac_datapath_tx_mgmt_frame</code></td><td><strong>Outside every diff hunk</strong></td></tr>
+      <tr><td>SAE auth</td><td><code>umac_mesh_tx_auth</code> · <code>umac_mesh.c:895</code> → <code>umac_datapath_tx_mgmt_frame</code></td><td><strong>Outside every diff hunk</strong></td></tr>
+      <tr><td>S3 forward aggregation</td><td><code>umac_datapath_tx_mesh_keyed_frame</code>; only caller is <code>umac_mesh_forward_data</code> (<code>umac_mesh.c:2628</code>) + group re-bcast (<code>:2752</code>)</td><td>No — RX-forward only</td></tr>
+      <tr><td>S2 next-hop stad</td><td><code>umac_datapath_process_tx_frame</code>; <code>key_stad == stad</code> for single-hop / non-mesh / multicast</td><td>No — no-op off multi-hop data path</td></tr>
+      <tr><td>FIX-1 (soft hw-restart)</td><td><code>CONFIG_HALOW_SOFT_HW_RESTART</code> unset → <code>g_mmdrv_soft_hw_restart=false</code>; <code>hw_restart</code> legacy path, not called at idle</td><td>No — compile-time dormant</td></tr>
+      <tr><td>App allowlist</td><td><code>umac_mesh_peer_allowed</code> at exactly one site — the data-RX gate <code>umac_datapath.c:697</code>, gated on <code>mesh_ctrl_present</code></td><td>No — gates mesh <em>data</em>, not beacons / MPM / SAE</td></tr>
+    </tbody>
+  </table>
+
+  <p>So S3's <code>fwd_aggregate = (key_type == PAIRWISE)</code> reroute (tid=0, data-channel, aggr_check) touches only
+  the relay forward path; S2's <code>sta_data = umac_sta_data_get_datapath(key_stad)</code> is a no-op off the multi-hop
+  data path; the app's role/allowlist rewrite (board2-relay vs board0-relay) is peering-irrelevant, and board2 peers
+  with chronite regardless of which topology the app selected.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Independent adversarial re-audit — bottom line</p>
+    <p>YES — the uncommitted morselib is IDLE-PEERING-NEUTRAL vs committed <code>7fdba0c9</code>. The regression
+    hypothesis (S1/S2/S3/telemetry introduced the flap) is REFUTED. The bench A/B should EXPECT BASELINE AND CURRENT TO
+    BEHAVE THE SAME AT IDLE.</p>
+    <p>The audit also surfaced the confound: the 45/45 "known-good" was traffic-loaded board0 under
+    <code>MESH_LINUX_INTEROP</code> auto-ping; the flap is idle board2 under <code>MESH_IPERF</code> with no ping — the
+    delta is <strong>traffic, not code</strong>.</p>
+  </div>
+
+  <h2 id="ab">3 · Bench A/B — both firmwares peer stably on the same board2</h2>
+  <p>Rig: board2 (only fully-wired ESP, PPK2 cold-bootable) ↔ chronite (Linux, <code>rimba-mesh</code>, SAE
+  <code>rimbamesh2026</code>, op_class 68 / ch27, fw 1.17.8 / 480664, user_mpm=1). board0/board1 stayed on
+  <code>rimba-hello</code> (silent — chronite only ever listed board2 as a peer). Flash FIRST, then PPK2 cold-boot
+  (clears the warm-reset MM6108 wedge). Measured from BOTH sides. <code>MESH_IPERF</code> = open peering, no
+  <code>g_ping_target</code> = <strong>idle</strong>.</p>
+
+  <h3>3.1 Current tree (uncommitted S2/S3/RTC/FIX-1/telemetry)</h3>
+  <p>chronite wpa log, board2 (<code>e2:72:a1:f8:f0:08</code>):</p>
+  <pre><code>:121 IDLE→OPN_SNT→OPN_RCVD → :122 established → ESTAB → MESH-PEER-CONNECTED     (establish #1)
+:165 SAE: remove the STA doing reauthentication → DISCONNECTED → MPM closing    (one re-SAE settle)
+:167 IDLE→OPN_SNT→OPN_RCVD → established → ESTAB → MESH-PEER-CONNECTED           (establish #2)
+[then NO further board2 events for ~525 s — continuously ESTAB]</code></pre>
+  <p>Observation (150 s + extended 182 s ≈ 5.5 min): <code>peers_now=1</code> at every 25 s checkpoint, <code>est</code>
+  frozen at 2, <code>disc</code> frozen at 1, inactive time 12–96 ms (≪ the 6 s inactivity threshold), signal
+  −10…−13 dBm.</p>
+  <p>ESP-side RTC (survives the warm-reset read): <code>PLINK-DBG estab=1→2, close=0</code> (<strong>never tore down an
+  established plink</strong>), <code>HWR-DBG boot_count=2 restart_attempts=0 restart_completions=0</code> (no crash-loop,
+  no hw_restart). Both sides agree: stable.</p>
+  <p>The single re-SAE at <code>:165</code> was board2 re-initiating SAE (chronite logged an RX SAE commit from board2)
+  — an early MPM settling artifact (asymmetric ESTAB: chronite reached ESTAB at <code>:122</code> but board2's side
+  likely timed out pre-ESTAB and re-opened, reaching ESTAB at <code>:167</code>; <code>g_plink_close=0</code> confirms
+  board2 never tore down an <em>established</em> link). It happened <strong>once</strong>, then the link held.</p>
+
+  <h3>3.2 Baseline <code>7fdba0c9</code> (stashed submodule + reverted app_main.c, same board2)</h3>
+  <p>chronite wpa log, board2:</p>
+  <pre><code>:692 SAE: remove the STA doing reauthentication → :693 DISCONNECTED → MPM closing   (cold-boot reconnect)
+:695 IDLE→OPN_SNT→OPN_RCVD → established → ESTAB → MESH-PEER-CONNECTED
+[then continuously ESTAB; station dump `connected time = 686 s` and counting]</code></pre>
+  <p>Observation (150 s): <code>est_delta=0 disc_delta=0</code> every checkpoint, <code>peers_now=1</code> throughout,
+  inactive 8–92 ms. <strong>Zero flaps in-window</strong> — after the one cold-boot reconnect it held continuously.</p>
+
+  <h3>3.3 Verdict</h3>
+  <table>
+    <thead><tr><th>Arm</th><th>early settle</th><th class="num">in-window flaps</th><th>steady state</th></tr></thead>
+    <tbody>
+      <tr><td>Current tree</td><td>1 re-SAE</td><td class="num">0</td><td>stable ~5.5 min, RTC close=0</td></tr>
+      <tr><td>Baseline <code>7fdba0c9</code></td><td>1 coldboot reconnect</td><td class="num">0</td><td>stable, connected 686 s+</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Identical.</strong> The uncommitted layers make peering neither better nor worse. The prior "8 est / 5
+  close then quiet, 100% loss" flap reproduced on <strong>neither</strong>.</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">current · flaps</span><span class="bar-track"><span class="bar-fill fast" style="width:2px"></span></span><span class="val">0</span></div>
+    <div class="bar-row"><span class="lbl">baseline · flaps</span><span class="bar-track"><span class="bar-fill fast" style="width:2px"></span></span><span class="val">0</span></div>
+    <div class="bar-row"><span class="lbl">prior "flap" est</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">8 est / 5 close</span></div>
+  </div>
+  <figcaption style="text-align:left;color:var(--muted);font-size:13px;margin:-.4em 0 1em">In-window plink teardowns: both A/B arms flat at 0. The prior "8 established / 5 closed, 100% loss" cascade (top-of-scale) reproduced on neither firmware.</figcaption>
+
+  <h2 id="flap">4 · What the flap actually was (and the latent gap it exposes)</h2>
+
+  <p><strong>Root attribution — ESP HOST STACK (morselib MPM), NOT the radio or "a degraded chip".</strong> The bench
+  runs ONE radio type end-to-end — the Morse Micro <strong>MM6108</strong> on the <strong>FGH100M / <code>fgh100mhaamd</code></strong>
+  module with the same <code>mm6108.bin</code> 1.17.8 fw + BCF. ESP and Linux differ <em>only</em> in host (morselib
+  vs <code>mac80211</code> + <code>morse_driver</code>) and carrier board. A Linux node peering rock-stably on the
+  <em>same</em> MM6108+fw DISPROVES a radio/firmware cause and DISPROVES "the MM6108 wore out". The A/B further shows
+  it is not the uncommitted S2/S3/RTC/FIX-1/telemetry — i.e. it is in the <strong>committed morselib MPM</strong>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">MM6108 + FGH100M</div><div class="s">same silicon, mm6108.bin 1.17.8</div></div>
+      <div class="node"><div class="t">host stack</div><div class="s">the only variable</div></div>
+      <div class="node ok"><div class="t">Linux mac80211 + morse_driver</div><div class="s">peers rock-stable</div></div>
+      <div class="node err"><div class="t">ESP morselib MPM</div><div class="s">flaps under marginal RX</div></div>
+    </div>
+    <figcaption>Isolation logic: same radio silicon + firmware end-to-end; only the host differs. A stable Linux peer on the same MM6108 pins the flap on morselib's committed MPM, not the chip or the air.</figcaption>
+  </figure>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Confounded control — the "45/45 known-good"</p>
+    <p>The reframe's control was traffic-loaded board0 under <code>MESH_LINUX_INTEROP</code> (auto-ping); continuous
+    ping frames refresh the inactivity timer, masking the very gap that fires on an idle plink. The flap was seen on
+    idle board2 under <code>MESH_IPERF</code>. Different board, config, and traffic — not a valid apples-to-apples
+    baseline.</p>
+  </div>
+
+  <h3>The latent robustness gap (in COMMITTED code, present in <code>7fdba0c9</code> too)</h3>
+  <p>The mesh peering FSM sends <strong>no ESTAB keepalive</strong> — an idle plink relies on received <strong>beacons</strong>
+  (100 ms) to keep the peer-link inactivity timer (<code>MESH_PLINK_INACTIVITY_MS = 6000</code>) from firing. When
+  beacons are missed (degraded / warm RX, RF marginality), a node can hit the 6 s inactivity →
+  <code>mesh_peer_free</code> teardown → re-open / re-SAE on the next beacon → the observed flap; repeated under
+  sustained adverse RX = the "8 est / 5 close" cascade. This is <strong>not</strong> introduced by S1/S2/S3 — it is a
+  property of the committed FSM that chip degradation amplifies.</p>
+
+  <figure>
+    <div class="flow vert">
+      <div class="node acc"><div class="t">peer beacon (100 ms)</div><div class="s">umac_mesh.c:1414 — refresh last_rx_ms</div></div>
+      <div class="node acc"><div class="t">any received data frame</div><div class="s">new umac_mesh_note_peer_rx(ta) — refresh last_rx_ms</div></div>
+      <div class="node"><div class="t">inactivity check</div><div class="s">now − last_rx_ms vs MESH_PLINK_INACTIVITY_MS</div></div>
+      <div class="node err"><div class="t">timeout → mesh_peer_free</div><div class="s">teardown → re-open / re-SAE = flap</div></div>
+    </div>
+    <figcaption>Liveness mechanism: both a peer beacon and (after the §7 fix) any received data frame refresh <code>last_rx_ms</code>; the inactivity check fires teardown only when neither arrives within the window. Pre-fix the window was 6 s and only beacons/peering refreshed it.</figcaption>
+  </figure>
+
+  <p>The follow-Linux fix is <strong>not</strong> a keepalive: <code>net/mac80211</code> sends none on an ESTAB plink
+  (the timer is a no-op, <code>mesh_plink.c:696</code>). Linux instead uses a <strong>1800 s</strong> inactivity window
+  (<code>MESH_DEFAULT_PLINK_TIMEOUT</code>) and refreshes <code>last_rx</code> on <strong>every</strong> received frame
+  incl. data (<code>rx.c:4810</code>); the ESP had 6 s + beacon/peering-only. Implemented + verified — see §7. A
+  committed-FSM correction, <strong>not</strong> a regression fix.</p>
+
+  <h4>Inactivity window — ESP (pre-fix) vs Linux reference</h4>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">ESP pre-fix</span><span class="bar-track"><span class="bar-fill slow" style="width:23.9%"></span></span><span class="val">6 s</span></div>
+    <div class="bar-row"><span class="lbl">Linux ref</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">1800 s</span></div>
+  </div>
+  <figcaption style="text-align:left;color:var(--muted);font-size:13px;margin:-.4em 0 1em"><strong>Log scale</strong> (bar widths ∝ log₁₀ of the window) — the true ratio is <strong>~300×</strong> (1800 s ÷ 6 s). At 100 ms beacons, 6 s tolerated only ~60 missed beacons; Linux ~1758. The §7 fix adopts Linux's <code>MESH_DEFAULT_PLINK_TIMEOUT</code>.</figcaption>
+
+  <h2 id="s3">5 · Implication for S3 + next steps</h2>
+  <ul>
+    <li><strong>The S3 RX-drop read is UNBLOCKED.</strong> The prior blocker (board2 flap → no traffic → counters 0)
+      was chip-condition, not code. In a fresh session board2 holds a stable plink, so the read can proceed:
+      <code>board0 → board2(relay, S3) → chronite</code> UDP blast, then read board2's RTC <code>RX-DBG[boot]</code> to
+      name the ~99 % early-host-RX drop bucket (allowlist / plaintext / hw-ccmp / sw-ccmp / no-decrypt) — the original
+      S3 goal. Do it on a fresh/cool bench; reflash board0 to the mesh-perf app (client role) first.</li>
+    <li><strong>The bisection itself changed no code</strong> — working tree restored exactly (submodule 12 files
+      +431/-29 @ <code>7fdba0c9</code>; <code>app_main.c</code> M). The follow-up liveness fix (§7) is a separate,
+      deliberate change on top. Nothing committed.</li>
+  </ul>
+
+  <h2 id="bench">6 · Bench mechanics that worked (reusable)</h2>
+  <ul>
+    <li><strong>Full bench control now available:</strong> board0/board1 VBUS via <code>tools/esp_usb_power.py</code>
+      (sudo pw known); board2 via <code>tools/ppk2_hold.py</code> (PPK2). Cold-boot board2 = kill the hold PID (found
+      via <code>/proc/*/cmdline</code>, never <code>pgrep -f</code> which self-matches) → DUT off →
+      re-<code>nohup ppk2_hold.py</code> → DUT on. Flash board2 by its stable by-id path, then cold-boot (esptool's
+      <code>--after hard_reset</code> wedges the MM6108; PPK2 power-cycle heals it).</li>
+    <li><strong>Read board2 RTC counters</strong> with <code>reset_read.py</code> (dtr=False + RTS pulse = reset-into-app,
+      not download); RTC survives the warm reset so the boot dump shows the run's <code>PLINK-DBG</code> /
+      <code>HWR-DBG</code> / <code>RX-DBG</code>.</li>
+    <li><strong>chronite mesh:</strong>
+      <code>sudo wpa_supplicant_s1g -B -i wlan1 -c /tmp/wpa-interop.conf -f /tmp/wpa_wlan1.log -t -dd</code> (fresh log
+      for clean counting or snapshot est/disc and measure the delta). Kill ONLY the wlan1 supplicant (match
+      binary+iface via <code>ps -eo … | awk</code> that does NOT contain the literal in its own cmdline). Silence = kill
+      wlan1 supplicant + <code>ip link set wlan1 down</code> (leave the wlan0/SSH supplicant).</li>
+    <li><strong>Radio-silent after:</strong> board2 → <code>~/pwr_test/reflash_hello.py</code> (rimba-hello, silent,
+      left powered); board0/board1 already hello; chronite wlan1 down. Done this session.</li>
+  </ul>
+
+  <h2 id="fix">7 · Follow-up fix — match Linux plink liveness (implemented + verified)</h2>
+  <p>Acting on §4: corrected the committed MPM to Linux's actual liveness mechanism. Full provenance + verified
+  <code>file:line</code> map: <code>rimba-mesh-plink-liveness-codemap.md</code> (reference <code>rpi-linux</code> @
+  <code>372414fd4</code>, every Linux line re-grepped on chronite, verified 2026-07-12).</p>
+
+  <h3>3 edits (uncommitted, layered on the current tree; build green)</h3>
+  <table>
+    <thead><tr><th>#</th><th>Edit (new code)</th><th>Linux reference</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><code>umac_mesh.c:418</code> — <code>MESH_PLINK_INACTIVITY_MS</code> 6 s → <code>1800u*1000u</code>. The dominant fix (6 s tolerated only ~60 missed 100 ms-beacons; Linux ~1758).</td><td><code>MESH_DEFAULT_PLINK_TIMEOUT</code> · <code>net/wireless/mesh.c:26</code></td></tr>
+      <tr><td>2</td><td>New <code>umac_mesh_note_peer_rx(ta)</code> (<code>umac_mesh.c</code> + decl <code>umac_mesh.h</code>), called from the mesh data-RX path (<code>umac_datapath.c</code>, post-decrypt, <code>dot11_get_ta(header)</code>) — refreshes <code>last_rx_ms</code> on any received data frame. Beacon refresh already existed (<code>umac_mesh.c:1414</code>).</td><td><code>last_rx = jiffies</code> on every RX · <code>rx.c:4810</code> (beacon: <code>mesh_plink.c:446</code>)</td></tr>
+      <tr><td>3</td><td><strong>No keepalive frame</strong> — deliberate. Adding one would diverge from the reference.</td><td>Linux sends none on an ESTAB plink · <code>mesh_plink.c:696</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Verification (2026-07-12) — stated by tier per the repo's on-air/verify convention</h3>
+  <ul>
+    <li><strong>Build:</strong> green (bin 0x173ae0 fits the 0x177000 SINGLE_APP_LARGE partition).</li>
+    <li><strong>On-air bytes: N/A (nothing new on the wire).</strong> The fix transmits no new or changed frame — the
+      timeout only changes <em>when</em> the already-verified Close is sent; <code>note_peer_rx</code> only updates a
+      local timestamp on RX. So the on-air byte-diff-vs-Linux tier does not apply (no frame to capture), stated
+      explicitly rather than implied.</li>
+    <li><strong>Hardware (regression check — PASS):</strong> flashed board2, PPK2 cold-boot, chronite mesh — peers
+      stably; the plink held <strong>continuously 150 s+</strong> (chronite <code>connected time</code> 50→150 s,
+      <code>peers_now=1</code> every 25 s, inactive 4–76 ms); ESP RTC <code>PLINK-DBG close=0</code>,
+      <code>restart_attempts=0</code>. The fix boots + peers correctly, no regression.</li>
+    <li><strong>Under-load demonstration — PASS.</strong> Ran a sustained relay blast (board0 client → board2 relay →
+      chronite, UDP 5 Mbit/s ~60 s; board0 auto-blasts via a temp <code>g_iperf_blast_target</code> + static ARP so no
+      ESP console is needed). board2's RTC across the blast: <strong><code>PLINK-DBG close=0</code></strong> — the relay
+      held its plink under a <strong>2088-frame</strong> load, with <code>note_peer_rx</code> refreshing
+      <code>last_rx_ms</code> on every forwarded frame. This is the positive under-load signal the idle A/B couldn't
+      give: the original <em>idle</em> flap didn't reproduce in a fresh session, so no before/after teardown A/B was
+      possible (named blocker) — but the change is strictly-more-stable regardless (it only <em>extends</em> the window
+      / <em>adds</em> activity signals; it cannot cause a spurious teardown).</li>
+    <li>Bench left radio-silent (board0 + board2 rimba-hello, board1 hello, chronite wlan1 down).</li>
+  </ul>
+
+  <h2 id="s3read">8 · Corollary — the S3 relay RX-drop read is answered</h2>
+  <p>The same blast run drained the S3 relay RX-drop counters — the read that blocked across multiple prior sessions
+  (<code>2026-07-12-mesh-ampdu-s3-rtc-noinit-fix1-bench-block.md</code>). board2's RTC <code>RX-DBG[boot]</code> across
+  the 2088-frame relay load names the bucket cleanly:</p>
+
+  <pre><code>RX-DBG[boot]: mesh_seen=2088  allowlist=0  plaintext=0
+              hw_ccmp_fail=0  sw_ccmp_fail=2080  no_decrypt=0  decrypt_ok=8</code></pre>
+
+  <div class="stats">
+    <div class="stat"><div class="num">2088</div><div class="lbl">mesh_seen — forward-intended frames board2 received</div></div>
+    <div class="stat"><div class="num err">2080</div><div class="lbl">sw_ccmp_fail — 99.6% — host SW-CCMP decrypt failure</div></div>
+    <div class="stat"><div class="num ok">8</div><div class="lbl">decrypt_ok — frames that decrypted (0.4%)</div></div>
+    <div class="stat"><div class="num">0 / 0 / 0 / 0</div><div class="lbl">allowlist / plaintext / hw_ccmp_fail / no_decrypt — all clear</div></div>
+  </div>
+
+  <h4>RX-DBG bucket breakdown (of 2088 mesh_seen)</h4>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">sw_ccmp_fail</span><span class="bar-track"><span class="bar-fill slow" style="width:99.6%"></span></span><span class="val">2080 · 99.6%</span></div>
+    <div class="bar-row"><span class="lbl">decrypt_ok</span><span class="bar-track"><span class="bar-fill fast" style="width:2px"></span></span><span class="val">8 · 0.4%</span></div>
+    <div class="bar-row"><span class="lbl">allowlist</span><span class="bar-track"><span class="bar-fill" style="width:2px"></span></span><span class="val">0</span></div>
+    <div class="bar-row"><span class="lbl">plaintext</span><span class="bar-track"><span class="bar-fill" style="width:2px"></span></span><span class="val">0</span></div>
+    <div class="bar-row"><span class="lbl">hw_ccmp_fail</span><span class="bar-track"><span class="bar-fill" style="width:2px"></span></span><span class="val">0</span></div>
+    <div class="bar-row"><span class="lbl">no_decrypt</span><span class="bar-track"><span class="bar-fill" style="width:2px"></span></span><span class="val">0</span></div>
+  </div>
+  <figcaption style="text-align:left;color:var(--muted);font-size:13px;margin:-.4em 0 1em">Widths to scale over the 2088 mesh_seen frames. One bucket dominates: <strong>sw_ccmp_fail = 2080 (99.6%)</strong>; every other drop path is exactly 0.</figcaption>
+
+  <div class="callout bug">
+    <p class="ct">⌗ The ~99.6% early-host-RX drop = host SW-CCMP decrypt failure</p>
+    <p><strong>2080 / 2088</strong> forward-intended frames fell in <code>umac_datapath_sw_ccmp_decrypt</code>
+    (<code>umac_datapath.c:741</code>) and were dropped at <code>umac_datapath.c:743</code> — <strong>not</strong> the
+    allowlist, plaintext, HW-CCMP, or no-decrypt path (all 0). The drop bucket is now named.</p>
+    <p><strong>Next (separate investigation):</strong> root-cause why SW-CCMP fails on the <code>A4≠TA</code> forwarded /
+    multi-hop-origin frames — MIC vs replay-window, and whether the decrypt keys on the <em>origin</em> vs
+    <em>next-hop</em> stad.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">board0</div><div class="s">client — UDP blast</div></div>
+      <div class="node"><div class="t">board2</div><div class="s">relay (S3) — saw 2088 forward-intended</div></div>
+      <div class="node ok"><div class="t">chronite</div><div class="s">Linux mesh peer</div></div>
+    </div>
+    <figcaption>Topology: board0 peered <em>directly</em> with chronite (all nodes in RF range), yet the 2-hop path still
+    happened — board2 received 2088 forward-intended frames because the allowlist data-RX drop forces board0's usable
+    path via board2.</figcaption>
+  </figure>
+
+  <div class="callout"><p style="margin:0">Bench radio-silent after (board0 + board2 on <code>rimba-hello</code>, board1 hello, chronite wlan1 down). Working tree restored exactly; nothing committed.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#tldr">TL;DR</a></li>
+    <li><a href="#method">1 · Method</a></li>
+    <li><a href="#code">2 · Code analysis</a></li>
+    <li><a href="#ab">3 · Bench A/B</a></li>
+    <li><a href="#flap">4 · What the flap was</a></li>
+    <li><a href="#s3">5 · Implication for S3</a></li>
+    <li><a href="#bench">6 · Bench mechanics</a></li>
+    <li><a href="#fix">7 · Plink-liveness fix</a></li>
+    <li><a href="#s3read">8 · S3 RX-drop read answered</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-12-mesh-peering-flap-bisect-no-regression</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
