@@ -798,8 +798,8 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   per-reply-SN/no-dedup bug was fixed 07-02 (halow `b677d9a3`) AND the ESTAB metric gate already exists
   (`mesh_last_hop_metric` :2339 → `MESH_METRIC_MAX` for a non-peer, == Linux); the 07-11 A-MPDU-S2 "flapping"
   was a **forced-topology bench artifact** (allowlist + all-in-RF-range, see the Forced-topology note above).
-  Two real, separate residuals: **D1 ✅ IMPLEMENTED + bench-verified 2026-07-15 (UNCOMMITTED in the halow
-  working tree — needs review + commit)** — a mesh unicast to a dest with no HWMP path AND not a direct peer
+  Two real, separate residuals: **D1 ✅ IMPLEMENTED + bench-verified + COMMITTED 2026-07-15 (halow `5ac5f33b`,
+  rimba `43ae003`)** — a mesh unicast to a dest with no HWMP path AND not a direct peer
   is now DROPPED + discovery kicked (helper `umac_datapath_mesh_frame_undeliverable`, gating both mesh TX
   paths in `umac_datapath_process_tx_frame`) instead of blasting `RA=dest` (follow Linux `mesh_nexthop_resolve`;
   EAPOL + multicast exempt so peering/ARP untouched). Regression PASS: single-hop iperf 0.46 Mbit/s (peering +
@@ -809,6 +809,29 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   next-hop (Linux `fail_avg`→`LINK_FAIL_THRESH(95)`→`mesh_plink_broken`; the hook exists at
   `umac_datapath.c:2938` beside `umac_rc_feedback`; needs the EWMA ported exactly + a convergence bench;
   would NOT cure the flapping). Memory [[mesh-p6c-airtime-and-hwmp-flapping]].
+- ☐ **Mesh hw-restart recovery (prerequisite) + FIX-1 (bus-preserving restart, REMOVED from the tree)** —
+  **one item, in this order.** *(1) The blocker:* **a mesh node cannot survive ANY hw_restart.**
+  `hw_restart_evt_handler` (`umac_mmdrv_shim.c:68`) restores scan + STA only, and
+  `umac_interface_reinstall_vif` is called **exclusively** with `UMAC_INTERFACE_STA`
+  (`umac_connection.c:1660`) — there is no `umac_mesh_handle_hw_restarted`, so once the chip reset wipes its
+  vifs nothing re-adds the mesh vif / re-runs SET_MESH_CONFIG / reinstalls keys / restarts beaconing, and the
+  node goes **silently deaf**. Bench-proven 2026-07-15: server receive rate → 0.00 Mbit/s ~4 s after the first
+  forced restart, never recovers, in **both** A/B arms. Fix = mirror `umac_connection_handle_hw_restarted` for
+  mesh. *(2) FIX-1 itself was **removed** from the halow branch 2026-07-15* (byte-identical to its pre-`b0ea9f6a`
+  state across all 7 files) after an A/B on board2: its **mechanism works** (SPI re-inits 8 → 2 = the bus is
+  genuinely preserved) but the **baseline never crashed either** (0 crashes both arms, 6 full teardowns under
+  load) ⇒ **no demonstrated benefit**, and while (1) is unfixed it is a **trap** (enabling it converts a
+  self-healing crash-reboot into a silent permanent zombie). NOT closed as unnecessary: the 07-12 record has
+  properly-wired **board2 crash-looping on INT-WDT intermittently**, and the fatal `esp_intr_alloc` frame may
+  actually sit at **boot** (`gpio_install_isr_service`) rather than in the restart teardown FIX-1 targets — so
+  "needed?" and "unnecessary?" are BOTH unproven. Verdict rests on n=1 restart-under-load per arm (traffic dies
+  after restart #1 → restarts 2-6 ran idle), which is near-zero power against an intermittent fault. Revisit
+  only after (1), which is what enables the real rig: dozens of loaded restarts, A/B the crash rate. Worklog
+  `2026-07-15-mesh-fix1-hw-restart-verify.md`; memory [[mesh-relay-intwdt-rootcause]]. **NB (bonus finding):**
+  under load the periodic health check **never runs** (`skbq.c:333` refreshes `last_checked` on every successful
+  chip transaction → `should_skip` defers forever; measured 38 skips / 3 checks) — a loaded relay reaches a
+  restart ONLY via the 30-comm-failure escalation, which weakens the old "relay = restart-frequency amplifier"
+  framing.
 - ☐ **SAE hardening residual** — a *well-formed* forged Commit still tears a live link down (hostap
   itself reaches `ap_free_sta` for any such frame), so closing it fully needs a **non-hostap rate-limit
   on ACCEPTED-state reauth** (a deliberate divergence from the line-by-line port, deferred); plus the
