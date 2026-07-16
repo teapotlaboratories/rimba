@@ -817,8 +817,13 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   vifs nothing re-adds the mesh vif / re-runs SET_MESH_CONFIG / reinstalls keys / restarts beaconing, and the
   node goes **silently deaf**. Bench-proven 2026-07-15: server receive rate → 0.00 Mbit/s ~4 s after the first
   forced restart, never recovers, in **both** A/B arms. Fix = mirror `umac_connection_handle_hw_restarted` for
-  mesh. *(2) FIX-1 itself was **removed** from the halow branch 2026-07-15* (byte-identical to its pre-`b0ea9f6a`
-  state across all 7 files) after an A/B on board2: its **mechanism works** (SPI re-inits 8 → 2 = the bus is
+  mesh. *(2) FIX-1 itself was **removed** from the halow branch 2026-07-15* (halow `a4653862`; byte-identical to its
+  pre-`b0ea9f6a` state across all 7 files). **Its implementation is archived at the halow tag
+  `archive/fix1-implementation` (= `391eb528`, the pre-removal tip) — `git show archive/fix1-implementation`
+  to recover it; the tag's annotation carries the A/B result + the three load-bearing invariants** (int_ena is
+  set only by `gpio_isr_handler_add` → removing the SPI_IRQ handler on the soft path silently kills RX;
+  `soft_start` must join its worker before returning or a failure unwind derefs a memset'd `driver_data`;
+  `bus_lock` must be released on the reset path). Removed after an A/B on board2: its **mechanism works** (SPI re-inits 8 → 2 = the bus is
   genuinely preserved) but the **baseline never crashed either** (0 crashes both arms, 6 full teardowns under
   load) ⇒ **no demonstrated benefit**, and while (1) is unfixed it is a **trap** (enabling it converts a
   self-healing crash-reboot into a silent permanent zombie). NOT closed as unnecessary: the 07-12 record has
