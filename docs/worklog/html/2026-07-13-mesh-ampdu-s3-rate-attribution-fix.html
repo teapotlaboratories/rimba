@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh A-MPDU S3: the relay-forward drop was a TX-rate-attribution bug — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-13</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-13</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">✓ fixed &amp; on-air confirmed</span>
+    <span class="badge bug">mesh · A-MPDU S3 · rate control</span>
+  </div>
+
+  <h1>Mesh A-MPDU S3 — the relay-forward drop was a TX-rate-attribution bug<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">moreFrag / FW fragmentation · fixed · <code style="font-size:.85em">0.4% → 96.5%</code></small></h1>
+
+  <p class="lead">The long-standing <strong>"S3 relay forwards ~0 / ~99.6% of forwarded frames MIC-fail"</strong> wall
+  was <strong>not</strong> <code>#20</code> (HW-crypto A4≠TA), <strong>not</strong> a pairwise-MTK desync, and
+  <strong>not</strong> an A-MPDU-of-4addr interaction. It was a <strong>wrong TX-rate attribution</strong> on the
+  multi-hop mesh <strong>origin</strong> leg.</p>
+
+  <h2 id="tldr">TL;DR</h2>
+
+  <p>A locally-originated mesh unicast to a <strong>multi-hop</strong> destination is dequeued on the
+  <strong><code>common_stad</code></strong> (the final destination is not a direct peer).
+  <code>umac_datapath_process_tx_frame</code> initialized the <strong>rate-control table and the AID on
+  <code>stad</code> (= <code>common_stad</code>)</strong> — the untrained MBSS default, <strong>≈ MCS0</strong> —
+  while the sequence-number space, BA session and reorder window had already been (correctly, S2) moved to
+  <strong><code>key_stad</code></strong> (the next hop).</p>
+
+  <p>At <strong>MCS0 / 1 MHz</strong> a full-size (~1500 B) 4-address frame <strong>exceeds the maximum
+  PPDU</strong>, so the <strong>MM6108 firmware fragments it</strong>. Fragmentation sets <strong>moreFrag (FC bit
+  10, <code>0x0400</code>)</strong> in the on-air Frame Control <strong>after</strong> the host has already computed
+  the SW-CCMP MIC over the <em>unfragmented</em> FC. CCMP AAD covers FC and (correctly, per 802.11 / mac80211) does
+  <strong>not</strong> mask moreFrag, so the next hop's MIC check fails on <strong>~99.6%</strong> of the
+  (full-size, multi-hop) frames.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">0.4% → 96.5%</div><div class="lbl">relay decrypt success (on-air)</div></div>
+    <div class="stat"><div class="num acc">9 → 1849</div><div class="lbl"><code>decrypt_ok</code> on board2</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">2064 → 68</div><div class="lbl"><code>sw_ccmp_fail</code></div></div>
+    <div class="stat"><div class="num acc">1 line ×2</div><div class="lbl"><code>stad</code> → <code>key_stad</code></div></div>
+    <div class="stat"><div class="num">4</div><div class="lbl">hypotheses refuted</div></div>
+    <div class="stat"><div class="num" style="color:var(--warn)">~3.5%</div><div class="lbl">residual (rate-training transient)</div></div>
+  </div>
+
+  <h3>The causal chain</h3>
+  <figure>
+  <div class="diagram">
+    <svg viewBox="0 0 700 700" width="700" role="img" aria-label="Causal chain: a multi-hop origin frame dequeues on common_stad, the rate table is initialized on stad so the frame goes out at MCS0, the MM6108 firmware fragments it and sets moreFrag after the host computed the SW-CCMP MIC, so the next hop MIC-fails on about 99.6 percent of frames">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#888"/>
+        </marker>
+      </defs>
+      <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">
+
+        <!-- 1 -->
+        <rect x="150" y="8" width="400" height="52" rx="9" fill="rgba(127,127,127,.09)" stroke="#888"/>
+        <text x="350" y="30" text-anchor="middle" font-size="14" font-weight="650" fill="currentColor">local mesh unicast → multi-hop destination</text>
+        <text x="350" y="48" text-anchor="middle" font-size="12" fill="#888">board0 → board1, via board2</text>
+        <path d="M350,60 L350,86" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+
+        <!-- 2 -->
+        <rect x="150" y="88" width="400" height="52" rx="9" fill="rgba(127,127,127,.09)" stroke="#888"/>
+        <text x="350" y="110" text-anchor="middle" font-size="14" font-weight="650" fill="currentColor">dequeued on common_stad</text>
+        <text x="350" y="128" text-anchor="middle" font-size="12" fill="#888">final destination is not a direct peer</text>
+        <path d="M350,140 L350,166" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+
+        <!-- 3 : the bug -->
+        <rect x="90" y="168" width="520" height="72" rx="9" fill="rgba(192,57,43,.13)" stroke="rgba(192,57,43,.65)" stroke-width="1.5"/>
+        <text x="350" y="192" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">BUG · aid + rate table initialized on stad (= common_stad)</text>
+        <text x="350" y="210" text-anchor="middle" font-size="12" fill="#888">umac_datapath_process_tx_frame</text>
+        <text x="350" y="228" text-anchor="middle" font-size="12" fill="#888">untrained MBSS default ≈ MCS0 · while seqno / BA / reorder already use key_stad</text>
+        <path d="M350,240 L350,266" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+
+        <!-- 4 -->
+        <rect x="150" y="268" width="400" height="52" rx="9" fill="rgba(127,127,127,.09)" stroke="#888"/>
+        <text x="350" y="290" text-anchor="middle" font-size="14" font-weight="650" fill="currentColor">TX at MCS0 / 1 MHz</text>
+        <text x="350" y="308" text-anchor="middle" font-size="12" fill="#888">~1500 B 4-address frame exceeds the max PPDU</text>
+        <path d="M350,320 L350,346" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+
+        <!-- 5 -->
+        <rect x="120" y="348" width="460" height="52" rx="9" fill="rgba(183,121,31,.14)" stroke="rgba(183,121,31,.65)"/>
+        <text x="350" y="370" text-anchor="middle" font-size="14" font-weight="650" fill="currentColor">MM6108 firmware fragments the frame</text>
+        <text x="350" y="388" text-anchor="middle" font-size="12" fill="#888">sets moreFrag — FC bit 10, 0x0400 — on-air</text>
+        <path d="M350,400 L350,426" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+
+        <!-- 6 -->
+        <rect x="90" y="428" width="520" height="72" rx="9" fill="rgba(183,121,31,.14)" stroke="rgba(183,121,31,.65)"/>
+        <text x="350" y="452" text-anchor="middle" font-size="14" font-weight="650" fill="currentColor">…but the host already MIC'd the unfragmented FC</text>
+        <text x="350" y="470" text-anchor="middle" font-size="12" fill="#888">SW-CCMP MIC computed before the FW touched FC</text>
+        <text x="350" y="488" text-anchor="middle" font-size="12" fill="#888">CCMP AAD covers FC and does not mask moreFrag (per 802.11 / mac80211 — correct)</text>
+        <path d="M350,500 L350,526" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+
+        <!-- 7 -->
+        <rect x="150" y="528" width="400" height="52" rx="9" fill="rgba(192,57,43,.13)" stroke="rgba(192,57,43,.65)" stroke-width="1.5"/>
+        <text x="350" y="550" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">next hop MIC-fails ~99.6%</text>
+        <text x="350" y="568" text-anchor="middle" font-size="12" fill="#888">"the relay forwards ~0" — the S3 wall</text>
+
+        <!-- fix -->
+        <path d="M350,580 L350,608" stroke="rgba(26,138,74,.75)" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+        <rect x="90" y="610" width="520" height="72" rx="9" fill="rgba(26,138,74,.13)" stroke="rgba(26,138,74,.7)" stroke-width="1.5"/>
+        <text x="350" y="634" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">FIX · aid + rate table on key_stad (the next hop)</text>
+        <text x="350" y="652" text-anchor="middle" font-size="12" fill="#888">trained next-hop rate → the frame fits one PPDU → no FW fragmentation</text>
+        <text x="350" y="670" text-anchor="middle" font-size="12" fill="#888">board2 decrypt 0.4% → 96.5%</text>
+      </g>
+    </svg>
+  </div>
+  <figcaption>Every box is a step the worklog establishes; the dashed arrow is the fix. Rate is the discriminator —
+  the same frame at a trained rate never fragments, so its MIC never breaks.</figcaption>
+  </figure>
+
+  <div class="callout ok">
+    <p class="ct">✓ Result (on-air, all-ESP forced line board0 → board2(relay) → board1)</p>
+    <p>board2's decrypt success on the forwarded-origin leg went from <strong>0.4% → 96.5%</strong>
+    (<code>mesh_seen=1917 sw_ccmp_fail=68 decrypt_ok=1849</code>); the relay now decrypts <strong>and
+    forwards</strong> (<code>rx_reached=1834 mmdrv_ok=1038</code>); board1 (far endpoint) receives it
+    (<code>decrypt_ok=1065</code>). The residual ~3.5% is the mmrc rate-training transient (first frames still go at
+    MCS0 until the peer's rate table trains up).</p>
+  </div>
+
+  <h2 id="confound">1 · How the confound was cleared <span style="font-size:.75em;color:var(--muted);font-weight:400">(the essential first step)</span></h2>
+
+  <p>Every prior session diagnosed this on a bench where all nodes are <strong>−3…−25 dBm apart</strong>, so the
+  client (board0) would <strong>peer the final destination directly</strong> and appear to "grab the wrong key".
+  That confounded the dual-side key comparison: it showed board0 enc <code>6f1d…</code> vs board2 dec
+  <code>7e58…</code> = an apparent MTK desync, which drove the <code>plid-IGNR</code> / re-peer-desync theory —
+  since <strong>refuted</strong>.</p>
+
+  <div class="callout bug">
+    <p class="ct">🐛 The confound was a startup race</p>
+    <p>The perf app called <code>mmwlan_mesh_set_peer_allowlist()</code> <em>after</em>
+    <code>mmwlan_mesh_start()</code>, leaving a window where the empty allowlist (<strong>count==0 ⇒
+    allow-all</strong>) let a neighbour peer before the <code>{next-hop-only}</code> allowlist took effect.</p>
+    <p><strong>Fix: hoist the allowlist config ahead of <code>mmwlan_mesh_start</code></strong>
+    (<code>app_main.c</code>). Verified on-air: after the fix board0's plink to the far node <strong>decays</strong>
+    (inactive → 21 s and climbing) and <strong>never re-forms</strong> — board0 peers <strong>only</strong>
+    board2.</p>
+  </div>
+
+  <p>On the clean forced topology the dual-side CCMP capture became decisive:</p>
+
+  <table>
+    <thead><tr><th>field</th><th>board0 (encrypt)</th><th>board2 (decrypt, failing frame)</th></tr></thead>
+    <tbody>
+      <tr><td>key</td><td><code>36 bf d2 71 bf 7b 23 96</code></td><td><code>36 bf d2 71 bf 7b 23 96</code> — <strong>identical</strong></td></tr>
+      <tr><td>nonce</td><td><code>00 e272a1f8efa4 000000000001</code></td><td>identical</td></tr>
+      <tr><td>AAD</td><td><code>88 <strong>43</strong> …</code></td><td><code>88 <strong>47</strong> …</code> — <strong>only FC byte1 differs (moreFrag)</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Key + nonce identical ⇒ not a key desync.</strong> The only difference is the moreFrag bit in the
+  on-air FC:</p>
+
+  <figure>
+  <div class="diagram">
+    <svg viewBox="0 0 660 250" width="660" role="img" aria-label="Byte diff of the CCMP AAD Frame Control: board0 encrypted over 88 43, board2 decrypted a frame carrying 88 47; the single differing bit is bit 10 of the 16-bit Frame Control, moreFrag, mask 0x0400">
+      <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">
+        <text x="20" y="20" font-size="12" fill="#888">CCMP AAD · Frame Control (first 2 bytes)</text>
+
+        <!-- header: bit indices for byte1 -->
+        <text x="140" y="52" font-size="11" fill="#888">byte 0</text>
+        <text x="238" y="52" font-size="11" fill="#888">byte 1</text>
+        <text x="356" y="52" font-size="11" fill="#888">byte 1, bit by bit  (b15 … b8)</text>
+
+        <!-- row A -->
+        <text x="20" y="82" font-size="12.5" font-weight="650" fill="currentColor">board0 enc</text>
+        <rect x="128" y="64" width="56" height="26" rx="5" fill="rgba(127,127,127,.1)" stroke="#888"/>
+        <text x="156" y="82" text-anchor="middle" font-size="13" font-family="ui-monospace,Menlo,monospace" fill="currentColor">88</text>
+        <rect x="192" y="64" width="56" height="26" rx="5" fill="rgba(127,127,127,.1)" stroke="#888"/>
+        <text x="220" y="82" text-anchor="middle" font-size="13" font-family="ui-monospace,Menlo,monospace" fill="currentColor">43</text>
+        <!-- bits of 0x43 = 0 1 0 0 0 0 1 1  (b15..b8) -->
+        <g font-size="12" font-family="ui-monospace,Menlo,monospace">
+          <rect x="300" y="64" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="315" y="82" text-anchor="middle" fill="currentColor">0</text>
+          <rect x="334" y="64" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="349" y="82" text-anchor="middle" fill="currentColor">1</text>
+          <rect x="368" y="64" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="383" y="82" text-anchor="middle" fill="currentColor">0</text>
+          <rect x="402" y="64" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="417" y="82" text-anchor="middle" fill="currentColor">0</text>
+          <rect x="436" y="64" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="451" y="82" text-anchor="middle" fill="currentColor">0</text>
+          <rect x="470" y="64" width="30" height="26" rx="4" fill="rgba(26,138,74,.18)" stroke="rgba(26,138,74,.7)" stroke-width="1.5"/><text x="485" y="82" text-anchor="middle" font-weight="700" fill="currentColor">0</text>
+          <rect x="504" y="64" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="519" y="82" text-anchor="middle" fill="currentColor">1</text>
+          <rect x="538" y="64" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="553" y="82" text-anchor="middle" fill="currentColor">1</text>
+        </g>
+        <text x="584" y="82" font-size="11" fill="#888">host MIC</text>
+
+        <!-- row B -->
+        <text x="20" y="128" font-size="12.5" font-weight="650" fill="currentColor">board2 dec</text>
+        <rect x="128" y="110" width="56" height="26" rx="5" fill="rgba(127,127,127,.1)" stroke="#888"/>
+        <text x="156" y="128" text-anchor="middle" font-size="13" font-family="ui-monospace,Menlo,monospace" fill="currentColor">88</text>
+        <rect x="192" y="110" width="56" height="26" rx="5" fill="rgba(192,57,43,.16)" stroke="rgba(192,57,43,.7)" stroke-width="1.5"/>
+        <text x="220" y="128" text-anchor="middle" font-size="13" font-weight="700" font-family="ui-monospace,Menlo,monospace" fill="currentColor">47</text>
+        <!-- bits of 0x47 = 0 1 0 0 0 1 1 1 -->
+        <g font-size="12" font-family="ui-monospace,Menlo,monospace">
+          <rect x="300" y="110" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="315" y="128" text-anchor="middle" fill="currentColor">0</text>
+          <rect x="334" y="110" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="349" y="128" text-anchor="middle" fill="currentColor">1</text>
+          <rect x="368" y="110" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="383" y="128" text-anchor="middle" fill="currentColor">0</text>
+          <rect x="402" y="110" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="417" y="128" text-anchor="middle" fill="currentColor">0</text>
+          <rect x="436" y="110" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="451" y="128" text-anchor="middle" fill="currentColor">0</text>
+          <rect x="470" y="110" width="30" height="26" rx="4" fill="rgba(192,57,43,.2)" stroke="rgba(192,57,43,.8)" stroke-width="1.5"/><text x="485" y="128" text-anchor="middle" font-weight="700" fill="currentColor">1</text>
+          <rect x="504" y="110" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="519" y="128" text-anchor="middle" fill="currentColor">1</text>
+          <rect x="538" y="110" width="30" height="26" rx="4" fill="rgba(127,127,127,.1)" stroke="#888"/><text x="553" y="128" text-anchor="middle" fill="currentColor">1</text>
+        </g>
+        <text x="584" y="128" font-size="11" fill="#888">on-air</text>
+
+        <!-- callout on the differing bit -->
+        <path d="M485,140 L485,168" stroke="rgba(192,57,43,.8)" stroke-width="1.5"/>
+        <path d="M485,168 L300,168" stroke="rgba(192,57,43,.8)" stroke-width="1.5"/>
+        <text x="296" y="172" text-anchor="end" font-size="12.5" font-weight="650" fill="currentColor">bit 10 = moreFrag (0x0400)</text>
+        <text x="296" y="190" text-anchor="end" font-size="11.5" fill="#888">set by the MM6108 FW when it fragments</text>
+
+        <text x="20" y="222" font-size="12" fill="#888">key <tspan font-family="ui-monospace,Menlo,monospace">36 bf d2 71 bf 7b 23 96</tspan> — identical both sides · nonce <tspan font-family="ui-monospace,Menlo,monospace">00 e272a1f8efa4 000000000001</tspan> — identical</text>
+        <text x="20" y="240" font-size="12" font-weight="650" fill="currentColor">⇒ not a key desync. One bit.</text>
+      </g>
+    </svg>
+  </div>
+  <figcaption>The dual-side capture, bit-exact: the encrypter MIC'd <code>88 43</code>, the decrypter saw
+  <code>88 47</code>. Bit values are the binary of the two hex bytes the worklog recorded.</figcaption>
+  </figure>
+
+  <h2 id="elimination">2 · Elimination path <span style="font-size:.75em;color:var(--muted);font-weight:400">(what was ruled out, and how)</span></h2>
+
+  <ol>
+    <li><strong>MTK desync / <code>plid-IGNR</code> — REFUTED.</strong> Forced clean topology ⇒ board0 encrypt key
+      == board2 decrypt key. The prior <code>6f1d</code>-vs-<code>7e58</code> was a confound (board0 had a chronite
+      key to grab). The <code>plid-IGNR</code> guard stays as legit follow-Linux hardening but is
+      <strong>unrelated to S3</strong>.</li>
+    <li><strong>Host sets moreFrag — REFUTED.</strong> <code>construct_80211_data_header_mesh</code> builds FC clear;
+      <code>frag_threshold</code> defaults to 0 (⇒ <code>UINT32_MAX</code>, no host frag); a grep for
+      <code>0x0400</code>/moreFrag in the TX path finds nothing; <code>skbq.c</code>
+      (<code>convert_tx_metadata_to_tx_info</code>) sets only metadata flags, never the 802.11 FC. <strong>So the FW
+      sets it.</strong></li>
+    <li><strong>A-MPDU-of-4addr interaction — REFUTED by A/B.</strong> Suppressing A-MPDU eligibility for the
+      multi-hop origin leg (<code>key_stad != stad</code>) left moreFrag set and the MIC still failing
+      (<code>decrypt_ok=8/3344</code>). <strong>Fragmentation is rate/size-driven, independent of
+      aggregation.</strong></li>
+    <li><strong>Frame size alone — REFUTED.</strong> Large <em>single-hop</em> (A1==A3) blast frames decrypt fine
+      (<strong>99.4%</strong>, prior data); small multi-hop pings work. The discriminator between "works" and "fails"
+      for the same-size frame is the <strong>rate</strong>, which tracks the dequeue stad: single-hop → trained peer
+      rate; multi-hop → <code>common_stad</code> ≈ MCS0.</li>
+  </ol>
+
+  <h3>The A/B that killed the aggregation theory, to scale</h3>
+  <p>Decrypt success on the relay. The middle bar is the A-MPDU-suppression arm — a <em>different</em> experiment
+  from the before/after pair, kept here because it is the one that proves aggregation is not the variable:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">before · RC on <code>common_stad</code></span><span class="bar-track"><span class="bar-fill slow" style="width:0.4%"></span></span><span class="val">0.4% <span style="color:var(--muted);font-weight:400">(9 / 2073)</span></span></div>
+    <div class="bar-row"><span class="lbl">A/B · A-MPDU suppressed</span><span class="bar-track"><span class="bar-fill slow" style="width:0.24%"></span></span><span class="val">0.24% <span style="color:var(--muted);font-weight:400">(8 / 3344)</span></span></div>
+    <div class="bar-row"><span class="lbl">after · RC on <code>key_stad</code></span><span class="bar-track"><span class="bar-fill fast" style="width:96.5%"></span></span><span class="val">96.5% <span style="color:var(--muted);font-weight:400">(1849 / 1917)</span></span></div>
+  </div>
+  <p>Removing aggregation changed nothing. Removing the wrong <em>rate</em> changed everything.</p>
+
+  <h2 id="fix">3 · The fix (code)</h2>
+
+  <p><code>components/halow/.../umac/datapath/umac_datapath.c</code>,
+  <code>umac_datapath_process_tx_frame</code>:</p>
+
+<pre><code><span class="cm">    /* aid + rate control follow the NEXT-HOP peer (key_stad), not the dequeue stad. ... Keeping them on
+     * common_stad sent multi-hop frames at MCS0, where a full-size 4-addr frame exceeds the 1 MHz max PPDU
+     * -&gt; the FW FRAGMENTS it (sets moreFrag) after the host SW-CCMP MIC -&gt; the next hop MIC-fails ~99.6%. */</span>
+    tx_metadata-&gt;aid = <span class="fn">umac_sta_data_get_aid</span>(key_stad);   <span class="cm">/* was: stad */</span>
+    ...
+        <span class="fn">umac_rc_init_rate_table_data</span>(key_stad, &amp;tx_metadata-&gt;rc_data, rts_required, ...);  <span class="cm">/* was: stad */</span>
+</code></pre>
+
+  <p>This mirrors <strong>net/mac80211</strong>, where <code>tx-&gt;sta = sta_info_get(addr1 =
+  mpath-&gt;next_hop)</code> drives rate control and the per-STA TX context. It completes the S2 <em>"the frame
+  follows the next hop"</em> pattern — seqno / BA / reorder were already keyed on <code>key_stad</code> at
+  <strong>:2209 / :2246 / :2314</strong>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">seqno</div><div class="s">:2209 · key_stad</div></div>
+      <div class="node"><div class="t">BA session</div><div class="s">:2246 · key_stad</div></div>
+      <div class="node"><div class="t">reorder window</div><div class="s">:2314 · key_stad</div></div>
+      <div class="node err"><div class="t">aid + rate table</div><div class="s">was <strong>stad</strong> ← the gap</div></div>
+      <div class="node ok"><div class="t">now key_stad</div><div class="s">pattern complete</div></div>
+    </div>
+    <figcaption>S2 had already moved three of the four per-next-hop TX properties. The rate table was the one left
+    behind on <code>common_stad</code>.</figcaption>
+  </figure>
+
+  <div class="callout ok">
+    <p class="ct">✓ Why the change is safe everywhere else</p>
+    <p>Off the multi-hop mesh path <strong><code>key_stad == stad</code></strong>, so single-hop, non-mesh (STA/AP)
+    and multicast are <strong>byte-identical</strong> (multicast uses <code>rate_table_mgmt</code> regardless).</p>
+    <p>The relay forward path (<code>umac_datapath_tx_mesh_keyed_frame</code>, reached via
+    <code>umac_datapath_tx_mesh_unicast_frame(nh_stad, …)</code>) was <strong>already</strong> keyed on the next-hop
+    peer, so its rate is correct — <strong>no change needed there</strong>.</p>
+  </div>
+
+  <h2 id="bench">4 · Bench method / evidence</h2>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">board0</div><div class="s">client · origin</div></div>
+      <div class="node acc"><div class="t">board2 — RELAY</div><div class="s">DUT · decrypt+forward</div></div>
+      <div class="node"><div class="t">board1</div><div class="s">far endpoint</div></div>
+    </div>
+    <figcaption>Pure all-ESP <strong>forced line</strong>. ESP↔ESP peering was used because the cross-vendor
+    ESP↔Linux (chronite) SAE would not re-peer this session.</figcaption>
+  </figure>
+
+  <ul>
+    <li>All three on a proper <code>make … BOARD=proto1-fgh100m</code> build (country <strong>US</strong>; chip
+      <strong>0x0306</strong> / fw <strong>1.17.8</strong>).</li>
+    <li><strong>Instrumentation</strong> (temp, RTC-noinit so it survives the console-open warm reset):
+      forward/RX-drop counters (<code>FWD-DBG</code> / <code>RX-DBG</code> / <code>TX-DBG</code>) + a
+      <strong>dual-side CCMP key/AAD/nonce capture</strong> (<code>CCMP-ENC</code> on the encrypter,
+      <code>CCMP-DEC</code> on a decrypt failure) dumped by the app at boot.</li>
+    <li><strong>RTC magic bumped each build</strong> because the dev-host USB hub's per-port <code>disable</code>
+      cuts DATA only, <strong>not VBUS</strong> — board0/board1 stay powered across a "cycle" and can't be
+      POWERON-reset to zero RTC, so a magic mismatch is the only reliable force-zero.</li>
+  </ul>
+
+  <div class="callout ok">
+    <p class="ct">✓ Confirmed healthy warm-reset</p>
+    <p>Opening the USB-JTAG console warm-resets these XIAO ESP32-S3 boards, and on a correct <strong>US</strong>
+    build the MM6108 comes back up clean (chip <code>0x0306</code>) — the prior <strong>"warm-reset-wedge / dead
+    MM6108"</strong> was itself the <code>??</code>-country build bug, <strong>not a hardware wedge</strong>.</p>
+  </div>
+
+  <h3 id="beforeafter">Before / after — board2 <code>RX-DBG</code>, the relay's decrypt of board0's origin frames</h3>
+
+  <table>
+    <thead><tr><th></th><th class="num">mesh_seen</th><th class="num">sw_ccmp_fail (mic)</th><th class="num">decrypt_ok</th><th class="num">rate</th></tr></thead>
+    <tbody>
+      <tr><td>before (RC on <code>common_stad</code>)</td><td class="num">2073</td><td class="num">2064 (2053)</td><td class="num">9</td><td class="num">0.4%</td></tr>
+      <tr><td>after (RC on <code>key_stad</code>)</td><td class="num">1917</td><td class="num">68 (63)</td><td class="num">1849</td><td class="num"><strong>96.5%</strong></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="review">5 · Adversarial review <span style="font-size:.75em;color:var(--muted);font-weight:400">(3-lens workflow, post-fix)</span></h2>
+
+  <p>Confirmed the core fix <strong>closes the systematic drop with no blocking regression</strong> — rate/bandwidth,
+  aid, CCMP key, seqno, and BA/reorder all follow <code>key_stad</code>; the aid change also correctly routes
+  <strong>tx-status RC feedback</strong> back to <code>key_stad</code>, so init + feedback are consistent — and it
+  means multi-hop-origin frames now actually <em>train</em> the next hop's rate, which under the old
+  <code>aid=0</code> they did not. Refinements to the residual, worth a follow-up:</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ The residual ~3.5% is NOT only cold-start</p>
+    <p>The mmrc rate chain <code>[best_tp, second_tp, best_prob, baseline]</code> hard-sets <code>baseline</code>
+    (<code>rates[3]</code>) to <strong>MCS0/1MHz</strong> (<code>umac/rc/…mmrc.c</code> ~<strong>:638</strong> /
+    <strong>:994</strong>), and <code>mmrc_get_rates</code> <strong>never excludes a rate that can't fit the frame in
+    one PPDU</strong> (the <code>frame_size</code> arg only budgets attempt <em>time</em>). So on any retry-descent to
+    the fallback, a full-size 4-addr frame still fragments. <strong>Fixing <code>rates[0]</code> (this fix) is
+    necessary but not sufficient to reach 100%.</strong></p>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Latent 100%-loss edge</p>
+    <p>If <code>umac_rc_start</code> early-returns (bandwidth/rate mask → 0), the peer's <code>reference_table</code>
+    stays <strong>NULL</strong> and <code>umac_rc_init_rate_table_data</code> falls back to the mgmt table = MCS0 for
+    the <strong>WHOLE chain</strong> (<code>umac/rc/umac_rc.c</code> ~<strong>:437</strong>). Not active here (96.5%
+    ⇒ RC trained), but it would <strong>masquerade as this same bug</strong>.</p>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚠ Config guns</p>
+    <p><code>apply_rate_table_overrides</code> (fixed tx_rate) and <code>apply_mcs10_mode</code> (rewrites MCS0/1MHz
+    → MCS10, which has <em>smaller</em> single-PPDU capacity than MCS0) can both <strong>re-introduce a fragmenting
+    rate over the fix</strong>. Avoid a low fixed-rate override with full-size secured mesh.</p>
+  </div>
+
+  <div class="callout">
+    <p class="ct">Heterogeneous-mesh latent</p>
+    <p><code>umac_connection_populate_tx_metadata</code> (<strong>:2321</strong>) stamps
+    <code>ampdu_mss</code>/MMSS/TP/1MHz-CR from a <strong>GLOBAL connection record</strong>, not
+    <code>key_stad</code>. Harmless on the all-MM6108 bench (identical caps), but to fully mirror <code>tx-&gt;sta =
+    next_hop</code> these four A-MPDU caps should also be <strong>per-next-hop-peer</strong>.</p>
+  </div>
+
+  <h2 id="followups">6 · Follow-ups (not blocking)</h2>
+
+  <ul>
+    <li><strong>Deterministic residual fix (recommended)</strong>: give full-size SW-CCMP mesh frames a
+      <strong>min-MCS floor</strong> (exclude any chain rate whose single-PPDU capacity can't carry the assembled
+      4-addr + 6 B mesh-ctrl + CCMP MPDU at 1 MHz), or an <strong>MTU cap</strong>. The 802.11
+      fragmentation-threshold param does <strong>NOT</strong> help — this fragmentation is <strong>PHY/rate-driven
+      (PPDU fit), not policy-driven</strong>; raising the threshold only adds host frag, never prevents the FW's
+      PPDU-fit frag. The min-MCS floor is the throughput-preserving middle ground vs a full MCS0-safe MTU cap.</li>
+    <li><strong>Rate-training transient (~3.5%)</strong>: the first frames after a peer/rate reset still ride MCS0
+      (cold-start seed + the MCS0 fallback above) and fragment until the rate trains. <em>Subsumed by the min-MCS
+      floor.</em></li>
+    <li><strong>S3 forward capacity</strong>: board2 <code>FWD-DBG build_null=662</code> — the forwarded-frame
+      allocation fails under the 5 Mbit blast. Separate S3 item (the <strong>1038</strong> that allocated forwarded
+      fine).</li>
+    <li><strong>A-MPDU aggregation depth</strong> on the now-flowing multi-hop path still needs a working on-air
+      sniffer (chronite/chronium <code>morse0</code> monitor delivered <strong>0 frames</strong> again this
+      session).</li>
+    <li>All instrumentation here is <strong>temp/uncommitted</strong>; only the <code>umac_datapath.c</code>
+      rate/aid change (+ the app allowlist-before-start hoist) are <strong>keepers</strong>.</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#tldr">TL;DR</a></li>
+    <li><a href="#confound">1 · Clearing the confound</a></li>
+    <li><a href="#elimination">2 · Elimination path</a></li>
+    <li><a href="#fix">3 · The fix (code)</a></li>
+    <li><a href="#bench">4 · Bench method / evidence</a></li>
+    <li><a href="#beforeafter">— Before / after</a></li>
+    <li><a href="#review">5 · Adversarial review</a></li>
+    <li><a href="#followups">6 · Follow-ups</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-13-mesh-ampdu-s3-rate-attribution-fix</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

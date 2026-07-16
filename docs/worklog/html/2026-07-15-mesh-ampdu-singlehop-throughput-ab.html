@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh A-MPDU: aggregation proven single-hop AND relay — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-15</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-15</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ win proven</span>
+    <span class="badge">mesh · A-MPDU · throughput</span>
+    <span class="badge todo">no committed-code change</span>
+  </div>
+
+  <h1>Mesh A-MPDU: aggregation proven single-hop <em>and</em> relay<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">engages on 97 / 98.5% of frames · ~37–38% throughput A/B · plus a ~2.2× real-RC finding</small></h1>
+
+  <p class="lead"><strong>Status: WIN PROVEN both single-hop and relay.</strong> Aggregation engages on
+  <strong>97%</strong> (origin) / <strong>98.5%</strong> (forward) of frames; ON-vs-OFF throughput A/B =
+  <strong>+37% single-hop, +38% relay</strong>, both at the current MCS-limited rate. No committed-code change
+  (temp counters + an A-MPDU-disable gate, both reverted). Bench radio-silent afterward.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">+37%</div><div class="lbl">single-hop A/B (0.52 vs 0.38 Mbit/s)</div></div>
+    <div class="stat"><div class="num ok">+38%</div><div class="lbl">relay A/B (0.29 vs 0.21 Mbit/s)</div></div>
+    <div class="stat"><div class="num acc">97%</div><div class="lbl">origin frames A-MPDU-eligible (953/984)</div></div>
+    <div class="stat"><div class="num acc">98.5%</div><div class="lbl">forwarded frames eligible (382/388)</div></div>
+    <div class="stat"><div class="num ok">2.2×</div><div class="lbl">real-RC (+118%) — the dominant lever</div></div>
+    <div class="stat"><div class="num">0</div><div class="lbl">committed-code changes (all temp, reverted)</div></div>
+  </div>
+
+  <h2 id="goal">Goal + method</h2>
+  <p>Prove the committed mesh A-MPDU work (<strong>S1–S3</strong>, halow <code>aa2bdb51</code>) actually
+  <strong>(a) engages aggregation</strong> and <strong>(b) improves goodput</strong> — the payoff the branch exists for.</p>
+
+  <ul>
+    <li><strong>App:</strong> committed <code>rimba-halow-mesh-perf</code> (<code>MESH_IPERF</code> mode — line
+      allowlist <code>board1--board0--board2</code> + an <code>esp_console</code> <code>iperf</code> REPL).
+      SW-CCMP (shipping default). Rig: <strong>single-hop board2→board0</strong> (board2 = the fully-wired DUT,
+      iperf <strong>client</strong> = the aggregating sender; board0 = iperf server). board1 idle.</li>
+    <li><strong>Traffic: UDP</strong> <code>iperf -c 10.9.9.136 -u -b 5</code> (offer 5 Mbit/s ≫ link → TX queue
+      fills → the FW can build deep A-MPDUs). <strong>TCP first gave the same low rate but a nearly-empty
+      queue</strong> → nothing to aggregate.</li>
+    <li><strong>On-air (chronium <code>morse0</code> + tshark):</strong> confirmed the <strong>ADDBA handshake
+      completes</strong> (category-3 BlockAck action exchange board2↔board0). <em>But</em> the monitor
+      <strong>drops the fast data + ACK/BA frames under a high-rate burst</strong> (captured 1087 beacons but
+      ~13 data frames in a UDP run) → it is <strong>unreliable for aggregation depth</strong>. So:</li>
+    <li><strong>ESP-side counters (the reliable instrument):</strong> temp <code>mmwlan_dbg_qos_tx</code> (mesh
+      unicast QoS-data TX) + <code>mmwlan_dbg_ampdu_tx</code> (the subset the BA session marks A-MPDU-eligible,
+      i.e. <code>umac_ba_is_ampdu_permitted</code> true and <code>MMDRV_TX_FLAG_AMPDU_ENABLED</code> set), at
+      <code>umac_datapath.c:2363</code> (origin) + <code>umac_datapath.c:2886</code> (relay), logged on the
+      heartbeat.</li>
+    <li><strong>A/B gate:</strong> a temp <code>mmwlan_dbg_ampdu_off</code> that still counts eligibility but
+      <strong>withholds the AMPDU_ENABLED flag</strong> → the FW sends each MPDU singly. Same binary otherwise;
+      <em>only the flag differs</em>.</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">ADDBA</div><div class="s">category-3 BlockAck<br>board2↔board0</div></div>
+      <div class="node acc"><div class="t">permitted</div><div class="s"><code>umac_ba_is_<br>ampdu_permitted</code></div></div>
+      <div class="node acc"><div class="t">per-frame flag</div><div class="s"><code>MMDRV_TX_FLAG_<br>AMPDU_ENABLED</code></div></div>
+      <div class="node ok"><div class="t">FW aggregates</div><div class="s">A-MPDU on air</div></div>
+    </div>
+    <figcaption>The path the counters prove end to end. The A/B gate cuts it at the third box only —
+    <code>mmwlan_dbg_ampdu_off</code> still <em>counts</em> eligibility but withholds the flag, so the FW sends each
+    MPDU singly.</figcaption>
+  </figure>
+
+  <h2 id="single-hop">1 · Single-hop A/B (board2→board0, UDP)</h2>
+
+  <table>
+    <thead><tr><th></th><th class="num">Throughput (20 s avg)</th><th class="num">A-MPDU-eligible / QoS-data TX</th></tr></thead>
+    <tbody>
+      <tr><td><strong>A-MPDU ON</strong> (flag set)</td><td class="num"><strong>0.52 Mbit/s</strong></td><td class="num">953 / 984 = <strong>97%</strong></td></tr>
+      <tr><td><strong>A-MPDU OFF</strong> (flag withheld)</td><td class="num"><strong>0.38 Mbit/s</strong></td><td class="num">642 / 675 = 96% (counted, unused)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">A-MPDU ON</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">0.52 Mbit/s</span></div>
+    <div class="bar-row"><span class="lbl">A-MPDU OFF</span><span class="bar-track"><span class="bar-fill slow" style="width:73.1%"></span></span><span class="val">0.38 Mbit/s</span></div>
+  </div>
+
+  <ul>
+    <li><strong>Aggregation engages:</strong> once the BA session is up (~first 5 s), <strong>97%</strong> of board2's
+      mesh QoS-data frames are A-MPDU-eligible + flagged. The code path works end to end (ADDBA → permitted →
+      per-frame flag → FW aggregates).</li>
+    <li><strong>~37% single-hop throughput win</strong> (0.52 vs 0.38), with <strong>the same eligibility on both
+      sides</strong> (97% vs 96%) — so it is the <em>aggregation</em> that differs, not the BA session.</li>
+    <li>Per-interval, ON is consistently ≥ OFF and reaches peaks (<strong>0.65–0.80</strong>) that OFF never hits
+      (max <strong>0.50</strong>) → the direction is real, not endpoint noise. <em>(Single A/B pair; would firm up
+      with repeats.)</em></li>
+  </ul>
+
+  <h2 id="relay">2 · Relay / multi-hop A/B — board2 as the fully-wired RELAY</h2>
+  <p>Rig: <code>board1(client) → board2(RELAY) → board0(server)</code>, forced through board2 by ESP allowlists
+  (board1/board0 peer only board2). board2 = the fully-wired DUT <em>in the relay role</em> (bench-conformant); it
+  forwards + aggregates, <strong>originates nothing</strong> (<code>TX qos=0</code>). Same UDP <code>-b 5</code>,
+  same ON/OFF gate, board2's <code>FWD</code> counters read live via a 3-serial hold
+  (<code>scratch iperf_relay_run.py</code>).</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">board1</div><div class="s">iperf client<br>origin</div></div>
+      <div class="node acc"><div class="t">board2</div><div class="s"><strong>RELAY</strong> · fully-wired DUT<br>forwards + aggregates · <code>TX qos=0</code></div></div>
+      <div class="node"><div class="t">board0</div><div class="s">iperf server<br>10.9.9.136</div></div>
+    </div>
+    <figcaption>The 2-hop rig, forced through board2 by ESP allowlists (board1 and board0 peer only board2). board2's
+    <code>FWD</code> counters at <code>umac_datapath.c:2886</code> are the instrument.</figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>board1→board2→board0 (2-hop, UDP)</th><th class="num">Throughput (20 s)</th><th class="num">Forward frames A-MPDU-eligible</th></tr></thead>
+    <tbody>
+      <tr><td><strong>A-MPDU ON</strong></td><td class="num"><strong>0.29 Mbit/s</strong></td><td class="num">382 / 388 = <strong>98.5%</strong></td></tr>
+      <tr><td><strong>A-MPDU OFF</strong></td><td class="num"><strong>0.21 Mbit/s</strong></td><td class="num">344 / 349 (counted, flag withheld)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">relay ON</span><span class="bar-track"><span class="bar-fill fast" style="width:55.8%"></span></span><span class="val">0.29 Mbit/s</span></div>
+    <div class="bar-row"><span class="lbl">relay OFF</span><span class="bar-track"><span class="bar-fill slow" style="width:40.4%"></span></span><span class="val">0.21 Mbit/s</span></div>
+  </div>
+  <p style="font-size:13px;color:var(--muted);margin-top:-.6em">Bars on the same scale as the single-hop pair above
+  (full track = 0.52 Mbit/s), so the half-duplex relay cost is visible directly.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ The S3 forward-path retag works</p>
+    <p>board2 marks <strong>98.5%</strong> of <em>forwarded</em> frames A-MPDU-eligible — <strong>B6 was "relay
+    bypasses aggregation"; now it doesn't</strong>. <strong>~38% relay win</strong>, ~the same ratio as single-hop.</p>
+  </div>
+
+  <ul>
+    <li>Absolute 2-hop rate (~0.29) ≈ <strong>half</strong> the single-hop (~0.52) — expected, the half-duplex relay
+      shares airtime.</li>
+    <li>The relay win ratio (~38%) ≈ single-hop (~37%): at this low MCS the gain is
+      <strong>overhead-amortization-limited on BOTH paths</strong>; it grows with MCS.</li>
+    <li><strong>board2-as-relay held up fine under iperf load (no crash)</strong> — the conformant rig.</li>
+  </ul>
+
+  <h2 id="real-rc">3 · Real-RC — the bigger lever (verified same day; already committed)</h2>
+  <p>Chasing the low absolute rate turned up that <strong>real per-peer rate control is already implemented +
+  committed</strong> (halow <code>838b23c2</code>) — the <code>mesh-real-rc-feasible-design</code> "ready to
+  implement" memo was <strong>stale</strong>. So the ~0.5 Mbit/s above was <strong>never fixed-MCS0</strong> —
+  real-RC was active the whole time. Verified directly (temp <code>mmwlan_dbg_rc_thr_kbps</code> print of
+  <code>umac_rc_get_learned_metric</code> + a <code>mmwlan_dbg_rc_off</code> gate forcing the mgmt/MCS0 table):</p>
+
+  <table>
+    <thead><tr><th>Single-hop board2→board0 (UDP)</th><th class="num">Learned rate (mmrc)</th><th class="num">Throughput</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Real-RC ON</strong></td><td class="num">300→<strong>900 kbps</strong> (MCS0→MCS2), prob 65–97%</td><td class="num"><strong>0.48 Mbit/s</strong></td></tr>
+      <tr><td><strong>Real-RC OFF</strong> (forced MCS0)</td><td class="num">300 kbps (MCS0), prob 100%</td><td class="num"><strong>0.22 Mbit/s</strong></td></tr>
+    </tbody>
+  </table>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">real-RC ON</span><span class="bar-track"><span class="bar-fill fast" style="width:92.3%"></span></span><span class="val">0.48 Mbit/s</span></div>
+    <div class="bar-row"><span class="lbl">real-RC OFF</span><span class="bar-track"><span class="bar-fill slow" style="width:42.3%"></span></span><span class="val">0.22 Mbit/s</span></div>
+  </div>
+
+  <p><strong>Real-RC ≈ 2.2× (+118%)</strong> — the dominant throughput lever, <strong>~6× bigger than A-MPDU's
+  ~37%</strong>, and they <strong>COMPOUND</strong> (A-MPDU's ~37% sits on top of the real-RC rate).</p>
+
+  <h3>The throughput stack on this bench</h3>
+  <p><strong>MCS0 baseline ~0.22 → +real-RC ~0.48 (2.2×) → +A-MPDU ~0.52 (another ~1.37×).</strong></p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 720 250" role="img" aria-label="Throughput stack: MCS0 baseline 0.22 Mbit/s, plus real-RC 0.48 Mbit/s (2.2x), plus A-MPDU 0.52 Mbit/s (1.37x)">
+      <!-- baseline axis -->
+      <line x1="60" y1="200" x2="700" y2="200" stroke="currentColor" stroke-opacity=".25"/>
+      <!-- bar 1: 0.22 -> height scale 0.52 = 150px -->
+      <rect x="90"  y="136.5" width="110" height="63.5" rx="6" fill="#e0a03a"/>
+      <text x="145" y="126" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">0.22</text>
+      <text x="145" y="219" text-anchor="middle" font-size="12" fill="currentColor" fill-opacity=".65">MCS0 baseline</text>
+      <text x="145" y="234" text-anchor="middle" font-size="11" fill="currentColor" fill-opacity=".5">real-RC OFF</text>
+      <!-- arrow 1 -->
+      <text x="250" y="100" text-anchor="middle" font-size="13" font-weight="700" fill="#2f6feb">× 2.2</text>
+      <line x1="215" y1="115" x2="285" y2="115" stroke="#2f6feb" stroke-width="2"/>
+      <polygon points="285,115 277,111 277,119" fill="#2f6feb"/>
+      <text x="250" y="133" text-anchor="middle" font-size="11" fill="currentColor" fill-opacity=".6">real-RC</text>
+      <!-- bar 2: 0.48 -->
+      <rect x="300" y="61.5" width="110" height="138.5" rx="6" fill="#2f6feb"/>
+      <text x="355" y="51" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">0.48</text>
+      <text x="355" y="219" text-anchor="middle" font-size="12" fill="currentColor" fill-opacity=".65">+ real-RC</text>
+      <text x="355" y="234" text-anchor="middle" font-size="11" fill="currentColor" fill-opacity=".5">MCS0→MCS2, 900 kbps</text>
+      <!-- arrow 2 -->
+      <text x="460" y="100" text-anchor="middle" font-size="13" font-weight="700" fill="#1a8a4a">× 1.37</text>
+      <line x1="425" y1="115" x2="495" y2="115" stroke="#1a8a4a" stroke-width="2"/>
+      <polygon points="495,115 487,111 487,119" fill="#1a8a4a"/>
+      <text x="460" y="133" text-anchor="middle" font-size="11" fill="currentColor" fill-opacity=".6">A-MPDU</text>
+      <!-- bar 3: 0.52 -->
+      <rect x="510" y="50" width="110" height="150" rx="6" fill="#1a8a4a"/>
+      <text x="565" y="39" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">0.52</text>
+      <text x="565" y="219" text-anchor="middle" font-size="12" fill="currentColor" fill-opacity=".65">+ A-MPDU</text>
+      <text x="565" y="234" text-anchor="middle" font-size="11" fill="currentColor" fill-opacity=".5">97% frames eligible</text>
+      <!-- unit -->
+      <text x="60" y="44" text-anchor="start" font-size="11" fill="currentColor" fill-opacity=".5">Mbit/s</text>
+    </svg>
+  </div>
+  <p style="font-size:13px;color:var(--muted);margin-top:-.4em;text-align:center">Bar heights to scale from the
+  measured single-hop UDP numbers (0.22 / 0.48 / 0.52 Mbit/s). The two levers compound.</p>
+
+  <div class="callout warn">
+    <p class="ct">⚠ The ceiling here is the BENCH LINK, not the code</p>
+    <p>mmrc's <code>prob</code> bounces <strong>65–70% at MCS2 (~30% loss)</strong> so it settles at
+    <strong>MCS2, not MCS7</strong> — the close bench nodes <strong>RX-overload</strong>. A cleaner RF setup
+    (separation / lower TX power) would let mmrc converge higher → more.</p>
+  </div>
+
+  <h2 id="caveats">4 · Honest caveats</h2>
+  <div class="callout warn">
+    <p class="ct">⚠ Absolute rate is low (~0.5 Mbit/s) → the PHY rate caps it, not aggregation</p>
+    <p>The mesh runs at a low/untrained MCS (the <strong>real-RC</strong> thread,
+    <code>mesh-real-rc-feasible-design</code>). A-MPDU amortizes fixed per-frame overhead (SIFS + BA + preamble); at
+    a low MCS the DATA airtime dominates so the amortization is a smaller fraction → a modest ~37%. <strong>The win
+    grows with MCS</strong> (higher rate → overhead dominates → bigger aggregation gain) and on the relay path (more
+    overhead to amortize) — A-MPDU and real-RC are <strong>complementary</strong> levers.</p>
+  </div>
+  <ul>
+    <li><strong>Superseded within the same day:</strong> the worklog's original caveat read <em>"The relay/multi-hop
+      win (the design's 'dominant relay-goodput win', S3/B6) is NOT measured here — needs a board2-as-relay rig
+      (board2 fully-wired; board0/board1 as light endpoints under iperf load = a wiring-risk to design around). The
+      <code>FWD</code> counters stayed 0 (single-hop has no forward)."</em> The relay A/B in §2 was then run and
+      closes it.</li>
+    <li>The <code>morse0</code> monitor is <strong>not a reliable A-MPDU-depth instrument under load</strong> (drops
+      data/BA); use ESP-side counters or a lower offered rate.</li>
+    <li>Single A/B pair per comparison; <strong>per-interval variance is high</strong> — the single-hop numbers want
+      repeated runs to firm up.</li>
+  </ul>
+
+  <h2 id="reusable">5 · Reusable</h2>
+  <div class="callout bug">
+    <p class="ct">🐛 These XIAO USB-JTAG boards reset on serial open</p>
+    <p>Driving <code>iperf</code> over the ESP console: a persistent <code>iperf -s</code> <strong>can't survive a
+    reopen</strong>, so <strong>hold BOTH serials open through the whole test</strong> and wait <strong>~16 s</strong>
+    for boot + SAE/AMPE re-peer before sending commands (<code>scratch iperf_run.py</code>).</p>
+  </div>
+  <ul>
+    <li><code>-b</code> is an integer in <strong>Mbit/s</strong> (<code>-b 5</code>, <em>not</em> <code>5M</code>).
+      Server <code>iperf -s -u</code>, client <code>iperf -c &lt;ip&gt; -u -b 5 -t &lt;sec&gt;</code>.</li>
+    <li>ESP-side A-MPDU eligibility counters at <code>umac_datapath.c:2363</code> / <code>umac_datapath.c:2886</code>
+      + the <code>ampdu_off</code> gate = <strong>the reliable ON/OFF A/B method</strong> (the on-air monitor is not).</li>
+    <li>3-serial hold for the relay rig: <code>scratch iperf_relay_run.py</code> (reads board2's <code>FWD</code>
+      counters live).</li>
+  </ul>
+
+  <h2 id="next">6 · Next</h2>
+  <ol>
+    <li><span class="badge ok">✓ done</span> <strong>Relay/multi-hop A/B</strong> — done (§2): board2-relay forward
+      aggregation works, <strong>~38%</strong>.</li>
+    <li><span class="badge ok">✓ done</span> <strong>Real-RC</strong> — found already committed + verified (§3):
+      <strong>~2.2×</strong>, the dominant lever.</li>
+    <li><span class="badge todo">open</span> <strong>Improve the RF link so mmrc can converge past MCS2</strong> —
+      the bench ceiling is the marginal close-node link (RX-overload, <code>prob</code> ~65–70% at MCS2),
+      <strong>NOT the code</strong>. Add node separation / drop TX power, then re-measure — real-RC should reach a
+      higher MCS and the whole stack (real-RC × A-MPDU) should scale up.</li>
+    <li><span class="badge todo">bench-limited</span> The <strong>Edit-3 metric/path-selection effect</strong>
+      (learned rate changing HWMP route choice) still wants a <strong>≥6-node convergence bench</strong>
+      (<code>mesh-real-rc-feasible-design</code>) — bench-limited here.</li>
+    <li><span class="badge todo">open</span> <strong>Firm up the single-hop numbers with repeated A/B runs</strong>
+      (per-interval variance is high).</li>
+  </ol>
+
+  <div class="callout"><p style="margin:0">No committed-code change from this session — the counters and the
+  A-MPDU-disable gate were temporary and <strong>both reverted</strong>. <strong>Bench radio-silent
+  afterward.</strong></p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#goal">Goal + method</a></li>
+    <li><a href="#single-hop">1 · Single-hop A/B</a></li>
+    <li><a href="#relay">2 · Relay A/B</a></li>
+    <li><a href="#real-rc">3 · Real-RC — the bigger lever</a></li>
+    <li><a href="#caveats">4 · Honest caveats</a></li>
+    <li><a href="#reusable">5 · Reusable</a></li>
+    <li><a href="#next">6 · Next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-15-mesh-ampdu-singlehop-throughput-ab</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

@@ -168,12 +168,40 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>60</b> worklogs · 2026-06-17 – 2026-07-14</p>
+<p class="stat"><b>67</b> worklogs · 2026-06-17 – 2026-07-15</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">34</span></h2>
+<h2>July 2026 <span class="mcount">40</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-15-mesh-fix1-hw-restart-verify.html">
+<div class="card-date">2026-07-15</div>
+<div class="card-title">FIX-1 (bus-preserving hw_restart) — verified, then removed</div>
+<div class="card-ex">Single-variable A/B on board2 (the only fully-wired ESP) as relay: 6 forced hw_restarts per arm under UDP forward load, only g_mmdrv_soft_hw_restart flipped. FIX-1's MECHANISM WORKS — SPI re-inits 8 (full teardown ran) → 2 (boot only, bus preserved), proving mmdrv_soft_restart keeps SPI2_HOST/bus_lock/GPIO ISR handlers across a chip reset + FW reload, never asserting. But the BASELINE never crashed either (0 crashes in BOTH arms), so there is no benefit to measure. A bigger, FIX-1-independent gap surfaced: a mesh node cannot recover from ANY hw_restart — hw_restart_evt_handler restores scan + STA only and umac_interface_reinstall_vif is called exclusively with UMAC_INTERFACE_STA (umac_connection.c:1660), so no umac_mesh_handle_hw_restarted exists and both arms went permanently deaf (server 0.00 Mbit/s) ~4 s after restart #1; enabling FIX-1 would trade a self-healing crash-reboot for a silent zombie. Also found: under load the PERIODIC health check never runs (skbq.c:333 refreshes last_checked on every successful chip transaction → 38 skips / 3 checks), so a loaded relay reaches a restart only via the 30-comm-failure escalation — weakening the old "relay = restart-frequency amplifier" framing. NOT closed as unnecessary: n=1 restart-under-load per arm (traffic dies after restart #1), and properly-wired board2 crash-loops intermittently per the 07-12 record. Removed from the tree, archived at tag archive/fix1-implementation, backlogged behind the mesh restart handler. Rig gotchas: printf blows the health task's 400-word stack; the client's UDP rate is meaningless (a broken path reports 4.72 of 5 Mbit/s) — read the server's; crash-looping boards re-enumerate.</div>
+<div class="card-meta">6 min · ◼ removed, not shipped · hw_restart · mesh · FIX-1</div>
+</a>
+
+<a class="card" href="2026-07-15-mesh-hwmp-flapping-artifact-verify.html">
+<div class="card-date">2026-07-15</div>
+<div class="card-title">HWMP path-flapping — a forced-topology TEST ARTIFACT, not a bug</div>
+<div class="card-ex">A 3-lens adversarial comparison against the pinned Linux net/mac80211/mesh_hwmp.c settled a long-standing question: there is NO production HWMP flapping bug. The anti-flap logic is a faithful Linux port (mesh_path_update at umac_mesh.c:1984 == hwmp_route_info_get: stale-SN reject + adopt only via same-next-hop OR a 10/9 ~11% metric-hysteresis win, applied independently of the SN test), so two genuine similar-metric paths cannot flap. The ESTAB metric gate already exists too — mesh_last_hop_metric (:2339) returns MESH_METRIC_MAX for a non-peer transmitter, exactly like Linux airtime_link_metric_get, so a route learned via a non-peer loses the compare. The 07-11 oscillation (~319 RA=board0 correct-relay vs ~221 RA=board2) was manufactured by the bench-only peer allowlist (mesh_peer_allowed:517, allows-all when count==0, i.e. off in production), which creates an "in-RF-range + HWMP-heard + not a data peer" state that cannot occur in an auto-peering mesh. The proximate RA-flip is the origin RA=dest fallback (umac_datapath.c:3761), not route-learning. Two real, separate residuals recorded: D1 (small — implemented + bench-verified the same day: drop + discover instead of blasting an unreachable RA=dest; single-hop 0.46 Mbit/s regression-clean, multi-hop ramps to 1.66) and D4 (bigger — no tx-status→fail_avg→LINK_FAIL_THRESH(95)→mesh_plink_broken self-heal, so a silent black-hole never heals; would NOT have cured the 07-11 flapping since allowlist-dropped frames hardware-ACK above the drop).</div>
+<div class="card-meta">5 min · ✓ artifact, no bug · HWMP · mesh · D1 fixed</div>
+</a>
+
+<a class="card" href="2026-07-15-mesh-ampdu-singlehop-throughput-ab.html">
+<div class="card-date">2026-07-15</div>
+<div class="card-title">A-MPDU + real-RC — the on-air throughput A/B</div>
+<div class="card-ex">Proved the aggregation win with ESP-side eligibility/rate counters rather than the monitor (which drops data/BA frames under load — 1087 beacons vs ~13 data frames captured). A-MPDU ON-vs-OFF: single-hop 0.52 vs 0.38 Mbit/s (+37%, 953/984 = 97% of origin frames eligible; peaks 0.65–0.80 ON vs 0.50 max OFF) and relay 0.29 vs 0.21 Mbit/s (+38%, 382/388 = 98.5% of forwards eligible). But the bigger lever turned out to be rate control, not aggregation: real per-peer RC (already committed, 838b23c2) converges mmrc MCS0 → MCS2 (300 → 900 kbps) for 0.48 vs 0.22 Mbit/s = ~2.2×, and the two compound (0.22 → ×2.2 → 0.48 → ×1.37 → 0.52). Caveat kept honest: MCS2 not MCS7 — the close-range bench link is RX-overloaded, so the ceiling here is the RF setup, not the code. Gotchas: iperf's -b takes an integer in Mbit/s (-b 5, not 5M), and the XIAO boards need ~16 s after a serial open before traffic.</div>
+<div class="card-meta">5 min · ✓ +37% / +38% · A-MPDU · real-RC · mesh</div>
+</a>
+
+<a class="card" href="2026-07-15-mesh-20-relay-crypto-discriminator.html">
+<div class="card-date">2026-07-15</div>
+<div class="card-title">#20 resolved — the RELAY's crypto mode is the discriminator</div>
+<div class="card-ex">Settled #20 with a clean single-variable A/B and then proved the mechanism offline. The discriminator for whether a forwarded multi-hop mesh frame is delivered is the FORWARDING RELAY's crypto mode — NOT the receiver's host stack. With a native HW-crypto Linux receiver (chronite, not recompiled) and only the ESP relay's g_mesh_sw_crypto flipped: a SW-CCMP relay's forwards ARE delivered by the Linux kernel (33 frames = 31 ICMP + 2 ARP, 31/31 replies), while a HW-crypto relay yields 0 delivered despite ~30 forwards on air — with a 28/28 positive control in both rows. That refutes BOTH earlier verdicts, which were relay-crypto-confounded: the 07-11 "universal MM6108 FW limitation (Linux also withholds)" AND the 07-14 "ESP-vs-Linux receiver difference" reversal. MECHANISM RESOLVED by an offline CCMP-MIC verify: board2's own MGTK was printed at AMPE install, its forwarded group frames captured byte-exact on chronium's morse0, and MIC-verified offline via a Python port of morselib ccmp.c mesh_ccmp_aad_nonce — the SW-relayed forward MIC-VERIFIES (plaintext = valid ARP, 2/2) while the HW-relayed forward MIC-FAILS (3/3). So the MM6108 HW-crypto path emits a MALFORMED forwarded frame that any canonical receiver rejects; morselib/morse_driver RX are exonerated and the fix is FIRMWARE. Verified for GROUP (MGTK); unicast (MTK) presumed the same. Practical answer unchanged: host SW-CCMP forwarding works end-to-end and stays the shipping default.</div>
+<div class="card-meta">7 min · ✓ resolved · #20 · CCMP · mesh · firmware fault</div>
+</a>
 
 <a class="card" href="2026-07-14-mesh-esp-linux-multihop-stress.html">
 <div class="card-date">2026-07-14</div>
@@ -196,11 +224,25 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <div class="card-meta">7 min · ✗ fix NOT verified — broken on-air · mesh · SW-CCMP · fragmentation</div>
 </a>
 
+<a class="card" href="2026-07-13-mesh-ampdu-s3-rate-attribution-fix.html">
+<div class="card-date">2026-07-13</div>
+<div class="card-title">S3 relay-forward drop root-caused — a TX-rate-attribution bug</div>
+<div class="card-ex">The long-standing "S3 relay forwards ~0 / ~99.6% of forwarded frames MIC-fail" wall was NOT #20 (HW-crypto A4≠TA), NOT a pairwise-MTK desync, and NOT an A-MPDU-of-4addr interaction. It was a wrong TX-rate attribution on the multi-hop ORIGIN leg: the frame was sent at the untrained common_stad's ~MCS0, so a full-size 4-addr frame exceeds the 1 MHz max PPDU → the MM6108 FW fragments it and sets moreFrag in the on-air FC AFTER the host SW-CCMP MIC was already computed over the unfragmented FC (which the AAD covers unmasked) → the next hop MIC-fails ~99.6%. Byte-proof from a dual-side capture: FC 88 43 at encrypt vs 88 47 at decrypt — only bit 10 (moreFrag) differs, with identical key and nonce, which is what rules out a key desync. FIX: init tx_metadata->aid + umac_rc_init_rate_table_data on key_stad (the next hop), not stad — completing the S2 "the frame follows the next hop" pattern (seqno/BA/reorder already key on key_stad) and mirroring net/mac80211 tx->sta = sta_info_get(addr1 = mpath->next_hop). No-op off the multi-hop mesh path. On air (all-ESP line board0→board2(relay)→board1): relay decrypt success 0.4% (9/2073) → 96.5% (1849/1917), the relay forwards, end-to-end verified. Refuted along the way: the 6f1d-vs-7e58 "MTK desync" and the plid-IGNR reads were confound artifacts of an allowlist startup race, disproved by forcing a clean topology.</div>
+<div class="card-meta">6 min · ✓ root-caused + FIXED · A-MPDU S3 · mesh · CCMP</div>
+</a>
+
 <a class="card" href="2026-07-13-mesh-ampdu-s3-mtk-desync-plid-ignr-fix.html">
 <div class="card-date">2026-07-13</div>
 <div class="card-title">The "??" that looked like dead hardware: S3 MTK desync + plid-IGNR fix, and two corrections</div>
 <div class="card-ex">Set out to verify a follow-Linux fix for the S3 relay forward-drop (a pairwise MTK key desync); two things turned out wrong and mattered more than the fix. (1) A whole "MM6108 won't boot / degraded silicon / physical power" thread was a MISDIAGNOSIS: every firmware was built with bare idf.py, which ships CONFIG_HALOW_COUNTRY_CODE="??", and morselib (umac_interface.c:266) REFUSES to bring up the radio on "??" — returning "Channel list not set" before touching the chip, so version reads UNAVAILABLE, the chip id prints as varying uninitialised garbage (0x8200f5e7→0x8200d052→0x0000), and the MAC reads 00:00:00 — indistinguishable from dead hardware. Building via `make BOARD=proto1-fgh100m` (country US) booted every board first try: chip id 0x0306 (MM6108A1), fw 1.17.8, real MAC, rc=0 SPI read. All three boards (incl. board1's swapped module) are healthy — the hardware was fine all along. New rule added: always build via make…BOARD, never bare idf.py. This voids the pristine-baseline, STA, SPI-clock, flash-size, and module-swap tests (all ran on "??" radios). (2) The plid-IGNR fix does NOT fix S3: on a proper build the multi-hop forward still MIC-fails 99.3% (board2 sw_ccmp_fail=2061/2075), keys still desynced (board0 enc 6f1d9d9c…, board2 dec 7e586627…), and the failure is immediate from ESTAB, not after a re-peer — so the plid re-peer guard is the wrong mechanism (kept as hardening). Sharper lead: board0 TX-DBG nh_eq_stad=2930 = forwards encrypted with the wrong per-link key; since single-hop works, the forward path selects the destination (chronite) MTK instead of the next-hop (board2) MTK — the S2 key_stad override, to re-examine on a forced true-multi-hop rig.</div>
 <div class="card-meta">9 min · ⚑ mixed — build bug ruled, S3 reopened · mesh · A-MPDU · build</div>
+</a>
+
+<a class="card" href="2026-07-12-mesh-ampdu-s3-rtc-noinit-fix1-bench-block.html">
+<div class="card-date">2026-07-12</div>
+<div class="card-title">S3: RTC-noinit drop counters + FIX-1 implemented; bench read blocked</div>
+<div class="card-ex">Three goals, three different outcomes. (a) DONE + hardware-validated: RTC-noinit counters that survive the relay's INT-WDT crash-reboot (esp_reset_reason() + a magic word — clear only on a true power-on, otherwise preserve and accumulate), so the ~99% early-host-RX drop could be read after the crash instead of being erased by it. (b) IMPLEMENTED + builds green but bench-unverified, toggle default OFF: FIX-1, the bus-preserving hw_restart that routes the transport through morse_trns_soft_stop/start so SPI2_HOST, spi_handle, bus_lock, spi_irq_semb and both GPIO ISR handlers survive a chip reset + FW reload, dropping the spi_bus_free/esp_intr_alloc that trips the interrupt watchdog. (c) BLOCKED: board2's mesh plink flaps (peers, then drops, never stable) so no traffic flowed through the relay to accumulate the counters — proven to be a bench/board2-stability issue independent of the instrumentation. Nothing committed; bench left radio-silent. Later: the ~99% drop was root-caused on 07-13 as a TX-rate-attribution bug and FIXED, and FIX-1 was A/B'd on 07-15 and REMOVED rather than shipped (mechanism works — SPI re-inits 8→2 — but the baseline never crashed either, and no mesh node can recover from any hw_restart today).</div>
+<div class="card-meta">7 min · ⚠ partial · (a) done · (b) unverified · (c) blocked · A-MPDU S3</div>
 </a>
 
 <a class="card" href="2026-07-12-mesh-s3-swccmp-mic-forward-drop.html">
