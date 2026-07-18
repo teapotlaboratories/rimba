@@ -1,5 +1,5 @@
-# Morse components are vendored (EXTRA_COMPONENT_DIRS). The iperf console is only for the
-# temporary IPERF throughput-test build (esp_console + `iperf` command).
+# Morse components are vendored (EXTRA_COMPONENT_DIRS). The esp_console + iperf-cmd
+# components provide the serial `iperf` / `ping` commands this example drives.
 dependencies:
   idf: ">=5.4.2,<6.0"
   espressif/iperf-cmd: "~0.1.1"

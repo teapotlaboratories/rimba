@@ -1,6 +1,6 @@
-# rimba-halow-ibss — RISK-01 IBSS / ad-hoc command-acceptance test.
+# rimba-halow-ibss — IBSS / ad-hoc HaLow example.
 # Built on the vendored morsemicro/halow component (with the local IBSS additions
-# to morselib). See docs/worklog/2026-06-18-risk01-ibss-recon.md.
+# to morselib).
 cmake_minimum_required(VERSION 3.16)
 
 # Vendored Morse Micro components live at the repo root (shared across apps).

@@ -145,8 +145,8 @@ average, epoch-stamped:
 ```
 
 Power is **P = 5.00 V × I** (whole-board: ESP32 + radio + regulator). Each ladder phase is a fixed 18 s
-window; the C6-harness pulses board2's D5 to timestamp phase entry, so the trace self-aligns even if the USB
-console drops (see `firmware/rimba-halow-sta`).
+window; the C6 (`test-c6-trigger`) pulses board2's D5 to timestamp phase entry, so the trace self-aligns even if the USB
+console drops (see `firmware/test-power`).
 
 Board2 quirks that matter for reproduction:
 - Native USB-JTAG serial does **not** auto-reset on open — reset via
@@ -155,8 +155,8 @@ Board2 quirks that matter for reproduction:
 - The PPK2 monitor can stall silently on the deep <5 mA tiers — check the last log timestamp is fresh.
 
 > **Deep-sleep floor:** the true radio-off floor is reached by holding the MM6108 in hardware reset
-> (`RESET_N`/GPIO1 LOW) + ESP32 deep sleep → **~0.35–0.6 mA** (`firmware/rimba-sleep-test` /
-> `rimba-deepsleep-cycle`). The older "~2.9 mA floor" used `mmwlan_shutdown()`, which resets but does **not**
+> (`RESET_N`/GPIO1 LOW) + ESP32 deep sleep → **~0.35–0.6 mA** (`firmware/rimba-deepsleep-cycle`; the
+> standalone `rimba-sleep-test` floor probe was retired in the firmware/ cleanup). The older "~2.9 mA floor" used `mmwlan_shutdown()`, which resets but does **not**
 > power-gate the chip — treat any "~2.9 mA" in the history below as the `mmwlan_shutdown` number, not the floor.
 
 ### On-air verification (chronium)
@@ -180,7 +180,7 @@ conditions, and on-air evidence.
 
 ### 3a. Idle ladder — board2 vs both plain APs
 
-One STA firmware (`rimba-halow-sta` triggered ladder), one PPK2 rig, both plain APs; only the AP swaps. The
+One STA firmware (`test-power`, the tp-tier triggered ladder), one PPK2 rig, both plain APs; only the AP swaps. The
 ladder walks **No-PS → Dynamic PS → TWT → WNM+powerdown**, each an 18 s phase, host-awake (§3a) and again
 with ESP32 host light-sleep (§3c). Numbers: [§1 ladder table](#idle-radio-ps-ladder--ma-host-awake---host-light-sleep).
 
@@ -273,7 +273,7 @@ with no reconnect tax and wins.
 ### 3g. STANDBY (morselib `MMWLAN_STANDBY`, deprecated)
 
 The chip keeps the link + offloads DTIM-PS/ARP/DHCP/keepalive while the host sleeps, GPIO-waking the host.
-Tested (`firmware/rimba-standby-test`): enter/exit ret=0, STA stays associated — but **~11.3 mA** (host
+Tested (`firmware/rimba-standby-test`, since retired): enter/exit ret=0, STA stays associated — but **~11.3 mA** (host
 light-sleep), *worse* than WNM+powerdown (chip stays active at DTIM1 instead of powering down). It is a
 functional offload, not a power win, and is deprecated → **WNM+powerdown remains the best low-power-while-
 connected leaf.** No STA-side PMKSA caching (PMK code is mesh-only), so no fast-reconnect shortcut for the
@@ -288,8 +288,8 @@ deep-sleep path.
 ```
 make build APP=rimba-halow-ap  BOARD=proto1-fgh100m       # ESP32 SoftAP
 make flash APP=rimba-halow-ap  BOARD=proto1-fgh100m PORT=/dev/ttyACM0
-make build APP=rimba-halow-sta BOARD=proto1-fgh100m       # STA ladder (variants below)
-make flash APP=rimba-halow-sta BOARD=proto1-fgh100m PORT=/dev/ttyACM4
+make build APP=test-power   BOARD=proto1-fgh100m       # the tp-tier PS ladder DUT (variants below)
+make flash APP=test-power   BOARD=proto1-fgh100m PORT=/dev/ttyACM4
 # post-test radio silence:
 make flash APP=rimba-hello     BOARD=proto1-fgh100m PORT=/dev/ttyACMx   # both ESPs
 ```

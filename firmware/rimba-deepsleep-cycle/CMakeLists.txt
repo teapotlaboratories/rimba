@@ -1,4 +1,4 @@
-# rimba-deepsleep-cycle — deep-sleep leaf that wakes on the C6 trigger and re-associates to the AP.
+# rimba-deepsleep-cycle — timer-woken deep-sleep leaf that re-associates to the AP each cycle.
 # Built on the vendored morsemicro/halow component (same skeleton as rimba-halow-sta).
 cmake_minimum_required(VERSION 3.16)
 

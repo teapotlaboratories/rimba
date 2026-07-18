@@ -12,6 +12,6 @@ CONFIG_HALOW_AP_MAX_STAS=255
 CONFIG_HALOW_STA_DATA_IN_PSRAM=y
 
 
-# hostapd + iperf + ping + console need >1.5MB; use a custom 2MB app partition (16MB flash).
+# iperf + ping console + the HaLow driver need >1.5MB; use a custom 2MB app partition (16MB flash).
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

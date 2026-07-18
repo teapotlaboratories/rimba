@@ -52,6 +52,10 @@ Most important rules:
   content-driven diagram; no Markdown→HTML converter)
   and update the index. See
   [AGENTS.md → Worklog HTML renders](AGENTS.md#worklog-html-renders).
+- **Save state before a context reset** — when the owner clears your context or starts a
+  fresh session, persist the handoff (goal, decisions, constraints, next step, footguns) to
+  durable memory + the worklog first; default on, unless waived for that reset. See
+  [AGENTS.md → Context handoff](AGENTS.md#context-handoff--save-state-before-a-reset).
 - **Cite sources** when finding, researching, or comparing. See
   [AGENTS.md → Research & citations](AGENTS.md#research--citations).
 - **Connect to bench nodes by hostname, never raw IP** — `ssh chronium` (or `chronium.local`), not

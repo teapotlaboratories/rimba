@@ -20,7 +20,6 @@
  * needs a return route `192.168.12.0/24 via 10.9.9.<gw>`.
  */
 
-#include <inttypes.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -29,7 +28,6 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_system.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
 #include "esp_netif_types.h"
@@ -67,28 +65,16 @@ static uint8_t g_mesh_mac[6];
 static esp_netif_t *g_mesh_netif;
 static esp_netif_t *g_ap_netif;
 static esp_netif_driver_base_t g_ap_driver_base;
-static volatile uint32_t g_ap_rx, g_ap_tx, g_mesh_rx;
 
-/* AP authorized-STA tracking (status cb fires during the assoc window; heartbeat logs it). */
-#define TRACK_MAX 8
-static uint8_t s_sta_macs[TRACK_MAX][MMWLAN_MAC_ADDR_LEN];
-static volatile int s_sta_n;
-
+/* Log AP client associations (the status cb fires as a STA authorizes / leaves the AP vif). */
 static void ap_sta_status_cb(const struct mmwlan_ap_sta_status *st, void *arg)
 {
     (void)arg;
     if (st == NULL) return;
-    int idx = -1;
-    for (int i = 0; i < s_sta_n; i++)
-        if (memcmp(s_sta_macs[i], st->mac_addr, MMWLAN_MAC_ADDR_LEN) == 0) { idx = i; break; }
-    if (st->state == MMWLAN_AP_STA_AUTHORIZED) {
-        if (idx < 0 && s_sta_n < TRACK_MAX)
-            memcpy(s_sta_macs[s_sta_n++], st->mac_addr, MMWLAN_MAC_ADDR_LEN);
-    } else if (st->state == MMWLAN_AP_STA_UNKNOWN && idx >= 0) {
-        for (int j = idx; j < s_sta_n - 1; j++)
-            memcpy(s_sta_macs[j], s_sta_macs[j + 1], MMWLAN_MAC_ADDR_LEN);
-        s_sta_n--;
-    }
+    if (st->state == MMWLAN_AP_STA_AUTHORIZED)
+        ESP_LOGI(TAG, "AP client joined: " MACSTR, MAC2STR(st->mac_addr));
+    else if (st->state == MMWLAN_AP_STA_UNKNOWN)
+        ESP_LOGI(TAG, "AP client left:   " MACSTR, MAC2STR(st->mac_addr));
 }
 
 /* ---- AP-side netif: a 2nd esp_netif bound to the AP (secondary) vif ---------
@@ -107,7 +93,6 @@ static esp_err_t gw_ap_transmit(void *h, void *buffer, size_t len)
     mmpkt_close(&v);
     struct mmwlan_tx_metadata md = MMWLAN_TX_METADATA_INIT;
     md.vif = MMWLAN_VIF_AP;
-    g_ap_tx++;
     enum mmwlan_status txs = mmwlan_tx_pkt(pkt, &md);
     return (txs == MMWLAN_SUCCESS) ? ESP_OK : ESP_FAIL;
 }
@@ -178,14 +163,12 @@ static void gw_rx_deliver(struct mmpkt *mmpkt, esp_netif_t *esp_netif)
 static void gw_mesh_rx_cb(struct mmpkt *mmpkt, const struct mmwlan_rx_metadata *md, void *arg)
 {
     (void)md;
-    g_mesh_rx++;
     gw_rx_deliver(mmpkt, (esp_netif_t *)arg);
 }
 
 static void gw_ap_rx_cb(struct mmpkt *mmpkt, const struct mmwlan_rx_metadata *md, void *arg)
 {
     (void)md;
-    g_ap_rx++;
     gw_rx_deliver(mmpkt, (esp_netif_t *)arg);
 }
 
@@ -275,8 +258,6 @@ void app_main(void)
     mmhalow_print_version_info();
     g_mesh_netif = mmhalow_get_netif();
 
-    mmwlan_override_max_tx_power(1);     /* close-bench RX-overload guard; drop for range */
-
     /* --- 1) MESH on the PRIMARY vif --------------------------------------- */
     struct mmwlan_mesh_args mesh_args = { 0 };
     memcpy(mesh_args.if_addr, g_mesh_mac, sizeof(g_mesh_mac));
@@ -322,15 +303,4 @@ void app_main(void)
     xTaskCreate(mesh_net_task, "mesh_net", 4096, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "on-air identities: MESH SA=" MACSTR, MAC2STR(g_mesh_mac));
-
-    uint32_t s = 0;
-    for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        if (++s % 5 == 0) {
-            uint8_t peer_macs[UMAC_MESH_MAX_PEERS][6] = {{0}};
-            uint8_t n_peers = mmwlan_mesh_peer_count(peer_macs);
-            ESP_LOGI(TAG, "alive uptime=%" PRIu32 "s  mesh_peers=%u ap_stas=%d  ap_rx=%" PRIu32 " ap_tx=%" PRIu32 " mesh_rx=%" PRIu32 "  heap=%" PRIu32,
-                     s, (unsigned)n_peers, s_sta_n, g_ap_rx, g_ap_tx, g_mesh_rx, esp_get_free_heap_size());
-        }
-    }
 }

@@ -239,21 +239,23 @@ Two gotchas the script encodes (and you must respect if doing it by hand):
 
 **Prevention:** measurement firmware should **never auto-run into sleep**. Boot into a host-AWAKE idle and
 start the ladder only on a **trigger** (GPIO6 / pad D5), ending host-awake — a fresh boot then keeps the USB
-enumerated and board2 stays reflashable. That's what `rimba-halow-sta`'s triggered ladder does.
+enumerated and board2 stays reflashable. That's what the tp-tier PS ladder (`test-power`) does.
 
-**Flash-hold guard (the deterministic escape hatch, in `rimba-halow-sta`).** The fw reads **D5/GPIO6 at boot
+**Flash-hold guard (the deterministic escape hatch, in the DUTs `test-power` + `test-deepsleep-cycle`).** The fw reads **D5/GPIO6 at boot
 (pull-DOWN)** *before any radio/NVS init*: if **D5 is HIGH → it sits in an infinite host-awake idle** and
 never runs the app; if **LOW (default) → it runs normally**. So to recover a board2 stuck in *any* bad fw,
-**drive D5 HIGH (flash `firmware/c6-harness/` with `MODE=HOLD_HIGH`, or a jumper D5→3V3) and power-cycle**
+**drive D5 HIGH (flash `firmware/test-c6-trigger/` with `MODE=HOLD_HIGH`, or a jumper D5→3V3) and power-cycle**
 — it boots straight into a guaranteed flashable idle, no fresh-boot-window race, no physical BOOT. `D5 HIGH` is the *special* hold
 state; the pull-down keeps the default = run. (Flip to pull-up if you want boot-into-hold as the safe
 default.) Pairs with `reflash_hello.py`: assert D5 HIGH → power-cycle → clean flash every time.
 **Verified on hardware 2026-07-07** via the C6 harness: D5 HIGH→FLASH-HOLD, LOW→run, and a C6 trigger pulse →
 the full P1–P4 ladder, back to idle.
 
-### board2 lowest-power floor — `rimba-sleep-test` (~0.6 mA)
+### board2 lowest-power floor (~0.6 mA)
 
-board2's measured deep-sleep floor is **~0.60 mA @ 5 V** (≈ 3 mW), via **`firmware/rimba-sleep-test`**:
+board2's measured deep-sleep floor is **~0.60 mA @ 5 V** (≈ 3 mW), reached the same way
+`rimba-deepsleep-cycle` powers down between wakes (the standalone `rimba-sleep-test` probe was retired
+in the firmware/ cleanup):
 **hold the MM6108 in reset (RESET_N / GPIO1 driven LOW) + ESP32 deep sleep.** **This corrects the old
 ~2.9 mA "board hardware floor"** — that figure used `mmwlan_shutdown()`, which *resets but never power-gates*
 the radio; asserting RESET_N low directly powers the FGH100M down and the floor drops **~5× to 0.6 mA**
@@ -339,11 +341,11 @@ board2 reads) is proven end-to-end.
   actual current capture, **tri-state** it (set the C6 pin to input) so it injects nothing.
 - **Common GND mandatory**; both sides 3.3 V (no level shifting); the C6 supplies **no power** to board2.
 
-**Build / flash the C6** — the project lives at **`firmware/c6-harness/`** (standalone IDF; the repo `make`
+**Build / flash the C6** — the project lives at **`firmware/test-c6-trigger/`** (standalone IDF; the repo `make`
 is S3-only). Its `MODE` selects **TRIGGER** / **HOLD_HIGH** (force board2 flash-hold) / **HOLD_LOW** /
 **TOGGLE** (link test):
 ```sh
-cd firmware/c6-harness
+cd firmware/test-c6-trigger
 export IDF_PATH=<repo>/vendor/esp-idf && source $IDF_PATH/export.sh
 idf.py set-target esp32c6 build && idf.py -p /dev/ttyUSB0 flash monitor   # C6 = CP210x on ttyUSB0
 ```

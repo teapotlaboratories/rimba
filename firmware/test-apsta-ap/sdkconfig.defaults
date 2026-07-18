@@ -1,0 +1,4 @@
+# test-apsta-ap needs the MM6108 driver's AP (SoftAP) path compiled in.
+# Without this, morselib defines MMWLAN_AP_DISABLED and umac_ap_enable_ap /
+# umac_ap_validate_ap_args are absent -> the AP link fails.
+CONFIG_HALOW_AP_MODE=y

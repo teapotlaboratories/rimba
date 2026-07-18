@@ -1,4 +1,4 @@
-# rimba-halow-ap — HaLow SoftAP node for the 2-board ping test.
+# rimba-halow-ap — 802.11ah (Wi-Fi HaLow) SoftAP example.
 # Pair with rimba-halow-sta. Built on the vendored morsemicro/halow component.
 cmake_minimum_required(VERSION 3.16)
 

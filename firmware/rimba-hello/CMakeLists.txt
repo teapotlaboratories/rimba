@@ -1,4 +1,4 @@
-# rimba-hello — Phase 1 bring-up example.
+# rimba-hello — board bring-up example.
 # Standard ESP-IDF project skeleton.
 cmake_minimum_required(VERSION 3.16)
 

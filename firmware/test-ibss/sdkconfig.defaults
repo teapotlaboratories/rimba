@@ -1,0 +1,3 @@
+# IBSS reuses the AP-type interface + BSS_CONFIG/beacon path, so AP-mode morselib sources
+# must compile in (same as rimba-halow-ibss / test-mesh-peering).
+CONFIG_HALOW_AP_MODE=y

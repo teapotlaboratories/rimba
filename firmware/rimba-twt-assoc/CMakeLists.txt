@@ -1,4 +1,4 @@
-# rimba-deepsleep-cycle — radio-doze hold: stay associated via TWT/WNM doze, no re-assoc.
+# rimba-twt-assoc — negotiate TWT power-save at association, then hold the link dozing.
 # Built on the vendored morsemicro/halow component (same skeleton as rimba-halow-sta).
 cmake_minimum_required(VERSION 3.16)
 

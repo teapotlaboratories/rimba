@@ -1,0 +1,7 @@
+# Common defaults for all targets of rimba-hello.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Console over the ESP32-S3 native USB-Serial-JTAG (this is what enumerates as
+# /dev/ttyACM0 on the XIAO ESP32-S3 — no external USB-UART bridge involved).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

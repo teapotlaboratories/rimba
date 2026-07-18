@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rimba regression suite — the complete guide</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:860px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.1rem;margin:1.5em 0 .35em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:13.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)}
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+/* flow */
+figure{margin:1.5em 0;text-align:center} figcaption{color:var(--muted);font-size:12.5px;margin-top:.6em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 13px;min-width:96px;text-align:center;font-size:13px;box-shadow:var(--shadow);margin:6px 26px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-22px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:660} .flow .node .s{font-size:11px;color:var(--muted);margin-top:2px}
+.flow .node.ok{border-color:var(--ok);background:var(--ok-bg)}
+.flow .node.warn{border-color:var(--warn);background:var(--warn-bg)}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+.dlabel{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:var(--fg)}
+.dsub{fill:var(--muted);font-size:10.5px}
+.dedge{fill:var(--muted);font-size:10px;font-family:"SF Mono",ui-monospace,monospace}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:22px;height:0;border-top-width:2px;border-top-style:solid;display:inline-block}
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh - 92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="rimba-regression-results.html">&larr; Regression</a>
+  <span class="crumb">the complete guide</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">reference guide</span>
+    <span class="badge">tiers · devices · tests</span>
+    <span class="badge ok">T2 12/12 · TP 4/4</span>
+  </div>
+
+  <h1>Rimba regression suite — the complete guide</h1>
+  <p class="lead">What the suite is, why it exists, what each test proves (and deliberately does not),
+  and the exact hardware each needs. The companion to the terse how-to
+  (<code>tools/regtest/README.md</code>) and the living results
+  (<code>rimba-regression-results.md</code>).</p>
+
+  <h2 id="goal">1 · The goal — why this exists</h2>
+  <p>Rimba is ESP32-S3 firmware on a <b>vendored, moving</b> HaLow stack (MorseMicro's morselib + a
+  hostap shim). Firmware blobs, morselib, and ESP-IDF all get bumped, and much of Rimba is ported from
+  the Linux reference. <b>Every bump risks silently regressing a milestone that worked yesterday</b> — a
+  dead radio, a broken mesh, a doubled power-save current. The suite makes <i>"is everything that
+  worked yesterday still working?"</i> a <b>runnable</b> answer instead of a bench session of
+  rediscovery.</p>
+  <div class="callout">
+    <p class="ct">The core principle: honest tiers</p>
+    <p>Every test is explicit about <b>what it proves and what it does NOT.</b> A test that overclaims is
+    worse than no test — it gets trusted. So the suite is split by <i>how much hardware it needs</i> and
+    <i>how strong a claim it supports</i>: cheap-and-weak first, expensive-and-strong last.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">T0 · build</div><div class="s">no hardware<br>it compiles</div></div>
+      <div class="node acc"><div class="t">T1 · smoke</div><div class="s">1 board<br>the radio boots</div></div>
+      <div class="node acc"><div class="t">T2 · on-air</div><div class="s">a rig<br>a milestone holds</div></div>
+      <div class="node warn"><div class="t">tp · power</div><div class="s">board2+PPK2+C6<br>PS didn't ~2×</div></div>
+      <div class="node warn"><div class="t">dscycle</div><div class="s">board2+C6<br>leaf rejoins</div></div>
+    </div>
+    <figcaption>The tier ladder — cheaper/earlier on the left, more hardware &amp; stronger claims on the
+    right. The T0 fw-blob pin catches the power-save regression <code>tp</code> exists for, with zero hardware.</figcaption>
+  </figure>
+
+  <h2 id="tiers">2 · The tiers, in detail</h2>
+  <table>
+    <thead><tr><th>Tier</th><th>Needs</th><th>Proves</th><th>Does <b>NOT</b> prove</th></tr></thead>
+    <tbody>
+      <tr><td><b>T0 build</b></td><td>a laptop</td><td>every app × board compiles via <code>make</code>, with a real country code + the pinned fw blob</td><td>anything at runtime — a T0-green tree can still have a dead radio</td></tr>
+      <tr><td><b>T1 smoke</b></td><td>one board</td><td>flash + boot + the radio really comes up (real chip id / fw / MAC / country)</td><td>any on-air feature — a T1 board has no peer</td></tr>
+      <tr><td><b>T2 on-air</b></td><td>a real rig</td><td>the milestone claims that matter (assoc, IBSS, TWT, mesh, SW-CCMP, the gate…)</td><td>throughput / power numbers — benchmarks, not gates</td></tr>
+      <tr><td><b>tp power</b></td><td>board2 + PPK2 + C6 + an AP</td><td>STA power-save current didn't grossly regress (the fw-1.17.9 ~2× kind)</td><td>absolute doze depth — a benchmark, deliberately not a gate</td></tr>
+      <tr><td><b>dscycle</b></td><td>board2 + C6 + an AP</td><td>the deep-sleep leaf reconnects on every wake</td><td>the power number (that's <code>tp</code>)</td></tr>
+    </tbody>
+  </table>
+  <p><b>T0</b> also enforces two build-time invariants no other tier can: the <b>country code</b> (a
+  <code>"??"</code> from a bare <code>idf.py</code> build makes morselib refuse the radio — looking
+  exactly like dead hardware), and the <b>fw-blob version-pin</b> — <code>mm6108.bin</code> must be the
+  1.17.8 blob by <b>size 480664 B + sha256</b> (a silent bump to 1.17.9 ~doubles STA power-save
+  current). <b>T1</b> reads <i>values not line-presence</i>: <code>country=US chip=0x0306 fw=1.17.8</code>
+  + a real MAC — a dead radio prints an uninitialised struct, which T1 rejects.</p>
+
+  <h2 id="bench">3 · The bench — devices and how they connect</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 800 470" role="img" aria-label="Bench topology: dev host, 3 ESP boards, PPK2, C6, and 4 Linux nodes">
+      <defs>
+        <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+      <!-- edges (drawn first, under the boxes) -->
+      <g fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#arr)">
+        <path d="M150,150 H236"/>            <!-- host->board0 -->
+        <path d="M150,175 H236"/>            <!-- host->board1 -->
+        <path d="M150,205 H236"/>            <!-- host->board2 -->
+        <path d="M150,235 C200,330 200,320 236,320"/> <!-- host->PPK2 -->
+        <path d="M150,250 C190,400 190,392 236,392"/> <!-- host->C6 -->
+        <path d="M150,120 C420,-10 640,20 636,60"/>   <!-- host->linux (ssh, bundled) -->
+      </g>
+      <!-- PPK2 5V rail -> board2 (accent-warn) -->
+      <path d="M296,300 V244" fill="none" stroke="var(--warn)" stroke-width="2" marker-end="url(#arr)"/>
+      <!-- C6 GPIO -> board2 D5 -->
+      <path d="M356,372 C420,372 372,244 356,240" fill="none" stroke="var(--accent2)" stroke-width="1.8" marker-end="url(#arr)"/>
+      <!-- on-air board2 <-> chronite -->
+      <path d="M360,205 C480,205 520,90 560,80" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4"/>
+      <!-- host -->
+      <rect x="24" y="118" width="126" height="118" rx="10" fill="var(--soft)" stroke="var(--accent)"/>
+      <text class="dlabel" x="87" y="168" text-anchor="middle" font-weight="700" font-size="13">dev host</text>
+      <text class="dsub" x="87" y="186" text-anchor="middle">runs the suite</text>
+      <text class="dsub" x="87" y="200" text-anchor="middle">ESP-IDF + ppk2-api</text>
+      <!-- ESP boards -->
+      <g>
+        <rect x="236" y="124" width="124" height="50" rx="8" fill="var(--card)" stroke="var(--line)"/>
+        <text class="dlabel" x="298" y="145" text-anchor="middle" font-weight="650" font-size="12.5">board0</text>
+        <text class="dsub" x="298" y="161" text-anchor="middle">WAKE/BUSY unwired · spare</text>
+        <rect x="236" y="176" width="124" height="30" rx="8" fill="var(--card)" stroke="var(--line)"/>
+        <text class="dlabel" x="298" y="195" text-anchor="middle" font-weight="650" font-size="12.5">board1<tspan class="dsub"> · spare</tspan></text>
+        <rect x="236" y="208" width="124" height="52" rx="8" fill="var(--ok-bg)" stroke="var(--ok)" stroke-width="1.6"/>
+        <text class="dlabel" x="298" y="228" text-anchor="middle" font-weight="700" font-size="12.5" fill="var(--ok)">board2</text>
+        <text class="dsub" x="298" y="244" text-anchor="middle">FULLY WIRED · the DUT</text>
+        <text class="dsub" x="298" y="256" text-anchor="middle">PS / relay / gate</text>
+      </g>
+      <!-- rig -->
+      <rect x="236" y="298" width="124" height="44" rx="8" fill="var(--warn-bg)" stroke="var(--warn)"/>
+      <text class="dlabel" x="298" y="317" text-anchor="middle" font-weight="650" font-size="12.5" fill="var(--warn)">nRF PPK2</text>
+      <text class="dsub" x="298" y="332" text-anchor="middle">powers + meters board2</text>
+      <rect x="236" y="370" width="124" height="44" rx="8" fill="var(--card)" stroke="var(--accent2)"/>
+      <text class="dlabel" x="298" y="389" text-anchor="middle" font-weight="650" font-size="12.5" fill="var(--accent2)">ESP32-C6</text>
+      <text class="dsub" x="298" y="404" text-anchor="middle">trigger / wake / hold → D5</text>
+      <!-- Linux nodes -->
+      <g>
+        <rect x="560" y="56" width="216" height="46" rx="8" fill="var(--soft)" stroke="var(--accent)"/>
+        <text class="dlabel" x="668" y="76" text-anchor="middle" font-weight="650" font-size="12.5">chronite · 10.9.9.2</text>
+        <text class="dsub" x="668" y="91" text-anchor="middle">the interop peer (mesh / hostapd AP)</text>
+        <rect x="560" y="112" width="216" height="46" rx="8" fill="var(--card)" stroke="var(--line)"/>
+        <text class="dlabel" x="668" y="132" text-anchor="middle" font-weight="650" font-size="12.5">chronium · 10.9.9.1</text>
+        <text class="dsub" x="668" y="147" text-anchor="middle">morse0 sniffer (on-air byte-diff)</text>
+        <rect x="560" y="168" width="216" height="46" rx="8" fill="var(--card)" stroke="var(--line)"/>
+        <text class="dlabel" x="668" y="188" text-anchor="middle" font-weight="650" font-size="12.5">chronosalt · 10.9.9.3</text>
+        <text class="dsub" x="668" y="203" text-anchor="middle">Pi Zero peer (power-marginal)</text>
+        <rect x="560" y="224" width="216" height="46" rx="8" fill="var(--card)" stroke="var(--line)"/>
+        <text class="dlabel" x="668" y="244" text-anchor="middle" font-weight="650" font-size="12.5">chronogen · 10.9.9.4</text>
+        <text class="dsub" x="668" y="259" text-anchor="middle">Pi Zero mesh peer</text>
+      </g>
+      <!-- edge labels -->
+      <text class="dedge" x="170" y="140">USB (by efuse MAC)</text>
+      <text class="dedge" x="306" y="278" fill="var(--warn)">5V rail</text>
+      <text class="dedge" x="378" y="300" fill="var(--accent2)">GPIO→D5</text>
+      <text class="dedge" x="430" y="130" fill="var(--accent)">on-air ch27</text>
+      <text class="dedge" x="360" y="72">ssh (hostname)</text>
+    </svg>
+    <div class="legend">
+      <span><i style="border-color:var(--muted)"></i>USB serial</span>
+      <span><i style="border-color:var(--warn)"></i>PPK2 5&nbsp;V rail</span>
+      <span><i style="border-color:var(--accent2)"></i>C6 GPIO → D5</span>
+      <span><i style="border-color:var(--accent);border-top-style:dashed"></i>on-air (S1G ch27 / 5560&nbsp;MHz)</span>
+      <span><i style="border-color:var(--accent)"></i>ssh</span>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>Device</th><th>What it is</th><th>Role</th><th>Key constraint</th></tr></thead>
+    <tbody>
+      <tr><td><b>board0 / board1</b></td><td>XIAO ESP32-S3 + MM6108</td><td>light-load endpoint / AP / STA / spare</td><td>WAKE+BUSY <b>unwired</b> → never a PS/relay/gate DUT</td></tr>
+      <tr><td><b>board2</b></td><td>XIAO ESP32-S3 + MM6108</td><td><b>the DUT</b> for power-save, relay, gate</td><td><b>only fully-wired board</b>; PPK2-powered → enumerates <i>only while</i> <code>tools/ppk2_hold.py</code> runs</td></tr>
+      <tr><td><b>nRF PPK2</b></td><td>Power Profiler Kit II</td><td>powers <b>and</b> meters board2's 5 V rail (ampere-meter)</td><td>one control CDC; the tp/dscycle runner owns it</td></tr>
+      <tr><td><b>ESP32-C6</b></td><td><code>firmware/test-c6-trigger</code></td><td>drives board2 D5: ladder <b>trigger</b>, deep-sleep <b>wake</b>, <b>flash-hold</b> guard</td><td>on <code>ttyUSB0</code>; must be powered + flashed + wired</td></tr>
+      <tr><td><b>chronite</b></td><td>Pi 5 + MM6108, Linux</td><td>the canonical <b>interop peer</b> (real mac80211 + morse_driver)</td><td>brought up/down over ssh by <code>linux_peer.py</code></td></tr>
+      <tr><td><b>chronium</b></td><td>Pi + MM6108, Linux</td><td>the reliable <b>morse0 sniffer</b> for on-air byte-diffs</td><td>not a mesh peer</td></tr>
+      <tr><td><b>chronosalt / chronogen</b></td><td>Pi Zero 2 W + MM6108</td><td>extra Linux mesh peers</td><td>chronosalt is power-marginal</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn">
+    <p class="ct">Two rules the harness enforces in code</p>
+    <p><b>1.</b> Ports resolve by <b>efuse MAC</b>, never a cached <code>ttyACM*</code> (they
+    re-enumerate on hotplug). <b>2.</b> <b>board2 is the only PS/relay/gate DUT</b> — a
+    <code>require_wired</code> role refuses to run on board0/board1 (unwired WAKE/BUSY tests missing
+    solder, not code — it produced false bugs twice). Whole-bench invariant: fw <b>1.17.8</b>, chip
+    <code>0x0306</code>, S1G <b>ch27</b> (<code>iw freq 5560</code>).</p>
+  </div>
+
+  <h2 id="orchestration">4 · How a T2 test runs</h2>
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">resolve</div><div class="s">role → device<br>by MAC / ssh host</div></div>
+      <div class="node"><div class="t">support up</div><div class="s">flash / ssh<br>+ up-marker</div></div>
+      <div class="node"><div class="t">reporter(s)</div><div class="s">flash + capture<br>TEST| lines</div></div>
+      <div class="node"><div class="t">verdict</div><div class="s">scrape RESULT<br>(multi: AND)</div></div>
+      <div class="node ok"><div class="t">silence</div><div class="s">→ test-idle<br>every board</div></div>
+    </div>
+    <figcaption>The orchestrator refuses a <code>require_wired</code> role on board0/1 (the false-bug
+    guard), and fails a run that emits no <code>TEST|RESULT</code> — silence is not a pass.</figcaption>
+  </figure>
+  <p>Every T2 app is a self-contained <code>test-*</code> app reporting over the <b><code>TEST|</code>
+  console contract</b> — one format, both a human and the scraper read it:</p>
+  <pre><code>TEST|BEGIN|name=&lt;slug&gt;|rig=&lt;what this needs&gt;
+TEST|INFO|&lt;progress / observed values&gt;
+TEST|STEP|&lt;step&gt;|&lt;PASS|FAIL&gt;|&lt;detail&gt;      &larr; a sub-check
+TEST|RESULT|&lt;PASS|FAIL|INCONCLUSIVE&gt;|&lt;detail&gt;
+TEST|END|name=&lt;slug&gt;</code></pre>
+
+  <h2 id="catalogue">5 · The T2 catalogue (12 feature tests)</h2>
+  <table>
+    <thead><tr><th>Test</th><th>Rig (role = device)</th><th>Proves</th></tr></thead>
+    <tbody>
+      <tr><td>swccmp</td><td>1 board, no radio</td><td>host SW-CCMP byte-exact (RFC-3610 KAT)</td></tr>
+      <tr><td>ampdu-cap</td><td>board2, mesh vif</td><td>FW still advertises the mesh A-MPDU capability</td></tr>
+      <tr><td>ap-sta-ping</td><td>ap=board0, sta=board1</td><td>ESP SoftAP + ESP STA assoc + ping both ways</td></tr>
+      <tr><td>ibss</td><td>board0 + board1</td><td>IBSS join + <b>exactly-1-peer / 0-phantom</b></td></tr>
+      <tr><td>twt</td><td>ap=board0, sta=board1</td><td>mid-session TWT → agreement <b>INSTALLED</b></td></tr>
+      <tr><td>twt-assoc</td><td>linux=chronite (hostapd), sta=board1</td><td><b>assoc-embedded</b> TWT → INSTALLED on a real <b>Linux AP</b></td></tr>
+      <tr><td>multi-twt</td><td>ap=board0, sta1=board1, sta2=board2</td><td><b>2 STAs</b> both TWT INSTALLED (plain AP)</td></tr>
+      <tr><td>mesh-peering</td><td>board0 + board1</td><td>SAE+AMPE mesh peering → <b>ESTAB</b></td></tr>
+      <tr><td>mesh-linux</td><td>linux=chronite, esp=board2</td><td>ESP peers + pings a <b>real Linux mesh node</b></td></tr>
+      <tr><td>mesh-relay</td><td>origin=board0, <b>relay=board2</b>, dest=board1</td><td>mesh multi-hop <b>SW-CCMP forwarding</b></td></tr>
+      <tr><td>mesh-ap</td><td><b>gate=board2</b>, peer=board1, sta=board0</td><td>the <b>mesh-gate</b> (mesh+AP on one radio), STA routes through, <b>ttl=63</b></td></tr>
+      <tr><td>mesh-ap-multi-twt</td><td><b>gate=board2</b>, sta1=board0, sta2=board1</td><td>the gate serves <b>2 concurrent TWT STAs</b> (mesh+AP + per-STA TWT)</td></tr>
+    </tbody>
+  </table>
+  <h3>TWT coverage as a matrix</h3>
+  <table>
+    <thead><tr><th></th><th>single STA</th><th>multi-STA</th></tr></thead>
+    <tbody>
+      <tr><td><b>plain ESP AP</b></td><td><code>twt</code></td><td><code>multi-twt</code></td></tr>
+      <tr><td><b>Linux AP</b></td><td><code>twt-assoc</code></td><td>—</td></tr>
+      <tr><td><b>mesh gate</b></td><td>(implicit in <code>mesh-ap</code>)</td><td><code>mesh-ap-multi-twt</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="tp">6 · The <code>tp</code> power-save tier</h2>
+  <p>board2 runs a fixed <b>4-tier current ladder</b>; the <b>C6 triggers</b> it; the host <b>samples the
+  PPK2</b> and segments the current stream by the firmware's <code>TEST|</code> phase markers. A
+  power verdict is host-side (the firmware can't see the current), so it's a separate tier.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 720 250" role="img" aria-label="The tp current ladder: No-PS 63, Dyn-PS 20, TWT 20, WNM+powerdown 13 mA">
+      <g stroke="var(--line)" stroke-width="1">
+        <line x1="58" y1="40" x2="700" y2="40"/><line x1="58" y1="103" x2="700" y2="103"/>
+        <line x1="58" y1="166" x2="700" y2="166"/><line x1="58" y1="210" x2="700" y2="210"/>
+      </g>
+      <g class="dsub" text-anchor="end" font-family="'SF Mono',ui-monospace,monospace">
+        <text x="50" y="44">70</text><text x="50" y="107">45</text><text x="50" y="170">20</text><text x="50" y="214">0 mA</text>
+      </g>
+      <g stroke="var(--err)" stroke-width="1.5" stroke-dasharray="4 4" opacity=".7">
+        <line x1="248" y1="107" x2="372" y2="107"/><line x1="578" y1="138" x2="700" y2="138"/>
+      </g>
+      <text x="310" y="99" text-anchor="middle" class="dedge" fill="var(--err)">FAIL band</text>
+      <text x="640" y="130" text-anchor="middle" class="dedge" fill="var(--err)">FAIL band</text>
+      <path d="M120,50 L310,158 L490,159 L660,180 L660,210 L120,210 Z" fill="var(--accent)" opacity=".08"/>
+      <polyline points="120,50 310,158 490,159 660,180" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
+      <circle cx="120" cy="50" r="5" fill="var(--accent)"/><circle cx="310" cy="158" r="5" fill="var(--ok)"/>
+      <circle cx="490" cy="159" r="5" fill="var(--warn)"/><circle cx="660" cy="180" r="5" fill="var(--ok)"/>
+      <g text-anchor="middle" font-weight="700" font-size="12.5" font-family="'SF Mono',ui-monospace,monospace">
+        <text x="120" y="34" fill="var(--accent)">63</text><text x="310" y="180" fill="var(--ok)">20</text>
+        <text x="490" y="181" fill="var(--warn)">20</text><text x="660" y="202" fill="var(--ok)">13</text>
+      </g>
+      <g class="dsub" text-anchor="middle" font-size="11">
+        <text x="120" y="234">No-PS · validity</text><text x="310" y="234">Dyn-PS · scored</text>
+        <text x="490" y="234">TWT · recorded</text><text x="660" y="234">WNM+pd · scored</text>
+      </g>
+    </svg>
+    <div class="legend"><span>board2 · PPK2 ampere-meter · median mA · dashed = calibrated FAIL band</span></div>
+  </div>
+  <p><b>4 measured, 2 scored.</b> No-PS (~63 mA) is a <b>validity</b> check (associated + PS on + not
+  overloaded); Dyn-PS + WNM+chip-powerdown are the scored discriminators; TWT is recorded (a Linux AP
+  ignores the mid-session setup). <b>Wide gross-multiple gate</b> — doze depth is a benchmark, so
+  <code>PASS ≤ ~1.4×</code> the calibrated baseline, <code>FAIL ≥ ~1.8–2×</code>, INCONCLUSIVE between,
+  raw mA always recorded. <code>tp --light-sleep</code> builds a stronger variant (separate bands).</p>
+  <div class="callout warn">
+    <p class="ct">Known offset — NOT an AP-TX / overload issue</p>
+    <p>This rig reads ~1.6–2× the documented reference on the doze tiers. Verified <b>not</b> overload:
+    both APs + the DUT are already TX-capped to ~0–1 dBm (<code>uint16_t</code> min 0), both AP paths
+    read <i>equal</i>, and the link is <i>healthy</i> (No-PS ~63 mA; overload reads wrong ~14). It's an
+    open measurement/config question — the bands are calibrated to <i>this rig</i>, so the gate is valid.</p>
+  </div>
+
+  <h2 id="status">7 · Status vocabulary</h2>
+  <p>Richer than pass/fail on purpose — conflating an honest non-result with a regression is how a
+  suite gets ignored. Exit is <b>0 only when nothing FAILed</b> (SKIP / INCONCLUSIVE / XFAIL don't gate).</p>
+  <table>
+    <thead><tr><th>Status</th><th>Meaning</th><th>Gates?</th></tr></thead>
+    <tbody>
+      <tr><td><b>PASS / FAIL</b></td><td>as expected</td><td>FAIL gates</td></tr>
+      <tr><td><b>SKIP</b></td><td>could not run (board absent, not implemented)</td><td>no</td></tr>
+      <tr><td><b>INCONCLUSIVE</b></td><td>ran, but the measurement can't be trusted (noisy RF, flaky link) — not a code regression</td><td>no</td></tr>
+      <tr><td><b>XFAIL</b></td><td>failed for a documented reason (<code>proto1</code>'s missing BCF)</td><td>no</td></tr>
+      <tr><td><b>XPASS</b></td><td>a known-broken case unexpectedly passed → the reason is stale</td><td><b>yes</b></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="run">8 · Running it</h2>
+  <pre><code>source vendor/esp-idf/export.sh          # once per shell (anything touching a board)
+make test-bench                          # what hardware is present right now
+
+make test-t0                             # build matrix (no hardware)
+make test-t1                             # smoke on board2 (radio boots)
+make test-t2                             # all 12 on-air feature tests
+make test-tp                             # PPK2 power-save ladder
+python tools/regtest/run.py dscycle      # deep-sleep reconnect gate
+python tools/regtest/run.py tp --light-sleep   # the stronger light-sleep variant
+python tools/regtest/run.py t2 --dry-run       # the T2 catalogue, no hardware
+
+make test-report                         # (re)generate build/regtest/report.html
+make test-silence                        # return every ESP to the idle app</code></pre>
+  <p>Each run writes a <b>git-stamped JSON baseline</b> (<code>build/regtest/&lt;tier&gt;-latest.json</code>
+  — a regression is a JSON diff) and refreshes a self-contained <code>report.html</code>. Long runs
+  accumulate across kill-safe chunks with <code>--append</code>. Start <code>tools/ppk2_hold.py</code>
+  before anything using board2; recover a deep-sleep-wedged board2 with a <b>5 s</b> PPK2 power-off
+  (2.5 s leaves it dark) + a tight esptool flash of <code>test-idle</code>.</p>
+
+  <div class="callout"><p style="margin:0">Companions: the terse how-to
+  <code>tools/regtest/README.md</code> · the living results
+  <code>docs/regression/rimba-regression-results.md</code> · the Markdown source of this guide
+  <code>rimba-regression-suite-guide.md</code>.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">Contents</p>
+  <ul>
+    <li><a href="#goal">1 · The goal</a></li>
+    <li><a href="#tiers">2 · The tiers</a></li>
+    <li><a href="#bench">3 · The bench + devices</a></li>
+    <li><a href="#orchestration">4 · How a T2 runs</a></li>
+    <li><a href="#catalogue">5 · The 12 T2 tests</a></li>
+    <li><a href="#tp">6 · The tp power tier</a></li>
+    <li><a href="#status">7 · Status vocabulary</a></li>
+    <li><a href="#run">8 · Running it</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba regression suite — the complete guide</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
