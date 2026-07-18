@@ -1,5 +1,5 @@
-# rimba-halow-sta — HaLow station node for the 2-board ping test.
-# Pair with rimba-halow-ap. Built on the vendored morsemicro/halow component.
+# rimba-halow-sta — HaLow station example: join a SoftAP (SAE) + ping it.
+# Pair with the rimba-halow-ap example. Built on the vendored morsemicro/halow component.
 cmake_minimum_required(VERSION 3.16)
 
 # Vendored Morse Micro components live at the repo root (shared across apps).

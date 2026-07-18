@@ -396,8 +396,13 @@ The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milesto
     re-verifying those modes — audit the adopted paths against the reference (governing rule).
   - **Test:** validate any adopted / changed behaviour on hardware — 3-board P0 bench +
     Linux interop — per the verify rule.
-- ☐ **Regression suite** across every built feature (hello / scan / AP-STA / IBSS / TWT /
-  Mesh+AP) so firmware/morselib bumps don't silently regress earlier milestones.
+- ◐ **Regression suite** across every built feature (hello / scan / AP-STA / IBSS / TWT /
+  Mesh+AP) so firmware/morselib bumps don't silently regress earlier milestones. **Built
+  2026-07-16** — `tools/regtest/` (T0 build / T1 smoke / T2 on-air). The IBSS T2 test is
+  *defined* (assert `IBSS_CONFIG(CREATE)==0`, exactly-2 peer records, 0 phantoms — the
+  structural facts, not RF-noisy ping counts) with provenance to this doc + the test plan, and
+  is reported honestly as not-yet-automated. See [`tools/regtest/README.md`](../../tools/regtest/README.md)
+  + worklog [`2026-07-16-regression-suite-and-fork-migration-plan.md`](../worklog/2026-07-16-regression-suite-and-fork-migration-plan.md).
 
 ---
 

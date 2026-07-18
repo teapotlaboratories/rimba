@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Power-saving test cases — a 5-feature batch — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)} .stat .num.warn{color:var(--warn)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+.pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap}
+.pill.ok{background:var(--ok-bg);color:var(--ok)} .pill.warn{background:var(--warn-bg);color:var(--warn)}
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh - 92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-17</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-17</span>
+    <span class="badge">8 min read</span>
+    <span class="badge ok">✓ shipped (uncommitted)</span>
+    <span class="badge">power · regtest · 5 tests</span>
+  </div>
+
+  <h1>Power-saving test cases — a 5-feature batch</h1>
+  <p class="lead">Five of the ranked "add next" power-saving test cases, built and verified on the bench.
+  Each is a delta against what the <code>tp</code> tier + T2 <code>twt</code> already covered — a T0
+  version-pin, two structural TWT gates (one needing a multi-reporter harness), a flapping-port
+  deep-sleep runner, and a light-sleep <code>tp</code> variant.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">4</div><div class="lbl">clean PASS on the bench</div></div>
+    <div class="stat"><div class="num warn">1</div><div class="lbl">honest INCONCLUSIVE (deep-sleep)</div></div>
+    <div class="stat"><div class="num acc">1</div><div class="lbl">new firmware app</div></div>
+    <div class="stat"><div class="num acc">0</div><div class="lbl">committed (all uncommitted)</div></div>
+  </div>
+
+  <table>
+    <thead><tr><th>#</th><th>test</th><th>tier</th><th>result</th><th>the delta</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>FW-blob version-pin</td><td>T0</td><td><span class="pill ok">PASS</span></td>
+        <td>asserts <code>mm6108.bin</code> = 480664 B / sha <code>ce2702b7…</code> (1.17.8) before any flash</td></tr>
+      <tr><td>2</td><td>assoc-embedded TWT → INSTALLED</td><td>T2 <code>twt-assoc</code></td><td><span class="pill ok">PASS</span></td>
+        <td>the universal path (both APs) — vs the mid-session action a Linux AP ignores</td></tr>
+      <tr><td>10</td><td>multi-STA TWT — both INSTALLED</td><td>T2 <code>multi-twt</code></td><td><span class="pill ok">PASS</span></td>
+        <td>2 STAs concurrent + a multi-reporter harness (AND the verdicts)</td></tr>
+      <tr><td>9</td><td>deep-sleep reconnect</td><td><code>dscycle</code></td><td><span class="pill warn">INCONCLUSIVE</span></td>
+        <td>flapping-port runner; deep-sleep proven by port-gone duration</td></tr>
+      <tr><td>8</td><td>HOST_LIGHT_SLEEP ladder</td><td><code>tp --light-sleep</code></td><td><span class="pill ok">PASS</span></td>
+        <td>a build-arg variant + a second on-rig calibration</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="fwpin">#1 · FW-blob version-pin (T0, no hardware)</h2>
+  <p>A build-time tripwire for the <strong>exact</strong> regression the whole <code>tp</code> tier exists
+  to catch: a silent bump to fw 1.17.9 roughly doubles STA power-save current. T0 now asserts, before a
+  board is flashed, that the pinned blob is 1.17.8 by <strong>size (480664 B) + sha256
+  (<code>ce2702b7…</code>)</strong>. Verified PASS on the pinned blob, FAIL when pointed at the thin-LMAC
+  blob (<code>mm6108-tlm.bin</code>, 473812 B). Highest value/effort of the batch — cheapest choke point,
+  enforces the whole-bench-1.17.8 rule.</p>
+
+  <h2 id="assoc">#2 · Assoc-embedded TWT → INSTALLED (T2 <code>twt-assoc</code>)</h2>
+  <p><code>regtest-twt-assoc-sta</code> requests TWT via <code>mmwlan_twt_add_configuration()</code>
+  <em>before</em> connect (the TWT IE in the assoc request). This is the universal path honoured by
+  <strong>both</strong> the ESP SoftAP and a Linux <code>hostapd_s1g</code> AP — the mid-session action
+  (the <code>twt</code> test) is ignored by a Linux AP, so this is genuinely new coverage.</p>
+  <div class="callout bug">
+    <p class="ct">🐛 an audit caveat, refuted on-bench</p>
+    <p><code>umac_twt_add_configuration</code> only <em>stores</em> the config, and
+    <code>umac_twt_process_ie</code> needs a pre-existing agreement — so an earlier audit pass claimed the
+    assoc-embedded path has <em>no</em> INSTALLED accessor. It DOES:
+    <code>mmwlan_twt_agreement_installed(0)==1</code> after an assoc-embedded setup, against both the ESP
+    AP and chronite's hostapd (flow 0, associated in 3.5 s). The reporter scans flows 0..3 to be safe.</p>
+  </div>
+  <p>The test uses the Linux AP as the discriminator, which needed a new orchestrator branch:
+  <code>_bring_up_linux</code> now handles a <code>hostapd-ap</code> role (→ <code>linux_peer.bring_up_ap</code>),
+  with the build-var / dry-run peer lines guarded so a hostapd-ap STA (associates by SSID) doesn't get the
+  mesh-interop MAC/IP. PASS end-to-end through the harness.</p>
+
+  <h2 id="multi">#10 · Multi-STA TWT: both INSTALLED (T2 <code>multi-twt</code>)</h2>
+  <p>Two STAs concurrently negotiating TWT against one ESP SoftAP — the "2 authorized STAs" concurrency the
+  single-STA <code>twt</code> test asserts but never runs. <strong>No new firmware</strong> (reuses
+  <code>regtest-twt-sta</code> on board1 + board2). The work was a <strong>multi-reporter harness
+  extension</strong>: <code>_run_orchestrated</code> now collects every <code>reporter=True</code> role,
+  captures each (the first stays associated while the next joins, so both coexist), and
+  <code>_record_multi_verdict</code> ANDs the verdicts. The single-reporter path was preserved (re-ran
+  <code>twt</code> = PASS). Verified: <code>2/2 reporters INSTALLED concurrently</code>.</p>
+
+  <h2 id="deepsleep">#9 · Deep-sleep duty-cycle reconnect (<code>dscycle</code>)</h2>
+  <p>Over N cycles, prove the battery-leaf rejoins on every wake — counting both <code>RECONNECTED</code>
+  lines and the long port-gone gaps that prove genuine deep-sleep. Structural gate, no PPK2 measurement.</p>
+  <div class="callout">
+    <p class="ct">Two subtleties, handled honestly</p>
+    <p><strong>(a)</strong> Re-opening the flapping native USB-JTAG <em>resets the just-woken board</em>, so
+    the firmware's <code>wake_cause</code> reads UNDEFINED — so deep-sleep is proven from the
+    <em>port-gone duration</em> (&gt;4 s = a real deep-sleep wait; a bare reset returns in ~2 s), which the
+    reset can't fake. <strong>(b)</strong> The sleep app wedges the USB; reliable recovery is a <strong>5 s</strong>
+    PPK2 power-off (2.5 s leaves board2 dark) + a tight <code>esptool</code> flash in the fresh-boot window.</p>
+  </div>
+  <div class="callout warn">
+    <p class="ct">◐ implemented + logic-verified; a clean PASS needs a healthy board2</p>
+    <p>First run: a clean <strong>2 reconnects + 2 consistent deep-sleep gaps</strong> (logic verified). Later
+    runs on the repeatedly-wedged, over-stressed board2 landed <strong>INCONCLUSIVE (2/3)</strong> — the wakes
+    went flaky and the gate <strong>correctly returned INCONCLUSIVE, never a false PASS</strong> (the suite
+    doctrine working). The test is code-complete and the recovery works; a 3/3 PASS needs a rested board2 +
+    reliable C6 wakes.</p>
+  </div>
+
+  <h2 id="ls">#8 · HOST_LIGHT_SLEEP ladder variant (<code>tp --light-sleep</code>)</h2>
+  <p><code>HOST_LIGHT_SLEEP</code> is now a <strong>build-arg</strong> (<code>#ifndef</code> guard + the
+  Makefile threading <code>HOST_LIGHT_SLEEP=1</code> → <code>-D REGTEST_HOST_LIGHT_SLEEP</code> → the CMake
+  define). <code>tp --light-sleep</code> builds it and scores against <code>POWER_BANDS_LS</code>, calibrated
+  on-rig (3 runs): LS Dyn-PS <strong>~25.8 mA</strong> / WNM <strong>~22–25 mA</strong>, tight, both APs
+  near-identical. Bands <code>dyn-ps (35, 48)</code> / <code>wnm (35, 46)</code>; fresh run PASS, gross
+  regression FAIL, grey INCONCLUSIVE (synthetic-verified); the host-awake bands are untouched.</p>
+  <div class="callout warn">
+    <p class="ct">Finding — the "stronger gate" advantage is masked on this rig</p>
+    <p>In the clean reference (TX-capped AP), light-sleep backfires WNM 1.17.8 ~4 mA → 1.17.9 ~30 mA (~7×).
+    But on our <strong>RX-overloaded</strong> rig the LS 1.17.8 already reads ~25.8 mA, so the multiple vs a
+    ~30 mA 1.17.9 is no bigger than the host-awake gate. The variant works + is tight/repeatable, but only
+    becomes the intended <em>stronger</em> gate under <strong>v2 (cap the AP TX)</strong> — the same
+    limitation the main <code>tp</code> tier has.</p>
+  </div>
+
+  <h2 id="net">Net + follow-ups</h2>
+  <p>All five in the (already-uncommitted) regtest harness; nothing committed. T0 stays green — fw-blob PASS,
+  drift clean, the new/changed apps build. Follow-ups: <strong>v2</strong> (cap the AP TX) unlocks the
+  reference-like numbers that make both the main <code>tp</code> and the LS gate genuinely stronger; and a
+  clean <strong>3/3 <code>dscycle</code></strong> on a rested board2.</p>
+  <div class="callout"><p style="margin:0">Bench radio-silent after (3 ESPs on <code>rimba-hello</code>,
+  chronite <code>wlan1</code> down, board2 held by <code>tools/ppk2_hold.py</code>).</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">The five</p>
+  <ul>
+    <li><a href="#fwpin">#1 · FW version-pin</a></li>
+    <li><a href="#assoc">#2 · assoc-embedded TWT</a></li>
+    <li><a href="#multi">#10 · multi-STA TWT</a></li>
+    <li><a href="#deepsleep">#9 · deep-sleep reconnect</a></li>
+    <li><a href="#ls">#8 · light-sleep ladder</a></li>
+    <li><a href="#net">Net + follow-ups</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-17-powersave-test-cases-batch</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

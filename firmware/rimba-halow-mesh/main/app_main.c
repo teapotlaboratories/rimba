@@ -8,8 +8,7 @@
  *
  * Flash on multiple boards (and/or alongside Linux mesh nodes): each derives a unique mesh MAC
  * from its ESP32 efuse MAC and joins the mesh on the shared channel. The heartbeat logs the
- * node's ESTAB peer count + peer MACs. iperf/ping and forced-topology multi-hop demos live in
- * the dedicated rimba-halow-mesh-perf app.
+ * node's ESTAB peer count + peer MACs.
  */
 
 #include <inttypes.h>
@@ -33,79 +32,16 @@
 #define MESH_S1G_CHAN   27   /* US 915.5 MHz, 1 MHz BW (global op-class 68) */
 #define MESH_MAX_PLINKS 16
 
-/* Default gateway for off-subnet replies = the all-ESP Mesh-gate's mesh IP. This is a DEPLOYMENT
- * PARAMETER (the bench gate = board0, whose mesh IP is 10.9.9.136); a mesh node is infrastructure, so
- * configuring its gate here is legitimate. The PROPER dynamic gate discovery is the planned 802.11s
- * mesh-gate port (RANN + IS_GATE + MPP); until then this is the single-source config. */
-#define MESH_GATE_IP    "10.9.9.136"
-
-/* 802.11 element IDs + beacon IE offset (24-byte PV0 header + ts/bcn-int/cap = 12). */
-#define DOT11_IE_MESH_ID        (114)
-#define BEACON_IE_OFFSET        (24 + 12)
+/* OPTIONAL default gateway for a mesh node whose replies must leave the mesh subnet — e.g. when
+ * a mesh gate bridges 10.9.9.0/24 to another subnet and off-mesh replies would otherwise die in
+ * lwIP ARP. Leave undefined for a plain single-subnet mesh (no gateway is pinned). To route
+ * off-mesh traffic through a gate, define it as that gate's mesh IP. Change for your network. */
+/* #define MESH_GATE_IP    "10.9.9.1" */
 
 static const char *TAG = "rimba-mesh";
 
 /* This node's mesh MAC, derived from the ESP32 efuse MAC (unique per board). */
 static uint8_t g_mesh_mac[6];
-
-/* ---- peer-beacon RX sniffer (on-air telemetry) --------------------------------
- * morselib's raw-frame capture hook is exported via the mmwlan* symbol rule; the API lives in
- * src/internal, so declare it locally (layout must match mmwlan_internal.h, same as
- * firmware/rimba-halow-scan). Note: S1G mesh peer beacons are handled directly in morselib's
- * datapath (which drives peering); this app-level hook only surfaces legacy beacons. */
-enum mmwlan_frame_filter_flag {
-    MMWLAN_FRAME_BEACON = 1 << 8,
-};
-struct mmwlan_rx_frame_info {
-    enum mmwlan_frame_filter_flag frame_filter_flag;
-    const uint8_t *buf;
-    uint32_t buf_len;
-    uint16_t freq_100khz;
-    int16_t rssi_dbm;
-    uint8_t bw_mhz;
-};
-typedef void (*mmwlan_rx_frame_cb_t)(const struct mmwlan_rx_frame_info *rx_info, void *arg);
-extern enum mmwlan_status mmwlan_register_rx_frame_cb(uint32_t filter,
-                                                      mmwlan_rx_frame_cb_t callback, void *arg);
-
-static const uint8_t *find_ie(const uint8_t *ies, uint32_t len, uint8_t want, uint8_t *out_len)
-{
-    uint32_t i = 0;
-    while (i + 2 <= len) {
-        uint8_t id = ies[i], ie_len = ies[i + 1];
-        if (i + 2 + ie_len > len) break;
-        if (id == want) { *out_len = ie_len; return &ies[i + 2]; }
-        i += 2 + ie_len;
-    }
-    return NULL;
-}
-
-static void peer_beacon_cb(const struct mmwlan_rx_frame_info *info, void *arg)
-{
-    (void)arg;
-    if (info->buf_len <= BEACON_IE_OFFSET) return;
-    const uint8_t *sa = info->buf + 10;   /* A2 / source address */
-    if (memcmp(sa, g_mesh_mac, 6) == 0) return; /* ignore our own beacons */
-
-    uint8_t id_len = 0;
-    const uint8_t *id = find_ie(info->buf + BEACON_IE_OFFSET,
-                                info->buf_len - BEACON_IE_OFFSET, DOT11_IE_MESH_ID, &id_len);
-    if (!id) return; /* not a mesh beacon */
-    bool ours = id_len == strlen(MESH_ID) && memcmp(id, MESH_ID, id_len) == 0;
-
-    ESP_LOGI(TAG, "PEER MESH BEACON%s from %02x:%02x:%02x:%02x:%02x:%02x rssi=%d "
-             "freq=%u00kHz MeshID=\"%.*s\"",
-             ours ? " (rimba-mesh)" : "", sa[0], sa[1], sa[2], sa[3], sa[4], sa[5],
-             info->rssi_dbm, info->freq_100khz, (int)id_len, (const char *)id);
-
-    /* Same Mesh ID -> initiate a peer link (idempotent; morselib runs the MPM/SAE/AMPE handshake
-     * and ignores repeats once the peer is known). Mirrors mac80211 opening a plink on a heard
-     * candidate beacon. */
-    if (ours)
-    {
-        mmwlan_mesh_peer_open(sa);
-    }
-}
 
 /* Pin a static mesh IP once the netif is up (distinct per node, derived from the mesh MAC). */
 static void mesh_net_task(void *arg)
@@ -127,14 +63,20 @@ static void mesh_net_task(void *arg)
     snprintf(ipbuf, sizeof(ipbuf), "10.9.9.%u", host);
     esp_netif_ip_info_t ip = { 0 };
     ip.ip.addr = esp_ip4addr_aton(ipbuf);
-    /* Route off-subnet replies (e.g. to a STA behind the gate on 192.168.12.0/24) via the Mesh-gate,
-     * else they die in lwIP ARP. (Was the phantom 10.9.9.1 — off-subnet echo replies got stuck in ARP,
-     * never transmitted; task #17 return-leg fix, hw-confirmed.) */
-    ip.gw.addr = esp_ip4addr_aton(MESH_GATE_IP);
     ip.netmask.addr = esp_ip4addr_aton("255.255.255.0");
+#ifdef MESH_GATE_IP
+    /* Route off-subnet replies (e.g. to a host behind a mesh gate) via the gate, else they die
+     * in lwIP ARP. Only pinned when MESH_GATE_IP is defined above. */
+    ip.gw.addr = esp_ip4addr_aton(MESH_GATE_IP);
+#endif
     ESP_ERROR_CHECK(esp_netif_set_ip_info(n, &ip));
+#ifdef MESH_GATE_IP
     ESP_LOGI(TAG, "mesh static IP %s gw %s (netif up=%d) — responder", ipbuf, MESH_GATE_IP,
              (int)esp_netif_is_netif_up(n));
+#else
+    ESP_LOGI(TAG, "mesh static IP %s (no gateway) (netif up=%d) — responder", ipbuf,
+             (int)esp_netif_is_netif_up(n));
+#endif
     vTaskDelete(NULL);
 }
 
@@ -173,10 +115,7 @@ void app_main(void)
     }
     ESP_LOGI(TAG, "==> mesh vif up; firmware beaconing periodically on chan %d.", MESH_S1G_CHAN);
 
-    /* Log any peer mesh beacons we hear (S1G peer beacons are handled in morselib's datapath). */
-    mmwlan_register_rx_frame_cb(MMWLAN_FRAME_BEACON, peer_beacon_cb, NULL);
-
-    /* Once a peer link is up, pin a static mesh IP. Peering (MPM/SAE/AMPE), forwarding, and HWMP
+    /* Once the mesh vif is up, pin a static mesh IP. Peering (MPM/SAE/AMPE), forwarding, and HWMP
      * are handled in morselib — the peer link forms automatically when a neighbour is heard/opens. */
     xTaskCreate(mesh_net_task, "mesh_net", 4096, NULL, 5, NULL);
 

@@ -1,145 +1,114 @@
 /*
- * rimba-halow-sta — TRIGGERED power-save ladder (C6-harness-ready, netif-free, zero traffic).
+ * rimba-halow-sta — join an 802.11ah HaLow SoftAP and ping it (the station example).
  *
- * Boots into a host-AWAKE idle and connects to the AP, then WAITS for a trigger on the one free
- * pin (GPIO6 / XIAO pad D5). A trigger runs ONE fixed-schedule ladder, marking each phase entry as
- * a pulse burst on that same pin (board2 drives it -> the C6 timestamps the edges), then returns to
- * idle. Because it never auto-runs into sleep, a fresh boot is ALWAYS host-awake -> USB stays
- * enumerated -> board2 is always reflashable. This is the fix for the deep-sleep-cycling wedge.
+ * The station side of the two-board HaLow demo. It brings up the MM6108 radio,
+ * associates to a HaLow SoftAP over SAE, pins a static IP on the AP's subnet (the
+ * SoftAP runs no DHCP server), and pings the AP continuously, printing the round-trip
+ * time so you can watch the link on the console. Pair it with the rimba-halow-ap
+ * example running on another board:
  *
- *   trigger : the C6 (or a jumper) pulls D5 LOW, then releases it HIGH
- *   phases  : 1 = No-PS   2 = Dyn-PS   3 = TWT(10 s SP)   4 = WNM + chip-powerdown   (all host-awake)
- *   marker  : phase N = N x 60 ms pulses on D5 at phase entry, then the tier runs 18 s
+ *   make flash APP=rimba-halow-ap  BOARD=proto1-fgh100m PORT=/dev/ttyACM0   # the AP
+ *   make flash APP=rimba-halow-sta BOARD=proto1-fgh100m PORT=/dev/ttyACM1   # this STA
+ *   make monitor APP=rimba-halow-sta BOARD=proto1-fgh100m PORT=/dev/ttyACM1
  *
- * Alignment: C6 trigger edge = t0; fixed 18 s phases; the burst count self-identifies each phase in
- * the PPK2 trace even if the USB console drops. Console markers are also logged (host is awake here).
+ * Change LINK_SSID / LINK_PSK and the IPs below for your own network.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
+
 #include <inttypes.h>
-#include <stdio.h>
 #include <string.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "esp_timer.h"
-#include "esp_pm.h"
 #include "nvs_flash.h"
-#include "driver/gpio.h"
+#include "ping/ping_sock.h"
+
 #include "mmhalow.h"
 #include "mmwlan.h"
 
+static const char *TAG = "rimba-halow-sta";
+
+/* Match the AP (rimba-halow-ap). */
 #define LINK_SSID  "rimba-ping"
 #define LINK_PSK   "rimbahalow"
-#define PHASE_PIN  GPIO_NUM_6          /* XIAO pad D5 — the single free pin shared with the C6 */
-#define PHASE_S    18                  /* seconds per tier */
-#define HOST_LIGHT_SLEEP 0            /* 0 = host AWAKE (§3a); 1 = ESP32 host light sleep (§3c) */
+#define AP_IP      "192.168.12.1"     /* the AP — our ping target and default gateway */
+#define STA_IP     "192.168.12.2"
+#define NETMASK    "255.255.255.0"
 
-static const char *TAG = "rimba-ladder";
+#define CONNECT_TIMEOUT_MS 40000
+#define PING_INTERVAL_MS   2000
+
 static volatile bool s_connected = false;
-static unsigned up_s(void) { return (unsigned)(esp_timer_get_time() / 1000000ULL); }
 
 static void sta_status_cb(enum mmwlan_sta_state st)
 {
-    if (st == MMWLAN_STA_CONNECTED) { s_connected = true; }
-}
-
-/* board2 DRIVES D5: emit n 60 ms pulses to mark entry into phase n (captured on the C6 / PPK2). */
-static void phase_mark(int n)
-{
-    gpio_set_direction(PHASE_PIN, GPIO_MODE_OUTPUT);
-    for (int i = 0; i < n; i++) {
-        gpio_set_level(PHASE_PIN, 1); vTaskDelay(pdMS_TO_TICKS(60));
-        gpio_set_level(PHASE_PIN, 0); vTaskDelay(pdMS_TO_TICKS(60));
+    if (st == MMWLAN_STA_CONNECTED) {
+        s_connected = true;
+        ESP_LOGI(TAG, "associated to \"%s\"", LINK_SSID);
     }
-    vTaskDelay(pdMS_TO_TICKS(150));    /* idle gap so the burst is clearly delimited */
 }
 
-/* Host-AWAKE idle. D5 = pulled-up input; the C6 (or a jumper to GND) pulls it LOW to trigger.
- * Waits for LOW (assert) THEN HIGH again (release) so the C6 is off the line before we drive it —
- * no bus contention, no series resistor needed. USB stays up the whole time => reflashable. */
-static void wait_for_trigger(void)
+static void on_ping_success(esp_ping_handle_t hdl, void *args)
 {
-    gpio_reset_pin(PHASE_PIN);
-    gpio_set_direction(PHASE_PIN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(PHASE_PIN, GPIO_PULLUP_ONLY);
-    ESP_LOGW(TAG, "=== IDLE (host awake) — waiting for trigger on D5/GPIO%d ===", PHASE_PIN);
-    while (gpio_get_level(PHASE_PIN) == 1) { vTaskDelay(pdMS_TO_TICKS(50)); }  /* assert (low)  */
-    while (gpio_get_level(PHASE_PIN) == 0) { vTaskDelay(pdMS_TO_TICKS(10)); }  /* release (high) */
-    vTaskDelay(pdMS_TO_TICKS(20));
-    ESP_LOGW(TAG, "=== TRIGGERED uptime=%us ===", up_s());
+    uint16_t seqno;
+    uint32_t elapsed_ms;
+    esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed_ms, sizeof(elapsed_ms));
+    ESP_LOGI(TAG, "reply from %s seq=%u time=%" PRIu32 " ms", AP_IP, seqno, elapsed_ms);
 }
 
-/* One fixed-schedule, all-host-AWAKE ladder; entry of each tier marked on D5 + console. */
-static void run_ladder(void)
+static void on_ping_timeout(esp_ping_handle_t hdl, void *args)
 {
-    phase_mark(1);
-    mmwlan_set_power_save_mode(MMWLAN_PS_DISABLED);
-    ESP_LOGW(TAG, "=== P1 NO-PS start uptime=%us ===", up_s());
-    vTaskDelay(pdMS_TO_TICKS(PHASE_S * 1000));
+    ESP_LOGW(TAG, "ping timeout");
+}
 
-    phase_mark(2);
-    mmwlan_set_power_save_mode(MMWLAN_PS_ENABLED);
-    ESP_LOGW(TAG, "=== P2 DYN-PS start uptime=%us ===", up_s());
-    vTaskDelay(pdMS_TO_TICKS(PHASE_S * 1000));
+/* mmhalow's STA netif is a DHCP client, but the SoftAP runs no DHCP server, so pin a
+ * static IP on the AP's subnet (mirrors rimba-halow-ap's assign_static_ip). */
+static bool assign_static_ip(void)
+{
+    esp_netif_t *n = mmhalow_get_netif();
+    if (n == NULL) {
+        ESP_LOGE(TAG, "STA netif is NULL");
+        return false;
+    }
+    esp_netif_dhcpc_stop(n);
 
-    phase_mark(3);
-    struct mmwlan_twt_config_args twt = MMWLAN_TWT_CONFIG_ARGS_INIT;
-    twt.twt_mode = MMWLAN_TWT_REQUESTER;
-    twt.twt_wake_interval_us = 10000000;
-    twt.twt_min_wake_duration_us = 65280;
-    twt.twt_setup_command = MMWLAN_TWT_SETUP_REQUEST;
-    enum mmwlan_status st = mmwlan_twt_setup_request(&twt);
-    ESP_LOGW(TAG, "=== P3 TWT start (ret=%d) uptime=%us ===", st, up_s());
-    vTaskDelay(pdMS_TO_TICKS(PHASE_S * 1000));
-    mmwlan_twt_teardown();
+    esp_netif_ip_info_t ip = { 0 };
+    ip.ip.addr      = esp_ip4addr_aton(STA_IP);
+    ip.gw.addr      = esp_ip4addr_aton(AP_IP);
+    ip.netmask.addr = esp_ip4addr_aton(NETMASK);
+    if (esp_netif_set_ip_info(n, &ip) != ESP_OK) {
+        ESP_LOGE(TAG, "set_ip_info failed");
+        return false;
+    }
+    esp_netif_action_connected(n, NULL, 0, NULL);
+    ESP_LOGI(TAG, "STA static IP %s (gw %s)", STA_IP, AP_IP);
+    return true;
+}
 
-    phase_mark(4);
-    struct mmwlan_set_wnm_sleep_enabled_args wnm = { .wnm_sleep_enabled = true,
-                                                     .chip_powerdown_enabled = true };
-    st = mmwlan_set_wnm_sleep_enabled_ext(&wnm);
-    ESP_LOGW(TAG, "=== P4 WNM+powerdown start (ret=%d) uptime=%us ===", st, up_s());
-    vTaskDelay(pdMS_TO_TICKS(PHASE_S * 1000));
-    wnm.wnm_sleep_enabled = false;
-    mmwlan_set_wnm_sleep_enabled_ext(&wnm);
-
-    phase_mark(5);   /* end-of-run marker */
-    ESP_LOGW(TAG, "=== LADDER DONE uptime=%us — returning to idle ===", up_s());
+static void idle_forever(void)
+{
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(10000));
+    }
 }
 
 void app_main(void)
 {
-    /* Let the USB-Serial-JTAG console attach before we log. */
-    vTaskDelay(pdMS_TO_TICKS(200));
+    vTaskDelay(pdMS_TO_TICKS(500));   /* let the USB-Serial-JTAG console attach */
+    ESP_LOGI(TAG, "joining HaLow AP \"%s\" (SAE), then pinging %s", LINK_SSID, AP_IP);
 
-    /* === SPECIAL: flash-hold guard (checked FIRST, before any radio/NVS init) ===
-     * If D5/GPIO6 is HIGH at boot, do NOT run the app — just idle host-AWAKE forever so the host can always
-     * reflash board2. This is the wedge escape hatch: to recover a board stuck in a bad fw, hold D5 HIGH
-     * (drive it from the C6, or jumper D5 -> 3V3), power-cycle, and it boots straight into this flashable
-     * idle instead of the app. Default is a pull-DOWN, so D5 LOW / floating = normal run; HIGH = the special
-     * hold state. Pure GPIO — no radio touched. */
-    gpio_reset_pin(PHASE_PIN);
-    gpio_set_direction(PHASE_PIN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(PHASE_PIN, GPIO_PULLDOWN_ONLY);
-    vTaskDelay(pdMS_TO_TICKS(50));               /* let the level settle */
-    if (gpio_get_level(PHASE_PIN) == 1) {
-        ESP_LOGW(TAG, "=== FLASH-HOLD: D5/GPIO%d HIGH at boot — idling host-awake for reflash ===", PHASE_PIN);
-        uint32_t held = 0;
-        while (1) {
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            ESP_LOGW(TAG, "FLASH-HOLD idling %us — safe to reflash (drive D5 low + reset to run)",
-                     (unsigned)(3 * ++held));
-        }
-    }
-    ESP_LOGI(TAG, "D5/GPIO%d low at boot -> normal run.", PHASE_PIN);
-
-    ESP_LOGI(TAG, "Booting TRIGGERED PS ladder (ssid=\"%s\")...", LINK_SSID);
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(esp_netif_init());
 
     mmhalow_init(NULL);
-    mmhalow_print_version_info();   /* logs morselib + CHIP FW version — verify rel_1_17_9 */
+    mmhalow_print_version_info();
+
     mmhalow_wifi_config_t conf = { .sta = MMWLAN_STA_ARGS_INIT };
     memcpy(conf.sta.ssid, LINK_SSID, strlen(LINK_SSID));
     conf.sta.ssid_len = strlen(LINK_SSID);
@@ -148,29 +117,45 @@ void app_main(void)
     conf.sta.security_type = MMWLAN_SAE;
     ESP_ERROR_CHECK(mmhalow_set_config(WIFI_IF_STA, &conf));
 
-    /* Close-bench RX-overload workaround: cap TX so the AP's receiver isn't saturated (applies on the
-       channel switch during connect). Earlier this dropped chronite's RX to a healthy ~-28 dBm and let
-       board2 hold a stable ladder. Remove for a real deployment. */
-    mmwlan_override_max_tx_power(1);
-    ESP_LOGI(TAG, "Connecting (TX capped to 1 dBm for the close bench)...");
     mmhalow_connect(sta_status_cb);
     int waited = 0;
-    while (!s_connected && waited < 60000) { vTaskDelay(pdMS_TO_TICKS(500)); waited += 500; }
-    if (!s_connected) { ESP_LOGW(TAG, "link-up timeout (idle anyway; retry on next trigger)"); }
-
-#if HOST_LIGHT_SLEEP
-    /* §3c: enable ESP32-S3 host light sleep between radio wakes (PM_ENABLE + tickless idle already on in
-     * sdkconfig). This backfires on per-DTIM PS (constant light-sleep exits) but is the multiplier that
-     * unlocks the deep leaf when wakes are RARE (TWT against the ESP AP, WNM+powerdown). USB console flaps
-     * here — rely on the PPK2 plateau LEVELS (~3 mA win vs ~32 mA backfire) + deterministic 18 s phases. */
-    esp_pm_config_t pm = { .max_freq_mhz = 160, .min_freq_mhz = 40, .light_sleep_enable = true };
-    esp_pm_configure(&pm);
-    ESP_LOGW(TAG, "=== HOST LIGHT SLEEP enabled (160/40 MHz) ===");
-#endif
-
-    /* idle -> triggered run -> idle. Host-awake unless HOST_LIGHT_SLEEP. */
-    while (1) {
-        wait_for_trigger();
-        run_ladder();
+    while (!s_connected && waited < CONNECT_TIMEOUT_MS) {
+        vTaskDelay(pdMS_TO_TICKS(250));
+        waited += 250;
     }
+    if (!s_connected) {
+        ESP_LOGE(TAG, "no association to \"%s\" within %d ms -- is the AP (rimba-halow-ap) up?",
+                 LINK_SSID, CONNECT_TIMEOUT_MS);
+        idle_forever();
+    }
+
+    if (!assign_static_ip()) {
+        idle_forever();
+    }
+
+    /* Ping the AP continuously so the console shows the live link. */
+    ip_addr_t target = { 0 };
+    target.type = IPADDR_TYPE_V4;
+    target.u_addr.ip4.addr = esp_ip4addr_aton(AP_IP);
+
+    esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
+    cfg.target_addr = target;
+    cfg.count = ESP_PING_COUNT_INFINITE;
+    cfg.interval_ms = PING_INTERVAL_MS;
+
+    esp_ping_callbacks_t cbs = {
+        .on_ping_success = on_ping_success,
+        .on_ping_timeout = on_ping_timeout,
+        .on_ping_end = NULL,
+        .cb_args = NULL,
+    };
+    esp_ping_handle_t ping;
+    if (esp_ping_new_session(&cfg, &cbs, &ping) != ESP_OK) {
+        ESP_LOGE(TAG, "failed to create the ping session");
+        idle_forever();
+    }
+    ESP_LOGI(TAG, "pinging %s every %d ms...", AP_IP, PING_INTERVAL_MS);
+    esp_ping_start(ping);
+
+    idle_forever();
 }

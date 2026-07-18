@@ -938,8 +938,31 @@ needs attention is the part that is silently rig-specific.*
   (board: RESET_N only, BUSY/WAKE on DNP pads — RISK-02).
 
 **Infra**
-- ☐ **Regression suite** for every built feature (hello / scan / AP-STA / IBSS / TWT / Mesh+AP) so
-  firmware/morselib bumps don't silently regress earlier milestones.
+- ◐ **Regression suite** for every built feature (hello / scan / AP-STA / IBSS / TWT / Mesh+AP) so
+  firmware/morselib bumps don't silently regress earlier milestones. **Built 2026-07-16** as a
+  three-tier harness under `tools/regtest/` (`make test-t0|test-t1|test-t2`), designed and its
+  values sourced ahead of a fork migration + stack bump. Full design, what each tier does and does
+  **not** prove, and the acceptance criteria are in
+  [`../worklog/2026-07-16-regression-suite-and-fork-migration-plan.md`](../worklog/2026-07-16-regression-suite-and-fork-migration-plan.md);
+  the tool's own docs are [`tools/regtest/README.md`](../../tools/regtest/README.md); **latest
+  results are in [`../regression/rimba-regression-results.md`](../regression/rimba-regression-results.md)**
+  (T0 17 PASS / 17 XFAIL, T1 14 PASS all radio apps bring up, T2 SW-CCMP PASS).
+  - **T0 build** (no hardware): every app × board compiles via `make`, with a real country code
+    asserted (catches the "??" dead-radio trap at build time). ✅ implemented; first run found a
+    pre-existing break — `BOARD=proto1` cannot build any app (its `bcf_mf16858.mbin` is absent from
+    the pinned `vendor/morse-firmware`); recorded as XFAIL pending an owner decision.
+  - **T1 smoke** (one board): flash + boot + radio up (chip id `0x0306` / fw `1.17.8` / real MAC /
+    runtime country), asserting *values* not line-presence so a dead radio can't pass. ✅ implemented.
+  - **T2 on-air** (a rig): one `firmware/test-<feature>/` app per milestone claim, each
+    self-reporting a machine-readable verdict; expected values reused from the milestones/worklogs and
+    tagged noisy-vs-stable so RF numbers never gate. ◐ `test-swccmp` (RFC-3610 CCM KAT) implemented
+    + hardware-verified; the rest are **defined** (rig + provenance in `tools/regtest/t2_tests.py`,
+    `t2 --dry-run`) with a README and reported honestly as not-yet-automated.
+
+- ☐ **Fork migration → real `MorseMicro/esp-halow` fork, history preserved** (the backlog's "Stack
+  bump"). A first migration plan was drafted 2026-07-16 and then **removed at the owner's request to
+  be restarted from scratch** — no plan doc exists right now. To be re-planned; gated on the
+  regression suite being green first.
 
 **Known unknown (not a task):** the MM6108 firmware's *true* concurrent-STA capacity is unpublished
 (Linux caps at 2007; spec 8191) — 255 is a build/structural ceiling, not a firmware guarantee.

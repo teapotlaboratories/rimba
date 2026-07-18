@@ -1,5 +1,5 @@
-# rimba-halow-ap — HaLow SoftAP node for the 2-board ping test.
-# Pair with rimba-halow-sta. Built on the vendored morsemicro/halow component.
+# rimba-halow-ap-perf — HaLow SoftAP for AP-side iperf throughput.
+# Pair with rimba-halow-sta-perf. Built on the vendored morsemicro/halow component.
 cmake_minimum_required(VERSION 3.16)
 
 # Vendored Morse Micro components live at the repo root (shared across apps).

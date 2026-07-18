@@ -1,8 +1,6 @@
-# rimba-halow-mesh-ap — Mesh + SoftAP concurrent on ONE MM6108 (the all-ESP32
-# "Mesh-gate", §A3 Stage 3 bring-up). Mesh on the primary vif, SoftAP on a
-# secondary vif, co-channel. Needs the components/halow feat/mesh-ap-concurrency
-# branch (Stage 1 + Stage 2 per-vif beacon). See
-# docs/mesh-ap/rimba-mesh-ap-esp32-stage1-codemap.md.
+# rimba-halow-mesh-ap — mesh + AP concurrency (the mesh-gate) example. An 802.11s
+# HaLow mesh on the primary vif and a co-channel SoftAP on a secondary vif, on ONE
+# MM6108, with lwIP routing traffic between the two subnets. See main/app_main.c.
 cmake_minimum_required(VERSION 3.16)
 
 # Vendored Morse Micro components live at the repo root (shared across apps).

@@ -340,6 +340,23 @@ card in `docs/worklog/html/index.html`.
 - **Faithful.** The HTML must carry all the worklog's information — findings, numbers,
   `file:line`, caveats — never a summary.
 
+## Context handoff — save state before a reset
+
+**Before the owner clears your context or starts a fresh session, save what the next
+session needs to continue — always, unless the owner waives it for that reset.** Don't
+leave a resumed session to reconstruct intent from the code.
+
+- **What:** the active task's goal, the decisions already made, the hard constraints, the
+  next step, and any *footguns* a fresh session would miss — the *why*, not just the *what*.
+- **Where:** somewhere durable that survives the reset — your cross-session memory if you
+  have one, plus the worklog for multi-step work
+  ([Worklogs](#worklogs--write-and-update-as-you-go)). Not only the chat, which the reset
+  discards.
+- **When:** the moment the owner signals a reset ("clear your context", "start fresh",
+  "let's reset") — save first, then tell them what you saved and where.
+- **Default on:** do this even unprompted at a reset; the owner can say "no need to save"
+  to skip it for that one.
+
 ## Research & citations
 
 **When asked to find, research, compare, or investigate something, cite your

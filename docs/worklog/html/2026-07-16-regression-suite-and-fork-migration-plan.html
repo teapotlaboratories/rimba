@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Regression suite (T0–T2) + fork-migration plan — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-16</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+
+<div class="metaline">
+  <span class="badge date">2026-07-16</span>
+  <span class="badge ok">Phase 1 · green baseline</span>
+  <span class="badge">regression suite</span>
+  <span class="badge">fork migration · PLAN ONLY</span>
+</div>
+
+<h1>Regression suite (T0–T2) + fork-migration plan</h1>
+
+<p class="lead">Two pieces of work, in order. <strong>Phase 1</strong>: build the regression suite
+the backlog has wanted since the start, and get it green on today's code. <strong>Phase 2</strong>:
+plan — not execute — the migration of <code>mm-esp32-halow</code> into a real fork of
+<code>MorseMicro/esp-halow</code>, history preserved. The order is the point: a green baseline
+<em>before</em> the migration is the only way to tell a migration break from a pre-existing one.</p>
+
+<div class="stats">
+  <div class="stat"><div class="num ok">27 / 0</div><div class="lbl">T0 pass / fail (proto1-fgh100m)</div></div>
+  <div class="stat"><div class="num ok">9 / 9</div><div class="lbl">T2 on-air tests PASS (incl. Linux interop)</div></div>
+  <div class="stat"><div class="num ok">14 / 4</div><div class="lbl">T1 radio bring-up pass / skip</div></div>
+  <div class="stat"><div class="num acc">97.9%</div><div class="lbl">of our work is inside mm-iot-sdk</div></div>
+</div>
+
+<h2 id="starting">Starting state — no harness existed</h2>
+<p>There was no test target. <code>tools/</code> held only <code>ppk2_hold.py</code>,
+<code>esp_usb_power.py</code>, <code>mesh_ccmp_verify.py</code>, <code>mesh_grab_fwd.py</code>;
+the <code>Makefile</code> had <code>build/flash/monitor/…</code> and nothing else. 17 apps under
+<code>firmware/</code>, 2 boards. A single <code>make build</code> is <strong>~1m17s</strong> — a
+full matrix is 30–80 min, long enough that the runner had to be resumable and unattended, not a
+foreground loop.</p>
+
+<h2 id="tiers">The three tiers — and what each does <em>not</em> prove</h2>
+<p>Each tier is explicit about its ceiling. A test that overclaims is worse than no test, because
+it gets trusted.</p>
+
+<figure>
+<div class="flow">
+  <div class="node acc"><div class="t">T0 build</div><div class="s">laptop</div></div>
+  <div class="node acc"><div class="t">T1 smoke</div><div class="s">one board</div></div>
+  <div class="node acc"><div class="t">T2 on-air</div><div class="s">a rig</div></div>
+</div>
+<figcaption>Escalating cost, escalating evidence. Each tier proves strictly more, and needs strictly more.</figcaption>
+</figure>
+
+<table>
+<thead><tr><th>Tier</th><th>Needs</th><th>Proves</th><th>Does NOT prove</th></tr></thead>
+<tbody>
+<tr><td><strong>T0 build</strong></td><td>nothing</td><td>every app × board compiles via <code>make</code>, with a real country code baked in</td><td>anything at runtime — a T0-green tree can still have a dead radio</td></tr>
+<tr><td><strong>T1 smoke</strong></td><td>one board</td><td>flash + boot + the radio really comes up (real chip id / fw / MAC / runtime country)</td><td>any on-air feature — a T1 board has no peer</td></tr>
+<tr><td><strong>T2 on-air</strong></td><td>a real rig</td><td>the milestone claims that matter (assoc, IBSS, TWT, mesh peering/relay, mesh+AP, SW-CCMP)</td><td>throughput / power numbers — those are benchmarks, not gates</td></tr>
+</tbody>
+</table>
+
+<h2 id="t0-finding">T0's first run found a real, pre-existing break</h2>
+
+<div class="callout bug">
+<p class="ct">🐛 <code>BOARD=proto1</code> cannot build <em>any</em> app</p>
+<p><code>boards/proto1/sdkconfig.defaults:33</code> asks for <code>bcf_mf16858.mbin</code>. The
+pinned <code>vendor/morse-firmware</code> (<code>fd41e1c</code>, 1.17.8) <strong>ships no
+<code>mf16858</code> BCF at all</strong> — every <code>proto1</code> build fails at CMake configure
+with <em>"BCF ELF 'bcf_mf16858.bin' not found"</em>. The BCF worked before the
+<code>2026-06-24-firmware-vendor-sourcing</code> change moved firmware to the submodule, which
+silently dropped it. The whole bench is <code>proto1-fgh100m</code>, so nobody had noticed.</p>
+</div>
+
+<p>This validates the tier design on its first run: <strong>T0 needs no hardware and found a broken
+board in ~25 seconds.</strong> It is not a regression this session introduced — it predates it.
+Rather than paper over it (a BCF is per-module RF calibration; the dev plan warns against flashing
+the fgh100m BCF onto mf16858 hardware) or hide it (dropping <code>proto1</code> from the matrix),
+the manifest marks <code>proto1</code> <strong>known-broken with the evidence</strong> and T0 reports
+those builds as <span class="badge">XFAIL</span> — counted, printed, non-gating, and flips to a loud
+<span class="badge err">XPASS</span> the moment someone restores the BCF.</p>
+
+<h4>T0 baseline — green</h4>
+<div class="bars">
+  <div class="bar-row"><div class="lbl">proto1-fgh100m</div><div class="bar-track"><div class="bar-fill fast" style="width:100%"></div></div><div class="val">17 PASS</div></div>
+  <div class="bar-row"><div class="lbl">proto1</div><div class="bar-track"><div class="bar-fill slow" style="width:100%"></div></div><div class="val">17 XFAIL</div></div>
+  <div class="bar-row"><div class="lbl">c6-harness</div><div class="bar-track"><div class="bar-fill" style="width:6%"></div></div><div class="val">1 SKIP</div></div>
+</div>
+<p><strong>0 FAIL, 0 XPASS → green.</strong> The full rebuild was real work: exporting one morselib
+symbol (below) relinked <em>every</em> <code>proto1-fgh100m</code> app against the changed library and
+all 17 still built — exactly the port-forward-safety guarantee T0 exists to give.</p>
+
+<h2 id="t1t2">T1 + T2 on real silicon</h2>
+
+<p>board2 (the only fully-wired ESP, needed for load/relay/PS) was not enumerated this session — its
+<code>ppk2_hold.py</code> was down — so bring-up tiers ran on <strong>board0</strong>, valid because
+they exercise only light-load bring-up where board0's unwired WAKE/BUSY do not matter.</p>
+
+<div class="callout ok">
+<p class="ct">✓ T1 radio bring-up — asserts values, not line-presence</p>
+<pre><code>Setting Channel List US
+Morselib version: 2.10.4   Morse firmware version: 1.17.8   Morse chip ID: 0x0306
+Wi-Fi MAC address: 68:24:99:44:6b:b7</code></pre>
+<p>country <code>US</code> (not "??"), chip <code>0x0306</code>, fw <code>1.17.8</code>, MAC ≠ all-zero
+— all four asserted, all four real. <code>mmhalow.c:157-165</code> prints the version struct <em>even
+when the version call failed</em> (the "looks like dead hardware" symptom), so T1 checks the values,
+not merely that the lines appeared — a line-presence check would pass on a dead radio.</p>
+</div>
+
+<div class="callout ok">
+<p class="ct">✓ T2 — 9 on-air feature tests automated + passing (8 all-ESP + 1 ESP↔Linux)</p>
+<p>A <strong>multi-role orchestrator</strong> flashes each test's roles (support first, verified via a
+console up-marker), scrapes the <strong>reporter's</strong> <code>REGTEST|RESULT</code>, and returns
+every board to <code>rimba-hello</code>. Every ESP role app is <code>regtest-*</code>; a Linux node is
+a support role driven over ssh. The 8 all-ESP tests:</p>
+<table>
+<thead><tr><th>test</th><th>proof</th></tr></thead>
+<tbody>
+<tr><td><code>swccmp</code></td><td>RFC-3610 CCM KAT, rc=0 (no radio, deterministic)</td></tr>
+<tr><td><code>ampdu-cap</code></td><td>FW advertises the mesh A-MPDU capability (=1)</td></tr>
+<tr><td><code>ap-sta-ping</code></td><td>SAE assoc + 15/15 ICMP replies</td></tr>
+<tr><td><code>ibss</code></td><td>joined + <strong>exactly 1</strong> peer record (0-phantom check)</td></tr>
+<tr><td><code>twt</code></td><td>TWT agreement → <strong>INSTALLED</strong></td></tr>
+<tr><td><code>mesh-peering</code></td><td>SAE+AMPE plink → ESTAB, ESP↔ESP</td></tr>
+<tr><td><code>mesh-relay</code></td><td>forced line, sole peer = <strong>relay (board2)</strong>, 14/15 forwarded</td></tr>
+<tr><td><code>mesh-ap</code></td><td>STA→gate→mesh→far-node, <strong>ttl=63</strong> (one gate hop)</td></tr>
+</tbody>
+</table>
+<p>Plus the <strong>gold-standard</strong> 9th test, <code>mesh-linux</code>: the ESP peers
+(SAE+AMPE) with a <strong>real Linux</strong> node (chronite) and pings it — proving interop with
+genuine <code>mac80211</code> + <code>morse_driver</code>, not just another ESP running the same
+morselib. The Linux side is fully orchestrated over ssh (<code>linux_peer.py</code> pushes the mesh
+config, starts <code>wpa_supplicant_s1g</code>, and tears the node back down). Verified: ESTAB peer =
+chronite <code>3c:22:7f:37:51:38</code> + 13/15 replies.</p>
+<p>The verdict lives in the <em>firmware</em> (only the device sees plink/peer/crypto state — a host
+scraper of log prose is the "endpoint logs are not proof" anti-pattern). Three small
+<code>mmwlan*</code> accessors were added to morselib so reporters can self-verify a structural fact
+that lives in an internal struct (TWT agreement state, A-MPDU cap, IBSS peer count).</p>
+</div>
+
+<h3>Design decision: the verdict lives in the firmware</h3>
+<p>Each <code>regtest-*</code> app runs the feature and prints one fixed
+<code>REGTEST|RESULT|PASS|…</code> line; the harness only transports it. Only the device can see
+association / plink / peer-table / crypto state, and <em>"endpoint logs + a working ping are not
+proof"</em> is already a project rule. A host scraper asserting from log prose would reintroduce
+exactly that anti-pattern.</p>
+
+<h3>Design decision: assert the structural fact, not the RF number</h3>
+<p>The bench's own docs are emphatic that RF numbers here are noisy (RX overload at close range; a
+power-marginal node; the mesh ceiling is "the link, not the code"), and the <em>recorded</em>
+milestone numbers already include single-packet misses (IBSS "4/5", AP "7/8 then 5/5") — a hard
+equality assert would have flaked <em>on the very run that produced the number</em>. So T2 asserts
+"peered + forwarded with <code>ccmp_fail==0</code>" and <em>reports</em> throughput, never gates on
+it. Noisy expectations are tagged in the manifest with the weaker assertion spelled out.</p>
+
+<div class="callout">
+<p class="ct">One morselib change was required (and is upstream-faithful)</p>
+<p>morselib's build runs <code>librarymangler.py</code>, which renames every symbol to
+<code>mmint_*</code> except those matching a glob in <code>protected_syms.txt</code>
+(<code>mmwlan*</code>, <code>mmhal*</code>, …). So <code>esp_mesh_ccm_selftest</code> shipped as
+<code>mmint_esp_mesh_ccm_selftest</code> and app code could not link it. Fix: add one line to
+<code>protected_syms.txt</code> — the sanctioned way to widen morselib's public surface, not a local
+hack. It is a change <em>inside</em> mm-iot-sdk, so it is part of the migration's morselib delta.</p>
+</div>
+
+<h2 id="crux">Phase 2 — the migration crux: fork mm-iot-sdk, or keep vendoring?</h2>
+
+<p>Upstream <code>esp-halow</code> keeps <code>mm-iot-sdk</code> as a <strong>separate submodule
+repo</strong>, but our morselib work lives inside it. So: <strong>(a)</strong> fork
+<code>MorseMicro/mm-iot-sdk</code> and move the work there (matching upstream), or <strong>(b)</strong>
+keep vendoring and deliberately diverge? The evidence decides it.</p>
+
+<h4>Where our 67 commits of work actually live</h4>
+<div class="bars">
+  <div class="bar-row"><div class="lbl">inside mm-iot-sdk</div><div class="bar-track"><div class="bar-fill" style="width:97.9%"></div></div><div class="val">8452 ins · 97.9%</div></div>
+  <div class="bar-row"><div class="lbl">esp-halow wrapper</div><div class="bar-track"><div class="bar-fill" style="width:2.1%"></div></div><div class="val">182 ins · 2.1%</div></div>
+</div>
+<p>And the wrapper's 182 is almost all docs/glue — README (+128), Kconfig (+34), two CMake lines —
+leaving <strong>12 lines of actual C</strong> (<code>mmhalow.c/.h</code>). Commit-level: of 62
+non-merge commits, <strong>52 touch only mm-iot-sdk</strong>, and exactly one has real C on both
+sides of the boundary (a 12-line straddle).</p>
+
+<div class="callout ok">
+<p class="ct">✓ The graft is clean — and provable</p>
+<p>The two subtrees our patches touch are <strong>git tree-object identical</strong> to upstream's
+public <code>mm-iot-sdk</code> tag 2.10.4 (<code>095b1290</code>):</p>
+<pre><code>framework/morselib     68ddbd8d: adef0b13…  ==  095b1290: adef0b13…
+framework/src/hostap   68ddbd8d: 9749d630…  ==  095b1290: 9749d630…</code></pre>
+<p>The tree our patches were authored against <em>is</em> the upstream tree object — so a reparent
+applies with <strong>zero conflicts</strong>. And upstream's own SDK release history
+(<code>2.6.4→2.10.4</code>, SHA-identical to GitHub) is <em>already</em> a second orphan lineage in
+our repo, so the graft onto <code>095b1290</code> is possible offline, today.</p>
+</div>
+
+<p><strong>Recommendation: (a) fork mm-iot-sdk</strong>, via a phased path (land the esp-halow
+reunification first with the SDK still vendored, prove Phase 1 green, then extract the SDK as a second
+change). The work is <em>essentially all</em> SDK work; vendoring buries it with no shared history and
+turns every future bump into an un-bisectable file drop. The tradeoff is honest: (a) is two forks +
+two submodule pointers to keep coherent; (b) is one repo at the cost of permanent divergence. As long
+as stack bumps are on the roadmap, (a) wins. Note <strong>both target forks already exist and are
+unused</strong> — <code>teapotlaboratories/esp-halow</code> and <code>teapotlaboratories/mm-iot-sdk</code>
+(created 2026-06-25) — so the migration pushes branches to forks it does not have to create.</p>
+
+<h2 id="portfwd">The port-forward: 2.10.4 → 2.12.3 concentrates in one file</h2>
+
+<p>Most of our 8452 lines ride nearly free — <code>umac/mesh/</code> (3280) and <code>umac/ibss/</code>
+(687) <strong>do not exist upstream at any tag</strong>; <code>ccmp.c</code> is byte-identical across
+2.10.4 / 2.11.2 / 2.12.3; <code>umac_twt.c</code> is ours and upstream barely touched it. The risk
+concentrates where both sides rewrote heavily:</p>
+
+<table>
+<thead><tr><th>file</th><th class="num">ours (+/−)</th><th class="num">upstream (+/−)</th><th>read</th></tr></thead>
+<tbody>
+<tr><td><code>umac/datapath/umac_datapath.c</code></td><td class="num">1501 / 57</td><td class="num">362 / 332</td><td><strong>the whole risk</strong></td></tr>
+<tr><td><code>internal/mmdrv.h</code></td><td class="num">118 / 2</td><td class="num">268 / 925</td><td>upstream deleted 925 lines under our decls</td></tr>
+<tr><td><code>driver/driver.c</code></td><td class="num">250 / 3</td><td class="num">431 / 510</td><td>heavy both</td></tr>
+<tr><td><code>include/mmwlan.h</code></td><td class="num">38 / 1</td><td class="num">463 / 624</td><td>public API reworked</td></tr>
+</tbody>
+</table>
+<p>Structural complication: upstream <strong>split</strong> the datapath
+(<code>umac_datapath_sta.c</code>) and <strong>added a full <code>umac/relay/</code></strong> — 1370
+lines at the 2.12.3 target, not the header-only stub it is at 2.11.2. Our datapath work must be
+<em>re-sited across the new AP/STA split</em>, not just conflict-resolved. Land 2.11.2 first for a
+bisectable midpoint.</p>
+
+<div class="callout warn">
+<p class="ct">⚠ A bench hazard the port introduces — pin it first</p>
+<p>2.11.2 flips <code>CONFIG_HALOW_PS_MODE</code>'s default <code>false → true</code> (gated on
+<code>MM_WAKE/MM_BUSY ≥ 0</code>, which our board overlays satisfy). Nothing in our tree sets it, so
+after the port it silently becomes <code>true</code> — the <code>mmhalow.c:199</code> PS-disable stops
+compiling and the shim starts driving WAKE / taking a BUSY IRQ. On board0/board1 those pins are
+<strong>physically unwired</strong>, so this turns PS on against pins that go nowhere and moves every
+PS/TWT number on the bench. <strong>Mitigation: set <code>CONFIG_HALOW_PS_MODE=n</code> explicitly in
+both board defaults before porting</strong> — a deliberate decision instead of a side effect.</p>
+</div>
+
+<h2 id="survives">What a SHA rewrite breaks — the archive tag</h2>
+<div class="callout warn">
+<p class="ct">⚠ <code>archive/fix1-implementation</code> is 8 commits OFF main</p>
+<p>The tag (<code>391eb528</code>) branches from <code>dbecb4dd</code>, not from
+<code>main</code> — its 8 commits are the pre-squash A-MPDU/defrag/D1 history. <strong>A subtree-split
+of <code>main</code> alone will NOT carry it.</strong> <code>filter-repo</code> rewrites all refs it is
+<em>given</em>, so the archive ref must be present in the working repo when the rewrite runs; after it,
+verify the tag still resolves and still holds all 8 commits. The brief says it must survive — this is a
+hard checklist item, not a nicety. rimba's <code>components/halow</code> gitlink and the ESP-IDF
+component paths (files move <code>components/halow/…</code> → <code>components/halow/halow/…</code>)
+move with the rewrite too; T0 is the acceptance test for the path changes.</p>
+</div>
+
+<h2 id="honest">What the suite still does not cover</h2>
+<p>With board2 online (<code>tools/ppk2_hold.py</code>) all 8 T2 feature tests are automated, so the
+earlier "defined but not automated" gap is closed. What remains genuinely out of scope, and why:</p>
+<ul>
+<li><strong>Power-save doze depth</strong> — needs the PPK2 current ladder, which is a measurement,
+not a pass/fail gate.</li>
+<li><strong>AID ≥ 64</strong> needs 64+ associated STAs — structurally unverifiable on a 3-board
+bench, recorded as such, not skipped silently.</li>
+<li><strong>HW-crypto mesh forwarding</strong> — a firmware limitation (SW-CCMP is the shipping
+default), not a regression target.</li>
+<li><strong>On-air byte-diff vs Linux</strong> (the gold-standard frame check) is a separate manual
+capture the suite points at but does not replace.</li>
+</ul>
+
+<h2 id="review">Self-review — the harness reviewed its own author</h2>
+<p>A 6-agent adversarial review (3 reviewers × a verify pass) over the harness Python, the firmware,
+and the plan found <strong>one genuine HIGH bug</strong>: the default <code>make test-t1</code> would
+have <em>false-FAILed</em> on <code>regtest-swccmp</code> — a <code>radio=False</code> app judged
+against <code>rimba-hello</code>'s banner — gating a healthy tree. (Not hit in this session because T1
+always ran with an explicit <code>--app</code>.) Fixed: T1 excludes the <code>regtest-*</code> apps
+(they are T2's), re-verified on board0. Lower-severity fixes: T1 now asserts the country <em>matches
+the board overlay</em> (not just ≠ "??"), flags an absent MAC line, and T0's XFAIL is
+<em>signature-checked</em> so a <em>new</em> <code>proto1</code> break can't hide under it. The review
+also caught a plan error — <code>teapotlaboratories/mm-iot-sdk</code> already exists as a fork, so the
+plan's "does not exist yet" was corrected. The plan's load-bearing numbers all survived the
+independent re-check exactly.</p>
+
+<div class="callout ok">
+<p class="ct">✓ Net</p>
+<p>The suite is <strong>green</strong> — T0 build (21/21, no hardware), T1 bring-up (14/14 radio
+apps), and <strong>all 9 T2 on-air feature tests</strong> pass on the 3-board bench; the one
+pre-existing break (<code>proto1</code>, missing BCF) is quarantined as a documented XFAIL. This is
+the baseline the migration must not regress. Live results:
+<code>docs/regression/rimba-regression-results.md</code>.</p>
+</div>
+
+<div class="callout warn">
+<p class="ct">⚠ Phase 2 plan — removed for a fresh restart</p>
+<p>A standalone migration plan was drafted this session, then <strong>deleted at the owner's request
+to be started over from scratch</strong> — so no plan document exists right now, and Phase 2 is to be
+re-planned. The verified recon above (divergence surface, tree-identity, port-forward scope, the
+archive-tag and PS-mode hazards) still stands as a self-contained record a restart can reuse or
+discard; it does not bind the next attempt to the prior "fork both repos" recommendation. Nothing was
+executed.</p>
+</div>
+
+<hr>
+<p style="font-size:13px;color:var(--muted)">Companion to
+<code>docs/worklog/2026-07-16-regression-suite-and-fork-migration-plan.md</code>. Harness:
+<code>tools/regtest/</code>. The standalone migration-plan doc was removed at the owner's request
+(Phase 2 restarting). All numbers verified 2026-07-16 against the live repos + an adversarial re-check.</p>
+
+</main>
+
+<aside>
+<nav class="toc">
+<div class="toc-h">On this page</div>
+<ul>
+  <li><a href="#starting">Starting state</a></li>
+  <li><a href="#tiers">The three tiers</a></li>
+  <li><a href="#t0-finding">T0's first finding</a></li>
+  <li><a href="#t1t2">T1 + T2 on silicon</a></li>
+  <li><a href="#crux">Migration crux</a></li>
+  <li><a href="#portfwd">Port-forward</a></li>
+  <li><a href="#survives">The archive tag</a></li>
+  <li><a href="#review">Self-review</a></li>
+  <li><a href="#honest">Honest partial</a></li>
+</ul>
+</nav></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-16-regression-suite-and-fork-migration-plan</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

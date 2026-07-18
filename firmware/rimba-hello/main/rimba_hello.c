@@ -1,17 +1,16 @@
 /*
- * rimba-hello — Phase 1 bring-up firmware for the Seeed XIAO ESP32-S3 (Plus).
+ * rimba-hello — board bring-up firmware for the Seeed XIAO ESP32-S3 (Plus).
  *
  * Purpose: prove the ESP-IDF toolchain + build + flash + console pipeline on
- * the real hardware, and validate the items Phase 1 can check WITHOUT the
- * MM6108/morselib HaLow port:
+ * the real hardware, and validate the board basics that don't need the HaLow
+ * radio yet:
  *
  *   - Chip identity / cores / silicon revision
- *   - PSRAM presence and a real allocation test   (RISK-04, dev-plan task 1.8)
- *   - SRAM/heap headroom                            (Phase 1 validation criteria)
+ *   - PSRAM presence and a real allocation test
+ *   - SRAM/heap headroom
  *
- * It deliberately does NOT touch the HaLow radio: the MM6108 morselib HAL has
- * to be ported to ESP-IDF first (see docs/worklog). This is the foundation that
- * everything in the development plan's Phase 1 builds on.
+ * It deliberately does NOT touch the HaLow radio — this is the board bring-up
+ * foundation the radio examples build on.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -33,8 +32,7 @@
 
 static const char *TAG = "rimba-hello";
 
-/* Target from RISK-04: confirm the XIAO ESP32-S3 (Plus) 8 MB PSRAM is present
- * and usable, since Rimba's bundle store / routing table depend on it. */
+/* Confirm the XIAO ESP32-S3 (Plus) 8 MB PSRAM is present and usable. */
 #define PSRAM_TEST_BYTES (1 * 1024 * 1024) /* 1 MiB probe */
 
 static void log_chip_info(void)
@@ -63,7 +61,7 @@ static void log_chip_info(void)
 static bool validate_psram(void)
 {
     if (!esp_psram_is_initialized()) {
-        ESP_LOGE(TAG, "PSRAM    : NOT initialized — RISK-04 not satisfied on this board/config");
+        ESP_LOGE(TAG, "PSRAM    : NOT initialized — check the board/config");
         return false;
     }
 
@@ -98,10 +96,10 @@ static bool validate_psram(void)
 
 static void log_memory(void)
 {
-    /* Internal SRAM holds time-critical morselib/FreeRTOS structures (dev plan). */
+    /* Internal SRAM holds time-critical FreeRTOS/driver structures. */
     size_t int_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t int_min  = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    ESP_LOGI(TAG, "SRAM     : %u KB free, %u KB min-ever  (Phase-1 gate: >50 KB)",
+    ESP_LOGI(TAG, "SRAM     : %u KB free, %u KB min-ever",
              (unsigned)(int_free / 1024), (unsigned)(int_min / 1024));
 }
 
@@ -114,7 +112,7 @@ void app_main(void)
     log_chip_info();
     bool psram_ok = validate_psram();
     log_memory();
-    ESP_LOGI(TAG, "PSRAM (RISK-04 / task 1.8): %s", psram_ok ? "OK" : "CHECK CONFIG");
+    ESP_LOGI(TAG, "PSRAM: %s", psram_ok ? "OK" : "CHECK CONFIG");
     ESP_LOGI(TAG, "=======================================================");
 
     uint32_t beat = 0;
