@@ -18,11 +18,34 @@ every table below is regenerable and attributable to an exact tree state.
 > `rimba-downlink-test`, `rimba-sleep-test`, `rimba-standby-test`, and `rimba-halow-mesh-perf` were
 > removed (their coverage lives in the `tp`/`dscycle` tiers + `test-*`), and `rimba-halow-sta`
 > was reworked from the PS-ladder rig into a clean join-AP + ping STA example (its ladder lives on
-> as `test-power`). **The run tables below predate this and refresh on the next `make test`.**
+> as `test-power`).**
 
 ---
 
-## Latest run — 2026-07-16
+## Latest run — 2026-07-18 (reshaped + renamed `test-*` tree)
+
+First full bench run after the reshape + the `regtest-`→`test-` rename. **All tiers green** except
+dscycle (honest INCONCLUSIVE — flaky C6 wake, non-gating).
+
+| Tier | Result |
+|---|---|
+| **T0 build** | ✅ 28 PASS / 0 FAIL / 1 SKIP / 27 XFAIL (`proto1` known-broken; `test-c6-trigger` esp32c6-excluded) |
+| **T1 smoke** (board2) | ✅ 12 PASS / 0 FAIL / 2 SKIP (the 2 sleep apps) |
+| **T2 on-air** | ✅ 15 PASS / 0 FAIL (12 feature tests + 3 silence) |
+| **tp** power (`--ap esp`) | ✅ 4 PASS — No-PS 62.7 mA anchor · Dyn-PS 23.9 ≤ 32 · TWT 23.2 (recorded) · WNM+pd 17.1 ≤ 24 |
+| **dscycle** | ⚠ INCONCLUSIVE — 1/2 wake cycles (C6 D5-wake flaky → 60 s backup timer); non-gating |
+
+**One fix landed mid-run.** T2 first showed 3 FAILs — `ap-sta-ping` / `twt` / `multi-twt`, all with
+"AP support role never came up: `ap-ready` not seen". Root cause: a **false-FAIL** — `test-apsta-ap`'s
+`app_main` task stops emitting console output the instant the AP netif comes up, so the up-marker never
+reached the orchestrator. The SoftAP is fully alive (a real STA associated over SAE and got **15/15**
+ICMP replies through the "hung" AP). Fix: emit `ap-ready` *before* the stalling netif call → T2 15/15;
+the same fix unblocked `tp --ap esp` and dscycle's AP. The underlying `app_main` stall is a separate
+firmware follow-up (`rimba-todo.md` + worklog `2026-07-18-regression-run-and-apsta-ap-marker.md`).
+
+---
+
+## Prior run — 2026-07-16
 
 | Tree | Value |
 |---|---|
