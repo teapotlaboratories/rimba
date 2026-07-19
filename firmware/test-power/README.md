@@ -54,11 +54,9 @@ STEP → **INCONCLUSIVE**, never PASS.
 ## Run it
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/tp_power.py            # or: python tools/regtest/run.py tp
-python tools/regtest/run.py tp --ap esp     # ESP SoftAP path (board0)
-python tools/regtest/run.py tp --ap linux   # Linux hostapd_s1g path (chronite)
-python tools/regtest/run.py tp --dry-run    # rig + tiers, no hardware
+make test-tp AP=esp            # ESP SoftAP path (board0)  -- AP is REQUIRED
+make test-tp AP=linux          # Linux hostapd_s1g path (chronite)
+make test-tp AP=esp DRY_RUN=1  # rig + tiers, no hardware
 ```
 
 Needs board2 on the PPK2 rail (the runner owns the PPK2 and power-cycles it), the C6 powered +

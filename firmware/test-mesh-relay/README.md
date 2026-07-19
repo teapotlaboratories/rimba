@@ -23,8 +23,7 @@ sole mesh peer == the relay (topology proof: the forced allowlist means the orig
 ## How to run
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/run.py t2 --test mesh-relay
+make test-t2 TEST=mesh-relay
 ```
 
 The orchestrator flashes each role (support roles first, verified up via a console up-marker), then
@@ -59,5 +58,4 @@ a second value to keep in sync. To retarget the line, edit the boards' `mesh_mac
 
 `firmware/test-mesh-relay/` (symmetric 3-node; role by MAC; per-role peer allowlist forces the line; origin reports).
 
-Full catalogue + provenance: `tools/regtest/t2_tests.py` (`MESH_RELAY`), `python tools/regtest/run.py
-t2 --dry-run --test mesh-relay`. Results: `docs/regression/rimba-regression-results.md`.
+Full catalogue + provenance: `tools/regtest/t2_tests.py` (`MESH_RELAY`), `make test-t2 TEST=mesh-relay`. DRY_RUN=1 Results: `docs/regression/rimba-regression-results.md`.

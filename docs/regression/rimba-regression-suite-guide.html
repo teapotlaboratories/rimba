@@ -262,12 +262,16 @@ figure{margin:1.5em 0;text-align:center} figcaption{color:var(--muted);font-size
     </tbody>
   </table>
   <div class="callout warn">
-    <p class="ct">Two rules the harness enforces in code</p>
+    <p class="ct">Rules the harness enforces in code</p>
     <p><b>1.</b> Ports resolve by <b>efuse MAC</b>, never a cached <code>ttyACM*</code> (they
     re-enumerate on hotplug). <b>2.</b> <b>board2 is the only PS/relay/gate DUT</b> — a
     <code>require_wired</code> role refuses to run on board0/board1 (unwired WAKE/BUSY tests missing
-    solder, not code — it produced false bugs twice). Whole-bench invariant: fw <b>1.17.8</b>, chip
-    <code>0x0306</code>, S1G <b>ch27</b> (<code>iw freq 5560</code>).</p>
+    solder, not code — it produced false bugs twice). <b>3.</b> A <b>mid-capture USB re-enumeration is
+    retried, not failed</b> — board2's PPK2 rail occasionally wobbles → its serial port drops + re-enumerates
+    mid-read (<i>"readiness to read but returned no data … multiple access on port?"</i>, ~2–3 %/capture on
+    board2, ~0 on the bus-powered boards); <code>common._capture</code> re-resolves by MAC + recaptures once
+    (logged), but a persistent fault still FAILs (the retry re-raises). Whole-bench invariant: fw <b>1.17.8</b>,
+    chip <code>0x0306</code>, S1G <b>ch27</b> (<code>iw freq 5560</code>).</p>
   </div>
 
   <h2 id="orchestration">4 · How a T2 test runs</h2>
@@ -373,22 +377,29 @@ TEST|END|name=&lt;slug&gt;</code></pre>
       <tr><td><b>PASS / FAIL</b></td><td>as expected</td><td>FAIL gates</td></tr>
       <tr><td><b>SKIP</b></td><td>could not run (board absent, not implemented)</td><td>no</td></tr>
       <tr><td><b>INCONCLUSIVE</b></td><td>ran, but the measurement can't be trusted (noisy RF, flaky link) — not a code regression</td><td>no</td></tr>
-      <tr><td><b>XFAIL</b></td><td>failed for a documented reason (<code>proto1</code>'s missing BCF)</td><td>no</td></tr>
+      <tr><td><b>XFAIL</b></td><td>failed for a documented reason (a board with a recorded, non-gating breakage)</td><td>no</td></tr>
       <tr><td><b>XPASS</b></td><td>a known-broken case unexpectedly passed → the reason is stale</td><td><b>yes</b></td></tr>
     </tbody>
   </table>
 
   <h2 id="run">8 · Running it</h2>
-  <pre><code>source vendor/esp-idf/export.sh          # once per shell (anything touching a board)
-make test-bench                          # what hardware is present right now
+  <p><b>First, configure your bench</b> — nothing is stored in the source; <code>export</code> these once
+  (values in §3 / <code>rimba-bench-devices.md</code>), or append them to each <code>make</code> line:</p>
+  <pre><code>export BENCH_BOARD=proto1-fgh100m
+export BOARD0_MAC=… BOARD1_MAC=… BOARD2_MAC=… WIRED_BOARD=board2
+export LINUX_HOST=chronite LINUX_MAC=… LINUX_IP=…    # only the T2 interop tests + tp --ap linux need this</code></pre>
+  <pre><code>make test-bench                          # what hardware is present right now  (make sources the ESP-IDF env for you)
 
-make test-t0                             # build matrix (no hardware)
-make test-t1                             # smoke on board2 (radio boots)
-make test-t2                             # all 12 on-air feature tests
-make test-tp                             # PPK2 power-save ladder
-python tools/regtest/run.py dscycle      # deep-sleep reconnect gate
-python tools/regtest/run.py tp --light-sleep   # the stronger light-sleep variant
-python tools/regtest/run.py t2 --dry-run       # the T2 catalogue, no hardware
+make test-all BOARD_NAME=board2 AP=esp CYCLES=2  # EVERY tier in order + report (needs the full rig)
+
+# ...or a tier at a time:
+make test-t0                                 # build matrix (no hardware)
+make test-t1 BOARD_NAME=board2               # smoke (BOARD_NAME required: board0|board1|board2)
+make test-t2                                 # all 12 on-air feature tests
+make test-tp AP=esp                          # PPK2 power-save ladder (AP required: esp|linux)
+make test-dscycle CYCLES=2       # deep-sleep reconnect gate (CYCLES required)
+make test-tp AP=linux LIGHT_SLEEP=1   # the stronger light-sleep variant
+make test-t2 DRY_RUN=1              # the T2 catalogue, no hardware
 
 make test-report                         # (re)generate build/regtest/report.html
 make test-silence                        # return every ESP to the idle app</code></pre>

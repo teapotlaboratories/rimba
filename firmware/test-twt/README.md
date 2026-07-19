@@ -40,8 +40,7 @@ or it didn't.
 ## How to run
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/run.py t2 --test twt
+make test-t2 TEST=twt
 ```
 
 ## Expected console (STA / board1)

@@ -6,5 +6,5 @@ The **STA (requester + reporter) role** of the `twt` T2 test, not a standalone t
 **Full test docs:** [`../test-twt/README.md`](../test-twt/README.md). Run via:
 
 ```sh
-python tools/regtest/run.py t2 --test twt
+make test-t2 TEST=twt
 ```

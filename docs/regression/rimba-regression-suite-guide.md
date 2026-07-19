@@ -74,8 +74,7 @@ not `"??"`) and the board's chip target. It also **version-pins the firmware blo
 - **The FW-blob version-pin:** T0 asserts `vendor/morse-firmware/firmware/mm6108.bin` is the pinned
   **1.17.8** blob by **size (480664 B) + sha256**. A silent bump to 1.17.9 roughly **doubles** STA
   power-save current — this catches it at the cheapest possible choke point.
-- 27 apps × 2 boards. `proto1-fgh100m` (the bench board) builds green; `proto1` is a documented
-  **XFAIL** (its BCF file isn't shipped by the pinned firmware) — counted, printed, **non-gating**.
+- 27 apps on the bench board `proto1-fgh100m`, all green. (The old broken `proto1` overlay was retired.)
 
 ### T1 — smoke (flash + boot + radio up)
 
@@ -89,6 +88,14 @@ country=US   chip=0x0306   fw=1.17.8   mac=bc:2a:33:96:b2:33   (morselib 2.10.4)
 The 2 sleep apps are **skipped by default** — a sleep/deep-sleep app powers the ESP32-S3 native USB
 down and re-enumerates it constantly, so esptool can never land download mode; recovery needs a PPK2
 power-cycle. Run them with `--include-sleep-apps` on board2 only.
+
+**Serial-capture flakes are tolerated, not failed.** board2's PPK2 rail can wobble mid-capture → the
+ESP resets and its serial port re-enumerates (renumbered), which pyserial raises as *"device reports
+readiness to read but returned no data … multiple access on port?"*. Measured ~2–3 % per capture on
+board2 (~0 on bus-powered board0/board1), so `common._capture` catches it once, re-resolves the port by
+efuse MAC, and recaptures a fresh window (logged). A persistent fault still FAILs — the retry re-raises
+after one attempt, so a genuinely dead board is never masked. (Characterized + hardened 2026-07-18 —
+worklog `2026-07-18-bench-stress-and-capture-retry.md`.)
 
 ### T2 — on-air feature tests
 
@@ -279,7 +286,7 @@ how a suite gets ignored:
 | **PASS / FAIL** | as expected | FAIL gates |
 | **SKIP** | could not run (board absent, test not implemented) | no |
 | **INCONCLUSIVE** | ran, but the measurement can't be trusted (a noisy RF number, a flaky link) — *not* a code regression | no |
-| **XFAIL** | failed, and it was *already known* to fail for a documented reason (`proto1`'s missing BCF) | no |
+| **XFAIL** | failed, and it was *already known* to fail for a documented reason (a board with a recorded, non-gating breakage) | no |
 | **XPASS** | a known-broken case unexpectedly passed → the documented reason is stale | **yes** |
 
 Exit code is **0 only when nothing FAILed** (SKIP / INCONCLUSIVE / XFAIL don't fail the run).
@@ -288,17 +295,30 @@ Exit code is **0 only when nothing FAILed** (SKIP / INCONCLUSIVE / XFAIL don't f
 
 ## 8. Running it — quick reference
 
+**First, configure your bench** (nothing is stored in the source — `export` once, or append to each
+`make` line). The current bench's values are in §3 above / `docs/reference/rimba-bench-devices.md`:
+
 ```sh
-source vendor/esp-idf/export.sh          # once per shell (for anything touching a board)
+export BENCH_BOARD=proto1-fgh100m
+export BOARD0_MAC=… BOARD1_MAC=… BOARD2_MAC=… WIRED_BOARD=board2
+export LINUX_HOST=chronite LINUX_MAC=… LINUX_IP=…    # only the T2 interop tests + tp --ap linux need this
+```
+
+Then:
+
+```sh
 make test-bench                          # what hardware is present right now (run this first)
 
-make test-t0                             # build matrix (no hardware)
-make test-t1                             # smoke on board2 (radio boots)
-make test-t2                             # all 12 on-air feature tests (needs the rig)
-make test-tp                             # PPK2 power-save ladder
-python tools/regtest/run.py dscycle      # deep-sleep reconnect gate
-python tools/regtest/run.py tp --light-sleep      # the stronger light-sleep variant
-python tools/regtest/run.py t2 --dry-run          # the T2 catalogue + rigs, no hardware
+make test-all BOARD_NAME=board2 AP=esp CYCLES=2  # EVERY tier in order + report (needs the full rig)
+
+# ...or a tier at a time:
+make test-t0                                 # build matrix (no hardware)
+make test-t1 BOARD_NAME=board2               # smoke (BOARD_NAME required: board0|board1|board2)
+make test-t2                                 # all 12 on-air feature tests (needs the rig)
+make test-tp AP=esp                          # PPK2 power-save ladder (AP required: esp|linux)
+make test-dscycle CYCLES=2       # deep-sleep reconnect gate (CYCLES required)
+make test-tp AP=linux LIGHT_SLEEP=1   # the stronger light-sleep variant
+make test-t2 DRY_RUN=1              # the T2 catalogue + rigs, no hardware
 
 make test-report                         # (re)generate build/regtest/report.html
 make test-silence                        # return every ESP to the radio-free idle app

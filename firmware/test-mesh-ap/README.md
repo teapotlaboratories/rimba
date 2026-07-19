@@ -23,8 +23,7 @@ the STA behind the AP pings a far mesh node and observes **ttl=63** -- the gate'
 ## How to run
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/run.py t2 --test mesh-ap
+make test-t2 TEST=mesh-ap
 ```
 
 The orchestrator flashes each role (support roles first, verified up via a console up-marker), then
@@ -37,5 +36,4 @@ Needs board2 powered (`tools/ppk2_hold.py`) as the gate; the orchestrator refuse
 
 `firmware/test-mesh-ap-{gate,peer,sta}/` (the gate reuses the product mesh-gate logic; the peer's return route is repointed to the board2 gate 10.9.9.108; the sta reports).
 
-Full catalogue + provenance: `tools/regtest/t2_tests.py` (`MESH_AP`), `python tools/regtest/run.py
-t2 --dry-run --test mesh-ap`. Results: `docs/regression/rimba-regression-results.md`.
+Full catalogue + provenance: `tools/regtest/t2_tests.py` (`MESH_AP`), `make test-t2 TEST=mesh-ap`. DRY_RUN=1 Results: `docs/regression/rimba-regression-results.md`.

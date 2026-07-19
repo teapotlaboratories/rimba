@@ -21,8 +21,7 @@
 ## How to run
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/run.py t2 --test ampdu-cap
+make test-t2 TEST=ampdu-cap
 ```
 
 The orchestrator flashes each role (support roles first, verified up via a console up-marker), then
@@ -33,5 +32,4 @@ captures the reporter's `TEST|RESULT`, and returns every board to `rimba-hello` 
 
 `firmware/test-ampdu-cap/` (single board; brings up a mesh vif, reads `mmwlan_ampdu_capability_advertised()`).
 
-Full catalogue + provenance: `tools/regtest/t2_tests.py` (`AMPDU_CAP`), `python tools/regtest/run.py
-t2 --dry-run --test ampdu-cap`. Results: `docs/regression/rimba-regression-results.md`.
+Full catalogue + provenance: `tools/regtest/t2_tests.py` (`AMPDU_CAP`), `make test-t2 TEST=ampdu-cap`. DRY_RUN=1 Results: `docs/regression/rimba-regression-results.md`.

@@ -168,12 +168,19 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>70</b> worklogs · 2026-06-17 – 2026-07-18</p>
+<p class="stat"><b>73</b> worklogs · 2026-06-17 – 2026-07-18</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">45</span></h2>
+<h2>July 2026 <span class="mcount">46</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-18-bench-stress-and-capture-retry.html">
+<div class="card-date">2026-07-18</div>
+<div class="card-title">Stress-testing the harness + a serial-capture retry hardening</div>
+<div class="card-ex">One T1 run had failed on a lone serial-capture glitch that vanished on retry (serial capture failed: device reports readiness to read but returned no data … multiple access on port?). Instead of waving it away, stress-tested the harness itself — looped the hardware-touching tiers with NO retries to measure the real flake rate. Clean-rail: 0 flakes across the first 8 T1 runs (~96 captures). Then flakes appeared after a dscycle iteration disturbed the PPK2 rail, on DIFFERENT random apps each time (rimba-halow-sta, rimba-halow-mesh-ap, even the radio-free rimba-hello) — ~4 flakes across ~168 board2 captures = ~2–3% per capture, ~1 in 4 runs, and NOT app-specific. Root cause: board2 is PPK2-powered, and a brief rail wobble resets the ESP → its USB-serial-JTAG drops and RE-ENUMERATES mid-capture (often renumbered), which pyserial surfaces as readable-but-0-bytes; bus-powered board0/board1 showed 0 flakes. The harness treated this transient as a hard gating FAIL. Fix (tools/regtest/common.py): a shared retry-aware _capture() + _await_port() — on a mid-capture SerialException re-resolve the port by efuse MAC and recapture a fresh window; exhausting the retry re-raises so a genuinely dead board still FAILs; the retry is LOGGED not silent. efuse_mac threaded through t1_smoke.py:159 + t2_onair.py:152/236/345. Verified: unit test covers both the recovery and persistent-fail branches; 10 post-fix runs = 120 captures, 0 fail (no regression). HONEST CAVEAT: a live transient never fired in the post-fix window (even on a dscycle-disturbed rail), so the fix catching a REAL event on-bench is unobserved — only the mock holds. The first buggy edit (a 'bench' name out of scope → 10/12 fail) was caught by the bench, prompting pyflakes in the loop. Incidental: dscycle's pgrep -f ppk2_hold.py | kill -9 is broad enough to kill any process mentioning the holder. Bench left radio-silent; changes uncommitted (weekday window).</div>
+<div class="card-meta">6 min · ✓ fix landed (uncommitted) · harness · serial-capture · bench-flake</div>
+</a>
 
 <a class="card" href="2026-07-18-regression-run-and-apsta-ap-marker.html">
 <div class="card-date">2026-07-18</div>

@@ -5,4 +5,4 @@ MM6108. Derived from the product `rimba-halow-mesh-ap` app + a `TEST|` up-marker
 Runs on **board2** (require_wired). Not a standalone test — the STA reporter emits the verdict.
 
 Needs `CONFIG_HALOW_AP_MODE=y` + `CONFIG_LWIP_IP_FORWARD=y`. Full test:
-[`../test-mesh-ap/README.md`](../test-mesh-ap/README.md). Run: `python tools/regtest/run.py t2 --test mesh-ap`.
+[`../test-mesh-ap/README.md`](../test-mesh-ap/README.md). Run: `make test-t2 TEST=mesh-ap`.

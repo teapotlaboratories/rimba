@@ -29,7 +29,7 @@ dscycle (honest INCONCLUSIVE — flaky C6 wake, non-gating).
 
 | Tier | Result |
 |---|---|
-| **T0 build** | ✅ 28 PASS / 0 FAIL / 1 SKIP / 27 XFAIL (`proto1` known-broken; `test-c6-trigger` esp32c6-excluded) |
+| **T0 build** | ✅ 28 PASS / 0 FAIL / 1 SKIP (`test-c6-trigger` esp32c6-excluded). *(This run predated retiring `proto1`; that board's 27 XFAIL are gone — the matrix is now the one bench board.)* |
 | **T1 smoke** (board2) | ✅ 12 PASS / 0 FAIL / 2 SKIP (the 2 sleep apps) |
 | **T2 on-air** | ✅ 15 PASS / 0 FAIL (12 feature tests + 3 silence) |
 | **tp** power (`--ap esp`) | ✅ 4 PASS — No-PS 62.7 mA anchor · Dyn-PS 23.9 ≤ 32 · TWT 23.2 (recorded) · WNM+pd 17.1 ≤ 24 |
@@ -42,6 +42,28 @@ reached the orchestrator. The SoftAP is fully alive (a real STA associated over 
 ICMP replies through the "hung" AP). Fix: emit `ap-ready` *before* the stalling netif call → T2 15/15;
 the same fix unblocked `tp --ap esp` and dscycle's AP. The underlying `app_main` stall is a separate
 firmware follow-up (`rimba-todo.md` + worklog `2026-07-18-regression-run-and-apsta-ap-marker.md`).
+
+### Harness robustness — the board2 serial-capture flake, characterized + hardened (2026-07-18)
+
+Stress-testing the harness (looping the hardware tiers with **no retries** to measure the real flake
+rate) characterized the one T1 transient seen above. It is a **standing, low-rate bench issue, not a
+code fault**:
+
+- **Rate ~2–3 % per capture (~1 in 4 board2 T1 runs).** ~4 serial-capture flakes across ~168 board2
+  captures, on **4 distinct apps** (`rimba-halow-sta`, `rimba-halow-mesh-ap`, and the radio-free
+  `rimba-hello`) — so it is the **capture**, not any app. **0 flakes** on bus-powered board0/board1.
+- **Root cause:** board2 is PPK2-powered; a brief rail wobble resets the ESP → its USB-serial-JTAG
+  **re-enumerates** (often renumbered) mid-read, which pyserial raises as `device reports readiness to
+  read but returned no data … multiple access on port?`. Clustered right after `dscycle` power-cycles the
+  rail (`dscycle.py:20` warns power-cycling *"destabilised the rail"*); base rate low but nonzero.
+- **Fix (uncommitted, code → branch+PR):** `tools/regtest/common.py` — a retry-aware `_capture()` +
+  `_await_port()` re-resolves the port by efuse MAC and recaptures a fresh window on a mid-capture
+  disconnect; **exhausting the retry re-raises so a genuinely dead board still FAILs**; the retry is
+  logged, not silent. `efuse_mac` threaded through `t1_smoke.py:159` + `t2_onair.py:152,236,345`.
+- **Verified:** unit test covers the recovery + persistent-fail branches; 10 post-fix runs = **120
+  captures, 0 fail** (no regression). **Unverified (honest):** no *live* transient fired in the post-fix
+  window, so the fix catching a real on-bench event is **unobserved** — only the mock holds; forcing one
+  needs invasive rail-glitching. Full detail: worklog `2026-07-18-bench-stress-and-capture-retry.md`.
 
 ---
 
@@ -66,22 +88,21 @@ firmware follow-up (`rimba-todo.md` + worklog `2026-07-18-regression-run-and-aps
 milestone claim** — all 9 on-air feature tests are automated and passing on the bench (board0 +
 board1 + board2 via the PPK2 hold), **including ESP↔Linux mesh interop** (the ESP peers with and
 pings a real Linux mac80211/morse_driver node, chronite, brought up + torn down over ssh). The one
-red-adjacent signal — `BOARD=proto1` — is a
-**pre-existing, documented break** (missing BCF), quarantined as XFAIL so it stays visible without
-gating. Nothing the suite tests has regressed.
+red-adjacent signal at the time — `BOARD=proto1` (a pre-existing missing-BCF break, quarantined as
+XFAIL) — has since been resolved by **retiring `boards/proto1`**. Nothing the suite tests has regressed.
 
 ---
 
 ## T0 — build matrix
 
-`make test-t0` · 28 apps × 2 boards · no hardware · ~25–35 min wall (a morselib change forces a
-full relink) · [proves: compiles + real country code; does **not** prove: any runtime behaviour].
+`make test-t0` · 28 apps on the bench board `proto1-fgh100m` · no hardware · ~25–35 min wall (a
+morselib change forces a full relink) · [proves: compiles + real country code; does **not** prove:
+any runtime behaviour].
 
 | Board | Result | Detail |
 |---|---|---|
 | **proto1-fgh100m** (the bench board) | **28 / 28 PASS** | every app compiles; each generated `sdkconfig` carries `CONFIG_HALOW_COUNTRY_CODE="US"` and `CONFIG_IDF_TARGET="esp32s3"` |
-| **proto1** | **28 / 28 XFAIL** | known-broken, documented reason (below); non-gating |
-| c6-harness | 1 SKIP | esp32c6 / standalone project; excluded from the S3 matrix by design |
+| **test-c6-trigger** | 1 SKIP | esp32c6 / standalone project; excluded from the S3 matrix by design |
 
 The 28 are the 16 product `rimba-*` apps plus 12 `test-*` T2 harness apps (`swccmp`,
 `apsta-ap`, `apsta-sta`, `mesh-peering`, `twt-sta`, `ampdu-cap`, `ibss`, `mesh-relay`,
@@ -98,29 +119,17 @@ but the baseline JSON reflects the last completed partial run, not one clean 28-
 `ibss_peer_count`, + the `esp_mesh_ccm_selftest` export) are purely additive, so they cannot break
 an app that does not call them — the 6 newest apps built directly against the current morselib.
 
-### ⚠ Pre-existing break — `BOARD=proto1` (found by T0's first run)
+### Pre-existing break — `BOARD=proto1` — RESOLVED (retired 2026-07-18)
 
-`boards/proto1/sdkconfig.defaults:33` requires `CONFIG_MM_BCF_FILE="bcf_mf16858.mbin"`, but the
-pinned `vendor/morse-firmware` (`fd41e1c`, 1.17.8) **ships no `mf16858` BCF at all**, so every
-`proto1` build fails at CMake configure:
+T0's first run surfaced a pre-existing break: `boards/proto1/sdkconfig.defaults` required a
+`bcf_mf16858.mbin` the pinned `vendor/morse-firmware` (1.17.8) doesn't ship, so every `proto1` build
+failed at CMake configure (`BCF ELF 'bcf_mf16858.bin' not found`). The BCF was silently dropped when
+the 2026-06-24 vendor-sourcing change moved firmware to the submodule; the whole bench is
+`proto1-fgh100m`, so nobody had noticed. It was quarantined as XFAIL (non-gating).
 
-```
-CMake Error at .../mm-fw-gen/firmware/CMakeLists.txt:66 (message):
-  BCF ELF 'bcf_mf16858.bin' not found under .../vendor/morse-firmware/bcf/
-```
-
-The BCF worked before `docs/worklog/2026-06-24-firmware-vendor-sourcing.md` moved firmware to
-the submodule, which silently dropped it. The whole bench is `proto1-fgh100m`, so nobody had
-noticed. It is **not** a regression from this session — T0 simply surfaced it.
-
-- **Why XFAIL, not FAIL:** a `bcf_mf16858` build failure is the *documented* cause, so it is
-  reported XFAIL (counted, printed, non-gating) with a **signature check** — if `proto1` ever
-  fails for a *different* reason (e.g. a stack bump removes a symbol), that is a real FAIL, not
-  hidden under XFAIL. If `proto1` ever *builds*, it reports XPASS and gates, forcing the stale
-  entry to be removed.
-- **Owner decision (open):** restore an `mf16858` BCF to `vendor/morse-firmware`, or retire
-  `boards/proto1`. Do **not** repoint it at the fgh100m BCF — a BCF is per-module RF
-  calibration (`docs/rimba-development-plan.md:53`).
+**Owner decision taken: `boards/proto1` was retired** (deleted). The bench is `proto1-fgh100m`, so no
+board needs the `mf16858` BCF. T0 now builds the one bench board; there is no XFAIL board today (the
+XFAIL / XPASS machinery remains for the next documented-broken board).
 
 ---
 
@@ -165,9 +174,9 @@ board0/board1 do not have. Run them with `--include-sleep-apps` on **board2** on
 
 The BCF board description on the bench modules reads `mf16858`, even though the build uses the
 `bcf_fgh100mhaamd` BCF. So the silicon identifies as mf16858 but runs clean on the fgh100m BCF.
-This does **not** rescue `boards/proto1`: that board asks for a `bcf_mf16858.mbin` *file* that
-the pinned firmware doesn't ship — a build-time file-resolution failure, independent of which
-BCF the radio prefers at runtime.
+This would **not** have rescued `boards/proto1` (since retired): that board asked for a
+`bcf_mf16858.mbin` *file* the pinned firmware doesn't ship — a build-time file-resolution failure,
+independent of which BCF the radio prefers at runtime.
 
 ---
 
@@ -248,7 +257,7 @@ silence inside the per-test loop instead of the end — at the cost of extra fla
 
 | Covered | Not covered (and why) |
 |---|---|
-| Every app compiles on the bench board (T0) | `proto1` at runtime — it can't build (missing BCF) |
+| Every app compiles on the bench board (T0) | any runtime behaviour — a T0-green tree can still have a dead radio |
 | Every radio app boots the MM6108 (T1) | power-save doze depth (needs the PPK2 current ladder, not a pass/fail) |
 | SW-CCMP crypto + FW A-MPDU capability (T2) | AID ≥ 64 (needs 64+ associated STAs — structurally impossible on 3 boards) |
 | AP↔STA ping + IBSS peer records (T2) | HW-crypto mesh forwarding (a firmware limitation, not a regression target) |
@@ -260,7 +269,7 @@ silence inside the per-test loop instead of the end — at the cost of extra fla
 
 ## TP — power-save tier (PPK2), added 2026-07-16
 
-`make test-tp` / `python tools/regtest/run.py tp --ap esp|linux` · **a new tier, not a T2 test** — a
+`make test-tp` / `make test-tp AP=esp|linux` · **a new tier, not a T2 test** — a
 power verdict comes from a host-side PPK2 current stream the firmware cannot see, so it can never be a
 firmware `TEST|RESULT` (T2's model). [proves: the STA PS tiers didn't silently ~2× (a fw/stack bump
 regressing power-save); does **not** prove: absolute doze depth — that is a benchmark, deliberately not
@@ -303,11 +312,11 @@ re-ran the full T2 into one baseline = **15 PASS / 0 FAIL** (all **12** feature 
 | test | tier | how to run | result |
 |---|---|---|---|
 | **FW-blob version-pin** | T0 | `make test-t0` | ✅ PASS (asserts mm6108.bin = 480664 B / sha `ce2702b7…` = 1.17.8 before any flash; FAIL on drift) |
-| **`twt-assoc`** | T2 | `run.py t2 --test twt-assoc` | ✅ PASS — assoc-embedded TWT → INSTALLED on a **Linux hostapd AP** (the universal path both APs honour) |
-| **`multi-twt`** | T2 | `run.py t2 --test multi-twt` | ✅ PASS — 2 STAs both INSTALLED (a new multi-reporter harness) |
-| **`mesh-ap-multi-twt`** | T2 | `run.py t2 --test mesh-ap-multi-twt` | ✅ PASS — the **mesh-gate serving 2 concurrent TWT STAs** (mesh+AP concurrency + per-STA TWT responder table), a combination no other test covered |
-| **`deepsleep-reconnect`** | `dscycle` | `run.py dscycle` | ◐ INCONCLUSIVE on-rig — implemented + logic-verified, but the C6 D5-wake is marginal so the leaf reconnects too slowly (the gate correctly reports INCONCLUSIVE, never a false PASS) |
-| **`tp --light-sleep`** | `tp` | `run.py tp --light-sleep` | ✅ PASS — a HOST_LIGHT_SLEEP build-arg variant + `POWER_BANDS_LS` (calibrated ~25.8 mA); the reference's "~7× stronger gate" doesn't reproduce here (same open question as the tp ~2×) |
+| **`twt-assoc`** | T2 | `make test-t2 TEST=twt-assoc` | ✅ PASS — assoc-embedded TWT → INSTALLED on a **Linux hostapd AP** (the universal path both APs honour) |
+| **`multi-twt`** | T2 | `make test-t2 TEST=multi-twt` | ✅ PASS — 2 STAs both INSTALLED (a new multi-reporter harness) |
+| **`mesh-ap-multi-twt`** | T2 | `make test-t2 TEST=mesh-ap-multi-twt` | ✅ PASS — the **mesh-gate serving 2 concurrent TWT STAs** (mesh+AP concurrency + per-STA TWT responder table), a combination no other test covered |
+| **`deepsleep-reconnect`** | `dscycle` | `make test-dscycle CYCLES=2` | ◐ INCONCLUSIVE on-rig — implemented + logic-verified, but the C6 D5-wake is marginal so the leaf reconnects too slowly (the gate correctly reports INCONCLUSIVE, never a false PASS) |
+| **`tp --light-sleep`** | `tp` | `make test-tp AP=linux LIGHT_SLEEP=1` | ✅ PASS — a HOST_LIGHT_SLEEP build-arg variant + `POWER_BANDS_LS` (calibrated ~25.8 mA); the reference's "~7× stronger gate" doesn't reproduce here (same open question as the tp ~2×) |
 
 **Harness bug fixed while building `mesh-ap-multi-twt`:** `cmd_t2`/`cmd_tp` used to call `rep.write()` even
 on `--dry-run`, so a dry run clobbered the real baseline with its empty results (and poisoned a later
@@ -323,14 +332,13 @@ on `--dry-run`, so a dry run clobbered the real baseline with its empty results 
 ## How to reproduce
 
 ```sh
-source vendor/esp-idf/export.sh          # for the pyserial-using tiers
 make test-bench                          # what hardware is present now
 make test-t0                             # build matrix (no hardware)
 make test-t1 BOARD_NAME=board0           # smoke (board2 if its PPK2 rail is up)
 make test-t2                             # on-air: all 9 feature tests (needs board2 via ppk2_hold + ssh to chronite)
 make test-tp AP=esp                      # power-save tier: measure board2's PS ladder off the PPK2 (needs the C6 + an AP)
-python tools/regtest/run.py t2 --test mesh-linux    # just one test (the ESP<->Linux interop)
-python tools/regtest/run.py t2 --dry-run            # the catalogue, no hardware
+make test-t2 TEST=mesh-linux    # just one test (the ESP<->Linux interop)
+make test-t2 DRY_RUN=1            # the catalogue, no hardware
 make test-silence                        # return every ESP to test-idle
 ```
 
@@ -342,15 +350,15 @@ make test-silence                        # return every ESP to test-idle
   collapsible evidence). `make test-report` regenerates it from the baselines without re-running.
 
 **Building a full-suite baseline across short runs.** This environment reaps long-running processes,
-so a single `make test-t2` (~13 min) can be killed mid-run. Use `--append` to accumulate onto the
+so a single `make test-t2` (~13 min) can be killed mid-run. Use `APPEND=1` to accumulate onto the
 existing baseline in short, kill-safe invocations (each re-run of a test supersedes its old result):
 
 ```sh
-python tools/regtest/run.py t2 --test swccmp --test ampdu-cap --test ap-sta-ping   # fresh
-python tools/regtest/run.py t2 --append --test ibss --test twt
-python tools/regtest/run.py t2 --append --test mesh-peering --test mesh-linux
-python tools/regtest/run.py t2 --append --test mesh-relay
-python tools/regtest/run.py t2 --append --test mesh-ap
+make test-t2 TEST="swccmp ampdu-cap ap-sta-ping"          # fresh
+make test-t2 APPEND=1 TEST="ibss twt"
+make test-t2 APPEND=1 TEST="mesh-peering mesh-linux"
+make test-t2 APPEND=1 TEST="mesh-relay"
+make test-t2 APPEND=1 TEST="mesh-ap"
 ```
 
 To record a new run in *this* doc, re-run the tiers and refresh the tables above with the new counts
