@@ -15,6 +15,11 @@ Most important rules:
   [AGENTS.md → Attribution](AGENTS.md#attribution--no-ai-self-reference-anywhere).
 - **Code/feature changes → branch + PR; doc-only changes → may push to `main`.**
   See [AGENTS.md → Branching & pull requests](AGENTS.md#branching--pull-requests).
+- **Review before merge** — run `/review` (`/code-review`) over the branch diff
+  before landing any PR, and fix (or file as a tracked TODO) every real finding;
+  never merge with open correctness findings. `/code-review ultra` is the
+  owner-triggered billed cloud review. See
+  [AGENTS.md → Review before merge](AGENTS.md#review-before-merge).
 - **Merge PRs with rebase + merge by default** (`gh pr merge --rebase`); keep
   `main` linear. Mind the submodule-SHA caveat. See
   [AGENTS.md → Merging pull requests](AGENTS.md#merging-pull-requests).

@@ -58,6 +58,19 @@ changed:
 
 When unsure whether a change counts as "doc-only," treat it as code and branch.
 
+### Review before merge
+
+**Run a code review of the branch before merging, and resolve what it finds.**
+Once the owner asks to land a PR (or before you merge one yourself), first run
+`/review` (`/code-review`) over the branch diff, then triage every finding:
+fix the real ones (or, for a finding the owner decides to defer, record it as a
+tracked TODO — see [Plan first](#plan-first--every-feature-starts-as-a-documented-todo))
+before the merge. Do **not** merge with unaddressed correctness findings still
+open. State the review outcome (what it found, what was fixed vs deferred) when
+you report the merge. For a large or risky branch, `/code-review ultra` (the
+multi-agent cloud review) is the owner-triggered, billed option — you cannot
+launch it yourself; surface it as a suggestion when it's warranted.
+
 ### Merging pull requests
 
 **Default merge strategy: rebase + merge** (`gh pr merge --rebase`). Replay the
