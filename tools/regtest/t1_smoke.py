@@ -84,6 +84,7 @@ def run(board_name: str = "board2", apps: Optional[list[str]] = None,
         include_sleep_apps: bool = False, boot_seconds: float = 12.0,
         quiet: bool = False, keep_radio_on: bool = False) -> Reporter:
     rep = Reporter("T1", quiet=quiet)
+    M.require_bench()
 
     bench = M.BENCH.get(board_name)
     if bench is None:
@@ -129,7 +130,7 @@ def run(board_name: str = "board2", apps: Optional[list[str]] = None,
     for app in candidates:
         if M.BENCH_BOARD not in app.boards:
             continue
-        _smoke_one(rep, app, M.BENCH_BOARD, port, boot_seconds)
+        _smoke_one(rep, app, M.BENCH_BOARD, port, boot_seconds, bench.efuse_mac)
         flashed_any = True
 
     # The standing rule: nothing left on the air when a test ends.
@@ -142,7 +143,7 @@ def run(board_name: str = "board2", apps: Optional[list[str]] = None,
 
 
 def _smoke_one(rep: Reporter, app: M.App, board: str, port: str,
-               boot_seconds: float) -> None:
+               boot_seconds: float, efuse_mac: str) -> None:
     name = f"{app.name} @ {board}"
     t0 = time.time()
 
@@ -155,7 +156,7 @@ def _smoke_one(rep: Reporter, app: M.App, board: str, port: str,
         return
 
     try:
-        log = capture_serial(port, boot_seconds)
+        log = capture_serial(port, boot_seconds, efuse_mac=efuse_mac)
     except Exception as e:
         rep.add(Result("T1", name, FAIL, duration_s=time.time() - t0,
                        detail=f"serial capture failed: {e}"))

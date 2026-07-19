@@ -180,6 +180,7 @@ def _recover_board2(efuse_mac: str) -> bool:
 
 def run(cycles: int = 2, append: bool = True) -> Reporter:
     rep = Reporter("T2")
+    M.require_bench()
     if append:
         prior = common.RESULTS_DIR / "T2-latest.json"
         if prior.exists():

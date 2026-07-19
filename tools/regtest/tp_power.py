@@ -385,6 +385,10 @@ def run(ap: str = "esp", dry_run: bool = False, append: bool = False,
     if dry_run:
         return _dry_run(rep, ap, light_sleep)
 
+    M.require_bench()
+    if ap == "linux":
+        M.require_linux()
+
     # --- preconditions ------------------------------------------------------
     ppk2_port = _find_ppk2_port()
     if not ppk2_port:

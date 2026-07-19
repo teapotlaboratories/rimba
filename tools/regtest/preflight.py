@@ -179,6 +179,8 @@ def _targets(args) -> list[Check]:
         checks.append(check_esp(f"port:{args.port}", args.port, chip))
     if args.mac:
         checks.append(check_esp(f"mac:{args.mac}", common.resolve_port(args.mac), chip))
+    if args.node:
+        M.require_bench()
     for node in (args.node or []):
         b = M.BENCH.get(node)
         if not b:
@@ -189,9 +191,10 @@ def _targets(args) -> list[Check]:
     for host in (args.host or []):
         checks.append(check_ssh(host))
 
-    # No target given: probe everything the manifest knows about that's currently present.
+    # No target given: probe every bench node make configured.
     if not (args.port or args.mac or args.node or args.host):
-        print("No target given — probing every bench node the manifest knows.\n")
+        M.require_bench()
+        print("No target given — probing every configured bench node.\n")
         for name, b in M.BENCH.items():
             port = common.resolve_port(b.efuse_mac)
             if port:

@@ -28,6 +28,7 @@ its provenance so a reviewer can check the number rather than trust it.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -35,53 +36,61 @@ from typing import Optional
 # Boards
 # --------------------------------------------------------------------------
 
-#: Board overlays under boards/<name>/. Both are esp32s3.
-BOARDS = ("proto1", "proto1-fgh100m")
+#: Board overlays under boards/<name>/. esp32s3.
+BOARDS = ("proto1-fgh100m",)
 
 #: Boards that are KNOWN BROKEN, with the reason. Builds for these are reported XFAIL
 #: (counted + printed, but they do not gate the run) and XPASS if they unexpectedly
-#: succeed — so the breakage stays visible without making `make test-t0` permanently
-#: red, and the entry gets removed loudly the moment someone fixes it.
-#:
-#: Do NOT "fix" proto1 by pointing it at another BCF: a BCF is per-module RF
-#: calibration, and docs/rimba-development-plan.md:53 explicitly warns against flashing
-#: the fgh100m BCF onto mf16858 hardware (same XIAO wiring, different calibration).
+#: succeed — so a documented breakage stays visible without making `make test-t0`
+#: permanently red, and the entry gets removed loudly the moment someone fixes it.
 #:
 #: Each entry is (reason, signature): the signature is a substring the recorded failure's
-#: output must contain. If a known-broken board later fails for a DIFFERENT reason (e.g. a
-#: stack bump removes a morselib symbol), the signature won't match and T0 reports a real
-#: FAIL instead of hiding it under XFAIL. This keeps the exclusion pinned to the ONE
-#: documented cause, not "proto1 is allowed to fail however".
-KNOWN_BROKEN_BOARDS: dict[str, tuple[str, str]] = {
-    "proto1": (
-        'boards/proto1/sdkconfig.defaults:33 requires CONFIG_MM_BCF_FILE="bcf_mf16858.mbin", '
-        "but the pinned vendor/morse-firmware (fd41e1c, 1.17.8) ships no mf16858 BCF at all "
-        "-- so every proto1 build fails at CMake configure: \"BCF ELF 'bcf_mf16858.bin' not "
-        "found\". The BCF worked before docs/worklog/2026-06-24-firmware-vendor-sourcing.md "
-        "moved firmware to the submodule (the original board's own BCF self-reported "
-        '{"module": "mm6108-mf16858"} -- 2026-06-17-mm6108-halow-bringup.md:61-64), which '
-        "silently dropped it. The whole bench is proto1-fgh100m, so nobody noticed. "
-        "OWNER DECISION: restore an mf16858 BCF, or retire boards/proto1.",
-        "bcf_mf16858",  # signature: the failure must be the missing-BCF one, not a new break
-    ),
-}
+#: output must contain, so a known-broken board that later fails for a DIFFERENT reason
+#: still reports a real FAIL instead of hiding under XFAIL.
+#:
+#: None today — the previously-broken `proto1` overlay (missing bcf_mf16858 BCF) was retired.
+KNOWN_BROKEN_BOARDS: dict[str, tuple[str, str]] = {}
 
 
 def known_broken(board: str) -> Optional[tuple[str, str]]:
     """(reason, signature) for a known-broken board, or None."""
     return KNOWN_BROKEN_BOARDS.get(board)
 
-#: The bench boards are all proto1-fgh100m (docs/reference/rimba-bench-devices.md:140).
-BENCH_BOARD = "proto1-fgh100m"
+# --------------------------------------------------------------------------
+# Bench identity — supplied by `make`, NEVER stored here.
+# --------------------------------------------------------------------------
+# Every physical fact about the bench is passed in from the Makefile (as env vars)
+# and read here; nothing is hardcoded, so a different bench needs no source edit.
+# Provide them per run, or `export` them once in your shell:
+#
+#   BENCH_BOARD   sdkconfig overlay for the ESP boards (e.g. proto1-fgh100m)
+#   BOARD0_MAC    board0 efuse MAC   (the light-load / spare slot)
+#   BOARD1_MAC    board1 efuse MAC   (the light-load / spare slot)
+#   BOARD2_MAC    board2 efuse MAC   (the fully-wired DUT/relay/gate slot)
+#   WIRED_BOARD   which logical board is fully wired (WAKE+BUSY) -- normally board2
+#   LINUX_HOST    the Linux interop node's ssh host (e.g. chronite)
+#   LINUX_MAC     that node's wlan1 MAC
+#   LINUX_IP      that node's mesh IP (10.9.9.x)
+#
+# mesh_mac / mesh_ip / fully_wired / usb_bus_powered are DERIVED from these. Tiers that
+# need the bench call require_bench() / require_linux(), which error clearly if a var is
+# missing -- so the no-hardware tiers (t0, report) run with nothing set.
+
+
+def _env(name: str) -> str:
+    return (os.environ.get(name) or "").strip()
+
+
+#: sdkconfig overlay for the ESP boards (make-supplied; empty until BENCH_BOARD is passed).
+BENCH_BOARD = _env("BENCH_BOARD")
 
 
 @dataclass(frozen=True)
 class BenchBoard:
     """A physical ESP32 node on the bench.
 
-    `efuse_mac` is the ONLY stable identifier — the /dev/ttyACM* numbers
-    re-enumerate on every hotplug (docs/reference/rimba-bench-devices.md:175).
-    Ports are resolved from /dev/serial/by-id/ via this MAC; see common.resolve_port.
+    `efuse_mac` is the ONLY stable identifier — the /dev/ttyACM* numbers re-enumerate on
+    every hotplug. Ports are resolved from /dev/serial/by-id/ via this MAC (common.resolve_port).
     """
 
     name: str
@@ -89,64 +98,23 @@ class BenchBoard:
     #: Locally-administered MAC the apps derive (efuse mac[0] |= 0x02).
     mesh_mac: str
     mesh_ip: str
-    #: False for board0/board1: WAKE (GPIO2) + BUSY (GPIO5) are NOT wired to the
-    #: MM6108 (docs/reference/rimba-bench-devices.md:148-156). Those two pins are the
-    #: chip's power-save / flow-control handshake, so any test that exercises PS,
-    #: flow control, or sustained load MUST use board2 or its result is meaningless.
-    #: Ignoring this has produced false bugs twice.
+    #: True only for WIRED_BOARD: WAKE (GPIO2) + BUSY (GPIO5) wired to the MM6108. Those pins
+    #: are the chip's PS / flow-control handshake, so any load / relay / power-save DUT role
+    #: MUST use the wired board or the result is meaningless (has produced false bugs twice).
     fully_wired: bool
-    #: board2's power comes from the PPK2 DUT rail, so it only enumerates while
-    #: tools/ppk2_hold.py is running. board0/board1 are bus-powered via hub 7-1.
+    #: The wired board's power comes from the PPK2 DUT rail, so it only enumerates while
+    #: tools/ppk2_hold.py runs; the others are USB-bus-powered.
     usb_bus_powered: bool
     notes: str = ""
 
-
-BENCH: dict[str, BenchBoard] = {
-    "board0": BenchBoard(
-        name="board0",
-        efuse_mac="E0:72:A1:F8:EF:A4",
-        mesh_mac="e2:72:a1:f8:ef:a4",
-        mesh_ip="10.9.9.136",
-        fully_wired=False,
-        usb_bus_powered=True,
-        notes="WAKE+BUSY unwired. Light-load endpoint / spare ONLY. Never a relay or PS DUT.",
-    ),
-    "board1": BenchBoard(
-        name="board1",
-        efuse_mac="E0:72:A1:F8:F9:40",
-        mesh_mac="e2:72:a1:f8:f9:40",
-        mesh_ip="10.9.9.100",
-        fully_wired=False,
-        usb_bus_powered=True,
-        notes="WAKE+BUSY unwired. Light-load endpoint / spare ONLY. Never a relay or PS DUT.",
-    ),
-    "board2": BenchBoard(
-        name="board2",
-        efuse_mac="E0:72:A1:F8:F0:08",
-        mesh_mac="e2:72:a1:f8:f0:08",
-        mesh_ip="10.9.9.108",
-        fully_wired=True,
-        usb_bus_powered=False,
-        notes="The ONLY fully-wired ESP. Required for any load / relay / power-save DUT role. "
-        "Powered by the PPK2 rail — enumerates only while tools/ppk2_hold.py runs.",
-    ),
-}
 
 @dataclass(frozen=True)
 class LinuxNode:
     """A Linux HaLow node usable as an interop peer (a T2 `linux:<host>` support role).
 
     `host` is the ONLY way the harness reaches it — resolved by `~/.ssh/config` (key auth,
-    passwordless sudo), never a raw IP (.ai/AGENTS.md). `mesh_ip` is the data-plane address the
-    harness assigns on wlan1 (10.9.9.N); `mesh_mac` is the node's wlan1 MAC as the ESP sees it as
-    a mesh peer.
-
-    THIS IS THE SINGLE SOURCE OF TRUTH for the Python side. To point an interop test at a different
-    node: change the test's `device="linux:<host>"` (t2_tests.py) to a host in this registry. The ESP
-    interop firmware (firmware/test-mesh-linux) ALSO hardcodes the peer's `mesh_mac`/`mesh_ip` at
-    compile time (it needs them to check the specific peer + ping it), so a different node also needs
-    that firmware's constant block updated + a rebuild -- linux_peer.mesh_mac_matches() cross-checks
-    the live node MAC against this registry at run time and warns on a mismatch.
+    passwordless sudo), never a raw IP. `mesh_ip` is the data-plane address on wlan1 (10.9.9.N);
+    `mesh_mac` is the node's wlan1 MAC as the ESP sees it. Supplied via make (LINUX_HOST/MAC/IP).
     """
 
     host: str
@@ -155,21 +123,96 @@ class LinuxNode:
     role: str = ""
 
 
-#: Linux HaLow nodes. Reach by hostname ONLY. The bench's canonical interop peer is `chronite`.
-#: (chronium is the sniffer, not a mesh peer; the Pi Zeros are power-marginal.)
-LINUX_NODES: dict[str, LinuxNode] = {
-    "chronium":   LinuxNode("chronium",   "10.9.9.1", "3c:22:7f:37:50:42",
-                            "sniffer / on-air monitor (not a mesh peer)"),
-    "chronite":   LinuxNode("chronite",   "10.9.9.2", "3c:22:7f:37:51:38",
-                            "testing + code-comparison node — the canonical interop peer"),
-    "chronosalt": LinuxNode("chronosalt", "10.9.9.3", "68:24:99:44:6a:56",
-                            "Pi Zero mesh peer — POWER-MARGINAL, reboots on radio-up"),
-    "chronogen":  LinuxNode("chronogen",  "10.9.9.4", "68:24:99:44:6b:80",
-                            "Pi Zero mesh peer"),
-}
+def _mesh_mac(efuse: str) -> str:
+    """The locally-administered MAC the apps derive: efuse mac[0] |= 0x02, lowercased."""
+    p = efuse.strip().lower().split(":")
+    if len(p) != 6:
+        return ""
+    try:
+        p[0] = f"{int(p[0], 16) | 0x02:02x}"
+    except ValueError:
+        return ""
+    return ":".join(p)
 
-#: The default Linux interop peer when a test just says it wants "a Linux node".
-DEFAULT_LINUX_PEER = "chronite"
+
+def _mesh_ip(efuse: str) -> str:
+    """The static mesh IP the apps derive: 10.9.9.<100 + (efuse mac[5] & 0x3f)>."""
+    p = efuse.strip().split(":")
+    if len(p) != 6:
+        return ""
+    try:
+        return f"10.9.9.{100 + (int(p[5], 16) & 0x3f)}"
+    except ValueError:
+        return ""
+
+
+_BOARD_MAC_ENV = {"board0": "BOARD0_MAC", "board1": "BOARD1_MAC", "board2": "BOARD2_MAC"}
+
+
+def _build_bench() -> dict[str, BenchBoard]:
+    """Build BENCH from the env vars make passes; {} unless BENCH_BOARD + all 3 MACs + WIRED_BOARD are set."""
+    macs = {name: _env(var) for name, var in _BOARD_MAC_ENV.items()}
+    wired = _env("WIRED_BOARD")
+    if not _env("BENCH_BOARD") or not all(macs.values()) or not wired:
+        return {}
+    out: dict[str, BenchBoard] = {}
+    for name, mac in macs.items():
+        fw = (name == wired)
+        out[name] = BenchBoard(
+            name=name, efuse_mac=mac, mesh_mac=_mesh_mac(mac), mesh_ip=_mesh_ip(mac),
+            fully_wired=fw, usb_bus_powered=not fw,
+            notes=("The fully-wired ESP (WAKE+BUSY): the only load / relay / power-save DUT; "
+                   "PPK2-powered, enumerates only while tools/ppk2_hold.py runs." if fw else
+                   "WAKE+BUSY unwired. Light-load endpoint / spare ONLY. Never a relay or PS DUT."),
+        )
+    return out
+
+
+def _build_linux() -> dict[str, LinuxNode]:
+    """Build the Linux interop-peer registry from the env vars make passes; {} unless HOST + IP are set."""
+    host, mac, ip = _env("LINUX_HOST"), _env("LINUX_MAC"), _env("LINUX_IP")
+    if not host or not ip:
+        return {}
+    return {host: LinuxNode(host, ip, mac, "interop peer (passed via make)")}
+
+
+#: Built from the make-supplied environment; empty when the bench vars aren't set. Tiers that need
+#: the bench call require_bench() / require_linux() for a clear error rather than a bare KeyError.
+BENCH: dict[str, BenchBoard] = _build_bench()
+LINUX_NODES: dict[str, LinuxNode] = _build_linux()
+
+#: The default Linux interop peer = whatever LINUX_HOST make passed.
+DEFAULT_LINUX_PEER = _env("LINUX_HOST")
+
+
+class BenchNotConfigured(SystemExit):
+    """A clean exit (not a traceback) when a tier needs bench identity that make didn't pass."""
+
+
+def require_bench() -> dict[str, BenchBoard]:
+    """Return BENCH, or exit with a clear message naming the missing make vars."""
+    if not BENCH:
+        missing = [v for v in ("BENCH_BOARD", "BOARD0_MAC", "BOARD1_MAC", "BOARD2_MAC", "WIRED_BOARD")
+                   if not _env(v)]
+        raise BenchNotConfigured(
+            "bench identity not provided. This tier needs the ESP boards -- pass them to make (or "
+            "`export` them once), e.g.:\n"
+            "  make <target> BENCH_BOARD=proto1-fgh100m BOARD0_MAC=<mac> BOARD1_MAC=<mac> "
+            "BOARD2_MAC=<mac> WIRED_BOARD=board2\n"
+            f"  missing: {', '.join(missing) or '(check the values)'}")
+    return BENCH
+
+
+def require_linux() -> dict[str, LinuxNode]:
+    """Return LINUX_NODES, or exit with a clear message naming the missing make vars."""
+    if not LINUX_NODES:
+        missing = [v for v in ("LINUX_HOST", "LINUX_MAC", "LINUX_IP") if not _env(v)]
+        raise BenchNotConfigured(
+            "Linux interop node not provided. This tier needs a Linux peer -- pass it to make (or "
+            "`export` it), e.g.:\n"
+            "  make <target> LINUX_HOST=chronite LINUX_MAC=3c:22:7f:37:51:38 LINUX_IP=10.9.9.2\n"
+            f"  missing: {', '.join(missing) or '(check the values)'}")
+    return LINUX_NODES
 
 #: The whole bench is pinned here. A mismatch reads as mystery breakage, so T1
 #: asserts it rather than hoping (see memory: all Morse fw + Linux drivers matched).
@@ -534,6 +577,6 @@ POWER_DUT_BOARD = "board2"
 POWER_ESP_AP_APP = "test-apsta-ap"    # ESP SoftAP support role
 POWER_ESP_AP_BOARD = "board0"            # a light-load AP role -> unwired board0 is fine
 POWER_ESP_AP_MARKER = "ap-ready"         # test-apsta-ap's up-marker
-POWER_LINUX_AP_HOST = "chronite"         # hostapd_s1g AP (linux_peer.bring_up_ap)
+POWER_LINUX_AP_HOST = DEFAULT_LINUX_PEER  # the make-supplied LINUX_HOST; hostapd_s1g AP (linux_peer.bring_up_ap)
 POWER_C6_TRIGGER_PERIOD_S = 30           # the C6 free-runs a LOW pulse this often (test-c6-trigger)
 POWER_PHASE_S = 18                       # seconds per ladder tier (test-power PHASE_S)
