@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Rimba regression suite — CLI entry point.
 
-    make test-t0                      # build matrix (no hardware)
-    make test-t1 BOARD_NAME=board2    # smoke (needs a board)
-    make test-t2                      # on-air feature tests (needs a rig)
-    make test                         # t0 + t1
+ALWAYS drive the suite through `make test-*` — never call this script directly. `make` sources the
+vendored ESP-IDF env for you (pyserial / ppk2-api), so no `source export.sh` step is needed:
 
-or directly:
+    make test-t0                          # build matrix (no hardware)
+    make test-t1 BOARD_NAME=board2        # smoke (BOARD_NAME REQUIRED: board0|board1|board2)
+    make test-t2                          # on-air feature tests (TEST="slug ..." for a subset)
+    make test-tp AP=esp                   # power-save tier (AP REQUIRED: esp|linux)
+    make test-dscycle CYCLES=2            # deep-sleep reconnect gate (CYCLES REQUIRED)
+    make test    BOARD_NAME=board2        # t0 + t1
+    make test-bench / test-conn / test-silence / test-report / test-interop
 
-    python tools/regtest/run.py t0 [--app NAME ...] [--board NAME ...]
-    python tools/regtest/run.py t1 [--board-name board2] [--include-sleep-apps]
-    python tools/regtest/run.py t2 [--test SLUG ...]
-    python tools/regtest/run.py bench          # what hardware is present right now
-    python tools/regtest/run.py silence        # return every ESP to the idle app
+Test-run parameters have NO defaults -- you always state the board / AP / cycle count, so a run
+never silently picks one for you. Extra knobs are make variables (DRY_RUN=1, APPEND=1, LIGHT_SLEEP=1,
+INCLUDE_SLEEP=1, TEST=, LINUX_MAC=/LINUX_IP=). `make help` lists the targets.
 
 Exit code is 0 only when nothing FAILed. SKIP and INCONCLUSIVE do not fail the run:
 a skipped tier (no hardware attached) and a noisy RF measurement outside its margin are
@@ -42,6 +44,7 @@ else:
 
 def cmd_bench(args) -> int:
     """Report what is physically present. Run this first when a tier says SKIP."""
+    M.require_bench()
     print("ESP32 bench nodes (identified by efuse MAC, never by ttyACM number):")
     present = 0
     for name, b in M.BENCH.items():
@@ -56,10 +59,12 @@ def cmd_bench(args) -> int:
         if not b.fully_wired:
             print("           ^ light-load endpoint / spare ONLY -- never a relay or power-save DUT")
     print(f"\n{present}/{len(M.BENCH)} ESP nodes present.")
-    print("\nLinux HaLow nodes (reach by hostname only, never a raw IP):")
-    for host, node in M.LINUX_NODES.items():
-        tag = "  [default interop peer]" if host == M.DEFAULT_LINUX_PEER else ""
-        print(f"  {host:12s} mesh {node.mesh_ip:10s} {node.mesh_mac}  {node.role}{tag}")
+    print("\nLinux HaLow interop node (reach by hostname only, never a raw IP):")
+    if M.LINUX_NODES:
+        for host, node in M.LINUX_NODES.items():
+            print(f"  {host:12s} mesh {node.mesh_ip:10s} {node.mesh_mac}  {node.role}")
+    else:
+        print("  (none configured -- pass LINUX_HOST / LINUX_MAC / LINUX_IP for the interop tests)")
     print(f"\nBench pinned at Morse fw {M.EXPECTED_FW_VERSION}, chip {M.EXPECTED_CHIP_ID}, "
           f"S1G ch{M.RADIO_CHANNEL_S1G} (iw freq {M.RADIO_FREQ_IW}).")
     return 0
@@ -67,6 +72,7 @@ def cmd_bench(args) -> int:
 
 def cmd_silence(args) -> int:
     """Return every present ESP to the radio-free idle app."""
+    M.require_bench()
     names = args.board_name or [n for n in M.BENCH if common.resolve_port(M.BENCH[n].efuse_mac)]
     if not names:
         print("No ESP nodes enumerated -- nothing to silence.")
@@ -203,6 +209,7 @@ def cmd_flash_interop(args) -> int:
     else:
         from . import linux_peer
 
+    M.require_bench()   # needs BENCH_BOARD to build/flash test-mesh-linux
     host, port = args.host, args.port
 
     # With --run, bring the node up first so wlan1 carries a MAC + the mesh IP before we query.
@@ -305,8 +312,9 @@ def main() -> int:
     p0.set_defaults(func=cmd_t0)
 
     p1 = sub.add_parser("t1", help="smoke: flash + boot + radio up (needs a board)")
-    p1.add_argument("--board-name", default="board2",
-                    help="bench node to smoke on (default: board2, the only fully-wired one)")
+    p1.add_argument("--board-name", required=True,
+                    help="bench node to smoke on: board0 | board1 | board2 (board2 is the only "
+                         "fully-wired one). REQUIRED -- no default, so the board is always explicit.")
     p1.add_argument("--app", action="append", help="limit to these apps (repeatable)")
     p1.add_argument("--include-sleep-apps", action="store_true",
                     help="also flash the sleep apps. These wedge the USB and need a PPK2 "
@@ -333,10 +341,10 @@ def main() -> int:
     p2.set_defaults(func=cmd_t2)
 
     pp = sub.add_parser("tp", help="PPK2 power-save tier (needs board2 + the PPK2 + the C6 + an AP)")
-    pp.add_argument("--ap", choices=("esp", "linux"), default="esp",
+    pp.add_argument("--ap", choices=("esp", "linux"), required=True,
                     help="the AP the STA ladder associates to: esp (test-apsta-ap on board0, "
                          "fully automated) or linux (hostapd_s1g on chronite, the authoritative "
-                         "reference). Bands are per-AP. Default: esp.")
+                         "reference). Bands are per-AP. REQUIRED -- no default, so the AP is always explicit.")
     pp.add_argument("--dry-run", action="store_true",
                     help="print the rig + tiers + bands without touching hardware")
     pp.add_argument("--append", action="store_true",
@@ -348,9 +356,9 @@ def main() -> int:
 
     pd = sub.add_parser("dscycle",
                         help="deep-sleep duty-cycle reconnect gate (board2 + the C6 + an AP)")
-    pd.add_argument("--cycles", type=int, default=2,
-                    help="deep-sleep→wake→reassoc cycles to require (default 2; the rig's C6-wake is "
-                         "unreliable so the cadence is ~130 s/cycle -- more cycles need a longer run)")
+    pd.add_argument("--cycles", type=int, required=True,
+                    help="deep-sleep→wake→reassoc cycles to require. REQUIRED -- no default; the rig's "
+                         "C6-wake is unreliable so the cadence is ~130 s/cycle (more cycles = a longer run)")
     pd.add_argument("--no-append", action="store_true",
                     help="write a fresh T2 baseline instead of seeding from the existing one")
     pd.set_defaults(func=cmd_dscycle)
@@ -358,7 +366,8 @@ def main() -> int:
     pa = sub.add_parser("all", help="t0 + t1")
     pa.add_argument("--app", action="append")
     pa.add_argument("--board", action="append")
-    pa.add_argument("--board-name", default="board2")
+    pa.add_argument("--board-name", required=True,
+                    help="bench node for the T1 half: board0 | board1 | board2. REQUIRED -- no default.")
     pa.add_argument("--include-sleep-apps", action="store_true")
     pa.add_argument("--keep-radio-on", action="store_true")
     pa.set_defaults(func=cmd_all)

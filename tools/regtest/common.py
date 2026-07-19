@@ -271,17 +271,49 @@ def read_sdkconfig_value(app: str, board: str, key: str) -> Optional[str]:
 # --------------------------------------------------------------------------
 
 
-def capture_serial(port: str, seconds: float, baud: int = 115200) -> str:
-    """Read a board's console for `seconds` and return the text.
+def _await_port(prev_port: str, efuse_mac: Optional[str], timeout: float = 15.0) -> Optional[str]:
+    """Wait for the DUT's serial node to reappear after a mid-capture USB re-enumeration.
 
-    No reset is issued here: callers capture immediately after `make flash`, whose
-    own end-of-flash hard reset is the boot trigger. Re-triggering here would be wrong.
+    The PPK2-powered board (board2) can transiently drop + re-enumerate on a rail wobble
+    -- measured ~2-3% of captures, worse right after dscycle cycles the rail. Re-enumeration
+    RENUMBERS the /dev/ttyACM* node, so we re-resolve by efuse MAC when we know it; without a
+    MAC (should not happen for the bench DUTs) we fall back to waiting for the prior path.
+    Returns the (possibly new) port, or None if it never came back within `timeout`.
+    """
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if efuse_mac:
+            p = resolve_port(efuse_mac)
+            if p:
+                return p
+        elif Path(prev_port).exists():
+            return prev_port
+        time.sleep(0.5)
+    return None
 
-    dtr/rts handling is a real trap on these XIAO ESP32-S3 boards: opening the port
-    with DTR/RTS asserted resets the ESP32 but does NOT cleanly reset the MM6108,
-    which then comes up garbage (chip id 0x8200fXXX -> 0x0000, MAC 00:00:00:00:00:00,
-    "Channel list not set"). Only a true VBUS/PPK2 power cycle clears that latch.
-    So: dtr=False, rts=False (docs/reference/rimba-bench-devices.md:269-280).
+
+def _capture(port: str, seconds: float, marker: Optional[str] = None,
+             baud: int = 115200, efuse_mac: Optional[str] = None,
+             retries: int = 1) -> tuple[str, bool]:
+    """Read a board's console for `seconds` (or until a line contains `marker`).
+
+    Tolerates up to `retries` mid-capture USB re-enumerations of the DUT. pyserial raises
+    SerialException ("device reports readiness to read but returned no data ... multiple
+    access on port?") when the /dev node drops mid-read; that is the PPK2 board glitching on
+    the bus, NOT a firmware fault (it clears on the very next attempt, and a genuinely dead
+    board fails deterministically anyway). Re-enumeration resets the ESP, so on such an error
+    we re-resolve the port (_await_port) and recapture a FRESH full window -- the post-reset
+    boot banner / radio-up line / reporter verdict prints again. Exhausting `retries` re-raises,
+    so a persistently unstable board still FAILs.
+
+    No reset is issued here: callers capture immediately after `make flash`, whose own
+    end-of-flash hard reset is the boot trigger. Re-triggering here would be wrong.
+
+    dtr/rts handling is a real trap on these XIAO ESP32-S3 boards: opening the port with
+    DTR/RTS asserted resets the ESP32 but does NOT cleanly reset the MM6108, which then comes
+    up garbage (chip id 0x8200fXXX -> 0x0000, MAC 00:00:00:00:00:00, "Channel list not set").
+    Only a true VBUS/PPK2 power cycle clears that latch. So: dtr=False, rts=False
+    (docs/reference/rimba-bench-devices.md:269-280).
     """
     try:
         import serial  # noqa: PLC0415  (lazy: stdlib-only import at module level)
@@ -290,60 +322,72 @@ def capture_serial(port: str, seconds: float, baud: int = 115200) -> str:
             "pyserial not importable. Run under the IDF python env, e.g.:\n"
             "  source vendor/esp-idf/export.sh && python tools/regtest/run.py ..."
         )
-    buf: list[str] = []
-    s = serial.Serial()
-    s.port = port
-    s.baudrate = baud
-    s.timeout = 0.5
-    s.dtr = False
-    s.rts = False
-    s.open()
-    try:
-        t0 = time.time()
-        while time.time() - t0 < seconds:
-            line = s.readline()
-            if line:
-                buf.append(line.decode("utf-8", "replace"))
-    finally:
-        s.close()
-    return "".join(buf)
+    attempt = 0
+    while True:
+        buf: list[str] = []
+        matched = False
+        s = serial.Serial()
+        s.port = port
+        s.baudrate = baud
+        s.timeout = 0.5
+        s.dtr = False
+        s.rts = False
+        try:
+            s.open()
+            t0 = time.time()
+            while time.time() - t0 < seconds:
+                line = s.readline()
+                if not line:
+                    continue
+                text = line.decode("utf-8", "replace")
+                buf.append(text)
+                if marker is not None and marker in text:
+                    matched = True
+                    break
+        except (serial.SerialException, OSError) as e:
+            if attempt >= retries:
+                raise
+            attempt += 1
+            # Visible, not silent: a recovered flake must still be countable (the bench's USB
+            # re-enumeration rate is real data, not something to paper over).
+            print(f"    [capture] {port} dropped mid-read ({type(e).__name__}); "
+                  f"re-resolving + retrying ({attempt}/{retries})", file=sys.stderr, flush=True)
+            new_port = _await_port(port, efuse_mac)
+            if new_port and new_port != port:
+                print(f"    [capture] re-enumerated: {port} -> {new_port}",
+                      file=sys.stderr, flush=True)
+            if new_port:
+                port = new_port
+            continue
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+        return "".join(buf), matched
 
 
-def capture_until(port: str, seconds: float, marker: str,
-                  baud: int = 115200) -> tuple[str, bool]:
+def capture_serial(port: str, seconds: float, baud: int = 115200,
+                   efuse_mac: Optional[str] = None) -> str:
+    """Read a board's console for `seconds` and return the text.
+
+    Pass `efuse_mac` so a mid-capture USB re-enumeration is re-resolved + retried once
+    instead of failing the run (see _capture). Same dtr/rts caveat as _capture.
+    """
+    text, _ = _capture(port, seconds, marker=None, baud=baud, efuse_mac=efuse_mac)
+    return text
+
+
+def capture_until(port: str, seconds: float, marker: str, baud: int = 115200,
+                  efuse_mac: Optional[str] = None) -> tuple[str, bool]:
     """Read a board's console until a line contains `marker` or `seconds` elapse.
 
     Returns (text, matched). Used by the T2 orchestrator to stop as soon as a reporter
-    emits its TEST|RESULT line (or a support role prints its up-marker), instead of
-    always waiting the full window. Same dtr/rts caveat as capture_serial.
+    emits its TEST|RESULT line (or a support role prints its up-marker), instead of always
+    waiting the full window. Pass `efuse_mac` to get the re-resolve-and-retry-once behaviour
+    (see _capture). Same dtr/rts caveat.
     """
-    try:
-        import serial  # noqa: PLC0415
-    except ImportError:
-        raise RuntimeError("pyserial not importable; run under the IDF python env")
-    buf: list[str] = []
-    matched = False
-    s = serial.Serial()
-    s.port = port
-    s.baudrate = baud
-    s.timeout = 0.5
-    s.dtr = False
-    s.rts = False
-    s.open()
-    try:
-        t0 = time.time()
-        while time.time() - t0 < seconds:
-            line = s.readline()
-            if not line:
-                continue
-            text = line.decode("utf-8", "replace")
-            buf.append(text)
-            if marker in text:
-                matched = True
-                break
-    finally:
-        s.close()
-    return "".join(buf), matched
+    return _capture(port, seconds, marker=marker, baud=baud, efuse_mac=efuse_mac)
 
 
 def esptool_reset(port: str) -> subprocess.CompletedProcess:

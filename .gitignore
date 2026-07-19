@@ -6,6 +6,9 @@ sdkconfig.old
 *.elf
 *.map
 
+# Local bench identity for the regression suite (per-machine; copy from bench.env.sh.example).
+bench.env.sh
+
 # ESP-IDF component manager. The Morse components are vendored under components/
 # (git submodules), so nothing is downloaded into managed_components/. The lock
 # file is regenerated on every reconfigure and, for our local components, records

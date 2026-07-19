@@ -76,6 +76,11 @@ def run(tests: Optional[list[str]] = None, dry_run: bool = False,
         _describe(selected, linux_mac=linux_mac, linux_ip=linux_ip)
         return rep
 
+    M.require_bench()
+    # Only demand the Linux interop node if a selected test actually uses one.
+    if not linux_mac and any(r.device.startswith("linux:") for t in selected for r in t.roles):
+        M.require_linux()
+
     used_boards: set[str] = set()
     try:
         for t in selected:
@@ -144,7 +149,7 @@ def _run_single(rep: Reporter, t, used_boards: set[str]) -> None:
                               + "\n".join(cp.stderr.strip().splitlines()[-4:])))
         return
     used_boards.add(board_name)
-    log, _ = capture_until(port, 20.0, "TEST|END")
+    log, _ = capture_until(port, 20.0, "TEST|END", efuse_mac=M.BENCH[board_name].efuse_mac)
     _record_verdict(rep, t.slug, log, time.time() - t0, {"board": board_name})
 
 
@@ -227,7 +232,8 @@ def _run_orchestrated(rep: Reporter, t, used_boards: set[str],
                                       + "\n".join(cp.stderr.strip().splitlines()[-4:])))
                 return
             used_boards.add(handle)
-            log, _ = capture_until(port, REPORTER_TIMEOUT_S, "TEST|END")
+            log, _ = capture_until(port, REPORTER_TIMEOUT_S, "TEST|END",
+                                   efuse_mac=M.BENCH[handle].efuse_mac)
             captures.append((reporter, handle, log))
 
         meta = {"reporters": [f"{r.name}@{h}" for r, h, _ in captures],
@@ -273,7 +279,7 @@ def _resolve_build_vars(t, assign: dict, linux_mac: Optional[str],
     linux_role = next((r for r in t.roles if r.device.startswith("linux:")
                        and r.linux_setup == "mesh-peer"), None)
     if linux_role is not None and reporter is not None:
-        host = linux_role.device.split(":", 1)[1]
+        host = M.DEFAULT_LINUX_PEER
         node = M.LINUX_NODES.get(host)
         add(reporter.app, "LINUX_MAC", linux_mac or (node.mesh_mac if node else None))
         add(reporter.app, "LINUX_IP", linux_ip or (node.mesh_ip if node else None))
@@ -296,7 +302,7 @@ def _resolve_role(role, esp_used: set[str]):
     resolves to None -> the caller SKIPs the test, not FAILs it.
     """
     if role.device.startswith("linux:"):
-        host = role.device.split(":", 1)[1]
+        host = M.DEFAULT_LINUX_PEER
         from . import linux_peer
         if not linux_peer.reachable(host):
             return None, None, (f"Linux node {host} not reachable over ssh -- the interop test "
@@ -336,7 +342,8 @@ def _bring_up_esp_support(role, board_name: str, used_boards: set[str],
     used_boards.add(board_name)
 
     if role.up_marker:
-        log, matched = capture_until(port, role.boot_wait_s, role.up_marker)
+        log, matched = capture_until(port, role.boot_wait_s, role.up_marker,
+                                     efuse_mac=M.BENCH[board_name].efuse_mac)
         if not matched:
             tail = "\n".join(l.rstrip() for l in log.splitlines()[-6:])
             return False, (f"up-marker {role.up_marker!r} not seen within "
@@ -440,7 +447,7 @@ def _describe(tests, linux_mac: Optional[str] = None, linux_ip: Optional[str] = 
             lr = next((r for r in t.roles if r.device.startswith("linux:")
                        and r.linux_setup == "mesh-peer"), None)
             if lr is not None:
-                host = lr.device.split(":", 1)[1]
+                host = M.DEFAULT_LINUX_PEER
                 node = M.LINUX_NODES.get(host)
                 mac = linux_mac or (node.mesh_mac if node else "?")
                 ip = linux_ip or (node.mesh_ip if node else "?")
@@ -450,7 +457,7 @@ def _describe(tests, linux_mac: Optional[str] = None, linux_ip: Optional[str] = 
             ap_role = next((r for r in t.roles if r.device.startswith("linux:")
                             and r.linux_setup == "hostapd-ap"), None)
             if ap_role is not None:
-                host = ap_role.device.split(":", 1)[1]
+                host = M.DEFAULT_LINUX_PEER
                 print(f"    AP     : linux:{host} hostapd_s1g (rimba-ping/SAE); STA associates by SSID")
             mac_roles = [r for r in t.roles if r.build_mac_var]
             if mac_roles:

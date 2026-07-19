@@ -4,9 +4,9 @@
 # sources its environment for each target so you don't have to `. export.sh`
 # by hand. Override any variable on the command line, e.g.:
 #
-#   make build                       # default app rimba-halow-scan, board proto1
+#   make build                       # default app rimba-halow-scan, board proto1-fgh100m
 #   make build APP=rimba-hello
-#   make build BOARD=proto1
+#   make build BOARD=proto1-fgh100m
 #   make flash PORT=/dev/ttyACM0
 #   make flash-monitor
 #
@@ -20,11 +20,11 @@ APP       ?= rimba-halow-scan
 APP_DIR   := $(CURDIR)/firmware/$(APP)
 
 # Board selection. Board-specific sdkconfig defaults live in boards/<BOARD>/;
-# override with BOARD=<name> (default: proto1). The board's sdkconfig.defaults
-# (plus sdkconfig.defaults.<target>) are applied to the build via
+# override with BOARD=<name> (default: proto1-fgh100m, the bench board). The board's
+# sdkconfig.defaults (plus sdkconfig.defaults.<target>) are applied to the build via
 # SDKCONFIG_DEFAULTS. The chip target is NOT set here — it comes from the board's
 # sdkconfig.defaults (CONFIG_IDF_TARGET), so the board owns its target.
-BOARD     ?= proto1
+BOARD     ?= proto1-fgh100m
 BOARD_DIR := $(CURDIR)/boards/$(BOARD)
 
 # sdkconfig defaults applied to the build: the board overlay first, then the
@@ -62,16 +62,30 @@ IDF := source "$(IDF_PATH)/export.sh" >/dev/null 2>&1 && cd "$(APP_DIR)" && \
               -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_DEFAULTS)" \
               $(IDF_EXTRA_D)
 
-# Regression suite (tools/regtest/). BOARD_NAME selects the physical bench node for
-# the hardware tiers (board2 is the only fully-wired one — see
-# docs/reference/rimba-bench-devices.md), as opposed to BOARD, which selects the
-# sdkconfig overlay.
-TEST    := python3 $(CURDIR)/tools/regtest/run.py
-BOARD_NAME ?= board2
+# Regression suite (tools/regtest/). ALWAYS run the suite through these `make test-*`
+# targets — make sources the vendored ESP-IDF env for you (pyserial / ppk2-api), so no
+# `source export.sh` is ever needed.
+#
+# The BENCH IDENTITY is passed in — NOTHING about the bench is stored in the Python source.
+# Provide these per run, or `export` them once in your shell (make forwards them either way);
+# a hardware tier that's missing one errors and tells you what to pass:
+#   BENCH_BOARD  sdkconfig overlay for the ESP boards (e.g. proto1-fgh100m)
+#   BOARD0_MAC   board0 efuse MAC   BOARD1_MAC board1 efuse MAC   BOARD2_MAC board2 efuse MAC
+#   WIRED_BOARD  which board is fully wired (WAKE+BUSY), normally board2
+#   LINUX_HOST / LINUX_MAC / LINUX_IP   the Linux interop node (only the T2 interop tests + tp --ap linux need it)
+# Test-run choices (also no defaults): BOARD_NAME (test-t1), AP (test-tp), CYCLES (test-dscycle).
+BENCH_ENV := BENCH_BOARD='$(BENCH_BOARD)' BOARD0_MAC='$(BOARD0_MAC)' BOARD1_MAC='$(BOARD1_MAC)' \
+             BOARD2_MAC='$(BOARD2_MAC)' WIRED_BOARD='$(WIRED_BOARD)' \
+             LINUX_HOST='$(LINUX_HOST)' LINUX_MAC='$(LINUX_MAC)' LINUX_IP='$(LINUX_IP)'
+RUNNER  := source "$(IDF_PATH)/export.sh" >/dev/null 2>&1 && $(BENCH_ENV) python3 $(CURDIR)/tools/regtest/run.py
+
+# require-var,<VAR>,<hint> — abort a target if a required test parameter is unset.
+require-var = @[ -n "$($(1))" ] || { echo "$@ requires $(1)=$(2)"; exit 2; }
 
 .PHONY: help build flash monitor flash-monitor clean fullclean \
         menuconfig size erase \
-        test test-t0 test-t1 test-t2 test-tp test-bench test-conn test-silence test-report
+        test test-all test-t0 test-t1 test-t2 test-tp test-dscycle test-bench \
+        test-conn test-interop test-silence test-report
 
 help:
 	@echo "Rimba firmware build (ESP-IDF wrapper)"
@@ -125,22 +139,49 @@ menuconfig:
 #            Needs a rig (multiple boards and/or Linux nodes).
 # See tools/regtest/README.md.
 
-test: test-t0 test-t1          ## build matrix + smoke
+test:                          ## build matrix + smoke (BOARD_NAME=board0|board1|board2 required)
+	$(call require-var,BOARD_NAME,board0|board1|board2)
+	@$(MAKE) test-t0
+	@$(MAKE) test-t1 BOARD_NAME=$(BOARD_NAME)
+
+# The whole bench, every tier in order. Runs them ALL even if one tier FAILs, then regenerates the
+# report; exits non-zero if any tier had a real FAIL (INCONCLUSIVE / SKIP do not gate). Needs the full
+# rig: board2 powered (tools/ppk2_hold.py) + the C6 flashed, plus board0/board1 for the T2 multi-board tests.
+test-all:                      ## run EVERY tier t0->t1->t2->tp->dscycle (BOARD_NAME, AP, CYCLES required)
+	$(call require-var,BOARD_NAME,board0|board1|board2)
+	$(call require-var,AP,esp|linux)
+	$(call require-var,CYCLES,a positive integer e.g. 2)
+	@rc=0; \
+	$(MAKE) test-t0                            || rc=1; \
+	$(MAKE) test-t1 BOARD_NAME=$(BOARD_NAME)   || rc=1; \
+	$(MAKE) test-t2                            || rc=1; \
+	$(MAKE) test-tp AP=$(AP)                   || rc=1; \
+	$(MAKE) test-dscycle CYCLES=$(CYCLES)      || rc=1; \
+	$(MAKE) test-report || true; \
+	[ $$rc -eq 0 ] && echo "test-all: all tiers green" || echo "test-all: a tier FAILed (see above)"; \
+	exit $$rc
 
 test-t0:                       ## build matrix (no hardware)
-	$(TEST) t0
+	$(RUNNER) t0
 
-test-t1:                       ## smoke on BOARD_NAME (default board2)
-	$(TEST) t1 --board-name $(BOARD_NAME)
+test-t1:                       ## smoke on BOARD_NAME=board0|board1|board2 (required); INCLUDE_SLEEP=1 adds the sleep apps (board2)
+	$(call require-var,BOARD_NAME,board0|board1|board2)
+	$(RUNNER) t1 --board-name $(BOARD_NAME) $(if $(INCLUDE_SLEEP),--include-sleep-apps,)
 
-test-t2:                       ## on-air feature tests (needs a rig)
-	$(TEST) t2
+test-t2:                       ## on-air tests; TEST="slug ..." runs those, DRY_RUN=1 lists, APPEND=1 accumulates
+	$(RUNNER) t2 $(foreach t,$(TEST),--test $(t)) $(if $(DRY_RUN),--dry-run,) $(if $(APPEND),--append,) \
+	  $(if $(LINUX_MAC),--linux-mac $(LINUX_MAC),) $(if $(LINUX_IP),--linux-ip $(LINUX_IP),)
 
-test-tp:                       ## PPK2 power-save tier (needs board2 + PPK2 + C6 + an AP)
-	$(TEST) tp $(if $(AP),--ap $(AP),)
+test-tp:                       ## PPK2 power tier — AP=esp|linux (required); LIGHT_SLEEP=1, DRY_RUN=1
+	$(call require-var,AP,esp|linux)
+	$(RUNNER) tp --ap $(AP) $(if $(LIGHT_SLEEP),--light-sleep,) $(if $(DRY_RUN),--dry-run,)
+
+test-dscycle:                  ## deep-sleep reconnect gate — CYCLES=N required (e.g. CYCLES=2)
+	$(call require-var,CYCLES,a positive integer e.g. 2)
+	$(RUNNER) dscycle --cycles $(CYCLES)
 
 test-bench:                    ## what hardware is present right now
-	$(TEST) bench
+	$(RUNNER) bench
 
 # Preflight: check you can actually reach a device before a (long) test run. Pass YOUR
 # setup info; with no args it probes every bench node the manifest knows.
@@ -150,15 +191,24 @@ test-bench:                    ## what hardware is present right now
 #   make test-conn HOST=chronite         # a Linux node over ssh
 # PORT has a default (for flash), so it is only forwarded when set ON the command line.
 test-conn:                     ## check a device is reachable (PORT=|MAC=|NODE=|HOST=)
-	$(TEST) preflight \
+	$(RUNNER) preflight \
 	  $(if $(filter command line,$(origin PORT)),--port $(PORT),) \
 	  $(if $(MAC),--mac $(MAC),) \
 	  $(if $(NODE),--node $(NODE),) \
 	  $(if $(HOST),--host $(HOST),) \
 	  $(if $(CHIP),--chip $(CHIP),)
 
+# ESP<->Linux mesh interop: flash test-mesh-linux at a Linux node, its MAC auto-queried over ssh.
+#   make test-interop HOST=chronite PORT=/dev/ttyACM4         # flash against chronite
+#   make test-interop HOST=chronite PORT=/dev/ttyACM4 GO=1    # + bring the mesh up, capture the verdict, silence
+test-interop:                  ## flash test-mesh-linux at HOST= over PORT= (GO=1 to run it + get the verdict)
+	$(call require-var,HOST,an ssh host e.g. chronite)
+	@[ -n "$(filter command line,$(origin PORT))" ] || { echo "$@ requires PORT=/dev/ttyACMx (set it explicitly)"; exit 2; }
+	$(RUNNER) flash-interop --host $(HOST) --port $(PORT) $(if $(GO),--run,) $(if $(MONITOR),--monitor,) \
+	  $(if $(IP),--ip $(IP),) $(if $(LINUX_MAC),--linux-mac $(LINUX_MAC),)
+
 test-silence:                  ## return every ESP to the radio-free idle app
-	$(TEST) silence
+	$(RUNNER) silence
 
 test-report:                   ## (re)generate build/regtest/report.html from the latest baselines
-	$(TEST) report
+	$(RUNNER) report
