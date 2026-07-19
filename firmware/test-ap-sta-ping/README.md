@@ -40,8 +40,7 @@ The observed 15/15 / 0-timeout / 10–37 ms matches the recorded milestones
 ## How to run
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/run.py t2 --test ap-sta-ping     # or: make test-t2 (runs the whole T2 suite)
+make test-t2 TEST=ap-sta-ping     # or: make test-t2 (runs the whole T2 suite)
 ```
 
 The orchestrator: resolves ap→board0 / sta→board1 by efuse MAC → flashes `rimba-halow-ap`, waits

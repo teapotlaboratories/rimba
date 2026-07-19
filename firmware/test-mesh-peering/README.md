@@ -31,8 +31,7 @@ independent of RF quality (a fading link changes timing, not whether the handsha
 ## How to run
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/run.py t2 --test mesh-peering
+make test-t2 TEST=mesh-peering
 ```
 
 ## Expected console (reporter / board1)

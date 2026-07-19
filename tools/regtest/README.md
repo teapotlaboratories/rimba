@@ -30,17 +30,77 @@ output (`--dry-run`) — see "Coverage" below.
 
 ## Requirements
 
-**Software (once per shell):**
-- Run from the repo root. All builds go through `make` (never bare `idf.py` — see "Building" below).
-- For any tier that touches a board (T1, T2), load the ESP-IDF python env so `pyserial` is importable:
-  `source vendor/esp-idf/export.sh`. T0 (build-only) does not need it.
+**Software:**
+- Run from the repo root, and drive everything through `make test-*` (never `python
+  tools/regtest/run.py` directly, never bare `idf.py` — see "Building" below).
+- `make` sources the vendored ESP-IDF env for you, so `pyserial` / `ppk2-api` are importable with **no
+  `source export.sh` step**.
+
+### Bench configuration — you pass it, nothing is stored
+
+**The bench identity lives nowhere in the source** — no `manifest.py` registry. Every hardware tier
+reads it from make variables (which make forwards to the harness), and errors telling you what to pass
+if one is missing.
+
+The easiest way to set them is the tracked template. Copy it once, fill in your bench's values, and
+`source` it per shell — the file (`bench.env.sh`) is `.gitignore`d so your identity never gets committed:
+
+```sh
+cp bench.env.sh.example bench.env.sh   # from the repo root; then edit in your MACs/host
+source bench.env.sh                    # exports BENCH_BOARD, BOARD*_MAC, WIRED_BOARD, LINUX_*
+```
+
+`bench.env.sh.example` (the committed template) documents every variable:
+
+```sh
+export BENCH_BOARD=proto1-fgh100m          # sdkconfig overlay for the ESP boards
+export BOARD0_MAC=E0:72:A1:F8:EF:A4        # board0 efuse MAC  (light-load / spare slot)
+export BOARD1_MAC=E0:72:A1:F8:F9:40        # board1 efuse MAC  (light-load / spare slot)
+export BOARD2_MAC=E0:72:A1:F8:F0:08        # board2 efuse MAC  (fully-wired DUT/relay/gate slot)
+export WIRED_BOARD=board2                  # which board is fully wired (WAKE+BUSY)
+export LINUX_HOST=chronite                 # the Linux interop node (only T2 interop + tp --ap linux need it)
+export LINUX_MAC=3c:22:7f:37:51:38         # its wlan1 MAC
+export LINUX_IP=10.9.9.2                   # its mesh IP
+```
+
+You can also skip the file and append the variables on each `make` line — they're ordinary make
+variables (e.g. `make test-t1 BOARD_NAME=board2 BENCH_BOARD=proto1-fgh100m BOARD2_MAC=… …`). Sourcing
+once is just less to type.
+
+`mesh_mac` / `mesh_ip` / `fully_wired` are **derived** from these — you never pass them. The current
+bench's values are in [`docs/reference/rimba-bench-devices.md`](../../docs/reference/rimba-bench-devices.md).
+`make test-bench` prints what it resolved. **Every `make test-*` example below assumes these are set**
+(sourced, or appended to the command).
+
+#### Worked example — a full run from a clean shell
+
+```sh
+# 1. Load your bench identity (once per shell).
+source bench.env.sh
+
+# 2. Confirm every device answers before spending time on the suite.
+make test-conn
+
+# 3. Run the whole suite — build (T0) + smoke (T1) + on-air (T2) + power (tp) + deep-sleep cycle,
+#    then render the HTML report. BOARD_NAME/AP/CYCLES are the only per-run knobs.
+make test-all BOARD_NAME=board2 AP=esp CYCLES=2
+
+# …or run one tier at a time, e.g. just the on-air checks:
+make test-t2
+
+# open the report
+xdg-open tools/regtest/report.html
+```
+
+Everything hardware-related in that `test-all` line beyond `BOARD_NAME`/`AP`/`CYCLES` (the three ESP
+MACs, which board is wired, the Linux peer host/MAC/IP) came from the `source bench.env.sh` in step 1.
 
 **Hardware, per tier:**
 
 | Tier | Needs |
 |---|---|
 | **T0** build | nothing — a laptop. |
-| **T1** smoke | one ESP board (default `board2`; `BOARD_NAME=board0` to use another). |
+| **T1** smoke | one ESP board — pass `BOARD_NAME=board0\|board1\|board2` (**required**, no default). |
 | **T2** on-air | depends on the test — see the table. |
 
 Per-T2-test hardware (the orchestrator SKIPs a test whose devices aren't present, with the reason):
@@ -89,22 +149,21 @@ node must satisfy, and how to point a test at one:
 The ESP reporter still needs the peer's MAC + IP compiled in (it has to recognise and ping the peer),
 but they are **build-time arguments, not source constants** — you never edit the firmware. They flow:
 
-    LINUX_NODES registry  ──(or)──  --linux-mac / --linux-ip
+    LINUX_HOST / LINUX_MAC / LINUX_IP  (make variables — the interop node)
               └────────────┬────────────────┘
-             make LINUX_MAC=… LINUX_IP=…  →  -D TEST_LINUX_MAC/IP  →  compiled into test-mesh-linux
+             make … LINUX_MAC=… LINUX_IP=…  →  -D TEST_LINUX_MAC/IP  →  compiled into test-mesh-linux
 
 | What | Where | Note |
 |---|---|---|
-| the node registry | `tools/regtest/manifest.py` → `LINUX_NODES` | **single source of truth (Python)**: `host → {mesh_ip, mesh_mac, role}`. `make test-bench` prints it. |
-| which node a test uses | `tools/regtest/t2_tests.py` → the test's `Role(device="linux:<host>")` | e.g. `mesh-linux` uses `linux:chronite` |
-| the peer MAC + IP the ESP checks | **passed to the build** as `TEST_LINUX_MAC` / `TEST_LINUX_IP` | harness derives them from the test's `linux:<host>` registry row and (re)builds the reporter against them; `app_main.c` falls back to a chronite `#ifndef` default only if nothing is passed |
+| the interop node | the make variables `LINUX_HOST` / `LINUX_MAC` / `LINUX_IP` | **you pass these** (exported or per-command) — nothing is stored in the source. `make test-bench` prints what it resolved. |
+| which node a test uses | `tools/regtest/t2_tests.py` → the test's `Role(device="linux:<host>")` | there's one configured peer, so every `linux:` role resolves to your `LINUX_HOST` |
+| the peer MAC + IP the ESP checks | **passed to the build** as `TEST_LINUX_MAC` / `TEST_LINUX_IP` | derived from your `LINUX_MAC` / `LINUX_IP` and compiled into the reporter; `app_main.c` has a `#ifndef` fallback only if nothing is passed |
 
-So a plain `python tools/regtest/run.py t2 --test mesh-linux` already builds the reporter against
-whatever `LINUX_NODES` says for its `linux:<host>` role — no manual step. Override the peer for one run
-without touching the registry:
+So with `LINUX_HOST`/`LINUX_MAC`/`LINUX_IP` set, `make test-t2 TEST=mesh-linux` builds the reporter
+against your node — no manual step. Override the peer for one run:
 
 ```sh
-python tools/regtest/run.py t2 --test mesh-linux --linux-mac 68:24:99:44:6b:80 --linux-ip 10.9.9.4
+make test-t2 TEST=mesh-linux LINUX_MAC=68:24:99:44:6b:80 LINUX_IP=10.9.9.4
 ```
 
 or drive the build directly:
@@ -117,42 +176,37 @@ make flash APP=test-mesh-linux BOARD=proto1-fgh100m LINUX_MAC=68:24:99:44:6b:80 
 off the node live over ssh, so you only pass the host and the board's port:
 
 ```sh
-python tools/regtest/run.py flash-interop --host chronite --port /dev/ttyACM0
-# add --run to also bring the node onto the rimba-smesh mesh, capture the board's PASS/FAIL,
+make test-interop HOST=chronite PORT=/dev/ttyACM0
+# add GO=1 to also bring the node onto the rimba-smesh mesh, capture the board's PASS/FAIL,
 # and take both sides off the air afterwards (the whole interop loop, one command):
-python tools/regtest/run.py flash-interop --host chronite --port /dev/ttyACM0 --run
+make test-interop HOST=chronite PORT=/dev/ttyACM0 GO=1
 ```
 
-| flag | meaning |
+| var | meaning |
 |---|---|
-| `--host` (req) | ssh host of the Linux node; its `wlan1` MAC is read live |
-| `--port` (req) | the ESP board's serial port to flash |
-| `--ip` | override the peer mesh IP (default: the node's live `wlan1` IPv4, else its manifest entry) |
-| `--linux-mac` | skip the query and use this MAC (e.g. the node is off but you know it) |
-| `--run` | bring the mesh up first, capture the verdict, then silence both sides |
-| `--monitor` | print the board's `TEST\|` output after flashing (implied by `--run`) |
+| `HOST=` (req) | ssh host of the Linux node; its `wlan1` MAC is read live |
+| `PORT=` (req) | the ESP board's serial port to flash |
+| `IP=` | override the peer mesh IP (default: the node's live `wlan1` IPv4, else its manifest entry) |
+| `LINUX_MAC=` | skip the query and use this MAC (e.g. the node is off but you know it) |
+| `GO=1` | bring the mesh up first, capture the verdict, then silence both sides |
+| `MONITOR=1` | print the board's `TEST\|` output after flashing (implied by `GO=1`) |
 
 A run-time cross-check (`linux_peer.mesh_mac_matches`) still reads the node's **live** `wlan1` MAC and
 **warns** if it differs from what was compiled in — catching a stale build against a re-flashed node.
 
-**To point `mesh-linux` at a different existing node** (e.g. `chronogen`): pass
-`--linux-mac`/`--linux-ip` for a one-off, or change the role to `device="linux:chronogen"` in
-`t2_tests.py` to make it the default (the MAC/IP then come from that node's `LINUX_NODES` row
-automatically). No firmware edit either way.
-
-**To add a brand-new Linux node:** give it an `~/.ssh/config` entry and add a `LinuxNode(...)` row to
-`LINUX_NODES` in `manifest.py`. That's it — the build-arg plumbing picks the MAC/IP up from there.
+**To use a different Linux node** (e.g. `chronogen`): give it an `~/.ssh/config` entry (key auth,
+passwordless sudo) and set `LINUX_HOST=chronogen LINUX_MAC=… LINUX_IP=…`. That's the whole change —
+no source or firmware edit; the build-arg plumbing picks up the MAC/IP you passed.
 
 ### The same pattern for ESP-only topology (the `mesh-relay` line)
 
 `mesh-relay` is symmetric — all three boards run `test-mesh-relay` and each self-selects its role
-(origin / dest / relay) by MAC — so **every** flash needs the whole line's MACs. Those are also
-**build-time arguments derived from the manifest**, not firmware constants: each relay `Role` declares
-a `build_mac_var` (`MESH_ORIGIN_MAC` / `MESH_DEST_MAC` / `MESH_RELAY_MAC`), and the orchestrator feeds
-each one its **assigned board's** `BENCH[...].mesh_mac`, passing all three to every flash. Retarget the
-line by editing the boards' `mesh_mac` in `manifest.py` (or `make ... MESH_ORIGIN_MAC=… MESH_DEST_MAC=…
-MESH_RELAY_MAC=…`); the dest's mesh IP is *derived* from `MESH_DEST_MAC`, so it's never a second value
-to sync. `python tools/regtest/run.py t2 --test mesh-relay --dry-run` prints the resolved MACs.
+(origin / dest / relay) by MAC — so **every** flash needs the whole line's MACs. Those are
+**build-time arguments, not firmware constants**: each relay `Role` declares a `build_mac_var`
+(`MESH_ORIGIN_MAC` / `MESH_DEST_MAC` / `MESH_RELAY_MAC`), and the orchestrator feeds each one its
+**assigned board's** mesh MAC — which is *derived* from that board's `BOARD*_MAC` you passed — to every
+flash. The dest's mesh IP is derived from its MAC too, so it's never a second value to sync.
+`make test-t2 TEST=mesh-relay DRY_RUN=1` prints the resolved MACs.
 
 > A `-D` cache var is sticky (both here and for the Linux peer): a *manual* custom build pins the value
 > until `make fullclean APP=<app>`. The harness always passes explicit values, so real T2 runs are
@@ -161,27 +215,38 @@ to sync. `python tools/regtest/run.py t2 --test mesh-relay --dry-run` prints the
 ## Quick start
 
 ```sh
-source vendor/esp-idf/export.sh     # once per shell (for T1/T2)
+make test-bench                                      # what hardware is present right now (run this first)
 
-make test-bench      # what hardware is present right now (run this first)
-make test-t0         # build matrix — no hardware, ~25–35 min cold / minutes warm
-make test-t1         # smoke on board2 (needs a board; BOARD_NAME=board0 to pick another)
-make test-t2         # all on-air feature tests (needs the rigs above)
-make test-tp         # power-save tier: PPK2 current ladder (board2 + PPK2 + C6 + an AP)
-make test            # t0 + t1
-make test-silence    # return every ESP to the radio-free idle app
-make test-report     # (re)generate the HTML report (build/regtest/report.html) from the baselines
+make test-all BOARD_NAME=board2 AP=esp CYCLES=2      # EVERY tier: t0->t1->t2->tp->dscycle + report (full rig)
+
+# ...or a tier at a time:
+make test-t0                                         # build matrix — no hardware, ~25–35 min cold / minutes warm
+make test-t1 BOARD_NAME=board2                       # smoke (BOARD_NAME required: board0|board1|board2)
+make test-t2                                         # all on-air feature tests (needs the rigs above)
+make test-tp AP=esp                                  # power-save PPK2 ladder (AP required: esp|linux)
+make test-dscycle CYCLES=2                           # deep-sleep reconnect gate
+make test    BOARD_NAME=board2                       # just t0 + t1
+make test-silence                                    # return every ESP to the radio-free idle app
+make test-report                                     # (re)generate build/regtest/report.html from the baselines
 ```
+
+`make test-all` runs every tier in order even if one FAILs, regenerates the report, and exits
+non-zero if any tier had a real FAIL (SKIP / INCONCLUSIVE don't gate). It needs the full rig
+(board2 on the PPK2 + the C6, plus board0/board1 for the multi-board T2 tests).
+
+> **Test-run parameters have no defaults.** You always state the board (`BOARD_NAME` / `--board-name`),
+> the AP (`AP` / `--ap`), and the cycle count (`--cycles`) so a run never silently picks one for you —
+> a missing one errors with a hint instead of quietly running on the wrong device.
 
 **Power-save + newer tests (added 2026-07):**
 
 ```sh
-python tools/regtest/run.py tp --ap esp|linux    # PPK2 current ladder (4 tiers, 2 scored)
-python tools/regtest/run.py tp --light-sleep     # a HOST_LIGHT_SLEEP build variant (separate bands)
-python tools/regtest/run.py dscycle              # deep-sleep duty-cycle reconnect gate (board2 + C6)
-python tools/regtest/run.py t2 --test twt-assoc  # assoc-embedded TWT -> INSTALLED (universal path, Linux AP)
-python tools/regtest/run.py t2 --test multi-twt  # 2 STAs both reach TWT INSTALLED concurrently (plain AP)
-python tools/regtest/run.py t2 --test mesh-ap-multi-twt  # 2 TWT STAs behind the MESH GATE (concurrency)
+make test-tp AP=esp|linux         # PPK2 current ladder (4 tiers, 2 scored; AP required)
+make test-tp AP=linux LIGHT_SLEEP=1   # a HOST_LIGHT_SLEEP build variant (separate bands)
+make test-dscycle CYCLES=2   # deep-sleep duty-cycle reconnect gate (CYCLES required; board2 + C6)
+make test-t2 TEST=twt-assoc  # assoc-embedded TWT -> INSTALLED (universal path, Linux AP)
+make test-t2 TEST=multi-twt  # 2 STAs both reach TWT INSTALLED concurrently (plain AP)
+make test-t2 TEST=mesh-ap-multi-twt  # 2 TWT STAs behind the MESH GATE (concurrency)
 ```
 
 **T2 now has 12 feature tests** (was 9): the original 8 all-ESP + `mesh-linux`, plus `twt-assoc`,
@@ -201,23 +266,18 @@ open in a browser); `make test-report` regenerates it from the existing baseline
 To run **one** T2 test (e.g. just the Linux interop, or just the mesh-gate):
 
 ```sh
-python tools/regtest/run.py t2 --test mesh-linux     # ESP <-> Linux interop
-python tools/regtest/run.py t2 --test mesh-ap        # the mesh-gate
-python tools/regtest/run.py t2 --dry-run             # list every T2 test + its rig, no hardware
+make test-t2 TEST=mesh-linux     # ESP <-> Linux interop
+make test-t2 TEST=mesh-ap        # the mesh-gate
+make test-t2 DRY_RUN=1             # list every T2 test + its rig, no hardware
 ```
 
 Exit code is `0` only when nothing FAILed (SKIP / XFAIL / INCONCLUSIVE don't fail the run).
 
-Or directly (the tiers that touch a board need the IDF python env for pyserial —
-`source vendor/esp-idf/export.sh` first):
-
-```sh
-python tools/regtest/run.py t0   [--app NAME ...] [--board NAME ...]
-python tools/regtest/run.py t1   [--board-name board2] [--include-sleep-apps]
-python tools/regtest/run.py t2   [--test SLUG ...] [--dry-run]
-python tools/regtest/run.py bench
-python tools/regtest/run.py silence
-```
+**Always drive the suite through `make test-*`** — never `python tools/regtest/run.py` directly.
+`make` sources the vendored ESP-IDF env for you (so `pyserial` / `ppk2-api` are importable), so no
+`source export.sh` is ever needed. Extra knobs are make variables: `TEST=<slug>` / `DRY_RUN=1` on
+`test-t2`, `LIGHT_SLEEP=1` / `DRY_RUN=1` on `test-tp`, `INCLUDE_SLEEP=1` on `test-t1`. Run `make help`
+to list the targets.
 
 Every run writes a JSON baseline to `build/regtest/<tier>-latest.json`, stamped with the
 repo SHA and the `components/halow` gitlink — so a baseline is always attributable to a
@@ -230,7 +290,7 @@ specific tree state. Diff two baselines to see what a bump changed.
   generated at the end of every tier run. Summary cards per tier + a per-test table with status
   badges, timing, detail, and collapsible `evidence`. Open it in a browser or share the single file.
   Regenerate anytime from the existing baselines (no re-run) with `make test-report` /
-  `python tools/regtest/run.py report`. It shows the **last run per tier**, so run `make test-t2`
+  `make test-report`. It shows the **last run per tier**, so run `make test-t2`
   to populate all of T2.
 - **JSON** (`build/regtest/<tier>-latest.json`) — machine-readable, for diffing across bumps.
 
@@ -256,23 +316,28 @@ ignored:
 
 ## Known-broken today (XFAIL)
 
-`BOARD=proto1` cannot build **any** app: `boards/proto1/sdkconfig.defaults` asks for
-`bcf_mf16858.mbin`, which the pinned `vendor/morse-firmware` (1.17.8) does not ship —
-every `proto1` build fails at CMake configure. This predates the suite; it was found by
-the suite's first run. The whole bench is `proto1-fgh100m`, so nobody had noticed. It is
-recorded in `manifest.KNOWN_BROKEN_BOARDS` with the full reason, so `proto1` builds report
-XFAIL and the gate stays meaningful. **Owner decision:** restore an `mf16858` BCF, or
-retire `boards/proto1`. See `docs/worklog/2026-07-16-regression-suite-and-fork-migration-plan.md`.
+**None.** The previously-broken `proto1` overlay (it asked for a `bcf_mf16858.mbin` the pinned
+`vendor/morse-firmware` doesn't ship, so every `proto1` build failed at CMake configure) was
+**retired** — `boards/proto1` is deleted and the whole bench is `proto1-fgh100m`. The XFAIL / XPASS
+machinery stays (`manifest.KNOWN_BROKEN_BOARDS`, currently empty) for the next time a board has a
+documented, non-gating breakage.
 
 ## Bench facts the harness enforces (so you don't have to remember them)
 
-These are wired into `manifest.py` / `common.py`, not left to the operator:
+These are wired into the harness / `common.py`, not left to the operator:
 
-- **Ports are resolved by efuse MAC**, never a cached `ttyACM*` (they re-enumerate).
-- **board0 / board1 have WAKE + BUSY unwired** — they are light-load endpoints only.
-  Any load / relay / power-save DUT role **must** be board2. The manifest marks this and
-  T2 pins board2 for those roles; using board0 there tests missing solder, not code.
+- **Ports are resolved by efuse MAC** (the `BOARD*_MAC` you pass), never a cached `ttyACM*` (they re-enumerate).
+- **The non-`WIRED_BOARD` boards have WAKE + BUSY unwired** — they are light-load endpoints only.
+  Any load / relay / power-save DUT role **must** be the wired board (normally board2). T2 pins it
+  for those roles; using a light-load board there tests missing solder, not code.
 - **board2 is PPK2-powered** and only enumerates while `tools/ppk2_hold.py` runs.
+- **A mid-capture USB re-enumeration is tolerated, not a FAIL.** board2's PPK2 rail occasionally
+  wobbles → the ESP resets and its serial port drops + re-enumerates (often renumbered) mid-read;
+  pyserial surfaces this as `device reports readiness to read but returned no data … multiple access on
+  port?`. The capture path (`common._capture`) catches it **once**, re-resolves the port by efuse MAC,
+  and recaptures a fresh window — logging `[capture] … dropped mid-read … re-resolving`. A *persistent*
+  fault still FAILs (the retry re-raises), so a genuinely dead board is not masked. Measured rate ~2–3 %
+  per capture on board2, ~0 on the bus-powered boards.
 - **Sleep apps wedge the USB** — T1 skips them by default (they need a PPK2 power-cycle to
   recover; `--include-sleep-apps` only on board2).
 - **Radio-silence after every hardware test** is automatic: T1/T2 flash `test-idle`
@@ -282,7 +347,7 @@ These are wired into `manifest.py` / `common.py`, not left to the operator:
 ## Coverage — what's automated vs defined
 
 ```sh
-python tools/regtest/run.py t2 --dry-run    # the full T2 catalogue, with provenance
+make test-t2 DRY_RUN=1    # the full T2 catalogue, with provenance
 ```
 
 **All 9 T2 tests are automated** (8 all-ESP + 1 ESP↔Linux interop), every ESP role app `test-*`,
@@ -325,7 +390,7 @@ interop test, add a `linux:<host>` support role — no new firmware on the Linux
 
 ```
 tools/regtest/
-  manifest.py     apps, boards, bench nodes, known-broken, T2 catalogue metadata
+  manifest.py     apps, known-broken, power bands, T2 catalogue metadata (bench identity comes from make, built here from env)
   t2_tests.py     the T2 test definitions (rig + expectations + provenance)
   common.py       ports, make, serial capture, results, radio-silence
   t0_build.py     T0 tier

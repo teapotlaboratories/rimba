@@ -22,8 +22,7 @@
 ## How to run
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/run.py t2 --test ibss
+make test-t2 TEST=ibss
 ```
 
 The orchestrator flashes each role (support roles first, verified up via a console up-marker), then
@@ -34,5 +33,4 @@ captures the reporter's `TEST|RESULT`, and returns every board to `rimba-hello` 
 
 `firmware/test-ibss/` (symmetric; both nodes run it, creator pinned to board0's MAC; reporter polls `mmwlan_ibss_peer_count()`).
 
-Full catalogue + provenance: `tools/regtest/t2_tests.py` (`IBSS`), `python tools/regtest/run.py
-t2 --dry-run --test ibss`. Results: `docs/regression/rimba-regression-results.md`.
+Full catalogue + provenance: `tools/regtest/t2_tests.py` (`IBSS`), `make test-t2 TEST=ibss`. DRY_RUN=1 Results: `docs/regression/rimba-regression-results.md`.

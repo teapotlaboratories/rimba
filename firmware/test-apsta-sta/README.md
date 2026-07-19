@@ -9,5 +9,5 @@ associates to the `rimba-halow-ap` SoftAP, pins a static IP, pings the AP, and e
 Run it via the orchestrator (do not flash by hand unless debugging):
 
 ```sh
-python tools/regtest/run.py t2 --test ap-sta-ping
+make test-t2 TEST=ap-sta-ping
 ```

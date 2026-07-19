@@ -39,8 +39,7 @@ protection. Those need real frames on the air — see `test-mesh-relay`.
 ### With the harness (recommended)
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/run.py t2 --test swccmp
+make test-t2 TEST=swccmp
 ```
 
 The harness picks any present board (radio-free, so wiring doesn't matter), flashes,

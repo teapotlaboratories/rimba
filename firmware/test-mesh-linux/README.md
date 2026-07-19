@@ -34,8 +34,7 @@ ESP↔ESP `mesh-peering` test (which uses `rimba-mesh`).
 ## How to run
 
 ```sh
-source vendor/esp-idf/export.sh
-python tools/regtest/run.py t2 --test mesh-linux
+make test-t2 TEST=mesh-linux
 ```
 
 The orchestrator: `linux_peer.bring_up_mesh(chronite)` pushes the reference config if missing, starts
