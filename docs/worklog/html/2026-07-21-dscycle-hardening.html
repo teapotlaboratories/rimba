@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dscycle deep-sleep tier: reliable + self-contained — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-21</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-21</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">✓ hardened &amp; bench-verified</span>
+    <span class="badge">regtest · dscycle · power-save</span>
+  </div>
+
+  <h1>dscycle deep-sleep tier: reliable + self-contained</h1>
+  <p class="lead">The <code>dscycle</code> regression tier proves board2 re-associates on every wake from
+  deep sleep. It had been landing <strong>INCONCLUSIVE run-to-run</strong> on a flaky wake, and it wasn't
+  self-contained — it left the PPK2 holder to the operator, killed processes with a too-broad match, and
+  silently SKIPped inside <code>test-all</code>. This pass fixes all of it: a <strong>commanded</strong> C6
+  wake, a correct cycle count, a self-starting holder, and a precise kill — verified by five consecutive
+  clean runs where there used to be one flaky one.</p>
+
+  <div class="callout ok">
+    <p class="ct">Bottom line</p>
+    <p>The tier went from <strong>1 flaky INCONCLUSIVE</strong> to <strong>5/5 clean PASS</strong>
+    (including a 3/3 and a run that self-started from a fully-powered-off board2). Each deep-sleep cycle is
+    now ~15–23 s wall instead of ~130 s, and the whole tier no longer needs an operator babysitting the
+    PPK2 rail.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">5/5</div><div class="lbl">clean PASS since the fix</div></div>
+    <div class="stat"><div class="num acc">~20 s</div><div class="lbl">per cycle (was ~130 s)</div></div>
+    <div class="stat"><div class="num">5</div><div class="lbl">hardening items landed</div></div>
+    <div class="stat"><div class="num">0</div><div class="lbl">operator steps to run</div></div>
+  </div>
+
+  <h2 id="flake">1 · The flake — two root causes</h2>
+  <p>Reproducing the baseline (<code>make test-dscycle CYCLES=2</code>, unmodified) gave the usual verdict:</p>
+  <pre><code>INCONCLUSIVE  333.6s  deepsleep-reconnect
+  2/2 reconnects but only 1 long deep-sleep gaps — the board reconnected but did not
+  clearly deep-sleep between cycles ... so not a clean deep-sleep-leaf proof.</code></pre>
+
+  <h3>Cause A — an off-by-one in the cycle count</h3>
+  <p>The DUT logs <code>RECONNECTED in N ms</code> on <em>every</em> association — including the one-off
+  <strong>fresh-boot</strong> association after flashing, before any deep sleep. The old capture counted all
+  of them and stopped at <code>len(recons) &ge; cycles</code>, so for <code>CYCLES=2</code> it stopped after
+  <em>fresh-boot + 1 real cycle</em> = 2 reconnects but only <strong>1</strong> deep-sleep gap → the
+  <code>n&ge;cycles but deep_sleeps&lt;cycles</code> branch fired <em>even when the wake worked</em>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">flash DUT</div><div class="s">fresh boot</div></div>
+      <div class="node err"><div class="t">RECONNECT #1</div><div class="s">fresh-boot assoc</div></div>
+      <div class="node"><div class="t">deep sleep</div><div class="s">gap #1</div></div>
+      <div class="node ok"><div class="t">RECONNECT #2</div><div class="s">wake cycle 1</div></div>
+      <div class="node err"><div class="t">STOP</div><div class="s">2 recons ≥ 2 → INCO</div></div>
+    </div>
+    <figcaption>Old count: the fresh-boot reconnect is counted, so the loop stops one real cycle short —
+    2 reconnects but only 1 deep-sleep gap. Fix: a cycle = a deep-sleep gap <em>followed by</em> a reconnect;
+    the fresh-boot reconnect is ignored.</figcaption>
+  </figure>
+
+  <h3>Cause B — a free-running wake that races the awake window</h3>
+  <p>The C6 fired a LOW pulse every 30 s <em>regardless of board2's state</em>. board2 only arms its ext1
+  D5-low wake <em>while asleep</em>, and its awake window per cycle is short (boot → connect → hold 4 s →
+  sleep). So a pulse arriving while board2 was awake was wasted, and the board then waited for the next
+  pulse — or fell through to the DUT's <strong>60 s backup timer</strong> (~130 s/cycle). Under a less-rested
+  board2 the reconnect itself flaked on top.</p>
+
+  <h2 id="commanded">2 · The fix — a commanded wake (item #5 enables #1)</h2>
+  <p>The C6 fixture (<code>firmware/test-c6-trigger</code>) no longer picks its behaviour at compile time.
+  It now takes <strong>serial commands</strong> over its UART0 console and latches a runtime mode (optionally
+  persisted to NVS). The harness holds D5 at Hi-Z, watches board2's USB port vanish (it slept), waits a
+  short settle so the ext1 wake is armed, then <strong>commands one pulse</strong> — a deterministic wake at
+  exactly the right instant.</p>
+
+  <figure>
+    <div class="flow vert">
+      <div class="node"><div class="t">board2 deep-sleeps</div><div class="s">radio RESET_N low · logs "DEEP SLEEP"</div></div>
+      <div class="node"><div class="t">USB port vanishes</div><div class="s">harness sees it go</div></div>
+      <div class="node acc"><div class="t">settle 1.5 s</div><div class="s">ext1 D5-low wake armed</div></div>
+      <div class="node acc"><div class="t">C6 ← <code>pulse 120</code></div><div class="s">GPIO20 → D5 LOW 120 ms</div></div>
+      <div class="node ok"><div class="t">wake → cold boot → RECONNECT</div><div class="s">counted: 1 cycle</div></div>
+    </div>
+    <figcaption>The commanded wake. No 30 s race, no 60 s fallback. If the C6 doesn't answer (old firmware
+    / unplugged) the harness warns loudly and falls back to the DUT's 60 s backup timer.</figcaption>
+  </figure>
+
+  <p>The serial protocol (responses prefixed <code>C6|</code>), smoke-tested directly over ttyUSB0:</p>
+  <pre><code>&gt; ping        -&gt; C6|PONG
+&gt; hiz         -&gt; C6|MODE hiz
+&gt; pulse 120   -&gt; C6|PULSE ms=120 ... C6|PULSE done -&gt; hiz
+&gt; trigger 30  -&gt; C6|MODE trigger period=30s
+&gt; bogus       -&gt; C6|ERR unknown: bogus</code></pre>
+
+  <h2 id="items">3 · Five items, all landed</h2>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>What changed</th></tr></thead>
+    <tbody>
+      <tr><td>5</td><td>C6 serial-latch <em>(the enabler)</em></td><td>UART0 command loop + NVS in
+        <code>test-c6-trigger</code>; <code>pulse/hiz/high/low/trigger/toggle/save/status/ping</code></td></tr>
+      <tr><td>1</td><td>Dependable wake</td><td><code>_capture</code> commands the pulse on port-vanish +
+        settle; correct cycle counting (deep-sleep gap <em>then</em> reconnect)</td></tr>
+      <tr><td>2</td><td>Self-restart holder</td><td><code>_start_holder()</code> (detached) re-holds board2
+        after recovery, in the <code>finally</code></td></tr>
+      <tr><td>4</td><td>Self-contained / no silent SKIP</td><td><code>_ensure_holder()</code> starts
+        <code>ppk2_hold</code> if board2 isn't powered; only a missing PPK2 SKIPs (loudly)</td></tr>
+      <tr><td>3</td><td>Tighten the kill</td><td><code>_free_ppk2()</code> kills only the PPK2 fd-owner +
+        pidfile PID; <code>ppk2_hold.py</code> writes <code>/tmp/ppk2_hold.pid</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="results">4 · Results</h2>
+  <p>Wall-clock, baseline vs the hardened runs (whole-tier time, incl. AP bring-up + recovery):</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">baseline (INCO)</span>
+      <span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">424 s</span></div>
+    <div class="bar-row"><span class="lbl">run 1 · 2/2</span>
+      <span class="bar-track"><span class="bar-fill fast" style="width:36.6%"></span></span><span class="val">155 s</span></div>
+    <div class="bar-row"><span class="lbl">run 2 · 2/2 self-start</span>
+      <span class="bar-track"><span class="bar-fill fast" style="width:35.4%"></span></span><span class="val">150 s</span></div>
+    <div class="bar-row"><span class="lbl">run 3 · 3/3</span>
+      <span class="bar-track"><span class="bar-fill fast" style="width:41.3%"></span></span><span class="val">175 s</span></div>
+    <div class="bar-row"><span class="lbl">run 4 · 2/2</span>
+      <span class="bar-track"><span class="bar-fill fast" style="width:36.1%"></span></span><span class="val">153 s</span></div>
+    <div class="bar-row"><span class="lbl">run 5 · 2/2 post-review</span>
+      <span class="bar-track"><span class="bar-fill fast" style="width:35.1%"></span></span><span class="val">149 s</span></div>
+  </div>
+
+  <table>
+    <thead><tr><th>Run</th><th class="num">Cycles</th><th>Result</th><th class="num">Gate wall</th><th>Per-cycle</th></tr></thead>
+    <tbody>
+      <tr><td>baseline (old)</td><td class="num">2</td><td>INCONCLUSIVE</td><td class="num">333.6 s</td><td>free-run + off-by-one</td></tr>
+      <tr><td>run 1</td><td class="num">2</td><td><strong>PASS 2/2</strong></td><td class="num">124.6 s</td><td>reconnects 8.6 / 5.8 / 7.2 s</td></tr>
+      <tr><td>run 2 (self-start)</td><td class="num">2</td><td><strong>PASS 2/2</strong></td><td class="num">118.6 s</td><td>from a dark board2</td></tr>
+      <tr><td>run 3</td><td class="num">3</td><td><strong>PASS 3/3</strong></td><td class="num">143.6 s</td><td>gaps 2.5 s · reconnects 5.8 / 6.7 / 6.7 s</td></tr>
+      <tr><td>run 4</td><td class="num">2</td><td><strong>PASS 2/2</strong></td><td class="num">122.7 s</td><td>gaps 2.5 s · reconnects 5.7 / 5.8 s</td></tr>
+      <tr><td>run 5 (post-review)</td><td class="num">2</td><td><strong>PASS 2/2</strong></td><td class="num">118.4 s</td><td>reflashed C6 + fixed harness · reconnects 6.0 / 5.8 s</td></tr>
+    </tbody>
+  </table>
+
+  <p>A <code>/code-review</code> over the diff surfaced 4 low-severity findings (core paths already
+  bench-verified): a leaked log fd in <code>_start_holder</code> (→ <code>with</code>), an unbounded
+  C6 <code>pulse [ms]</code> that could starve the UART RX (→ clamped to 2000 ms;
+  <code>pulse 99999999 → C6|PULSE ms=2000</code>), a stale <code>rimba-hello</code> doc wording
+  (→ <code>test-idle</code>), and a pre-existing IDLE_APP-pre-built dependency (left, noted). Run 5 above
+  is the end-to-end confirmation after those fixes + a C6 reflash.</p>
+
+  <div class="callout bug">
+    <p class="ct">Design validation: the marker, not the gap, is the proof</p>
+    <p>Run 3's real gaps are only <strong>~2.5 s</strong> — <em>shorter</em> than the old 4 s (and my 3 s)
+    threshold, and close to a bare reset's ~2 s re-enumerate. With the fast commanded wake, a gap-duration
+    heuristic alone <strong>cannot</strong> tell a real deep-sleep from a reset. So the rework gates on the
+    DUT's <code>DEEP SLEEP</code> log marker (printed only right before <code>esp_deep_sleep_start()</code>
+    with the radio in RESET_N-low) as the primary proof; the gap is corroboration. A pure-gap gate would
+    have false-INCONCLUSIVE'd the very wake we made reliable.</p>
+  </div>
+
+  <div class="callout">
+    <p class="ct">A bug caught mid-verification</p>
+    <p>Runs 1–2 printed <code>deep-slept 0.0s</code>: a stale <code>/dev/serial/by-id</code> symlink lingers
+    through the vanish transition, so <code>resolve_port</code> briefly returned the old path and the
+    deep-sleep was counted (correctly, via the marker) but with a bogus ~0 gap. Fixed by trusting only a
+    <strong>successful serial open</strong> as "board2 genuinely back" — run 3 then reported the true ~2.5 s
+    gaps. The PASS was always valid (marker-gated); the fix corrects the reported duration and removes the
+    fragility.</p>
+  </div>
+
+  <h2 id="verify">5 · Item-by-item verification</h2>
+  <h4>Item 3 — precise kill (the tightened match)</h4>
+  <p>Started a bystander whose command line is literally <code>python3 tools/ppk2_hold.py --bystander</code>
+  but which holds no PPK2 fd. <code>pgrep -af ppk2_hold.py</code> matched <strong>both</strong> it and the
+  real holder — what the old broad <code>kill</code> would have targeted. <code>_free_ppk2()</code> killed
+  <strong>only</strong> the real holder (the PPK2 fd owner); the bystander survived.</p>
+
+  <h4>Items 2 + 4 — self-start from a dark board2</h4>
+  <p>Powered board2 fully OFF with no holder (the post-<code>tp</code> state that used to make the tier SKIP
+  silently), then ran <code>make test-dscycle</code>:</p>
+  <pre><code>dscycle -- board2 not powered; starting tools/ppk2_hold.py ...
+dscycle -- bringing up the AP ...            <span class="cm"># board2 enumerated in ~3 s; then PASS 2/2</span></code></pre>
+
+  <h2 id="files">6 · Files changed</h2>
+  <ul>
+    <li><code>firmware/test-c6-trigger/main/main.c</code> — serial-latch firmware (UART0 command loop + NVS
+      persistence); compile-time <code>MODE</code> is now just the power-on default, so <code>tp</code>'s
+      free-run is unchanged.</li>
+    <li><code>tools/regtest/dscycle.py</code> — commanded-wake <code>_capture</code>, correct cycle counting,
+      <code>_ensure_holder</code> / <code>_start_holder</code>, precise <code>_free_ppk2</code> (fd + pidfile),
+      progress prints.</li>
+    <li><code>tools/ppk2_hold.py</code> — writes <code>/tmp/ppk2_hold.pid</code> (cleaned up on exit/signal).</li>
+    <li><code>Makefile</code>, <code>firmware/test-c6-trigger/README.md</code> — docs for the self-start +
+      serial protocol.</li>
+  </ul>
+  <p><em>Not an on-air change:</em> dscycle is a structural USB/serial gate; the C6 wake is a D5 GPIO pulse,
+  not RF, so no transmitted frame changed and the on-air gold-standard doesn't apply. Harness unit tests
+  (11) still pass; bench left radio-silent (all ESPs on <code>rimba-hello</code>, holder powering board2).</p>
+
+  <div class="callout"><p style="margin:0">Next slice of the regtest "Loop-back: harden" umbrella after the
+  <a href="2026-07-20-regtest-hardening-new-testcases.html">config-guards + 3 mesh tests</a> batch.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#flake">1 · The flake</a></li>
+    <li><a href="#commanded">2 · Commanded wake</a></li>
+    <li><a href="#items">3 · Five items</a></li>
+    <li><a href="#results">4 · Results</a></li>
+    <li><a href="#verify">5 · Verification</a></li>
+    <li><a href="#files">6 · Files changed</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-21-dscycle-hardening</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

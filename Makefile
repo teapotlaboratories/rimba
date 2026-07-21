@@ -146,7 +146,9 @@ test:                          ## build matrix + smoke (BOARD_NAME=board0|board1
 
 # The whole bench, every tier in order. Runs them ALL even if one tier FAILs, then regenerates the
 # report; exits non-zero if any tier had a real FAIL (INCONCLUSIVE / SKIP do not gate). Needs the full
-# rig: board2 powered (tools/ppk2_hold.py) + the C6 flashed, plus board0/board1 for the T2 multi-board tests.
+# rig: board2 powered (tools/ppk2_hold.py) + the C6 flashed (firmware/test-c6-trigger, serial-controlled),
+# plus board0/board1 for the T2 multi-board tests. tp runs before dscycle and frees the PPK2 holder, but
+# dscycle now self-starts ppk2_hold if board2 isn't powered, so it no longer SKIPs silently after tp.
 test-all:                      ## run EVERY tier t0->t1->t2->tp->dscycle (BOARD_NAME, AP, CYCLES required)
 	$(call require-var,BOARD_NAME,board0|board1|board2)
 	$(call require-var,AP,esp|linux)

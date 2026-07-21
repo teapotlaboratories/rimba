@@ -18,13 +18,46 @@ A clean power-cycle of board2 = `off`, then run the hold again.
 Nohup it to keep board2 powered across your session:
     nohup $PY tools/ppk2_hold.py >/tmp/ppk2_hold.log 2>&1 &
 """
+import atexit
+import os
+import signal
 import sys
 import time
+from pathlib import Path
 
 import serial.tools.list_ports
 from ppk2_api.ppk2_api import PPK2_API
 
 PPK2_VID, PPK2_PID = 0x1915, 0xC00A
+#: Where the running holder records its PID, so a tool that needs the PPK2 (e.g. the dscycle tier's
+#: recovery power-cycle) can identify + free THIS holder precisely instead of a broad process-name match.
+PIDFILE = Path("/tmp/ppk2_hold.pid")
+
+
+def _remove_pidfile():
+    try:
+        if PIDFILE.exists() and PIDFILE.read_text().strip() == str(os.getpid()):
+            PIDFILE.unlink()
+    except OSError:
+        pass
+
+
+def _write_pidfile():
+    try:
+        PIDFILE.write_text(str(os.getpid()))
+    except OSError:
+        return
+    atexit.register(_remove_pidfile)   # covers normal exit + SystemExit
+
+    def _on_signal(signum, _frame):
+        _remove_pidfile()
+        raise SystemExit(0)            # exit cleanly so a precise SIGTERM frees the rail + the pidfile
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _on_signal)
+        except (ValueError, OSError):
+            pass
 
 
 def find_ppk2_control_port():
@@ -55,6 +88,7 @@ def main():
         return
 
     ppk2.toggle_DUT_power("ON")
+    _write_pidfile()
     print(f"PPK2 {port}: DUT power ON — board2 up @ 5 V (ampere-meter). "
           "board2 enumerates as an Espressif /dev/ttyACM* while this holds.", flush=True)
     try:
