@@ -349,6 +349,158 @@ MESH_RELAY = T2Test(
     ),
 )
 
+MESH_LARGE_FRAME = T2Test(
+    slug="mesh-large-frame",
+    pass_if="a large (FW-fragmented) frame is forwarded origin->relay->dest with SW-CCMP intact",
+    title="Large-frame mesh forwarding (FW-fragmented SW-CCMP, defrag-before-decrypt)",
+    rig={
+        "relay": "board2 — test-mesh-large-frame (MANDATORY: fully wired)",
+        "dest": "board1 — test-mesh-large-frame (responder)",
+        "origin": "board0 — test-mesh-large-frame (pings dest with a LARGE payload; reporter)",
+    },
+    roles=(
+        # Identical forced-line rig to mesh-relay (same symmetric app family, same three build MACs);
+        # the ONLY difference is a large ICMP payload that forces the FW to fragment the encrypted
+        # mesh frame, exercising the defrag-before-decrypt RX path.
+        Role(name="relay", device="board2", app="test-mesh-large-frame", require_wired=True,
+             boot_wait_s=30.0, up_marker="mesh-up", build_mac_var="MESH_RELAY_MAC"),
+        Role(name="dest", device="board1", app="test-mesh-large-frame",
+             boot_wait_s=30.0, up_marker="mesh-up", build_mac_var="MESH_DEST_MAC"),
+        Role(name="origin", device="board0", app="test-mesh-large-frame", reporter=True,
+             build_mac_var="MESH_ORIGIN_MAC"),
+    ),
+    what_it_proves=(
+        "A mesh frame LARGER than the 1 MHz / MCS0 single-PPDU limit is fragmented over the air by "
+        "the MM6108 FW after the host computed one SW-CCMP MIC over the whole frame, and the RX "
+        "reassembles the raw fragments BEFORE decrypting (encrypt->fragment) -- the "
+        "defrag-before-decrypt path, end to end over a 2-hop line."
+    ),
+    what_it_does_not_prove=(
+        "HW-crypto forwarding (a FIRMWARE limitation, same as mesh-relay), nor throughput. The "
+        "small-frame forward is mesh-relay's job; this variant adds only the fragmentation/reassembly."
+    ),
+    expectations=(
+        Expectation(
+            metric="large-frame multi-hop delivery, defrag-before-decrypt",
+            value="131/131 single-hop, 143/146 (~98%) multi-hop, ccmp_fail=0",
+            source="docs/worklog/2026-07-14-mesh-defrag-before-decrypt-PASS.md",
+            noisy=True,
+            assertion="delivery >= a WIDE floor (>=8/15) over a ~1400-byte payload is the primary "
+                      "proof -- a defrag/decrypt-order regression MIC-fails the reassembled frame and "
+                      "drops it, so it shows as ~0 replies. datapath_rx_ccmp_failures corroborates "
+                      "(FAIL only if DOMINANT). Plus topology: sole peer == relay.",
+        ),
+    ),
+    manual_steps=(
+        "THE RELAY MUST BE board2 (WAKE+BUSY wired only there) -- same constraint as mesh-relay. The "
+        "large payload (PING_SIZE=1400) must exceed the air single-PPDU limit to force FW "
+        "fragmentation; if a future radio/rate change stops fragmenting at 1400, bump PING_SIZE."
+    ),
+)
+
+MESH_LEAF = T2Test(
+    slug="mesh-leaf",
+    pass_if="the relay peers 1-hop but does NOT forward (mmwlan_mesh_set_multihop(false))",
+    title="Mesh leaf / single-hop mode (multihop opt-out)",
+    rig={
+        "relay": "board2 — test-mesh-leaf (MANDATORY: fully wired; multihop OFF)",
+        "dest": "board1 — test-mesh-leaf (responder)",
+        "origin": "board0 — test-mesh-leaf (pings dest; expects NO reply; reporter)",
+    },
+    roles=(
+        # Same forced-line rig as mesh-relay; the relay calls mmwlan_mesh_set_multihop(false) so it
+        # keeps its 1-hop plinks but declines to forward. The origin's assertion is INVERTED.
+        Role(name="relay", device="board2", app="test-mesh-leaf", require_wired=True,
+             boot_wait_s=30.0, up_marker="mesh-up", build_mac_var="MESH_RELAY_MAC"),
+        Role(name="dest", device="board1", app="test-mesh-leaf",
+             boot_wait_s=30.0, up_marker="mesh-up", build_mac_var="MESH_DEST_MAC"),
+        Role(name="origin", device="board0", app="test-mesh-leaf", reporter=True,
+             build_mac_var="MESH_ORIGIN_MAC"),
+    ),
+    what_it_proves=(
+        "mmwlan_mesh_set_multihop(false) makes a node a LEAF: it keeps its 1-hop mesh plinks but does "
+        "not forward, and does not black-hole (its peering survives). A shipped, on-air-A/B-verified "
+        "runtime opt-out (P6d) that otherwise has no regression guard -- a port-forward could silently "
+        "re-enable relaying, or turn the opt-out into a black hole."
+    ),
+    what_it_does_not_prove=(
+        "The HWMP-invisibility of a leaf (its absence from other nodes' path selection) -- only that "
+        "it declines to forward and keeps peering. Path-selection invisibility needs a >=3-hop "
+        "topology this 3-board bench cannot form."
+    ),
+    expectations=(
+        Expectation(
+            metric="leaf blocks forwarding, keeps peering",
+            value="0 replies via a leaf relay; sole peer still the relay",
+            source="mmwlan_mesh_set_multihop(bool) (umac_mesh.h:190); P6d leaf/single-hop opt-out",
+            noisy=False,
+            assertion="DETERMINISTIC (not RF-bound): the forced allowlist makes the relay the ONLY "
+                      "path to the dest, so a leaf relay declining to forward => EXACTLY 0 replies. "
+                      "PASS iff sole peer == relay (peering survived, no black-hole) AND replies == 0. "
+                      "ANY reply => leaf broken (relaying re-enabled); lost peering => black-hole.",
+        ),
+    ),
+    manual_steps=(
+        "THE RELAY MUST BE board2 (same wired constraint as mesh-relay). Unlike the delivery tests, "
+        "this one asserts EXACTLY 0 replies (no wide floor): with the forced line there is no path to "
+        "the dest except the leaf relay, so any reply is a deterministic leak, not RF noise."
+    ),
+)
+
+MESH_RELAY_NOCRASH = T2Test(
+    slug="mesh-relay-nocrash",
+    pass_if="the relay forwards a sustained load with NO silent hw-restart (interrupt-WDT crash)",
+    title="Mesh relay stability under load (no hw-restart)",
+    rig={
+        "origin": "board0 — test-mesh-relay-nocrash (support; drives a long ping burst)",
+        "dest": "board1 — test-mesh-relay-nocrash (support; responder)",
+        "relay": "board2 — test-mesh-relay-nocrash (MANDATORY fully wired; REPORTER)",
+    },
+    roles=(
+        # Roles are RE-CAST vs mesh-relay: the RELAY is the reporter (hw_restart_counter is its own
+        # stat, and only a reporter's console is scraped). So origin + dest are SUPPORT (they boot
+        # first); the origin drives a long ping burst to load the relay, and the relay (flashed LAST)
+        # forwards then checks it did not hw-restart. Declaration order matters -- support boots first.
+        Role(name="origin", device="board0", app="test-mesh-relay-nocrash",
+             boot_wait_s=30.0, up_marker="mesh-up", build_mac_var="MESH_ORIGIN_MAC"),
+        Role(name="dest", device="board1", app="test-mesh-relay-nocrash",
+             boot_wait_s=30.0, up_marker="mesh-up", build_mac_var="MESH_DEST_MAC"),
+        Role(name="relay", device="board2", app="test-mesh-relay-nocrash", require_wired=True,
+             reporter=True, build_mac_var="MESH_RELAY_MAC"),
+    ),
+    what_it_proves=(
+        "An ESP relay forwards a sustained mesh load without a SILENT hw-restart: its "
+        "hw_restart_counter does not increment across the forwarding window. This catches the "
+        "root-caused interrupt-WDT SPI-host-teardown crash-and-recover that a delivery check alone "
+        "can miss (a brief crash-recover inside a ping window still delivers most pings)."
+    ),
+    what_it_does_not_prove=(
+        "Throughput, nor the SW-CCMP correctness that mesh-relay covers -- only that the relay stays "
+        "up (no hw-restart) while forwarding. It needs REAL forwarding load: if the endpoints never "
+        "peer the relay, it lands INCONCLUSIVE (a relay under no load cannot crash under load)."
+    ),
+    expectations=(
+        Expectation(
+            metric="relay hw_restart_counter across a forwarding window",
+            value="hw_restart_counter unchanged (0 restarts) over ~40s of forwarding",
+            source="hw_restart_counter (mmwlan_stats.h:65); interrupt-WDT SPI-host-teardown crash "
+                   "root-caused 2026-07-12",
+            noisy=False,
+            assertion="PASS iff BOTH endpoints peered the relay (real forwarding load) AND "
+                      "hw_restart_counter did not change across the window. FAIL if it climbed (a "
+                      "silent hw-restart under load). INCONCLUSIVE if the relay never got both peers "
+                      "(no load -> a crash-under-load cannot be judged; never a false PASS).",
+        ),
+    ),
+    manual_steps=(
+        "THE RELAY MUST BE board2 -- doubly so here: the interrupt-WDT crash this guards was only ever "
+        "seen on a WIRED relay (board2); board0/board1 as relay produce a DIFFERENT (missing-solder) "
+        "crash, so using them tests the wrong thing. Timing is sized to REPORTER_TIMEOUT_S (130s): "
+        "relay boot + peer-wait (45s) + window (40s); widen the window budget if a cold bench needs "
+        "longer to peer both endpoints."
+    ),
+)
+
 MESH_AP = T2Test(
     slug="mesh-ap",
     pass_if="both vifs beacon + STA routes through, ttl=63 (1 hop)",
@@ -573,6 +725,9 @@ T2_TESTS: tuple[T2Test, ...] = (
     MESH_PEERING,
     MESH_LINUX,
     MESH_RELAY,
+    MESH_LARGE_FRAME,
+    MESH_LEAF,
+    MESH_RELAY_NOCRASH,
     MESH_AP,
     MESH_AP_MULTI_TWT,
 )
