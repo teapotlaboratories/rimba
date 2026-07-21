@@ -67,9 +67,12 @@ fix the real ones (or, for a finding the owner decides to defer, record it as a
 tracked TODO — see [Plan first](#plan-first--every-feature-starts-as-a-documented-todo))
 before the merge. Do **not** merge with unaddressed correctness findings still
 open. State the review outcome (what it found, what was fixed vs deferred) when
-you report the merge. For a large or risky branch, `/code-review ultra` (the
-multi-agent cloud review) is the owner-triggered, billed option — you cannot
-launch it yourself; surface it as a suggestion when it's warranted.
+you report the merge.
+
+**`/review` (`/code-review`) is sufficient** — that is the standing review for
+every branch, large or risky included. Do **not** reach for or suggest
+`/code-review ultra` (the billed multi-agent cloud review); the owner will ask
+for it explicitly on the rare occasion they want it.
 
 ### Merging pull requests
 
