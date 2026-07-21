@@ -29,8 +29,13 @@ its provenance so a reviewer can check the number rather than trust it.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional
+
+#: A well-formed MAC: six colon-separated hex octets. _mesh_mac/_mesh_ip only touch octets 0 and 5,
+#: so a bad octet 1-4 derives a non-empty (wrong) value; validate the whole shape here.
+_MAC_RE = re.compile(r"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 
 # --------------------------------------------------------------------------
 # Boards
@@ -207,11 +212,11 @@ def _validate_bench(bench: dict[str, BenchBoard]) -> None:
             f"WIRED_BOARD={_env('WIRED_BOARD')!r} is not one of {sorted(bench)} -- no board is "
             "fully wired, so there is no relay/power-save/DUT slot. Set WIRED_BOARD to a real board.")
 
-    # A present-but-malformed MAC passes the non-empty check in _build_bench but derives an empty
-    # mesh_mac/mesh_ip (see _mesh_mac/_mesh_ip: they return "" on a bad shape).
+    # A present-but-malformed MAC passes the non-empty check in _build_bench. Validate the FULL shape
+    # here (not just the empty-derived mesh_mac/ip, which only catches a bad octet 0 or 5).
     for name in sorted(bench):
         b = bench[name]
-        if not b.mesh_mac or not b.mesh_ip:
+        if not _MAC_RE.match(b.efuse_mac.strip()):
             problems.append(
                 f"{_BOARD_MAC_ENV[name]}={b.efuse_mac!r} is not a valid MAC "
                 "(need 6 colon-separated hex octets, e.g. e0:72:a1:f8:ef:a4).")

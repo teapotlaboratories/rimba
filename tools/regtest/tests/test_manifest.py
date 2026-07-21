@@ -66,6 +66,17 @@ class ValidateBenchTests(unittest.TestCase):
             manifest._validate_bench(bench)
         self.assertIn("BOARD0_MAC", str(cm.exception))
 
+    def test_bad_middle_octet_raises(self):
+        # A non-hex octet in the MIDDLE (positions 1-4) still derives a NON-empty mesh_mac/ip
+        # (_mesh_mac/_mesh_ip only touch octets 0 and 5), so the empty-derived check misses it --
+        # the full-shape check must catch it.
+        bench = build_with(BOARD1_MAC="e0:72:zz:f8:f9:40")
+        self.assertTrue(bench["board1"].mesh_mac and bench["board1"].mesh_ip,
+                        "the derived fields are non-empty, which is exactly why octet-0/5-only fails")
+        with self.assertRaises(manifest.BenchNotConfigured) as cm:
+            manifest._validate_bench(bench)
+        self.assertIn("BOARD1_MAC", str(cm.exception))
+
     def test_mesh_ip_collision_raises(self):
         # 0xef:08 and 0xf9:48 both have (last octet & 0x3f) == 8 -> both 10.9.9.108;
         # board2 pinned to a distinct IP so the collision is exactly board0/board1.
@@ -97,9 +108,12 @@ class ValidateBenchTests(unittest.TestCase):
 class RequireBenchTests(unittest.TestCase):
     def test_require_bench_rejects_malformed(self):
         bad = build_with(WIRED_BOARD="board3")
-        with mock.patch.object(manifest, "BENCH", bad):
-            with self.assertRaises(manifest.BenchNotConfigured):
+        # patch the env too, so _validate_bench's message renders the real WIRED_BOARD value.
+        with mock.patch.object(manifest, "BENCH", bad), \
+             mock.patch.dict(os.environ, {"WIRED_BOARD": "board3"}):
+            with self.assertRaises(manifest.BenchNotConfigured) as cm:
                 manifest.require_bench()
+            self.assertIn("board3", str(cm.exception))
 
     def test_require_bench_accepts_good(self):
         good = build_with()
