@@ -168,12 +168,26 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>73</b> worklogs · 2026-06-17 – 2026-07-18</p>
+<p class="stat"><b>74</b> worklogs · 2026-06-17 – 2026-07-18</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">46</span></h2>
+<h2>July 2026 <span class="mcount">47</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-19-sdk-hop1-2.11.2-report.html">
+<div class="card-date">2026-07-19</div>
+<div class="card-title">SDK Hop 1 — morselib 2.10.4 → 2.11.2</div>
+<div class="card-ex">The first hop of the staged forward-port that pulls MorseMicro's upstream mm-iot-sdk INTO our vendored tree — morselib 2.10.4 → 2.11.2, keeping our 24 PRs. Three layers on one commit: (1) the upstream refactor from a single global datapath ops table (data-&gt;ops, one active vif) to a per-VIF ops model (two fixed slots VIF_STA/VIF_AP, TX stamped with tx_metadata-&gt;vif_id, RX demuxed by fw vif) — with signature changes to umac_interface_add (+datapath_ops), umac_datapath_tx_frame (5→4 arg), morse_cmd_tx (+skip_errlog, int→enum), and driver_health moved to umac/health_check; (2) re-architecting our all-ESP mesh-gate onto it — deleting datapath_ops_gateway/gw_*/configure_gateway_mode/ap_vif_id and creating native umac_datapath_mesh.c + umac_datapath_ibss.c, mesh on VIF_STA + concurrent AP on VIF_AP; (3) SIX fixes found by on-air regression — get_tx_seq key_type→key_id, mesh config_beacon_timer non-fatal (fw 1.17.8 rejects standalone BSS_BEACON_CONFIG on a mesh vif), mmhalow AP egress vif-tag (0 ICMP → 15/15), an unconditional RX vif-reassignment LUT (concurrent mesh claimed the client's PROBE_REQ so the AP never answered), mmhalow_set_tx_vif for the gate's mesh netif (STA→AP→ip_forward→mesh forwarding), and (6) a twt-assoc REGRESSION — the hostap 2.11.2 forward-port guarded the assoc-time TWT-seed on CONFIG_DRIVER_NL80211_MORSE, which the ESP (MM_IOT) build does not define, so the .twt_conf op compiled out; fixed by adding || defined(MM_IOT). None a re-arch logic bug. Firmware is UNCHANGED at 1.17.8 bench-wide — the ESP .mbin is regenerated from vendor/morse-firmware (the single source of truth) at build time, so the committed submodule mbin is never used and there was no version to reconcile. T0 build matrix green + T2 on-air green (STA, IBSS, TWT, SW-CCMP, A-MPDU, mesh peering/relay, ap-sta-ping 15/15, the concurrent mesh-ap + mesh-ap-multi-twt, ESP↔Linux mesh interop mesh-linux, and twt-assoc — full T2 12 PASS / 0 INCONCLUSIVE). Uncommitted; tagging 2.11.2-esp32-1 is the owner's call.</div>
+<div class="card-meta">8 min · green · SDK forward-port · Hop 1</div>
+</a>
+
+<a class="card" href="2026-07-18-fork-migration-esp-halow-handoff.html">
+<div class="card-date">2026-07-18</div>
+<div class="card-title">Fork migration handoff — mm-esp32-halow → esp-halow</div>
+<div class="card-ex">Scoping + strategy handoff for moving all our morselib work from teapotlaboratories/mm-esp32-halow (the current components/halow submodule) onto teapotlaboratories/esp-halow (the proper fork of the OFFICIAL MorseMicro/esp-halow SDK), then repointing the submodule. This is the long-deferred "fork migration" backlog item, now unblocked (suite green, rimba#36 merged). Verified with gh+git: mm-esp32-halow is STANDALONE (isFork:false, parent:null), 70 commits with base 68ddbd8d "Import morsemicro/halow 2.10.4-esp32-2 (pristine from ESP Component Registry)" — the 69 commits above it = ALL our work across 24 merged PRs (#1–#24: IBSS, 802.11s mesh+SAE/AMPE/CCMP, mesh-gate AP concurrency, TWT, SW-CCMP bulk-AES, A-MPDU, real-RC, accessors). esp-halow forks MorseMicro/esp-halow, tip "mm-iot-sdk: update to 2.12 tag" = Morse SDK 2.12. THREE DECISIVE FINDINGS: (1) DISJOINT histories — git merge-base = none, so no shared-base rebase; commits must be REPLAYED (cherry-pick / format-patch+am -3). (2) VERSION GAP 2.10.4→2.12 — a forward-port across SDK versions, not a clean transplant, conflicts expected. (3) POSSIBLE LAYOUT MISMATCH — ESP Component Registry package vs mm-iot-sdk source tree, so patches may not apply by path; FIRST STEP = diff 68ddbd8d tree vs esphalow/main to map the layout. "Preserve history" = per-commit author/date/msg survive but land as new SHAs on 2.12; "preserve PRs" = recreate (GitHub PRs can't move repos). Strategy options (a) cherry-pick range (b) format-patch+am (c) per-PR replay (d) one cumulative PR. Footguns: submodule gitlink SHA caveat, re-run the WHOLE suite against 2.12, no-commit-work-hours/owner-attribution/branch+PR/review-before-merge, fw-driver parity may force a bench Linux/fw bump. Migration NOT started — owner clearing context to restart fresh.</div>
+<div class="card-meta">4 min · planning · fork migration · handoff</div>
+</a>
 
 <a class="card" href="2026-07-18-bench-stress-and-capture-retry.html">
 <div class="card-date">2026-07-18</div>

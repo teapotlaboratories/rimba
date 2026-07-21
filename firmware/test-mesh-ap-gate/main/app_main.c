@@ -280,6 +280,10 @@ void app_main(void)
     mmhalow_init(NULL);                 /* creates the mesh netif (WIFI_STA_DEF) + boots morselib */
     mmhalow_print_version_info();
     g_mesh_netif = mmhalow_get_netif();
+    /* This netif egresses on the MESH vif (the STA host-slot). Tag it so morselib's per-VIF datapath
+     * routes gateway-forwarded packets out the mesh vif; without this the UNSPECIFIED tag is ambiguous
+     * once the concurrent AP vif comes up and the forward is dropped/misrouted (STA->mesh path dead). */
+    mmhalow_set_tx_vif(MMWLAN_VIF_STA);
 
     mmwlan_override_max_tx_power(1);     /* close-bench RX-overload guard; drop for range */
 
