@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SDK Hop 1 — morselib 2.10.4 → 2.11.2 — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)} .stat .num.warn{color:var(--warn)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}}
+</style>
+<style>
+/* --- flow / pipeline (from index.html design system) --- */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok);background:var(--ok-bg)} .flow .node.err{border-color:var(--err);background:var(--err-bg)}
+.flow.vert{flex-direction:column;align-items:stretch}
+.flow.vert .node{margin:0 0 26px;min-width:0}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* --- diff coloring inside dark <pre> --- */
+pre .del{color:#ff9ca0;display:block} pre .add{color:#7ee2a8;display:block}
+pre .ctx{color:var(--code-fg);display:block} pre .cmt{color:#8894a6}
+
+/* --- two-column compare (before/after) --- */
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:1.3em 0}
+.cmp>div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);min-width:0}
+.cmp h4{margin-top:.2em}
+.cmp .tag{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.cmp .tag.old{color:var(--muted)} .cmp .tag.new{color:var(--accent)}
+@media (max-width:640px){.cmp{grid-template-columns:1fr}}
+
+/* --- fix cards --- */
+.fixhdr{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:1.8em 0 .3em}
+.fixhdr .n{font-size:.8rem;font-weight:800;color:#fff;background:var(--bug);border-radius:8px;
+  padding:2px 9px;letter-spacing:.02em}
+.fixhdr .n.ok{background:var(--ok)}
+.fixhdr h3{margin:0;font-size:1.1rem}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-19 · SDK Hop 1 (2.11.2)</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-19</span>
+    <span class="badge">8 min read</span>
+    <span class="badge ok">T0 + T2 green</span>
+    <span class="badge">SDK forward-port · Hop 1 of 2</span>
+  </div>
+
+  <h1>SDK Hop 1 — morselib&nbsp;2.10.4&nbsp;→&nbsp;2.11.2<br>
+    <small style="font-weight:600;color:var(--muted);font-size:1.05rem">a global-ops&nbsp;→&nbsp;per-VIF datapath refactor, our mesh-gate re-architected onto it, and five debugged fixes</small></h1>
+
+  <p class="lead">Hop 1 of the staged forward-port that pulls MorseMicro's upstream <code>mm-iot-sdk</code>
+  <strong>into</strong> our self-contained vendored tree — upgrading bundled <strong>morselib 2.10.4&nbsp;→&nbsp;2.11.2</strong>
+  while preserving our 24 PRs (IBSS, 802.11s mesh + SAE/AMPE/CCMP, mesh-gate/AP concurrency, TWT, SW-CCMP,
+  A-MPDU, real-RC). Every on-air capability that worked on 2.10.4 works on 2.11.2.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">2.10.4 → 2.11.2</div><div class="lbl">morselib version</div></div>
+    <div class="stat"><div class="num">1.17.8</div><div class="lbl">chip firmware — bench-wide, unchanged</div></div>
+    <div class="stat"><div class="num bug" style="color:var(--bug)">6</div><div class="lbl">fixes found by regression</div></div>
+    <div class="stat"><div class="num ok">12</div><div class="lbl">T2 on-air tests pass (incl. Linux interop)</div></div>
+  </div>
+
+  <div class="callout ok">
+    <p class="ct">✔ Bottom line</p>
+    <p>The upstream refactor swapped a <strong>single global datapath ops table</strong> for a
+    <strong>per-VIF ops model</strong>. We deleted our custom mesh-gateway machinery and re-expressed
+    mesh&nbsp;+&nbsp;AP concurrency natively on it. Six fixes later — <strong>none a re-arch logic bug</strong> —
+    STA, IBSS, TWT, SW-CCMP mesh, A-MPDU, mesh peering/relay, AP↔STA, and the concurrent mesh-gate are all
+    green. Uncommitted; tagging <code>2.11.2-esp32-1</code> is the owner's call.</p>
+  </div>
+
+  <h2 id="layers">What "the hop" actually is — three layers</h2>
+  <p>The whole change sits on one commit over the pristine 2.10.4 base (<code>3c8ded0d</code>):</p>
+  <figure>
+  <div class="flow vert">
+    <div class="node acc"><div class="t">1 · Upstream SDK forward-port (2.10.4 → 2.11.2)</div><div class="s">global <code>data-&gt;ops</code> → per-VIF ops model · new files · API signature changes · <code>driver_health</code>→<code>health_check</code></div></div>
+    <div class="node acc"><div class="t">2 · Re-architect our features onto the per-VIF model</div><div class="s">delete gateway machinery · new <code>umac_datapath_mesh.c</code> + <code>umac_datapath_ibss.c</code> · rebuilt <code>umac_interface.c</code> (two-slot)</div></div>
+    <div class="node acc"><div class="t">3 · Six fixes (firmware unchanged at 1.17.8)</div><div class="s">get_tx_seq · mesh-beacon · AP vif-tag · reassign-LUT · gate mesh-netif tag · twt-assoc hostap-guard</div></div>
+  </div>
+  <figcaption>Three stacked layers. Layer 1 is upstream's; layers 2–3 are ours.</figcaption>
+  </figure>
+
+  <h2 id="arch">1 · The architectural shift: global ops → per-VIF ops</h2>
+  <p>The load-bearing change. On 2.10.4 the datapath kept <strong>one</strong> ops table (<code>data-&gt;ops</code>)
+  and <strong>one</strong> active <code>data-&gt;vif_id</code>. On 2.11.2 each interface owns its ops table in a
+  <strong>two-slot</strong> structure; TX frames carry a stamped <code>tx_metadata-&gt;vif_id</code>, RX frames
+  are demuxed by the firmware's rx vif.</p>
+
+  <figure>
+  <div class="diagram">
+    <svg viewBox="0 0 760 300" role="img" aria-label="Before: one global ops table. After: two per-VIF slots.">
+      <!-- BEFORE -->
+      <text x="20" y="26" font-size="13" font-weight="700" fill="currentColor">2.10.4 — one global ops table</text>
+      <rect x="20" y="44" width="300" height="210" rx="10" fill="none" stroke="#8894a6" stroke-width="1.4"/>
+      <rect x="46" y="86" width="248" height="52" rx="8" fill="#8894a622" stroke="#8894a6"/>
+      <text x="170" y="110" font-size="12" font-weight="700" fill="currentColor" text-anchor="middle">data-&gt;ops</text>
+      <text x="170" y="127" font-size="10.5" fill="#8894a6" text-anchor="middle">single table, swapped per mode</text>
+      <rect x="46" y="160" width="248" height="34" rx="8" fill="none" stroke="#8894a6"/>
+      <text x="170" y="181" font-size="11" fill="#8894a6" text-anchor="middle">data-&gt;vif_id  (one active vif)</text>
+      <text x="170" y="228" font-size="11" fill="#c0392b" font-weight="700" text-anchor="middle">mesh + AP share it via a custom "gateway" table</text>
+      <!-- arrow -->
+      <path d="M 332 150 L 420 150" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#ah)"/>
+      <text x="376" y="142" font-size="11" fill="#7c3aed" font-weight="700" text-anchor="middle">refactor</text>
+      <defs><marker id="ah" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#7c3aed"/></marker></defs>
+      <!-- AFTER -->
+      <text x="440" y="26" font-size="13" font-weight="700" fill="currentColor">2.11.2 — per-VIF, two slots</text>
+      <rect x="440" y="44" width="300" height="210" rx="10" fill="none" stroke="#5b93ff" stroke-width="1.4"/>
+      <rect x="460" y="70" width="260" height="74" rx="8" fill="#5b93ff18" stroke="#5b93ff"/>
+      <text x="590" y="90" font-size="12" font-weight="700" fill="currentColor" text-anchor="middle">VIF_STA slot</text>
+      <text x="590" y="107" font-size="10.5" fill="#5b93ff" text-anchor="middle">ops_sta / ops_mesh / ops_ibss</text>
+      <text x="590" y="123" font-size="10" fill="#8894a6" text-anchor="middle">own ops table + fw vif id</text>
+      <text x="590" y="137" font-size="10" fill="#8894a6" text-anchor="middle">STA · MESH · IBSS live here</text>
+      <rect x="460" y="156" width="260" height="66" rx="8" fill="#7c3aed14" stroke="#7c3aed"/>
+      <text x="590" y="176" font-size="12" font-weight="700" fill="currentColor" text-anchor="middle">VIF_AP slot</text>
+      <text x="590" y="193" font-size="10.5" fill="#7c3aed" text-anchor="middle">ops_ap</text>
+      <text x="590" y="209" font-size="10" fill="#8894a6" text-anchor="middle">concurrent SoftAP</text>
+      <text x="590" y="243" font-size="10.5" fill="#1a8a4a" font-weight="700" text-anchor="middle">RX by fw vif · TX by tx_metadata-&gt;vif_id</text>
+    </svg>
+  </div>
+  <figcaption>The two-slot model natively subsumes what our bespoke "gateway" table used to do.</figcaption>
+  </figure>
+
+  <div class="cmp">
+    <div>
+      <span class="tag old">Before · 2.10.4</span>
+      <pre><code><span class="cmt">/* one table, one vif */</span>
+<span class="ctx">struct umac_datapath_data {</span>
+<span class="ctx">  const struct umac_datapath_ops *ops;</span>
+<span class="ctx">  uint16_t vif_id;</span>
+<span class="ctx">};</span>
+
+<span class="cmt">/* TX: 5-arg, vif passed in */</span>
+<span class="ctx">umac_datapath_tx_frame(</span>
+<span class="ctx">  umacd, pkt, enc, ra, vif_id);</span></code></pre>
+    </div>
+    <div>
+      <span class="tag new">After · 2.11.2</span>
+      <pre><code><span class="cmt">/* two fixed slots, each with ops */</span>
+<span class="ctx">struct umac_interface_data {</span>
+<span class="ctx">  umac_interface_vif_data data_sta;</span>
+<span class="ctx">  umac_interface_vif_data data_ap;</span>
+<span class="ctx">};</span>
+
+<span class="cmt">/* TX: 4-arg, vif via metadata */</span>
+<span class="ctx">umac_datapath_tx_frame(</span>
+<span class="ctx">  umacd, pkt, enc, ra);</span></code></pre>
+    </div>
+  </div>
+
+  <h4>API signatures that changed — and the callers we adapted</h4>
+  <table>
+    <thead><tr><th>Symbol</th><th>2.10.4</th><th>2.11.2</th><th>impact on us</th></tr></thead>
+    <tbody>
+      <tr><td><code>umac_interface_add()</code></td><td><code>(type, bssid)</code> → vif_id</td><td><code>(type, datapath_ops, bssid)</code></td><td>every add supplies its ops table</td></tr>
+      <tr><td><code>umac_datapath_tx_frame()</code></td><td>5-arg (<code>…, vif_id</code>)</td><td>4-arg (<code>tx_metadata-&gt;vif_id</code>)</td><td>all TX callers re-stamped</td></tr>
+      <tr><td><code>morse_cmd_tx()</code></td><td>5-arg, <code>int</code></td><td>6-arg (<code>…, skip_errlog</code>), <code>enum</code></td><td>mesh cmds add <code>,false</code> + enum</td></tr>
+      <tr><td><code>mmdrv_add_if / update_sta_state</code></td><td><code>int</code></td><td><code>enum mmwlan_status</code></td><td>return-type propagation</td></tr>
+      <tr><td><code>umac_datapath_ops</code> struct</td><td>—</td><td><code>+update_stad_state_rx</code>, <code>+handle_frame_unknown_sta</code>, <code>+type</code></td><td>ops tables re-shaped</td></tr>
+      <tr><td>offload / standby / whitelist</td><td>present</td><td><strong>removed</strong></td><td>zero source usage</td></tr>
+      <tr><td><code>driver_health.c</code></td><td>present</td><td><strong>moved</strong> → <code>umac/health_check/</code></td><td>CMake SRCS re-synced</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="rearch">2 · Re-architecting the mesh-gate onto per-VIF</h2>
+  <p>Our biggest feature — the <strong>all-ESP mesh-gate</strong> (mesh primary + a concurrent SoftAP on one
+  MM6108, L3-routing between them) — was built on the old global model with a bespoke
+  <code>datapath_ops_gateway</code> that served <em>both</em> stads. That model is gone. The owner's call was
+  <strong>"re-arch fully clean — delete the fallbacks, trust the FW vif tagging."</strong></p>
+
+  <div class="cmp">
+    <div>
+      <span class="tag old">Deleted (our gateway machinery)</span>
+      <pre><code><span class="del">- datapath_ops_gateway</span>
+<span class="del">- gw_*  (helpers)</span>
+<span class="del">- configure_gateway_mode()</span>
+<span class="del">- data-&gt;ap_vif_id</span></code></pre>
+    </div>
+    <div>
+      <span class="tag new">Created (native per-VIF tables)</span>
+      <pre><code><span class="add">+ umac_datapath_mesh.c  (250 L)</span>
+<span class="add">+   umac_datapath_ops_mesh → VIF_STA</span>
+<span class="add">+ umac_datapath_ibss.c  (191 L)</span>
+<span class="add">+   umac_datapath_ops_ibss → VIF_STA</span></code></pre>
+    </div>
+  </div>
+
+  <figure>
+  <div class="diagram">
+    <svg viewBox="0 0 720 250" role="img" aria-label="Mesh-gate on the per-VIF model: mesh on VIF_STA, AP on VIF_AP, one radio.">
+      <rect x="250" y="94" width="220" height="62" rx="10" fill="#0c101822" stroke="#8894a6" stroke-width="1.4"/>
+      <text x="360" y="120" font-size="12" font-weight="700" fill="currentColor" text-anchor="middle">one MM6108 radio</text>
+      <text x="360" y="138" font-size="10.5" fill="#8894a6" text-anchor="middle">S1G ch 27</text>
+      <!-- mesh slot -->
+      <rect x="30" y="40" width="200" height="52" rx="9" fill="#5b93ff18" stroke="#5b93ff"/>
+      <text x="130" y="61" font-size="12" font-weight="700" fill="currentColor" text-anchor="middle">MESH · VIF_STA slot</text>
+      <text x="130" y="78" font-size="10" fill="#5b93ff" text-anchor="middle">ops_mesh · 10.9.9.x</text>
+      <path d="M 230 66 C 280 66, 260 108, 300 116" fill="none" stroke="#5b93ff" stroke-width="2"/>
+      <!-- ap slot -->
+      <rect x="30" y="158" width="200" height="52" rx="9" fill="#7c3aed14" stroke="#7c3aed"/>
+      <text x="130" y="179" font-size="12" font-weight="700" fill="currentColor" text-anchor="middle">SoftAP · VIF_AP slot</text>
+      <text x="130" y="196" font-size="10" fill="#7c3aed" text-anchor="middle">ops_ap · 192.168.12.1</text>
+      <path d="M 230 184 C 280 184, 260 140, 300 132" fill="none" stroke="#7c3aed" stroke-width="2"/>
+      <!-- L3 routing note -->
+      <text x="490" y="100" font-size="11" font-weight="700" fill="#1a8a4a">RX: demux by fw vif</text>
+      <text x="490" y="118" font-size="11" font-weight="700" fill="#1a8a4a">TX: tx_metadata-&gt;vif_id</text>
+      <text x="490" y="140" font-size="10.5" fill="#8894a6">ip_forward bridges</text>
+      <text x="490" y="155" font-size="10.5" fill="#8894a6">AP subnet ⇄ mesh subnet</text>
+      <text x="360" y="182" font-size="10.5" fill="#8894a6" text-anchor="middle">dequeue drains both slots</text>
+    </svg>
+  </div>
+  <figcaption>MESH registers on VIF_STA, the concurrent AP on VIF_AP — no custom gateway table needed.</figcaption>
+  </figure>
+
+  <h2 id="fw">3 · Firmware: uniformly 1.17.8 (no version change)</h2>
+  <div class="callout warn">
+    <p class="ct">⚠ Correction to record</p>
+    <p>An earlier draft framed this as a <em>"1.17.6 → 1.17.8 firmware-parity bump."</em> That was wrong. The
+    bench — all 3 ESP nodes <strong>and</strong> all 4 Linux nodes — runs the identical chip firmware
+    <strong>1.17.8</strong> (<code>mm6108.bin</code>, 480664&nbsp;B, md5 <code>cfe56db2</code>), and has for the
+    whole HaLow effort.</p>
+  </div>
+  <p>The reason it's identical is the build system. <code>cmake/mm-fw-gen/</code> treats
+  <strong><code>vendor/morse-firmware</code> as the single source of truth</strong> and <em>regenerates</em> the
+  ESP-loadable Morse-TLV <code>.mbin</code> from that ELF <strong>at build time</strong>
+  (<code>convert-bin-to-mbin.py</code>). Per the generator's own header:</p>
+  <pre><code><span class="cmt">/* "Nothing firmware-related is committed under components/; the firmware</span>
+<span class="cmt">    version is whatever vendor/morse-firmware is pinned at." */</span></code></pre>
+  <p>So the <code>mm6108.mbin</code> <strong>committed inside the morselib submodule</strong> is
+  <strong>never used</strong> — a dormant artifact of the vendored SDK package. I bumped it (399468 → 399796&nbsp;B)
+  to 2.11.2's blob for tree-fidelity, but it has <strong>zero build effect</strong>: the ESP loads the same 1.17.8
+  binary the Linux nodes do, regenerated from <code>vendor/morse-firmware</code>, before and after. There was
+  <strong>no firmware version to reconcile</strong>; fix&nbsp;#2 is a 2.11.2 mesh-vif quirk on the unchanged fw.</p>
+
+  <h2 id="fixes">4 · The fixes</h2>
+  <p>Regression testing surfaced five real breaks. The through-line: the re-arch's <em>structure</em> was sound —
+  the bugs were latent assumptions in our glue, one-per-VIF-model corners the global model had masked, and one
+  mesh-vif/beacon-config quirk on the (unchanged) 1.17.8 firmware that the 2.11.2 setup surfaced.</p>
+
+  <div class="fixhdr"><span class="n ok">1</span><h3>get_tx_seq — a key <em>type</em> where a key <em>id</em> was expected</h3></div>
+  <p>Upstream moved the <code>key_type → key_id</code> resolution out of <code>connection_keys</code>; our
+  resolution kept the enum, so a key <strong>type</strong> flowed into a slot that wanted a key <strong>id</strong>
+  — corrupting the mesh SW-CCMP packet number.</p>
+  <pre><code><span class="cmt">/* umac_keys.h / .c + umac_datapath.c */</span>
+<span class="del">- uint64_t umac_keys_get_tx_seq(stad, enum umac_key_type key_type);</span>
+<span class="add">+ uint64_t umac_keys_get_tx_seq(stad, uint8_t key_id);</span>
+<span class="del">- seq = umac_keys_get_tx_seq(stad, key_type);</span>
+<span class="add">+ seq = umac_keys_get_tx_seq(stad, (uint8_t)key_id);</span></code></pre>
+
+  <div class="fixhdr"><span class="n ok">2</span><h3>Mesh vif wouldn't start — fw 1.17.8 rejects a standalone beacon config</h3></div>
+  <p>The mesh vif failed at <code>mmwlan_mesh_start</code>: the firmware returned <code>fw_status=14</code> to a
+  standalone <code>BSS_BEACON_CONFIG</code>. The firmware is 1.17.8 the whole time (§3) — what changed is the
+  <strong>2.11.2 mesh-vif bring-up</strong>, which trips a rejection the 2.10.4 path didn't. The Linux 1.17.8
+  driver confirms the fix's shape: it doesn't send <code>config_beacon_timer</code> on the initial mesh start
+  (<code>MESH_CONFIG(enable_beaconing)</code> arms beaconing). Following that reference, we made it non-fatal.</p>
+  <pre><code><span class="ctx">  ret = mmdrv_config_beacon_timer(vif_id, true);</span>
+<span class="del">- if (ret != 0) { goto fail; }</span>
+<span class="add">+ if (ret != 0) {</span>
+<span class="add">+   /* fw 1.17.8 rejects standalone BSS_BEACON_CONFIG (fw_status 14); Linux doesn't send it on</span>
+<span class="add">+    * the initial mesh start — MESH_CONFIG(enable_beaconing) arms beaconing. Non-fatal. */</span>
+<span class="add">+   MMLOG_ERR("MESH: config_beacon_timer fw_status=%d (non-fatal on 1.17.8)\n", ret);</span>
+<span class="add">+ }</span></code></pre>
+  <p><span class="badge ok">verified</span> mesh vif up + beaconing → mesh-peering, mesh-relay, ampdu-cap PASS.</p>
+
+  <div class="fixhdr"><span class="n ok">3</span><h3>AP SoftAP: 0 ICMP replies — egress left the VIF UNSPECIFIED</h3></div>
+  <p>A STA associated and completed the 4-way, but every ICMP reply died at
+  <code>mmwlan_tx_pkt: Unable to infer VIF ID</code>. Root cause is in <strong>our ESP glue</strong>
+  (<code>mmhalow.c</code>): <code>halow_transmit</code> left <code>.vif = 0 = UNSPECIFIED</code>. Under the old
+  global model that resolved via the single <code>data-&gt;vif_id</code>; the per-VIF inference bails when both a
+  STA vif and an AP vif are valid — and mwlan <em>always</em> boots a STA vif, so a plain AP app is ambiguous.</p>
+  <pre><code><span class="cmt">/* components/halow/mmhalow.c — halow_transmit + mmhalow.h field */</span>
+<span class="add">+ mmhalow_netif_driver_t *driver = (mmhalow_netif_driver_t *)h;</span>
+<span class="ctx">  struct mmwlan_tx_metadata metadata = {</span>
+<span class="ctx">    .tid = 0,</span>
+<span class="add">+   .vif = driver->tx_vif,     /* was implicitly UNSPECIFIED */</span>
+<span class="ctx">  };</span>
+<span class="cmt">/* mmhalow_wifi_start (AP path): */</span>
+<span class="add">+ morse_drv->tx_vif = MMWLAN_VIF_AP;</span></code></pre>
+  <p><span class="badge ok">verified</span> <code>ap-sta-ping</code> → 15/15 ICMP (was 0/15).</p>
+
+  <div class="fixhdr"><span class="n ok">4</span><h3>Mesh-gate: a new STA can't associate — the reassign LUT only ran on INVALID</h3></div>
+  <p>With mesh + AP concurrent, the firmware tags a client's <strong>broadcast PROBE_REQ</strong> with the
+  <em>mesh</em> vif (a valid id, not INVALID). The reassignment LUT (<code>PROBE_REQ → AP</code>) only ran on an
+  INVALID fw vif, so the probe went to the mesh ops and <strong>the AP never answered</strong>. Instrumentation
+  showed <code>PROBE_REQ vif=0</code>; after the fix, <code>probe/auth/assoc/action all vif=1 (AP)</code>.</p>
+  <pre><code><span class="cmt">/* umac_datapath.c — apply the LUT authoritatively (no-op unless the target vif exists) */</span>
+<span class="del">- if (vif_id == MMDRV_VIF_ID_INVALID) {</span>
+<span class="del">-   reassign(umacd, metadata, fvts, lut, N);  /* only on INVALID */</span>
+<span class="del">- }</span>
+<span class="add">+ bool lut_managed = reassign(umacd, metadata, fvts, lut, N);  /* always; now returns bool */</span>
+<span class="add">+ vif_id = umac_interface_get_vif_id_from_rx_metadata(metadata);</span>
+<span class="add">+ if (vif_id == MMDRV_VIF_ID_INVALID && !lut_managed)</span>
+<span class="add">+   MMLOG_WRN("RX VIF unknown ...");   /* warn lifted out of reassign */</span></code></pre>
+  <p><span class="badge ok">verified</span> STA associates to the concurrent gate AP · mesh-peering still PASS (no mesh regression).</p>
+
+  <div class="fixhdr"><span class="n ok">5</span><h3>Mesh-gate: forwarding STA → mesh was dead — the gate's mesh netif egressed UNSPECIFIED</h3></div>
+  <p>Association fixed, but the STA got <strong>0/15 replies from the far mesh node</strong>. The gate's mesh
+  netif is mmhalow's default, and the gate calls <code>mmwlan_mesh_start</code> directly (not
+  <code>mmhalow_wifi_start</code>), so its <code>tx_vif</code> stayed UNSPECIFIED — ambiguous once the concurrent
+  AP exists, so the mesh-bound forward was dropped. A small new API lets the gate tag its mesh netif STA.</p>
+  <pre><code><span class="cmt">/* components/halow/mmhalow.{h,c} — new API */</span>
+<span class="add">+ void mmhalow_set_tx_vif(enum mmwlan_vif vif);</span>
+<span class="cmt">/* firmware/test-mesh-ap-gate/main/app_main.c */</span>
+<span class="ctx">  g_mesh_netif = mmhalow_get_netif();</span>
+<span class="add">+ mmhalow_set_tx_vif(MMWLAN_VIF_STA);   /* mesh = STA host-slot; morselib resolves STA→MESH */</span></code></pre>
+  <p><span class="badge ok">verified</span> <code>mesh-ap</code> PASS (full STA→far-node ping) · <code>mesh-ap-multi-twt</code> PASS.</p>
+
+  <div class="fixhdr"><span class="n ok">6</span><h3>twt-assoc regression — the assoc-time TWT seed was compiled out by a <code>#if</code> guard</h3></div>
+  <div class="callout warn">
+    <p class="ct">⚠ Correction to the record</p>
+    <p>The first draft listed <code>twt-assoc</code>'s INCONCLUSIVE as a "pre-existing accessor limitation, not a
+    regression." That was <strong>wrong</strong> — it <strong>PASSED on 2.10.4</strong> (2026-07-17) and only INCO'd
+    on 2.11.2, a genuine Hop-1 <strong>regression</strong>.</p>
+  </div>
+  <p>The hostap 2.11.2 forward-port tightened the assoc-time TWT-seed guard in <code>wpa_supplicant.c</code> (two
+  sites). The ESP build uses the <code>mmwlan</code> driver and defines <strong><code>MM_IOT</code></strong>, not
+  <code>CONFIG_DRIVER_NL80211_MORSE</code> — so the whole TWT-config block <strong>compiled out</strong>: the
+  <code>.twt_conf</code> op never fired → no agreement seeded → the assoc request carried no TWT IE → INCONCLUSIVE.
+  It <strong>compiles fine either way</strong> (why compile-verify missed it — the flagged 268-file hostap bench-risk).</p>
+  <pre><code><span class="del">- #if defined(CONFIG_S1G_TWT) && defined(CONFIG_DRIVER_NL80211_MORSE)</span>
+<span class="add">+ #if defined(CONFIG_S1G_TWT) && (defined(CONFIG_DRIVER_NL80211_MORSE) || defined(MM_IOT))</span></code></pre>
+  <p><span class="badge ok">verified</span> serial probes show the chain light up (<code>.twt_conf</code> fires →
+  agreement → assoc-req IE → AP grant → INSTALLED flow 0) + harness <code>twt-assoc</code> PASS → full T2 <strong>12/0</strong>.</p>
+
+  <div class="callout bug">
+    <p class="ct">The debugging arc</p>
+    <div class="flow" style="margin:.4em 0 0">
+      <div class="node err"><div class="t">mesh vif dead</div><div class="s">fw_status 14 → #2</div></div>
+      <div class="node err"><div class="t">AP 0 ICMP</div><div class="s">infer VIF → #3</div></div>
+      <div class="node err"><div class="t">gate no assoc</div><div class="s">probe→mesh → #4</div></div>
+      <div class="node err"><div class="t">gate no fwd</div><div class="s">mesh tx → #5</div></div>
+      <div class="node err"><div class="t">twt-assoc INCO</div><div class="s">#if guard → #6</div></div>
+      <div class="node ok"><div class="t">all green</div><div class="s">12 T2 pass</div></div>
+    </div>
+  </div>
+
+  <h2 id="verify">5 · Verification</h2>
+  <div class="stats">
+    <div class="stat"><div class="num ok">~25</div><div class="lbl">esp32s3 apps compile (T0)</div></div>
+    <div class="stat"><div class="num ok">12</div><div class="lbl">T2 on-air PASS</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">INCONCLUSIVE</div></div>
+    <div class="stat"><div class="num">0</div><div class="lbl">real regressions</div></div>
+  </div>
+  <table>
+    <thead><tr><th>Test</th><th>Result</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>swccmp · ibss · twt · multi-twt · ampdu-cap</td><td><span class="badge ok">PASS</span></td><td>datapath + mesh SW-CCMP + A-MPDU</td></tr>
+      <tr><td>ap-sta-ping</td><td><span class="badge ok">PASS</span></td><td>15/15 (fix #3)</td></tr>
+      <tr><td>mesh-peering · mesh-relay</td><td><span class="badge ok">PASS</span></td><td>ESP↔ESP ESTAB + multi-hop</td></tr>
+      <tr><td><strong>mesh-ap</strong></td><td><span class="badge ok">PASS</span></td><td>concurrent gate, full STA→far-node (fixes #4+#5)</td></tr>
+      <tr><td><strong>mesh-ap-multi-twt</strong></td><td><span class="badge ok">PASS</span></td><td>gate + TWT</td></tr>
+      <tr><td><strong>mesh-linux</strong></td><td><span class="badge ok">PASS</span></td><td>ESP↔Linux 802.11s mesh interop — ESP peers with chronite's <code>rimba-smesh</code> + pings 10.9.9.2</td></tr>
+      <tr><td><strong>twt-assoc</strong></td><td><span class="badge ok">PASS</span></td><td>assoc-embedded TWT INSTALLED (fix #6 — the hostap MM_IOT guard)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="files">6 · Files changed</h2>
+  <p>The working tree carries the whole hop against base <code>3c8ded0d</code> (pristine 2.10.4):</p>
+  <ul>
+    <li><strong>Firmware blobs:</strong> <code>mm6108.mbin</code>, <code>mm8108b2-rl.mbin</code> (1.17.8) + the prebuilt <code>libmorse*.a</code> set.</li>
+    <li><strong>Upstream new files:</strong> <code>common.c</code>, <code>consbuf.c</code>, <code>coredump.{c,h}</code>, <code>umac_datapath_sta.c</code>, <code>s1g_action.{c,h}</code>, <code>umac_health_check.*</code>, <code>reachable_address.*</code>, <code>umac_relay.h</code>, hostap additions.</li>
+    <li><strong>Upstream deleted:</strong> <code>driver/health/driver_health.{c,h}</code> → <code>umac/health_check/</code>.</li>
+    <li><strong>Our new files:</strong> <code>umac_datapath_mesh.c</code>, <code>umac_datapath_ibss.c</code>.</li>
+    <li><strong>Our edits (5 fixes):</strong> <code>umac_keys.{c,h}</code>, <code>umac_datapath.c</code>, <code>umac_mesh.c</code>; <code>mmhalow.{c,h}</code>; <code>test-mesh-ap-gate/main/app_main.c</code>.</li>
+    <li><strong>Heavily churned by the forward-port:</strong> <code>driver.c</code>, <code>command.c</code>, <code>umac_interface.c</code>, <code>umac.c</code>, <code>umac_ap.c</code>, <code>mmwlan.h</code>, <code>mmdrv.h</code>, the hostap tree.</li>
+  </ul>
+
+  <h2 id="next">7 · What's next</h2>
+  <div class="callout">
+    <ol style="margin:.2em 0">
+      <li><strong>Tag <code>2.11.2-esp32-1</code></strong> + commit the six fixes — owner's call (no-push-work-hours · commits-are-owner-identity · /review-before-merge). <code>git add</code> clears the <code>UU</code> index state on <code>umac_keys.h</code> / <code>umac_datapath.c</code> from the 3-way merge.</li>
+      <li><strong>Hop 2 (2.11.2 → 2.12.3)</strong> — flagged <em>additive</em> (relay subsystem + DPP QR), then full compile-verify, full regression, repoint the superproject gitlink.</li>
+    </ol>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#layers">Three layers</a></li>
+    <li><a href="#arch">Global → per-VIF ops</a></li>
+    <li><a href="#rearch">Mesh-gate re-arch</a></li>
+    <li><a href="#fw">Firmware: 1.17.8</a></li>
+    <li><a href="#fixes">The fixes</a></li>
+    <li><a href="#verify">Verification</a></li>
+    <li><a href="#files">Files changed</a></li>
+    <li><a href="#next">What's next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-19-sdk-hop1-2.11.2-report</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

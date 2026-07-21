@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fork migration handoff — mm-esp32-halow → esp-halow — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)} .stat .num.warn{color:var(--warn)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-18 · handoff</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-18</span>
+    <span class="badge">4 min read</span>
+    <span class="badge warn">planning · NOT started</span>
+    <span class="badge bug">fork migration · handoff</span>
+  </div>
+
+  <h1>Fork migration handoff — mm-esp32-halow → esp-halow<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">disjoint histories + a 2.10.4 → 2.12 version gap = a forward-port, not a transplant</small></h1>
+
+  <p class="lead">Move all of our morselib work from <code>teapotlaboratories/mm-esp32-halow</code> (the
+  current <code>components/halow</code> submodule) onto <code>teapotlaboratories/esp-halow</code> — the
+  proper fork of the <strong>official</strong> <code>MorseMicro/esp-halow</code> SDK — preserving history +
+  PRs if possible, then repoint the submodule. This is the long-deferred <strong>fork-migration</strong>
+  backlog item, now unblocked (suite green, rimba#36 merged). Scoping done; migration not started.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">24</div><div class="lbl">merged PRs to replay (#1–#24)</div></div>
+    <div class="stat"><div class="num">69</div><div class="lbl">commits over the import base</div></div>
+    <div class="stat"><div class="num warn">2.10.4 → 2.12</div><div class="lbl">Morse SDK version gap</div></div>
+    <div class="stat"><div class="num err">disjoint</div><div class="lbl">no common git ancestor</div></div>
+  </div>
+
+  <h2 id="repos">The two repos</h2>
+  <table>
+    <thead><tr><th></th><th>mm-esp32-halow (ours)</th><th>esp-halow (target)</th></tr></thead>
+    <tbody>
+      <tr><td>Fork?</td><td><strong>standalone</strong> — isFork:false, parent:null</td><td><strong>fork of MorseMicro/esp-halow</strong> (official)</td></tr>
+      <tr><td>Tip</td><td><code>935c6b82</code> (merge of PR #24)</td><td><code>7a97b8ec</code> "mm-iot-sdk: update to 2.12 tag"</td></tr>
+      <tr><td>Base SDK</td><td><strong>2.10.4-esp32-2</strong> (ESP Component Registry)</td><td><strong>2.12</strong> (mm-iot-sdk layout)</td></tr>
+      <tr><td>Our work</td><td>69 commits over <code>68ddbd8d</code>, 24 merged PRs</td><td>none of ours yet</td></tr>
+    </tbody>
+  </table>
+  <p>Import boundary in ours: <code>68ddbd8d Import morsemicro/halow 2.10.4-esp32-2 (pristine)</code>.
+  Everything above it is ours — the range <code>68ddbd8d..origin/main</code>.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 260" role="img" aria-label="Two disjoint fork histories with a replay arrow from ours onto esp-halow">
+        <!-- ours -->
+        <text x="20" y="40" font-size="13" font-weight="700" fill="currentColor">mm-esp32-halow (ours, standalone)</text>
+        <circle cx="40" cy="80" r="7" fill="#8894a6"/>
+        <text x="34" y="112" font-size="10" fill="#8894a6">68ddbd8d</text>
+        <text x="20" y="126" font-size="10" fill="#8894a6">import 2.10.4</text>
+        <line x1="47" y1="80" x2="120" y2="80" stroke="#8894a6" stroke-width="2"/>
+        <circle cx="130" cy="80" r="7" fill="#5b93ff"/><circle cx="200" cy="80" r="7" fill="#5b93ff"/><circle cx="270" cy="80" r="7" fill="#5b93ff"/>
+        <line x1="137" y1="80" x2="193" y2="80" stroke="#5b93ff" stroke-width="2"/>
+        <line x1="207" y1="80" x2="263" y2="80" stroke="#5b93ff" stroke-width="2"/>
+        <text x="130" y="60" font-size="10" fill="#5b93ff">69 commits · 24 PRs (IBSS, mesh, TWT, SW-CCMP, A-MPDU…)</text>
+        <!-- target -->
+        <text x="20" y="185" font-size="13" font-weight="700" fill="currentColor">esp-halow (fork of MorseMicro/esp-halow)</text>
+        <circle cx="40" cy="220" r="7" fill="#8894a6"/><circle cx="130" cy="220" r="7" fill="#8894a6"/><circle cx="270" cy="220" r="7" fill="#8894a6"/>
+        <line x1="47" y1="220" x2="263" y2="220" stroke="#8894a6" stroke-width="2"/>
+        <text x="300" y="224" font-size="11" font-weight="700" fill="#b7791f">7a97b8ec · 2.12 tip</text>
+        <!-- disjoint marker -->
+        <text x="430" y="80" font-size="11" fill="#c0392b" font-weight="700">no shared ancestor</text>
+        <text x="430" y="96" font-size="10" fill="#8894a6">(git merge-base = none)</text>
+        <!-- replay arrow -->
+        <path d="M 300 90 C 360 130, 360 175, 300 210" fill="none" stroke="#7c3aed" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#a)"/>
+        <defs><marker id="a" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#7c3aed"/></marker></defs>
+        <text x="360" y="150" font-size="11" fill="#7c3aed" font-weight="700">replay</text>
+        <text x="360" y="165" font-size="10" fill="#8894a6">cherry-pick / am -3</text>
+        <text x="360" y="182" font-size="10" fill="#8894a6">+ resolve 2.10.4→2.12</text>
+      </svg>
+    </div>
+    <figcaption>Because the histories share no commit objects, our range can't be rebased onto a common
+    base — it must be <strong>replayed</strong> onto esp-halow and forward-ported across the version gap.</figcaption>
+  </figure>
+
+  <h2 id="findings">The three decisive findings</h2>
+  <div class="callout err">
+    <p class="ct">1 · Disjoint histories</p>
+    <p><code>git merge-base origin/main esphalow/main</code> → <strong>no common ancestor</strong>. Ours was
+    a fresh squashed import, so it shares no commit objects with esp-halow. No shared base to rebase onto —
+    replay via cherry-pick or <code>git format-patch … | git am -3</code>.</p>
+  </div>
+  <div class="callout warn">
+    <p class="ct">2 · Version gap 2.10.4 → 2.12</p>
+    <p>Our diffs were written against 2.10.4; the target is 2.12. A <strong>forward-port across SDK
+    versions</strong>, not a clean transplant — expect conflicts where 2.12 moved the code our patches touch.</p>
+  </div>
+  <div class="callout warn">
+    <p class="ct">3 · Possible layout mismatch</p>
+    <p>Ours imported the <em>ESP Component Registry package</em>; esp-halow is the <em>mm-iot-sdk source
+    tree</em>. Layouts may differ, so patches may not apply by path. <strong>First step: diff the
+    <code>68ddbd8d</code> tree vs <code>esphalow/main</code> to map the layout before choosing a strategy.</strong></p>
+  </div>
+
+  <h2 id="preserve">What "preserve history + PRs" can mean here</h2>
+  <ul>
+    <li><strong>Commit history:</strong> per-commit author/date/message survive cherry-pick / <code>git am</code>,
+      but land as <strong>new SHAs on the 2.12 base</strong> with conflict-altered diffs — not a SHA-preserving
+      transplant. Be honest about that with the owner.</li>
+    <li><strong>PRs:</strong> GitHub PRs can't move across repos. "Preserve PRs" ≈ <strong>recreate</strong> them
+      (replay each of the 24 as its own branch/PR), or land fewer logical PRs. Numbers + threads won't transfer.</li>
+  </ul>
+
+  <h2 id="strategy">Strategy options (decide with the owner)</h2>
+  <table>
+    <thead><tr><th>Option</th><th>Preserves</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr><td>(a) Cherry-pick <code>68ddbd8d..main</code></td><td>per-commit history</td><td>heaviest conflicts</td></tr>
+      <tr><td>(b) <code>format-patch</code> → <code>git am -3</code></td><td>per-commit history</td><td>same, better 3-way tooling</td></tr>
+      <tr><td>(c) Replay per-PR (24 branches/PRs)</td><td>PR structure</td><td>most overhead</td></tr>
+      <tr><td>(d) One cumulative forward-port PR</td><td>—</td><td>simplest; loses granularity</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="footguns">Footguns</h2>
+  <ul>
+    <li><strong>Submodule gitlink SHA caveat</strong> — merge submodule PR(s) so the superproject gitlink
+      resolves on merged <code>main</code> (rebase rewrites SHAs; see <code>.ai/AGENTS.md</code>).</li>
+    <li><strong>Re-run the WHOLE regression suite against 2.12</strong> after repointing — a stack bump is
+      exactly what the suite guards; nothing is done until T0/T1/T2/tp/dscycle re-verify.</li>
+    <li><strong>Standing rules:</strong> no commit/push weekday 09:00–16:59, owner-attributed only, code →
+      branch+PR, <strong>/review before merge</strong>. Bench radio-silent; connect by hostname.</li>
+    <li><strong>fw/driver parity</strong> — the 2.10.4→2.12 bump may force a matching Linux driver / MM6108
+      fw bump on the bench so both sides stay on one version.</li>
+    <li>An <code>esphalow</code> remote was added inside <code>components/halow</code> and <code>esphalow/main</code>
+      fetched during analysis — harmless local-only remote, left for the fresh session.</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0"><strong>Next step:</strong> owner clears context and restarts.
+  Fresh session: (1) diff <code>68ddbd8d</code> vs <code>esphalow/main</code> to map the layout, (2) pick a
+  replay strategy with the owner, (3) forward-port + resolve conflicts, (4) repoint <code>components/halow</code>
+  and re-run the full suite.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#repos">The two repos</a></li>
+    <li><a href="#findings">Three findings</a></li>
+    <li><a href="#preserve">Preserve history + PRs</a></li>
+    <li><a href="#strategy">Strategy options</a></li>
+    <li><a href="#footguns">Footguns</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-18-fork-migration-esp-halow-handoff</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
