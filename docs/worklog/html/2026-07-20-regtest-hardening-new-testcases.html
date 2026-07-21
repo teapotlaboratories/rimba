@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Regtest hardening + 3 new mesh T2 tests — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-20</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-20</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ bench-verified on 2.10.4</span>
+    <span class="badge bug">regtest · mesh · harness</span>
+  </div>
+
+  <h1>Regtest hardening + 3 new mesh T2 tests<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">developed on the pre-forward-port 2.10.4 baseline · 3/3 PASS</small></h1>
+
+  <p class="lead">Hardened the <code>tools/regtest</code> suite and added three on-air (T2) test cases, developed against the known-good <strong>morselib 2.10.4</strong> baseline (<code>3c8ded0d</code>) so a later failure — including against the 2.12.3 forward-port — is a real regression, not a mis-calibrated test.</p>
+
+  <div class="callout ok"><p class="ct">Bottom line</p>
+    <p>All three new tests <strong>PASS on the 2.10.4 baseline</strong> (<code>T2: 6 pass, 0 fail, 0 skip</code>), plus Batch A's 10 host-side unit tests. No timing tuning was needed. The suite grew from 12 to 15 on-air tests; each new test guards a real behavior using only <em>existing</em> accessors, so it carries zero forward-port cost.</p></div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">3 / 3</div><div class="lbl">new tests PASS on 2.10.4</div></div>
+    <div class="stat"><div class="num acc">12 → 15</div><div class="lbl">T2 on-air tests</div></div>
+    <div class="stat"><div class="num ok">10</div><div class="lbl">Batch A unit tests (make test-unit)</div></div>
+    <div class="stat"><div class="num">0</div><div class="lbl">forward-port cost (existing accessors)</div></div>
+  </div>
+
+  <div class="callout warn"><p class="ct">Footgun for the next session</p>
+    <p>The submodule is checked out at the baseline <code>3c8ded0d</code> for this work (detached; <code>main</code>'s gitlink is untouched). <strong>Restore it to <code>7d7f76ad</code></strong> (<code>git submodule update</code>) before any superproject commit, or a commit would downgrade the gitlink.</p></div>
+
+  <h2 id="scope">How it was scoped</h2>
+  <p>A coverage-gap analysis — current T2 coverage vs the validated-feature inventory vs the recorded "does-not-prove" gaps — produced a ranked candidate list. The <strong>mesh-relay-rig batch</strong> was picked: three tests that all reuse the existing 3-node forced-line rig and only existing accessors. Chosen as <strong>three separate apps</strong> over build-var modes on one app.</p>
+
+  <h2 id="batch-a">Batch A — harness config-validation guards</h2>
+  <p><code>manifest._validate_bench()</code>, called from the <code>require_bench()</code> gate, catches <strong>present-but-wrong</strong> bench config that used to build a silently-broken bench:</p>
+  <ul>
+    <li><code>WIRED_BOARD</code> naming a board that doesn't exist → no fully-wired DUT/relay/PS slot.</li>
+    <li>a malformed <code>BOARDx_MAC</code> (non-empty but not a valid MAC) → empty derived <code>mesh_mac</code>/<code>mesh_ip</code>.</li>
+    <li>two boards deriving the same <code>10.9.9.x</code> mesh IP → indistinguishable on-air.</li>
+  </ul>
+  <p>Import-safety preserved: <em>absent</em> config still yields <code>{}</code>, so the no-hardware tiers import fine; only a tier that calls <code>require_bench()</code> validates. Verified by <code>tools/regtest/tests/test_manifest.py</code> (10 stdlib-<code>unittest</code> tests) + a new <code>make test-unit</code> target. The <code>LINUX_MAC</code> guard was dropped (empty is a supported "read-live" mode); the strict <strong>pyflakes gate</strong> was deferred (running it surfaced 7 pre-existing findings, 2 of them intentional patterns to reshape first).</p>
+
+  <h2 id="tests">Three new T2 tests</h2>
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">origin</div><div class="s">board0</div></div>
+      <div class="node acc"><div class="t">RELAY</div><div class="s">board2 · wired</div></div>
+      <div class="node"><div class="t">dest</div><div class="s">board1</div></div>
+    </div>
+    <figcaption>The shared forced-line rig (peer allowlist). All three tests reuse it; each changes one thing.</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th>test</th><th>the one change</th><th>assertion</th><th>guards</th></tr></thead>
+    <tbody>
+      <tr><td><code>mesh-large-frame</code></td><td>origin pings a 1400 B payload</td><td>same topology + delivery-floor + ccmp-not-dominant, over a FW-fragmented frame</td><td>the <strong>defrag-before-decrypt</strong> RX path (its inverse was reverted)</td></tr>
+      <tr><td><code>mesh-leaf</code></td><td>relay calls <code>mmwlan_mesh_set_multihop(false)</code></td><td>INVERTED + deterministic: PASS iff sole peer still the relay AND <strong>exactly 0</strong> replies</td><td>the shipped-but-unguarded leaf/single-hop opt-out (P6d)</td></tr>
+      <tr><td><code>mesh-relay-nocrash</code></td><td>roles re-cast: RELAY is the reporter, origin drives a 90-ping burst</td><td>relay forwards, then <code>hw_restart_counter</code> unchanged across a ~40 s window; INCONCLUSIVE if no load</td><td>the interrupt-WDT SPI-host-teardown relay crash</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="nocrash">Why <code>nocrash</code> re-casts the roles</h3>
+  <p><code>t2_onair._run_orchestrated</code> brings SUPPORT roles up first (waits each <code>up_marker</code>), then flashes reporters and <strong>blocks per-reporter</strong> (<code>capture_until "TEST|END"</code>) in declaration order. So a relay-then-origin multi-reporter would deadlock — the relay's <code>hw_restart_counter</code> verdict needs the origin's traffic, but the origin isn't flashed until <em>after</em> the relay's verdict.</p>
+  <div class="callout"><p class="ct">Resolution</p>
+    <p>The relay is the <strong>sole reporter</strong>; the origin becomes a <strong>support role that drives traffic</strong> (boots first, pings the relay once it appears). <code>REPORTER_TIMEOUT_S = 130 s</code> caps the relay's flash→<code>TEST|END</code>, so the windows are sized boot(~25) + peer-wait(45) + forward(40) &lt; 130.</p></div>
+
+  <h2 id="verify">Verification</h2>
+  <p><strong>Build (2.10.4 baseline):</strong> all three build green via <code>make build APP=… BOARD=proto1-fgh100m</code> against <code>3c8ded0d</code>. One real compile error was caught + fixed — <code>nocrash</code> used <code>if (is_dest)</code> but the app only declared <code>is_origin</code>/<code>is_relay</code> (dest was the <code>else</code>).</p>
+  <p><strong>Bench (2.10.4 baseline):</strong> <code>ppk2_hold</code> running (board2 → ttyACM4), 3/3 ESP nodes, fw 1.17.8, ch27; no Linux node needed.</p>
+  <table>
+    <thead><tr><th>test</th><th>verdict</th><th class="num">wall-clock</th></tr></thead>
+    <tbody>
+      <tr><td><code>mesh-large-frame</code></td><td><span class="badge ok">PASS</span></td><td class="num">189.3 s</td></tr>
+      <tr><td><code>mesh-leaf</code></td><td><span class="badge ok">PASS</span></td><td class="num">182.8 s</td></tr>
+      <tr><td><code>mesh-relay-nocrash</code></td><td><span class="badge ok">PASS</span></td><td class="num">207.6 s</td></tr>
+    </tbody>
+  </table>
+  <p>The run's radio-silence sweep (board0/1/2 → <code>test-idle</code>, all PASS) confirms the bench was left silent. The <code>nocrash</code> relay peered both endpoints and measured within the 130 s cap; <code>mesh-leaf</code>'s deterministic 0-reply held — no tuning needed.</p>
+
+  <h2 id="conformance"><code>.ai</code>-rule conformance</h2>
+  <ul>
+    <li><strong>Build</strong> via <code>make … BOARD=proto1-fgh100m</code> (harness) — never bare <code>idf.py</code>.</li>
+    <li><strong>Verify:</strong> Batch A = unit tests; the 3 apps = this hardware bench-verify (evidence = the captured <code>TEST|RESULT</code> lines).</li>
+    <li><strong>On-air byte-diff:</strong> N/A — these are <em>test-harness</em> apps exercising mesh behaviors already on-air-verified when the features were built; they do not alter what the ESP puts on the wire.</li>
+    <li><strong>Radio-silent</strong> after via the harness <code>go_radio_silent</code> + an explicit <code>make test-silence</code>.</li>
+  </ul>
+
+  <h2 id="next">Next</h2>
+  <ol>
+    <li><span class="badge ok">done</span> Bench-verify on 2.10.4 — 3/3 PASS, no tuning.</li>
+    <li>Restore the submodule to <code>7d7f76ad</code> and rebuild the three against <strong>2.12.3</strong> (forward-compat).</li>
+    <li>Land: branch + PR (superproject Python + firmware), <strong>gitlink restored first</strong>, <code>/review</code> before merge.</li>
+  </ol>
+
+  <div class="callout"><p style="margin:0">Bench radio-silent after (board0/1/2 on <code>test-idle</code>).</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#scope">Scope</a></li>
+    <li><a href="#batch-a">Batch A · config guards</a></li>
+    <li><a href="#tests">The three tests</a></li>
+    <li><a href="#nocrash">Why nocrash re-casts</a></li>
+    <li><a href="#verify">Verification</a></li>
+    <li><a href="#conformance">.ai conformance</a></li>
+    <li><a href="#next">Next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-20-regtest-hardening-new-testcases</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

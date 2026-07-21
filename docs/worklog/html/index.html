@@ -172,8 +172,15 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">47</span></h2>
+<h2>July 2026 <span class="mcount">48</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-20-regtest-hardening-new-testcases.html">
+<div class="card-date">2026-07-20</div>
+<div class="card-title">Regtest hardening + 3 new mesh T2 tests</div>
+<div class="card-ex">Hardened the tools/regtest suite and added three on-air (T2) test cases, developed against the known-good morselib 2.10.4 baseline (3c8ded0d) so a later failure — including against the 2.12.3 forward-port — is a real regression. Batch A: manifest._validate_bench() config-validation guards (a WIRED_BOARD typo → no wired DUT; a malformed BOARDx_MAC → empty derived mesh_mac/ip; two boards colliding on the derived 10.9.9.x) + a make test-unit target with 10 stdlib-unittest tests (import-safety preserved: absent config still {}). Scope calls: the LINUX_MAC guard dropped (empty is a supported read-live mode); the strict pyflakes gate deferred (it surfaced 7 pre-existing findings, 2 intentional patterns to reshape first). Three new T2 tests, each a copy of test-mesh-relay reusing the 3-node forced-line rig + existing accessors (T2 12→15): mesh-large-frame (1400 B payload → the FW fragments the encrypted mesh frame → exercises the defrag-before-decrypt RX path, whose inverse was reverted); mesh-leaf (relay calls mmwlan_mesh_set_multihop(false); the origin INVERTS deterministically → PASS iff its sole peer is still the relay AND exactly 0 replies — the shipped-but-unguarded leaf opt-out P6d); mesh-relay-nocrash (roles re-cast so the RELAY is the sole reporter and the origin drives a 90-ping burst — because the orchestrator flashes reporters and blocks per-reporter, a relay-then-origin multi-reporter would deadlock; the relay forwards then asserts hw_restart_counter unchanged across a ~40s window, INCONCLUSIVE if it never peers both endpoints so a no-load run can't false-PASS — guards the interrupt-WDT SPI-host-teardown crash). All three build green on 2.10.4; one compile error caught (nocrash used is_dest with only is_origin/is_relay declared). Bench-verified on the 2.10.4 baseline: T2 6 pass / 0 fail / 0 skip (mesh-large-frame 189.3s, mesh-leaf 182.8s, mesh-relay-nocrash 207.6s), no timing tuning needed, bench left radio-silent (board0/1/2 → test-idle). Next: restore the submodule to gitlink 7d7f76ad + rebuild against 2.12.3 (forward-compat), then land (gitlink restored first, /review before merge). UNCOMMITTED — submodule parked at the 2.10.4 baseline.</div>
+<div class="card-meta">5 min · green · regtest · 3 new T2 tests</div>
+</a>
 
 <a class="card" href="2026-07-19-sdk-hop1-2.11.2-report.html">
 <div class="card-date">2026-07-19</div>

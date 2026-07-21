@@ -189,8 +189,55 @@ class BenchNotConfigured(SystemExit):
     """A clean exit (not a traceback) when a tier needs bench identity that make didn't pass."""
 
 
+def _validate_bench(bench: dict[str, BenchBoard]) -> None:
+    """Loud errors for a MALFORMED (not absent) bench config.
+
+    Absence is handled by require_bench's "missing vars" path; this catches values that are
+    present-but-wrong and would otherwise resolve to a silently-broken bench:
+      - WIRED_BOARD naming a board that doesn't exist -> no fully-wired DUT/relay/PS slot;
+      - a BOARDx_MAC that isn't a valid MAC -> empty derived mesh_mac/mesh_ip (never resolves);
+      - two boards deriving the same mesh IP -> mesh/interop tests can't tell them apart.
+    """
+    problems: list[str] = []
+
+    # WIRED_BOARD must name a real board, else `fully_wired` is False for all of them and there
+    # is no relay / power-save / DUT slot (which has produced false bugs before).
+    if not any(b.fully_wired for b in bench.values()):
+        problems.append(
+            f"WIRED_BOARD={_env('WIRED_BOARD')!r} is not one of {sorted(bench)} -- no board is "
+            "fully wired, so there is no relay/power-save/DUT slot. Set WIRED_BOARD to a real board.")
+
+    # A present-but-malformed MAC passes the non-empty check in _build_bench but derives an empty
+    # mesh_mac/mesh_ip (see _mesh_mac/_mesh_ip: they return "" on a bad shape).
+    for name in sorted(bench):
+        b = bench[name]
+        if not b.mesh_mac or not b.mesh_ip:
+            problems.append(
+                f"{_BOARD_MAC_ENV[name]}={b.efuse_mac!r} is not a valid MAC "
+                "(need 6 colon-separated hex octets, e.g. e0:72:a1:f8:ef:a4).")
+
+    # The apps derive 10.9.9.<100 + (mac[5] & 0x3f)>, so two boards whose last octet collides in
+    # its low 6 bits map to the SAME IP and become indistinguishable on-air.
+    by_ip: dict[str, list[str]] = {}
+    for name in sorted(bench):
+        ip = bench[name].mesh_ip
+        if ip:
+            by_ip.setdefault(ip, []).append(name)
+    for ip, names in by_ip.items():
+        if len(names) > 1:
+            problems.append(
+                f"{' and '.join(names)} both derive mesh IP {ip} (their efuse MACs share the low "
+                "6 bits of the last octet); mesh/interop tests can't tell them apart -- use "
+                "different boards for this run.")
+
+    if problems:
+        raise BenchNotConfigured(
+            "bench config is malformed (values were passed but are wrong):\n"
+            + "\n".join(f"  - {p}" for p in problems))
+
+
 def require_bench() -> dict[str, BenchBoard]:
-    """Return BENCH, or exit with a clear message naming the missing make vars."""
+    """Return BENCH, or exit with a clear message naming the missing/malformed make vars."""
     if not BENCH:
         missing = [v for v in ("BENCH_BOARD", "BOARD0_MAC", "BOARD1_MAC", "BOARD2_MAC", "WIRED_BOARD")
                    if not _env(v)]
@@ -200,6 +247,7 @@ def require_bench() -> dict[str, BenchBoard]:
             "  make <target> BENCH_BOARD=proto1-fgh100m BOARD0_MAC=<mac> BOARD1_MAC=<mac> "
             "BOARD2_MAC=<mac> WIRED_BOARD=board2\n"
             f"  missing: {', '.join(missing) or '(check the values)'}")
+    _validate_bench(BENCH)
     return BENCH
 
 
@@ -322,6 +370,20 @@ APPS: tuple[App, ...] = (
     App("test-mesh-relay",
         notes="T2 mesh-relay: symmetric 3-node (origin/relay/dest by MAC; forced-line allowlist). "
               "RELAY=board2 (require_wired). Origin reports. Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-large-frame",
+        notes="T2 mesh-large-frame: test-mesh-relay's forced line with a LARGE ICMP payload so the FW "
+              "fragments the encrypted mesh frame -> exercises the defrag-before-decrypt RX path. "
+              "RELAY=board2 (require_wired). Origin reports. Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-leaf",
+        notes="T2 mesh-leaf: test-mesh-relay's forced line but the relay calls "
+              "mmwlan_mesh_set_multihop(false) (leaf/single-hop). Origin inverts: PASS iff peering "
+              "survives AND forwarding is blocked (0 replies). RELAY=board2 (require_wired). "
+              "Origin reports. Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-relay-nocrash",
+        notes="T2 mesh-relay-nocrash: forced line, but the RELAY is the reporter (origin+dest are "
+              "support; origin drives a long ping burst). Relay forwards, then asserts its "
+              "hw_restart_counter did NOT climb across the window (the interrupt-WDT crash). "
+              "RELAY=board2 (require_wired). Needs CONFIG_HALOW_AP_MODE=y."),
     App("test-mesh-ap-gate",
         notes="T2 mesh-ap: the GATE support role (mesh+AP+ip_forward on one radio). board2. "
               "Needs CONFIG_HALOW_AP_MODE=y + CONFIG_LWIP_IP_FORWARD=y."),

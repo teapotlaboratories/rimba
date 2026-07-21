@@ -85,7 +85,7 @@ require-var = @[ -n "$($(1))" ] || { echo "$@ requires $(1)=$(2)"; exit 2; }
 .PHONY: help build flash monitor flash-monitor clean fullclean \
         menuconfig size erase \
         test test-all test-t0 test-t1 test-t2 test-tp test-dscycle test-bench \
-        test-conn test-interop test-silence test-report
+        test-conn test-interop test-silence test-report test-unit
 
 help:
 	@echo "Rimba firmware build (ESP-IDF wrapper)"
@@ -163,6 +163,9 @@ test-all:                      ## run EVERY tier t0->t1->t2->tp->dscycle (BOARD_
 
 test-t0:                       ## build matrix (no hardware)
 	$(RUNNER) t0
+
+test-unit:                     ## harness unit tests (pure Python, no hardware/bench)
+	python3 -m unittest discover -s $(CURDIR)/tools/regtest/tests -p 'test_*.py'
 
 test-t1:                       ## smoke on BOARD_NAME=board0|board1|board2 (required); INCLUDE_SLEEP=1 adds the sleep apps (board2)
 	$(call require-var,BOARD_NAME,board0|board1|board2)
