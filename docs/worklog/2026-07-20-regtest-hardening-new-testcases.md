@@ -100,10 +100,15 @@ here first.
   not alter what the ESP puts on the wire.
 - **Radio-silent** after via the harness `go_radio_silent` + an explicit `make test-silence`.
 
-## Next
+## Disposition — LANDED 2026-07-21
 
-1. ✅ Bench-verify on 2.10.4 — done, 3/3 PASS, no tuning needed (above).
-2. Restore the submodule to `7d7f76ad` and rebuild the three against **2.12.3** (forward-compat), then
-   optionally re-run them on the bench against 2.12.3.
-3. Land: branch + PR (superproject Python + firmware), **gitlink restored to `7d7f76ad` first**,
-   `/review` before merge.
+1. ✅ Bench-verify on 2.10.4 — 3/3 PASS, no tuning needed (above).
+2. ✅ Forward-compat — restored the submodule to `7d7f76ad`; all three rebuilt **clean against 2.12.3**
+   (the accessors survived the forward-port).
+3. ✅ Landed via **[#39](https://github.com/teapotlaboratories/rimba/pull/39)** (rebase-merge, gitlink
+   unchanged at `7d7f76ad`). The pre-merge review returned SAFE TO MERGE; two cheap findings were fixed
+   in a second commit — `_validate_bench` now full-shape-validates every MAC (a bad middle octet used to
+   slip through) + a test fixup — and two non-blocking robustness caveats deferred as tracked TODOs
+   (`nocrash` peer-count-as-load proxy; negative-assertion isolation), see `docs/rimba-todo.md`.
+
+The suite is now at **15 T2 tests** + a `make test-unit` host tier, on `main`.

@@ -246,11 +246,11 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
     <li><strong>Radio-silent</strong> after via the harness <code>go_radio_silent</code> + an explicit <code>make test-silence</code>.</li>
   </ul>
 
-  <h2 id="next">Next</h2>
+  <h2 id="next">Disposition — landed 2026-07-21</h2>
   <ol>
     <li><span class="badge ok">done</span> Bench-verify on 2.10.4 — 3/3 PASS, no tuning.</li>
-    <li>Restore the submodule to <code>7d7f76ad</code> and rebuild the three against <strong>2.12.3</strong> (forward-compat).</li>
-    <li>Land: branch + PR (superproject Python + firmware), <strong>gitlink restored first</strong>, <code>/review</code> before merge.</li>
+    <li><span class="badge ok">done</span> Forward-compat — restored the submodule to <code>7d7f76ad</code>; all three rebuilt clean against <strong>2.12.3</strong> (the accessors survived the forward-port).</li>
+    <li><span class="badge ok">done</span> Landed via PR #39 (rebase-merge, gitlink unchanged at <code>7d7f76ad</code>). Pre-merge review SAFE TO MERGE — two cheap findings fixed (<code>_validate_bench</code> now full-shape-validates every MAC) + two non-blocking robustness caveats deferred as tracked TODOs.</li>
   </ol>
 
   <div class="callout"><p style="margin:0">Bench radio-silent after (board0/1/2 on <code>test-idle</code>).</p></div>
