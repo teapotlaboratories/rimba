@@ -1,13 +1,20 @@
 # Design: Proper (Linux-derived) 802.11s Mesh-Gate Discovery + Proxy — replacing the hard-coded default-gw hack
 
-**Status: DESIGN (implement-from) — needs sign-off (§0, §5) before any code.** Author: porting-lead
+**Status: APPROVED 2026-07-10 — SIGN-OFF #1 (RANN+IS_GATE+learned MPP) and #2 (L2-bridge single-subnet)
+are accepted; blocked only on SIGN-OFF #3 (a bench Linux gate for the byte-diff gold standard) + a code-map
+re-pin to the 2.12.3 morselib tree (§2/§3) before any S-code is written.** Author: porting-lead
 investigation, 2026-07-10. This is the mandated pre-port deliverable under `[[proper-fix-follow-linux]]`
-+ `[[porting-ships-verified-codemap]]`. morselib anchors were grepped in-repo this session; **the Linux
-`net/mac80211` anchors are from a fetched reference copy (open80211s/Intel, ~6.12.x) and MUST be re-pinned
-to the bench's exact `rpi-linux`/`morse_driver` checkout before the §3 code-map is treated as verified.**
++ `[[porting-ships-verified-codemap]]`. **⚠ Both anchor sets must be re-pinned before the §3 code-map is
+treated as verified:** (1) the morselib anchors were grepped on the **pre-forward-port 2.10.4** tree — the
+2.10.4→2.12.3 forward-port **moved the files into `umac/mesh/` + `umac/datapath/` subdirs and shifted every
+line number** (e.g. `umac_mesh.c:353` is now `#define DOT11_IE_PREQ`, not the RANN defines), so re-grep them
+on the current `7d7f76ad` tree; (2) the Linux `net/mac80211` anchors are from a fetched reference copy
+(open80211s/Intel, ~6.12.x) and must be re-pinned to the bench's exact `rpi-linux`/`morse_driver` checkout.
 
-Goal: let mesh nodes DISCOVER the gate and reach off-mesh hosts the standards way, deleting the 2nd mesh
-node's hard-coded `ip.gw.addr = 10.9.9.136` (`firmware/rimba-halow-mesh/main/app_main.c:124`).
+Goal: let mesh nodes DISCOVER the gate and reach off-mesh hosts the standards way, replacing the mesh
+node's static gw — already reduced to an **optional, commented-out** `#define MESH_GATE_IP "10.9.9.1"`
+(`firmware/rimba-halow-mesh/main/app_main.c:39`, applied at `:70` under `#ifdef`) — with a gw driven
+**dynamically from the discovered gate**. (The STA-side de-hardcode already happened via DHCP.)
 
 ---
 
@@ -90,8 +97,10 @@ points, so there is no gold-standard frame until this is actioned.
 ## 2. Staged port plan (each stage independently on-air-verifiable)
 
 morselib edit sites are under
-`components/halow/components/mm-iot-sdk/framework/morselib/src/umac/`; Linux refs re-pin to the bench
-checkout before the code-map ships.
+`components/halow/components/mm-iot-sdk/framework/morselib/src/umac/` — post-forward-port specifically
+`umac/mesh/umac_mesh.c` and `umac/datapath/umac_datapath.c` (the flat `umac/` paths **and** the line numbers
+below predate the 2.12.3 forward-port and **must be re-grepped** on the current tree). Linux refs re-pin to
+the bench checkout before the code-map ships.
 
 **S1 — RANN element + HWMP builder extension + proactive-root timer (GATE side).** Gate periodically
 broadcasts a 21-octet RANN with `RANN_FLAG_IS_GATE`; no node behaviour change (fully additive). Edits:
@@ -157,7 +166,7 @@ Re-verify every Linux file:line against the **bench-pinned** checkout before thi
 | S4 | `send_to_gates` fallback hook | `umac_mesh.c:1995` | `mesh_path_send_to_gates` (+trigger) | `mesh_pathtbl.c:969` / `mesh_hwmp.c:1425` |
 | S4 | RX MPP learning | `umac_datapath.c:833` | `mpp_path_add(proxied, h_source)` | `rx.c:2889` |
 | S5 | gate L2 bridge (replace ip_forward) | `rimba-halow-mesh-ap/app_main.c:156` | portal concept | — |
-| S5 | delete hard-coded gw | `rimba-halow-mesh/app_main.c:124` | — | — |
+| S5 | drive gw from the discovered gate (retire the optional `MESH_GATE_IP`) | `rimba-halow-mesh/app_main.c:39/70` | — | — |
 
 ---
 
@@ -184,10 +193,11 @@ exists until a bench Linux node is put in gate mode (SIGN-OFF #3).**
 ---
 
 ## 5. Open decisions the next session cannot start without
-- **SIGN-OFF #1** — RANN+MPP, not literal GANN/PXU.
-- **SIGN-OFF #2** — L2-bridge single-subnet target vs L3-retain fallback (determines whether S3–S5 are in
-  scope at all).
-- **SIGN-OFF #3** — a live Linux gate configured on the bench for the byte-diff gold standard.
+- **SIGN-OFF #1 — ✅ APPROVED** (RANN+MPP, not literal GANN/PXU).
+- **SIGN-OFF #2 — ✅ APPROVED** — L2-bridge single-subnet target; the L3-retain fallback stays documented
+  as the safety valve if S3–S5 regress the concurrency datapath.
+- **SIGN-OFF #3 — ☐ OUTSTANDING** — a live Linux gate configured on the bench for the byte-diff gold
+  standard (the one true blocker left, alongside the code-map re-pin above).
 - Root/gate mode to emit: `PROACTIVE_RANN` (recommended) vs proactive-PREQ-with-gate-bit; align RX + byte-diff
   target with what the Linux bench gate emits by default.
 - Re-pin the Linux reference tree to the bench's exact `rpi-linux`/`morse_driver` commit before the §3

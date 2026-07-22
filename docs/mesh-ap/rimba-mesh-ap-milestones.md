@@ -29,9 +29,11 @@ documented), and ported code carries a new-code ↔ Linux mapping (below).
 ## Hardware / bench
 
 - **3× Seeed XIAO ESP32-S3 + FGH100M** (`boards/proto1-fgh100m`, `bcf_fgh100mhaamd`) — the
-  device under test. **ESP firmware 1.17.9** (the build ships the vendored `vendor/morse-firmware`
-  `mm6108` blob via `CONFIG_MM_FW_FILE`, overriding morselib's stock 1.17.6 — one minor rev *ahead* of
-  the Linux 1.17.8 reference; the earlier AP/TWT milestones were validated on stock 1.17.6).
+  device under test. **ESP firmware 1.17.8** (the build ships the vendored `vendor/morse-firmware`
+  `mm6108` blob via `CONFIG_MM_FW_FILE`, overriding morselib's stock 1.17.6 — **matching the Linux 1.17.8
+  reference and the bench standard**; the vendored blob is 480664 B = 1.17.8. 1.17.9 was tried but
+  regressed STA power-save ~2×, so the bench deliberately stays on 1.17.8 [[morse-fw-same-version]] /
+  [[halow-sta-powersave-measured]]. The earlier AP/TWT milestones were validated on stock 1.17.6).
 - **4× Raspberry Pi HaLow reference nodes** — all **Seeed Wio-WM6108** (Quectel FGH100M-H / MM6108),
   `morse_driver` + firmware **1.17.8**, the interop oracle
   ([`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md)):
@@ -596,7 +598,9 @@ rejects the {AP, MESH} pair; and `mmwlan_mesh_start` calls `umac_mesh_tear_down_
     `CONFIG_HALOW_AP_MODE=y` in its `sdkconfig.defaults` — `umac_mesh.c` is always compiled, so one AP-mode
     build carries **both** the AP and mesh code. **Stage 1 is not blocked.**
 - ✅ **Stage 1 — concurrent vifs in umac: IMPLEMENTED + builds (2026-07-08).** Primary+secondary
-  vif model landed on `components/halow` branch `feat/mesh-ap-concurrency`; function-level
+  vif model landed — now **merged to `main`** (submodule gitlink `7d7f76ad`, morselib `2.12.3-esp32-1`;
+  the A3 concurrency work was carried in with the 2.10.4→2.12.3 forward-port, so the old
+  `feat/mesh-ap-concurrency` branch no longer exists); function-level
   new-code↔reference map in [`rimba-mesh-ap-esp32-stage1-codemap.md`](rimba-mesh-ap-esp32-stage1-codemap.md).
   `ap_vif_id`/`ap_mac_addr` slot added; `{AP,MESH}` allowed (mesh-first enforced); a concurrent
   AP allocs a 2nd FW vif (distinct locally-admin MAC) instead of the rm→add swap; getters +
@@ -709,8 +713,8 @@ rejects the {AP, MESH} pair; and `mmwlan_mesh_start` calls `umac_mesh_tear_down_
          forced-topology RX drop in morselib `umac_datapath.c`: it was guarded by `umac_mesh_is_active()`
          (always true on a mesh+AP node) so it dropped ALL non-allowlisted RX data incl. the gate AP's
          client EAPOL → STA couldn't associate. Fix = gate on `mesh_ctrl_present` (802.11s Mesh Control bit)
-         instead, so the allowlist filters ONLY mesh frames, never AP-client frames. (Submodule, branch
-         `feat/mesh-ap-concurrency`.) A Linux far mesh-node needs a return route `192.168.12.0/24 via
+         instead, so the allowlist filters ONLY mesh frames, never AP-client frames. (Submodule; merged
+         to `main` at gitlink `7d7f76ad`, morselib `2.12.3-esp32-1`.) A Linux far mesh-node needs a return route `192.168.12.0/24 via
          10.9.9.136` (same as board1's gw, task #17).
     (d) `mmwlan_ap_disable` (Stage 2 deferral) + the 2% app-partition headroom; (e) byte-for-byte on-air
     IE diff vs a live Linux gateway ([[verify-onair-chronium-monitor]]).
@@ -938,31 +942,38 @@ needs attention is the part that is silently rig-specific.*
   (board: RESET_N only, BUSY/WAKE on DNP pads — RISK-02).
 
 **Infra**
-- ◐ **Regression suite** for every built feature (hello / scan / AP-STA / IBSS / TWT / Mesh+AP) so
-  firmware/morselib bumps don't silently regress earlier milestones. **Built 2026-07-16** as a
-  three-tier harness under `tools/regtest/` (`make test-t0|test-t1|test-t2`), designed and its
-  values sourced ahead of a fork migration + stack bump. Full design, what each tier does and does
-  **not** prove, and the acceptance criteria are in
+- ✅ **Regression suite** for every built feature (hello / scan / AP-STA / IBSS / TWT / Mesh+AP) so
+  firmware/morselib bumps don't silently regress earlier milestones. **Built 2026-07-16**, since grown
+  into a full multi-tier harness under `tools/regtest/` (`make test-t0|t1|t2|tp|dscycle` on the bench,
+  plus off-bench host tiers `test-unit` / `test-lint` / `test-flakes` / `test-trend`). It earned its
+  keep on the migration: the **2.10.4→2.12.3 forward-port ran fully green** (latest run **2026-07-21**,
+  `components/halow` gitlink `7d7f76ad`) — **T0 31 PASS / 0 FAIL / 1 SKIP · T1 12 / 0 / 2 SKIP · T2 18
+  PASS / 0 FAIL (15 feature + 3 return-to-idle) · tp 4 PASS · dscycle PASS**. Full design, what each
+  tier does and does **not** prove, and the acceptance criteria are in
   [`../worklog/2026-07-16-regression-suite-and-fork-migration-plan.md`](../worklog/2026-07-16-regression-suite-and-fork-migration-plan.md);
-  the tool's own docs are [`tools/regtest/README.md`](../../tools/regtest/README.md); **latest
-  results are in [`../regression/rimba-regression-results.md`](../regression/rimba-regression-results.md)**
-  (T0 17 PASS / 17 XFAIL, T1 14 PASS all radio apps bring up, T2 SW-CCMP PASS).
+  the tool's own docs are [`tools/regtest/README.md`](../../tools/regtest/README.md); the **living
+  results record is in [`../regression/rimba-regression-results.md`](../regression/rimba-regression-results.md)**.
   - **T0 build** (no hardware): every app × board compiles via `make`, with a real country code
-    asserted (catches the "??" dead-radio trap at build time). ✅ implemented; first run found a
-    pre-existing break — `BOARD=proto1` cannot build any app (its `bcf_mf16858.mbin` is absent from
-    the pinned `vendor/morse-firmware`); recorded as XFAIL pending an owner decision.
+    asserted (catches the "??" dead-radio trap at build time). ✅ 31 PASS / 0 FAIL / 1 SKIP
+    (`test-c6-trigger`, esp32c6-only). *(The old `BOARD=proto1` XFAILs are gone — `proto1` was retired;
+    the matrix is now the one bench board `proto1-fgh100m`.)*
   - **T1 smoke** (one board): flash + boot + radio up (chip id `0x0306` / fw `1.17.8` / real MAC /
-    runtime country), asserting *values* not line-presence so a dead radio can't pass. ✅ implemented.
+    runtime country), asserting *values* not line-presence so a dead radio can't pass. ✅ 12 PASS /
+    0 FAIL / 2 SKIP (the 2 sleep apps).
   - **T2 on-air** (a rig): one `firmware/test-<feature>/` app per milestone claim, each
     self-reporting a machine-readable verdict; expected values reused from the milestones/worklogs and
-    tagged noisy-vs-stable so RF numbers never gate. ◐ `test-swccmp` (RFC-3610 CCM KAT) implemented
-    + hardware-verified; the rest are **defined** (rig + provenance in `tools/regtest/t2_tests.py`,
-    `t2 --dry-run`) with a README and reported honestly as not-yet-automated.
+    tagged noisy-vs-stable so RF numbers never gate. ✅ 18 PASS / 0 FAIL — **15 feature tests** (swccmp,
+    ampdu-cap, ap-sta-ping, ibss, twt, twt-assoc, multi-twt, mesh-peering, mesh-linux, mesh-relay,
+    mesh-large-frame, mesh-leaf, mesh-relay-nocrash, mesh-ap, mesh-ap-multi-twt) + 3 return-to-idle checks.
 
-- ☐ **Fork migration → real `MorseMicro/esp-halow` fork, history preserved** (the backlog's "Stack
-  bump"). A first migration plan was drafted 2026-07-16 and then **removed at the owner's request to
-  be restarted from scratch** — no plan doc exists right now. To be re-planned; gated on the
-  regression suite being green first.
+- ✅ **Fork migration / stack bump — DONE (landed 2026-07-20).** It completed **not** as the old
+  "replay onto a `MorseMicro/esp-halow` fork" plan (that target fork was deleted) but as an **in-place
+  forward-port of the vendored morselib 2.10.4 → 2.11.2 → 2.12.3** INTO our fork, keeping our vendored
+  layout + our feature work, with a per-hop tagged commit at each step (`2.11.2-esp32-1` /
+  `2.12.3-esp32-1`). Landed via PR #37, then PR #38 added the beacon-notify cleanup; superproject `main`
+  now points `components/halow` at gitlink `7d7f76ad` (= tag `2.12.3-esp32-1` + that cleanup, morselib
+  **2.12.3**). Verified by the full green regression run above
+  ([results doc](../regression/rimba-regression-results.md)).
 
 **Known unknown (not a task):** the MM6108 firmware's *true* concurrent-STA capacity is unpublished
 (Linux caps at 2007; spec 8191) — 255 is a build/structural ceiling, not a firmware guarantee.

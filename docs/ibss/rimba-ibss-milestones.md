@@ -15,7 +15,7 @@ and the validation results in [`rimba-ibss-test-plan.md`](rimba-ibss-test-plan.m
 set, merge, and ATIM — not improvised from morselib's AP path.
 
 **Hardware:** up to 3× Seeed XIAO ESP32-S3 + HaLow module (reports
-`mm6108-mf16858`, chip `0x0306`, firmware **v1.17.6**) **plus a Raspberry Pi +
+`mm6108-mf16858`, chip `0x0306`, firmware **v1.17.8**) **plus a Raspberry Pi +
 MM6108 Linux reference node** (`morse_driver`/mac80211, same silicon — the interop
 oracle, see [`reference/rimba-linux-node-setup.md`](../reference/rimba-linux-node-setup.md)); board config
 `boards/proto1-fgh100m` (`bcf_fgh100mhaamd`); US 915.5 MHz, 1 MHz BW, S1G channel
@@ -328,7 +328,7 @@ The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milesto
   netdev is `#ifdef`'d out — a build flag, not hardware). Close via a rebuild with that flag,
   or the ESP32 raw-frame hook (`mmwlan_register_rx_frame_cb` + `MMWLAN_FRAME_BEACON`). Open
   Q: our ESP32 beacon's `source_addr` (MAC vs BSSID).
-- ☐ **#20 Beacon RX source-address: re-open the "firmware wall" (surfaced by the mesh P2
+- ☐ **#22 Beacon RX source-address: re-open the "firmware wall" (surfaced by the mesh P2
   work, 2026-06-25).** H5 concluded "the firmware does not surface same-cell peer beacons"
   from **0 beacons reaching `process_s1g_beacon`**. But the mesh P2 work found foreign
   beacons **do** reach the host — as **legacy MGMT/Beacon frames at
@@ -357,10 +357,11 @@ The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milesto
     the fix Linux saw `00:00` too (confirming we were *transmitting* zeros). **For IBSS this is
     DIFFERENT and likely fine:** IBSS builds beacons from `args->if_addr` (not the broken
     getter), and the beacon source is the *shared cell BSSID* by design — so IBSS's
-    data-driven discovery is correct regardless. **Still worth doing for IBSS:** (a) confirm
-    the IBSS beacon's on-air SA with the now-working `morse0` monitor (is it the real
-    per-node MAC or the shared BSSID?); (b) re-check the "0 beacons surfaced" claim by tapping
-    `rx_frame_filter` (legacy path), not just `process_s1g_beacon`.
+    data-driven discovery is correct regardless. **The two IBSS residual checks this raised —
+    (a) confirm the IBSS beacon's on-air SA with the now-working `morse0` monitor (real per-node
+    MAC or the shared BSSID?), and (b) re-check the "0 beacons surfaced" claim by tapping
+    `rx_frame_filter` (legacy path), not just `process_s1g_beacon` — are now owned by #21**
+    (which also subsumes the #11/I.4 on-wire decode); don't duplicate them here.
 - ☐ **#21 Verify IBSS on-air behavior with the working `morse0` monitor.** chronium's
   `morse_driver` is now rebuilt with `CONFIG_MORSE_MONITOR=y`, so the `morse0` raw-monitor
   netdev finally delivers S1G frames (this was the blocker behind #11 and the I.4 gap). With an
@@ -380,11 +381,17 @@ The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milesto
   `reference/rimba-linux-node-setup.md` + `CONFIG_MORSE_MONITOR=y`.
 
 **Code quality / maintenance**
-- ☐ **#15 Bump the ESP32 stack** (fw / SDK / IDF) from MM6108 fw **1.17.6**, `morsemicro/halow`
-  **`2.10.4-esp32-2`**, ESP-IDF **v5.4.2**. *Not a fast-forward:* the IBSS port patches morselib
-  (ADHOC iface, IBSS commands, beacon/probe-resp, RX-VIF fix) → re-apply + re-validate; keep
-  **generation parity with the chronium Linux node** (a one-sided bump invalidates interop);
-  keep cmake on 3.x; re-run the 3-board P0 bench + AP-STA ping after any bump.
+- ◐ **#15 Bump the ESP32 stack** (fw / SDK / IDF). **morselib LANDED at `2.12.3-esp32-1`**
+  (forward-port `2.10.4`→`2.12.3`, 2026-07-20; superproject gitlink `7d7f76ad`, `MM_VERSION_BUILDID
+  "2.12.3"`): despite the port being *not a fast-forward* — the IBSS port patches morselib (ADHOC
+  iface, IBSS commands, beacon/probe-resp, RX-VIF fix) — **the IBSS module (`umac_ibss.c/.h`)
+  survived the forward-port and is now covered by the automated `test-ibss` T2 case** (see the
+  Regression-suite item below). **Residue:** the **fw / ESP-IDF version *decision*** (in-tree
+  `mm6108.mbin` is now **1.17.8** = the bench standard; ESP-IDF still **v5.4.2**) and a **full
+  3-board P0 re-bench against 2.12.3** — the automated `test-ibss` is only a 2-node rig, so the
+  ≥3-board P0 mesh + Linux-interop bench has not been re-run on the new morselib. Keep **generation
+  parity with the chronium Linux node** (a one-sided bump invalidates interop); keep cmake on 3.x;
+  re-run the 3-board P0 bench + AP-STA ping after any further bump.
 - ☐ **#19 Re-audit the adopted `momentary-systems` fork** (we adopted it at H2 — see the
   "Implementation comparison" section above). Three checks:
   - **Missing features:** re-diff against their current `ibss-support` branch — is anything
@@ -396,13 +403,19 @@ The single IBSS backlog. ☐ todo · ◐ in progress. Done items are the milesto
     re-verifying those modes — audit the adopted paths against the reference (governing rule).
   - **Test:** validate any adopted / changed behaviour on hardware — 3-board P0 bench +
     Linux interop — per the verify rule.
-- ◐ **Regression suite** across every built feature (hello / scan / AP-STA / IBSS / TWT /
+- ✅ **Regression suite** across every built feature (hello / scan / AP-STA / IBSS / TWT /
   Mesh+AP) so firmware/morselib bumps don't silently regress earlier milestones. **Built
-  2026-07-16** — `tools/regtest/` (T0 build / T1 smoke / T2 on-air). The IBSS T2 test is
-  *defined* (assert `IBSS_CONFIG(CREATE)==0`, exactly-2 peer records, 0 phantoms — the
-  structural facts, not RF-noisy ping counts) with provenance to this doc + the test plan, and
-  is reported honestly as not-yet-automated. See [`tools/regtest/README.md`](../../tools/regtest/README.md)
-  + worklog [`2026-07-16-regression-suite-and-fork-migration-plan.md`](../worklog/2026-07-16-regression-suite-and-fork-migration-plan.md).
+  2026-07-16, since expanded** — `tools/regtest/`: on-air tiers **T0** (build) / **T1** (smoke) /
+  **T2** (on-air behaviour), plus **`tp`** (PPK2 power) + **`dscycle`** (deep-sleep reconnect),
+  and the off-bench host tiers **`test-unit`** / **`test-lint`** / **`test-flakes`** /
+  **`test-trend`**. **The IBSS T2 case is now fully automated** (`firmware/test-ibss` +
+  `IBSS = T2Test` in `tools/regtest/t2_tests.py`): a symmetric 2-node rig (board0 CREATEs by
+  pinned MAC, board1 JOINs + polls the peer count) asserting `IBSS_CONFIG(CREATE)==0` and
+  **exactly 1 peer record / 0 phantoms** on the 2-node cell — the structural facts, not RF-noisy
+  ping counts. It **ran GREEN in the 2026-07-21 T2 run** (18/18 PASS; gitlink `7d7f76ad`, morselib
+  2.12.3; evidence `IBSS formed exactly 1 peer record (0 phantoms)`). See
+  [`tools/regtest/README.md`](../../tools/regtest/README.md) + worklog
+  [`2026-07-16-regression-suite-and-fork-migration-plan.md`](../worklog/2026-07-16-regression-suite-and-fork-migration-plan.md).
 
 ---
 

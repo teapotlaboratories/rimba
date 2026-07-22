@@ -61,6 +61,13 @@ flowchart LR
 | **tp power** | board2 + PPK2 + C6 + an AP | the STA power-save current didn't grossly regress (the fw-1.17.9 ~2× kind) | absolute doze depth — that's a benchmark, deliberately not a gate |
 | **dscycle** | board2 + C6 + an AP | the deep-sleep leaf reconnects on every wake | the power number (that's `tp`) |
 
+**Off-bench host tiers (no hardware).** Four helper tiers run on the dev host alone — they never touch a
+board and gate/inform the *harness itself*, not the firmware: **`test-unit`** (37 harness unit tests over the
+manifest / flake-ledger / trend / lint logic), **`test-lint`** (a pyflakes gate over the harness, also run
+before every bench tier), **`test-flakes`** (a run-history flake ledger — which tests flip verdict
+run-to-run), and **`test-trend`** (the "numbers that drift" view — trend a recorded metric over runs, or diff
+it across two morselib gitlinks).
+
 ### T0 — the build matrix
 
 Every app × board compiles through the repo `Makefile` (never bare `idf.py` — the board overlay is
@@ -74,7 +81,7 @@ not `"??"`) and the board's chip target. It also **version-pins the firmware blo
 - **The FW-blob version-pin:** T0 asserts `vendor/morse-firmware/firmware/mm6108.bin` is the pinned
   **1.17.8** blob by **size (480664 B) + sha256**. A silent bump to 1.17.9 roughly **doubles** STA
   power-save current — this catches it at the cheapest possible choke point.
-- 27 apps on the bench board `proto1-fgh100m`, all green. (The old broken `proto1` overlay was retired.)
+- 30 apps on the bench board `proto1-fgh100m`, all green. (The old broken `proto1` overlay was retired.)
 
 ### T1 — smoke (flash + boot + radio up)
 
@@ -82,7 +89,7 @@ Flashes each radio app to one board and asserts the radio really came up, readin
 line-presence** (a dead radio prints an uninitialised struct):
 
 ```
-country=US   chip=0x0306   fw=1.17.8   mac=bc:2a:33:96:b2:33   (morselib 2.10.4)
+country=US   chip=0x0306   fw=1.17.8   mac=bc:2a:33:96:b2:33   (morselib 2.12.3)
 ```
 
 The 2 sleep apps are **skipped by default** — a sleep/deep-sleep app powers the ESP32-S3 native USB
@@ -114,6 +121,9 @@ regression while always recording the raw mA. See §7.
 
 Proves the battery-leaf (`test-deepsleep-cycle`, the dscycle DUT) rejoins the AP on every wake, counting reconnects
 across the flapping USB port (the port drops while board2 deep-sleeps and re-enumerates on each wake).
+The tier is now **reliable and self-contained** — it self-powers board2 by starting its own `ppk2_hold` and
+commands a **serial-latched C6 wake** (`test-c6-trigger`), so it no longer reads flaky/INCONCLUSIVE by
+default (the old systematic INCONCLUSIVE was a bench-plumbing gap, not a code fault).
 
 ---
 
@@ -212,7 +222,7 @@ A run that emits **no** RESULT fails — a board that hung or crashed must not r
 
 ---
 
-## 5. The T2 test catalogue (12 feature tests)
+## 5. The T2 test catalogue (15 feature tests)
 
 | Test | Rig (role = device) | Proves |
 |---|---|---|
@@ -226,6 +236,9 @@ A run that emits **no** RESULT fails — a board that hung or crashed must not r
 | **mesh-peering** | board0 + board1 | SAE + AMPE mesh peering → **ESTAB**, no Linux anchor |
 | **mesh-linux** | linux=chronite, esp=board2 | ESP peers + pings a **real Linux mesh node** (the gold-standard interop) |
 | **mesh-relay** | origin=board0, **relay=board2**, dest=board1 | mesh multi-hop **SW-CCMP forwarding** through an ESP relay |
+| **mesh-large-frame** | origin=board0, **relay=board2**, dest=board1 | a **large** ICMP payload forces the FW to fragment the encrypted mesh frame → exercises the **defrag-before-decrypt** RX path |
+| **mesh-leaf** | origin=board0, **relay=board2**, dest=board1 | the relay set single-hop (`mmwlan_mesh_set_multihop(false)`) → PASS iff peering **survives** *and* forwarding is **blocked** (0 replies) |
+| **mesh-relay-nocrash** | origin=board0, **relay=board2** (reporter), dest=board1 | the relay forwards a long ping burst and its `hw_restart_counter` **does not climb** (the interrupt-WDT crash guard) |
 | **mesh-ap** | **gate=board2**, mesh_peer=board1, sta=board0 | the **mesh-gate**: mesh + AP on one radio, STA routes through, **ttl=63** (one IP-forward hop) |
 | **mesh-ap-multi-twt** | **gate=board2**, sta1=board0, sta2=board1 | the mesh-gate serves **2 concurrent TWT STAs** on its AP half (mesh+AP concurrency + per-STA TWT) |
 
@@ -314,11 +327,17 @@ make test-all BOARD_NAME=board2 AP=esp CYCLES=2  # EVERY tier in order + report 
 # ...or a tier at a time:
 make test-t0                                 # build matrix (no hardware)
 make test-t1 BOARD_NAME=board2               # smoke (BOARD_NAME required: board0|board1|board2)
-make test-t2                                 # all 12 on-air feature tests (needs the rig)
+make test-t2                                 # all 15 on-air feature tests (needs the rig)
 make test-tp AP=esp                          # PPK2 power-save ladder (AP required: esp|linux)
 make test-dscycle CYCLES=2       # deep-sleep reconnect gate (CYCLES required)
 make test-tp AP=linux LIGHT_SLEEP=1   # the stronger light-sleep variant
 make test-t2 DRY_RUN=1              # the T2 catalogue + rigs, no hardware
+
+# ...or the off-bench host tiers (no hardware):
+make test-unit                               # 37 harness unit tests
+make test-lint                               # pyflakes gate over the harness (also runs before every tier)
+make test-flakes                             # run-history flake ledger (which tests flip verdict run-to-run)
+make test-trend TEST=<slug> LAST=8           # trend a recorded metric (or DIFF="A B" across gitlinks)
 
 make test-report                         # (re)generate build/regtest/report.html
 make test-silence                        # return every ESP to the radio-free idle app
@@ -339,7 +358,7 @@ after every hardware test — T1/T2/tp auto-flash `test-idle` back.
 
 ```
 tools/regtest/
-  run.py          CLI (t0 / t1 / t2 / tp / dscycle / bench / silence / report / flash-interop)
+  run.py          CLI (t0 / t1 / t2 / tp / dscycle / bench / silence / report / lint / flakes / trend / flash-interop)
   manifest.py     single source of truth: apps, boards, Linux nodes, known-broken, power bands, fw-pin
   t0_build.py     T0 tier (+ the fw-blob version-pin)
   t1_smoke.py     T1 tier
@@ -350,6 +369,7 @@ tools/regtest/
   linux_peer.py   Linux bring-up over ssh (bring_up_mesh / bring_up_ap / radio_silence)
   common.py       ports, make, serial capture, Result/Reporter, radio-silence
   report.py       the self-contained HTML report
+  tests/          the test-unit host-side unit tests (manifest / ledger / trend / lint)
 firmware/
   test-common/include/test_report.h   the TEST| verdict contract
   test-<slug>/                            one app per feature + its README
