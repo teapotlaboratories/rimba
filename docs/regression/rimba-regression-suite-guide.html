@@ -118,7 +118,7 @@ figure{margin:1.5em 0;text-align:center} figcaption{color:var(--muted);font-size
   <div class="metaline">
     <span class="badge date">reference guide</span>
     <span class="badge">tiers · devices · tests</span>
-    <span class="badge ok">T2 12/12 · TP 4/4</span>
+    <span class="badge ok">T2 15/15 · TP 4/4</span>
   </div>
 
   <h1>Rimba regression suite — the complete guide</h1>
@@ -170,6 +170,14 @@ figure{margin:1.5em 0;text-align:center} figcaption{color:var(--muted);font-size
   1.17.8 blob by <b>size 480664 B + sha256</b> (a silent bump to 1.17.9 ~doubles STA power-save
   current). <b>T1</b> reads <i>values not line-presence</i>: <code>country=US chip=0x0306 fw=1.17.8</code>
   + a real MAC — a dead radio prints an uninitialised struct, which T1 rejects.</p>
+  <p><b>Off-bench host tiers (no hardware).</b> Four helpers run on the dev host alone and gate/inform the
+  <i>harness itself</i>, not the firmware: <code>test-unit</code> (37 harness unit tests over the manifest /
+  flake-ledger / trend / lint logic), <code>test-lint</code> (a pyflakes gate, also run before every bench
+  tier), <code>test-flakes</code> (a run-history flake ledger — which tests flip verdict run-to-run), and
+  <code>test-trend</code> (the "numbers that drift" view — trend a recorded metric over runs, or diff it
+  across two morselib gitlinks). And <code>dscycle</code> is now <b>reliable + self-contained</b> — it
+  self-powers board2 by starting its own <code>ppk2_hold</code> and commands a <b>serial-latched C6 wake</b>,
+  so it no longer reads flaky/INCONCLUSIVE by default.</p>
 
   <h2 id="bench">3 · The bench — devices and how they connect</h2>
   <div class="diagram">
@@ -294,7 +302,7 @@ TEST|STEP|&lt;step&gt;|&lt;PASS|FAIL&gt;|&lt;detail&gt;      &larr; a sub-check
 TEST|RESULT|&lt;PASS|FAIL|INCONCLUSIVE&gt;|&lt;detail&gt;
 TEST|END|name=&lt;slug&gt;</code></pre>
 
-  <h2 id="catalogue">5 · The T2 catalogue (12 feature tests)</h2>
+  <h2 id="catalogue">5 · The T2 catalogue (15 feature tests)</h2>
   <table>
     <thead><tr><th>Test</th><th>Rig (role = device)</th><th>Proves</th></tr></thead>
     <tbody>
@@ -308,6 +316,9 @@ TEST|END|name=&lt;slug&gt;</code></pre>
       <tr><td>mesh-peering</td><td>board0 + board1</td><td>SAE+AMPE mesh peering → <b>ESTAB</b></td></tr>
       <tr><td>mesh-linux</td><td>linux=chronite, esp=board2</td><td>ESP peers + pings a <b>real Linux mesh node</b></td></tr>
       <tr><td>mesh-relay</td><td>origin=board0, <b>relay=board2</b>, dest=board1</td><td>mesh multi-hop <b>SW-CCMP forwarding</b></td></tr>
+      <tr><td>mesh-large-frame</td><td>origin=board0, <b>relay=board2</b>, dest=board1</td><td>a <b>large</b> payload forces FW fragmentation → the <b>defrag-before-decrypt</b> RX path</td></tr>
+      <tr><td>mesh-leaf</td><td>origin=board0, <b>relay=board2</b>, dest=board1</td><td>relay set single-hop → PASS iff peering <b>survives</b> and forwarding is <b>blocked</b></td></tr>
+      <tr><td>mesh-relay-nocrash</td><td>origin=board0, <b>relay=board2</b> (reporter), dest=board1</td><td>relay forwards a long burst, <code>hw_restart_counter</code> <b>does not climb</b> (interrupt-WDT guard)</td></tr>
       <tr><td>mesh-ap</td><td><b>gate=board2</b>, peer=board1, sta=board0</td><td>the <b>mesh-gate</b> (mesh+AP on one radio), STA routes through, <b>ttl=63</b></td></tr>
       <tr><td>mesh-ap-multi-twt</td><td><b>gate=board2</b>, sta1=board0, sta2=board1</td><td>the gate serves <b>2 concurrent TWT STAs</b> (mesh+AP + per-STA TWT)</td></tr>
     </tbody>
@@ -395,11 +406,17 @@ make test-all BOARD_NAME=board2 AP=esp CYCLES=2  # EVERY tier in order + report 
 # ...or a tier at a time:
 make test-t0                                 # build matrix (no hardware)
 make test-t1 BOARD_NAME=board2               # smoke (BOARD_NAME required: board0|board1|board2)
-make test-t2                                 # all 12 on-air feature tests
+make test-t2                                 # all 15 on-air feature tests
 make test-tp AP=esp                          # PPK2 power-save ladder (AP required: esp|linux)
 make test-dscycle CYCLES=2       # deep-sleep reconnect gate (CYCLES required)
 make test-tp AP=linux LIGHT_SLEEP=1   # the stronger light-sleep variant
 make test-t2 DRY_RUN=1              # the T2 catalogue, no hardware
+
+# ...or the off-bench host tiers (no hardware):
+make test-unit                               # 37 harness unit tests
+make test-lint                               # pyflakes gate (also runs before every tier)
+make test-flakes                             # run-history flake ledger
+make test-trend TEST=&lt;slug&gt; LAST=8           # trend a metric (or DIFF="A B" across gitlinks)
 
 make test-report                         # (re)generate build/regtest/report.html
 make test-silence                        # return every ESP to the idle app</code></pre>
@@ -422,7 +439,7 @@ make test-silence                        # return every ESP to the idle app</cod
     <li><a href="#tiers">2 · The tiers</a></li>
     <li><a href="#bench">3 · The bench + devices</a></li>
     <li><a href="#orchestration">4 · How a T2 runs</a></li>
-    <li><a href="#catalogue">5 · The 12 T2 tests</a></li>
+    <li><a href="#catalogue">5 · The 15 T2 tests</a></li>
     <li><a href="#tp">6 · The tp power tier</a></li>
     <li><a href="#status">7 · Status vocabulary</a></li>
     <li><a href="#run">8 · Running it</a></li>

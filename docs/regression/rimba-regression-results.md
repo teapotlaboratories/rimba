@@ -22,7 +22,37 @@ every table below is regenerable and attributable to an exact tree state.
 
 ---
 
-## Latest run — 2026-07-18 (reshaped + renamed `test-*` tree)
+## Latest run — 2026-07-21 (2.12.3 forward-port + reliable dscycle)
+
+First full `make test-all` on the merged **2.10.4 → 2.12.3 morselib forward-port** (`components/halow`
+gitlink `7d7f76ad` = tag `2.12.3-esp32-1`). **All tiers green, and `dscycle` now PASSes** — the deep-sleep
+reconnect tier was made reliable + self-contained in [#40](https://github.com/teapotlaboratories/rimba/pull/40)
+(commanded C6 serial-latched wake + marker-gated cycle counting; it now self-powers board2 via `ppk2_hold`).
+
+| Tier | Result |
+|---|---|
+| **T0 build** | ✅ 31 PASS / 0 FAIL / 1 SKIP (`test-c6-trigger`, esp32c6-only, excluded on the `proto1-fgh100m` matrix) |
+| **T1 smoke** (board2) | ✅ 12 PASS / 0 FAIL / 2 SKIP (the 2 sleep apps) |
+| **T2 on-air** | ✅ 18 PASS / 0 FAIL (**15 feature tests** + 3 return-to-idle) |
+| **tp** power (`--ap esp`, fw 1.17.8) | ✅ 4 PASS — No-PS 62.8 mA anchor · Dyn-PS 25.6 (band 32–42) · TWT 25.3 (installed) · WNM+pd 20.2 (band 24–32) |
+| **dscycle** | ✅ PASS — reliable + self-contained (#40); an honest INCONCLUSIVE only ever on a stressed board2 rail |
+
+**T2 grew 12 → 15 feature tests** — [#39](https://github.com/teapotlaboratories/rimba/pull/39) added
+`mesh-large-frame` (1400 B payload → FW fragmentation → the defrag-before-decrypt RX path), `mesh-leaf`
+(relay `mmwlan_mesh_set_multihop(false)`; PASS iff peering survives AND 0 replies), and `mesh-relay-nocrash`
+(the relay asserts `hw_restart_counter` unchanged across a forwarding window — the interrupt-WDT crash guard).
+
+**Off-bench host tiers** (no hardware; `test-all` lints first, the rest on demand): `test-unit` (37
+stdlib-unittest tests over manifest/ledger/lint/trend), `test-lint` (pyflakes gate over `tools/regtest`),
+`test-flakes` (run-history flake ledger — a verdict that flips run-to-run is surfaced), `test-trend`
+("numbers that drift" — per-metric sparkline + a two-gitlink diff that flags a >20% move while the pass/fail
+verdict is unchanged). Landed in [#39](https://github.com/teapotlaboratories/rimba/pull/39) /
+[#41](https://github.com/teapotlaboratories/rimba/pull/41). One transient `mesh-linux` chronite flake was
+seen mid-run and passed on retry (ledger-classified a same-code transient, not a regression).
+
+---
+
+## Prior run — 2026-07-18 (reshaped + renamed `test-*` tree)
 
 First full bench run after the reshape + the `regtest-`→`test-` rename. **All tiers green** except
 dscycle (honest INCONCLUSIVE — flaky C6 wake, non-gating).

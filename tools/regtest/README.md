@@ -23,7 +23,7 @@ overclaims is worse than no test, because it gets trusted.
 | **T1 smoke** | one board | flash + boot + the radio really comes up (real chip id / fw / MAC / runtime country) | any on-air feature — a T1 board has no peer |
 | **T2 on-air** | a real rig | the milestone claims that matter (assoc, IBSS, TWT, mesh peering/relay, mesh+AP, SW-CCMP…) | throughput / power numbers — those are benchmarks, not pass/fail gates |
 
-A full on-air matrix over 17 apps is not realistic on a 3-board bench, so the suite is
+A full on-air matrix over 30 apps is not realistic on a 3-board bench, so the suite is
 **deliberately partial and honest about it** rather than fake-complete. Every T2 test
 that is defined but not yet automated says so, with the concrete blocker, in its own
 output (`--dry-run`) — see "Coverage" below.
@@ -109,7 +109,7 @@ Per-T2-test hardware (the orchestrator SKIPs a test whose devices aren't present
 |---|---|
 | `swccmp`, `ampdu-cap` | any 1 ESP board |
 | `ap-sta-ping`, `ibss`, `twt`, `mesh-peering` | board0 **+** board1 |
-| `mesh-relay`, `mesh-ap` | board0 + board1 **+ board2** (board2 is the relay/gate — `require_wired`) |
+| `mesh-relay`, `mesh-large-frame`, `mesh-leaf`, `mesh-relay-nocrash`, `mesh-ap` | board0 + board1 **+ board2** (board2 is the relay/gate — `require_wired`) |
 | `mesh-linux` | board2 **+ a reachable Linux node** (chronite over ssh) |
 
 **Bench setup notes:**
@@ -249,8 +249,9 @@ make test-t2 TEST=multi-twt  # 2 STAs both reach TWT INSTALLED concurrently (pla
 make test-t2 TEST=mesh-ap-multi-twt  # 2 TWT STAs behind the MESH GATE (concurrency)
 ```
 
-**T2 now has 12 feature tests** (was 9): the original 8 all-ESP + `mesh-linux`, plus `twt-assoc`,
-`multi-twt`, and `mesh-ap-multi-twt`. Combination coverage of TWT: single-STA (`twt`, both APs via
+**T2 now has 15 feature tests** (was 12): the original 8 all-ESP + `mesh-linux`, then `twt-assoc`,
+`multi-twt`, and `mesh-ap-multi-twt`, plus the three mesh-hardening tests `mesh-large-frame`,
+`mesh-leaf`, and `mesh-relay-nocrash`. Combination coverage of TWT: single-STA (`twt`, both APs via
 `twt-assoc`), multi-STA on a plain AP (`multi-twt`), and multi-STA **behind the mesh gate**
 (`mesh-ap-multi-twt`).
 
@@ -313,6 +314,11 @@ afterwards — you don't watch it live. Two pieces make that trustworthy:
 this once cost a 10/12-FAIL bench run). It runs automatically ahead of `t0/t1/t2/tp/dscycle` and at the top
 of `make test-all`; run it on its own with **`make test-lint`**. A real finding aborts with a non-zero
 exit and no bypass; a missing pyflakes only warns (it never blocks the bench on a missing dev tool).
+
+**Unit tests (off-bench).** The harness's own logic — the flake ledger, the `manifest` / `APPS`
+drift check, the trend math, the lint gate — is covered by **37 host unit tests**; run them with
+**`make test-unit`** (no hardware, no bench). They gate the harness itself the way T0–T2 gate the
+firmware.
 
 **Flake ledger (durable, automatic).** Because the per-tier JSON is latest-wins, a passing retry used to
 **silently erase** a failed run — a flake left no trace. Now `Reporter.add` **appends every result** to
@@ -396,7 +402,7 @@ These are wired into the harness / `common.py`, not left to the operator:
 make test-t2 DRY_RUN=1    # the full T2 catalogue, with provenance
 ```
 
-**All 9 T2 tests are automated** (8 all-ESP + 1 ESP↔Linux interop), every ESP role app `test-*`,
+**All 15 T2 tests are automated** (13 all-ESP + 2 ESP↔Linux interop), every ESP role app `test-*`,
 all passing on the bench:
 - **`swccmp`** — RFC-3610 CCM KAT (no radio, deterministic).
 - **`ampdu-cap`** — FW advertises the mesh A-MPDU capability (single board, mesh vif).
@@ -405,9 +411,20 @@ all passing on the bench:
 - **`twt`** — TWT responder agreement → INSTALLED (`test-apsta-ap` + `test-twt-sta`).
 - **`mesh-peering`** — SAE+AMPE peering to ESTAB, ESP↔ESP (symmetric `test-mesh-peering`).
 - **`mesh-relay`** — mesh multi-hop SW-CCMP forwarding, forced line, **relay = board2**.
+- **`mesh-large-frame`** — a large (FW-fragmented) frame forwarded origin→relay→dest with SW-CCMP
+  intact (the defrag-before-decrypt RX path), forced line, **relay = board2**.
+- **`mesh-leaf`** — the P6d single-hop/leaf opt-out: the relay keeps its 1-hop plinks but declines to
+  forward (`mmwlan_mesh_set_multihop(false)`) — exactly 0 replies, no black-hole, **relay = board2**.
+- **`mesh-relay-nocrash`** — the relay forwards a sustained load with **no silent hw-restart**
+  (`hw_restart_counter` unchanged), guarding the interrupt-WDT crash, **relay = board2** (reporter).
 - **`mesh-ap`** — mesh + AP concurrency (the gate), STA pings a far node, **ttl=63**, **gate = board2**.
 - **`mesh-linux`** — **ESP↔Linux mesh interop**: the ESP peers with + pings a real Linux node
   (chronite), brought up + torn down over ssh by `linux_peer.py`. The gold standard.
+- **`twt-assoc`** — assoc-embedded TWT reaches INSTALLED (flow 0..3) against a **Linux AP** — the
+  universal path (the second ESP↔Linux interop test).
+- **`multi-twt`** — two STAs both reach TWT INSTALLED **concurrently** on a plain ESP AP.
+- **`mesh-ap-multi-twt`** — two TWT STAs **behind the mesh gate** both reach INSTALLED (mesh+AP
+  concurrency + per-STA TWT).
 
 `mesh-relay`/`mesh-ap` need board2 powered (`tools/ppk2_hold.py`); the orchestrator refuses their
 `require_wired` roles on board0/board1. `mesh-linux` needs chronite reachable by ssh. Three small
