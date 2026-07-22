@@ -7,6 +7,7 @@ pyserial is imported lazily and only by the tiers that actually touch a board.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -63,11 +64,26 @@ class Result:
 class Reporter:
     """Collects results, prints a live line per test, writes a JSON baseline."""
 
-    def __init__(self, tier: str, quiet: bool = False):
+    def __init__(self, tier: str, quiet: bool = False, persist: bool = True):
         self.tier = tier
         self.quiet = quiet
+        #: When False, add() neither writes the crash-safe baseline nor appends to the run-history
+        #: ledger. Used for DRY runs: a preview must not clobber the real baseline or pollute the
+        #: flake ledger (the per-add() crash-safe write would otherwise defeat run.py's dry-run guard).
+        self.persist = persist
+        #: False until finalize() — so a run REAPED mid-way (the env kills long processes) leaves a
+        #: baseline marked incomplete, instead of a partial all-PASS prefix that reads as a complete green
+        #: run on the report the fire-and-forget operator trusts.
+        self._complete = False
         self.results: list[Result] = []
         self.started = time.time()
+        #: A stable id for THIS run, so every result the ledger records from this Reporter groups
+        #: into one run (distinct from any retry). Monotonic-ish + pid keeps concurrent/rapid runs apart.
+        self.run_id = f"{tier}-{int(self.started * 1000):x}-{os.getpid()}"
+        #: git describe + submodule SHA, computed once per run (lazily on first ledger append) and cached
+        #: — the run's provenance doesn't change mid-run, so don't re-shell `git` for every result.
+        self._git = None
+        self._gitlink = None
         #: When set (via seed_from / --append), pre-existing results keyed by name that new
         #: results replace, so a run can accumulate across invocations.
         self._seed: dict[str, dict] = {}
@@ -83,12 +99,24 @@ class Reporter:
     def add(self, r: Result) -> Result:
         self.results.append(r)
         self._seed.pop(r.name, None)   # a fresh result supersedes any seeded one
-        # Crash-safe: persist after every result so a killed run still leaves a baseline of
-        # what completed (the environment reaps long processes; a run may not reach the end).
-        try:
-            self.write()
-        except Exception:
-            pass
+        if self.persist:
+            # Crash-safe: persist after every result so a killed run still leaves a baseline of
+            # what completed (the environment reaps long processes; a run may not reach the end).
+            try:
+                self.write()
+            except Exception:
+                pass
+            # Append-only run-history ledger (never overwritten), so a retried transient is RECORDED
+            # instead of silently lost when the next run overwrites <tier>-latest.json. Best-effort +
+            # lazy import to keep this module dependency-free and import-cycle-free.
+            try:
+                from . import ledger
+                if self._git is None:
+                    self._git = git_describe()
+                    self._gitlink = submodule_sha("components/halow")
+                ledger.append_result(self.run_id, self.tier, self._git, self._gitlink, r)
+            except Exception:
+                pass
         if not self.quiet:
             mark = {
                 PASS: "\033[32mPASS\033[0m",
@@ -143,12 +171,19 @@ class Reporter:
             "generated": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "git": git_describe(),
             "halow_gitlink": submodule_sha("components/halow"),
+            "complete": self._complete,   # False on the crash-safe per-result writes; True only at finalize()
             "counts": self.counts(),
             "duration_s": round(time.time() - self.started, 1),
             "results": self._merged(),
         }
         path.write_text(json.dumps(payload, indent=2) + "\n")
         return path
+
+    def finalize(self, path: Optional[Path] = None) -> Path:
+        """Mark the run complete and write the baseline. Callers use this for the FINAL write so a reaped
+        run (which only ever hit the crash-safe write() in add()) stays flagged complete=False."""
+        self._complete = True
+        return self.write(path)
 
 
 # --------------------------------------------------------------------------

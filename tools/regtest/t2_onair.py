@@ -32,7 +32,6 @@ from .common import (
     SKIP,
     Reporter,
     Result,
-    capture_serial,
     capture_until,
     go_radio_silent,
     make,
@@ -53,7 +52,7 @@ REPORTER_TIMEOUT_S = 130.0
 def run(tests: Optional[list[str]] = None, dry_run: bool = False,
         quiet: bool = False, append: bool = False,
         linux_mac: Optional[str] = None, linux_ip: Optional[str] = None) -> Reporter:
-    rep = Reporter("T2", quiet=quiet)
+    rep = Reporter("T2", quiet=quiet, persist=not dry_run)
     if append and not dry_run:
         # Accumulate onto the existing baseline (build a full-suite report across short runs,
         # since the environment can reap a long single run). Seeded results carry forward;
@@ -84,7 +83,15 @@ def run(tests: Optional[list[str]] = None, dry_run: bool = False,
     used_boards: set[str] = set()
     try:
         for t in selected:
-            _dispatch(rep, t, used_boards, linux_mac=linux_mac, linux_ip=linux_ip)
+            try:
+                _dispatch(rep, t, used_boards, linux_mac=linux_mac, linux_ip=linux_ip)
+            except Exception as e:
+                # A bench transient -- e.g. a PPK2-rail board2 re-enumeration invalidating a cached
+                # /dev/ttyACM* so a serial open raises past the capture retry -- must fail THIS test, not
+                # crash the whole tier and skip every test after it. INCONCLUSIVE (a rig hiccup, not a code
+                # regression); the flake ledger records it so the underlying rate stays visible.
+                rep.add(Result("T2", t.slug, INCONCLUSIVE,
+                               detail=f"harness/bench transient: {type(e).__name__}: {e}"[:300]))
     finally:
         # Always leave the bench silent, even if a test raised.
         if used_boards:
@@ -387,8 +394,8 @@ def _record_verdict(rep: Reporter, slug: str, log: str, dur: float, meta: dict) 
 
     if not verdict:
         rep.add(Result("T2", slug, FAIL, duration_s=dur,
-                       detail=f"no TEST|RESULT line within the window -- the reporter hung, "
-                              f"crashed, or never ran. Silence is not a pass."
+                       detail="no TEST|RESULT line within the window -- the reporter hung, "
+                              "crashed, or never ran. Silence is not a pass."
                               + (f" [failed steps: {', '.join(failed_steps)}]" if failed_steps else ""),
                        evidence=ev, meta=meta))
         return

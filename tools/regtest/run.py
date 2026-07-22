@@ -98,10 +98,68 @@ def _write_report() -> None:
         print(f" (HTML report skipped: {e})")
 
 
+def _lint_gate() -> int:
+    """Run the pyflakes lint gate over the harness. 0 = clean (or linter absent), non-zero = findings.
+
+    Called automatically before every run-producing command so a bad harness edit (an undefined name that
+    py_compile misses) is caught in ~0.1 s, off-bench, instead of 40 min into a run. No opt-out."""
+    if __package__ in (None, ""):
+        from tools.regtest import lint  # type: ignore
+    else:
+        from . import lint
+    ok, report = lint.check()
+    if not ok:
+        print("LINT GATE FAILED — fix these harness issues before running (caught off-bench, "
+              "not mid-run):\n", flush=True)
+        print(report, flush=True)
+        print("\n(pyflakes over tools/regtest + tools; py_compile does not catch undefined names. "
+              "This gate has no bypass on purpose.)", flush=True)
+        return 2
+    if report:   # a non-blocking notice, e.g. pyflakes-not-installed
+        print(report, flush=True)
+    return 0
+
+
+def cmd_lint(args) -> int:
+    """Run the harness lint gate on demand (`make test-lint`)."""
+    rc = _lint_gate()
+    if rc == 0:
+        if __package__ in (None, ""):
+            from tools.regtest import lint  # type: ignore
+        else:
+            from . import lint
+        print(f"lint: clean — {len(lint.targets())} harness files, no pyflakes findings.")
+    return rc
+
+
+def cmd_flakes(args) -> int:
+    """Print the run-history flake ledger (which tests flipped verdict run-to-run)."""
+    if __package__ in (None, ""):
+        from tools.regtest import ledger  # type: ignore
+    else:
+        from . import ledger
+    print(ledger.format_report())
+    return 0
+
+
+def cmd_trend(args) -> int:
+    """Trend a recorded numeric metric over runs, or diff it across two halow gitlinks (the 'numbers that
+    drift' view: a metric that moves while the test still PASSes)."""
+    if __package__ in (None, ""):
+        from tools.regtest import ledger  # type: ignore
+    else:
+        from . import ledger
+    if args.diff:
+        print(ledger.format_diff(args.diff[0], args.diff[1]))
+    else:
+        print(ledger.format_trend(name=args.test, last=args.last))
+    return 0
+
+
 def cmd_t0(args) -> int:
     print("T0 -- build matrix (every app x board via make; asserts the country code)\n")
     rep = t0_build.run(apps=args.app, boards=args.board)
-    path = rep.write()
+    path = rep.finalize()   # final write: marks the run complete
     print(f"\n{rep.summary()}\n baseline: {path}")
     _write_report()
     return 0 if rep.green else 1
@@ -115,7 +173,7 @@ def cmd_t1(args) -> int:
         include_sleep_apps=args.include_sleep_apps,
         keep_radio_on=args.keep_radio_on,
     )
-    path = rep.write()
+    path = rep.finalize()   # final write: marks the run complete
     print(f"\n{rep.summary()}\n baseline: {path}")
     _write_report()
     return 0 if rep.green else 1
@@ -137,7 +195,7 @@ def cmd_t2(args) -> int:
         # the dry run's empty ones (which then poisons a later --append seed).
         print(f"\n{rep.summary()}")
         return 0
-    path = rep.write()
+    path = rep.finalize()   # final write: marks the run complete
     print(f"\n{rep.summary()}\n baseline: {path}")
     _write_report()
     return 0 if rep.green else 1
@@ -156,7 +214,7 @@ def cmd_tp(args) -> int:
     if args.dry_run:
         print(f"\n{rep.summary()}")   # dry run must not write/clobber the baseline
         return 0
-    path = rep.write()
+    path = rep.finalize()   # final write: marks the run complete
     print(f"\n{rep.summary()}\n baseline: {path}")
     _write_report()
     return 0 if rep.green else 1
@@ -171,7 +229,7 @@ def cmd_dscycle(args) -> int:
 
     print("dscycle -- deep-sleep duty-cycle reconnect gate\n")
     rep = dscycle.run(cycles=args.cycles, append=not args.no_append)
-    path = rep.write()
+    path = rep.finalize()   # final write: marks the run complete
     print(f"\n{rep.summary()}\n baseline: {path}")
     _write_report()
     return 0 if rep.green else 1
@@ -392,6 +450,21 @@ def main() -> int:
     pr = sub.add_parser("report", help="(re)generate the HTML report from the latest baselines")
     pr.set_defaults(func=cmd_report)
 
+    pl = sub.add_parser("lint", help="pyflakes lint gate over the harness (no hardware) — runs "
+                                     "automatically before every tier too")
+    pl.set_defaults(func=cmd_lint)
+
+    pfk = sub.add_parser("flakes", help="run-history flake ledger: which tests flip verdict run-to-run")
+    pfk.set_defaults(func=cmd_flakes)
+
+    ptr = sub.add_parser("trend", help="trend a recorded numeric metric over runs, or diff it across "
+                                       "two halow gitlinks (numbers that drift while a test still passes)")
+    ptr.add_argument("--test", help="limit to one test slug/name")
+    ptr.add_argument("--last", type=int, default=8, help="recent runs to show per metric (default 8)")
+    ptr.add_argument("--diff", nargs=2, metavar=("GITLINK_A", "GITLINK_B"),
+                     help="compare each metric's value at halow gitlink A vs B (SHA prefixes accepted)")
+    ptr.set_defaults(func=cmd_trend)
+
     pf = sub.add_parser("flash-interop",
                         help="flash test-mesh-linux at a Linux node, MAC auto-queried over ssh")
     pf.add_argument("--host", required=True,
@@ -412,6 +485,13 @@ def main() -> int:
     pf.set_defaults(func=cmd_flash_interop)
 
     args = p.parse_args()
+    # Automatic off-bench gate: lint the harness before any command that produces results / touches the
+    # bench, so an undefined-name bug fails in ~0.1 s instead of mid-run. Cheap enough to always run.
+    _RUN_PRODUCING = {"t0", "t1", "t2", "tp", "dscycle", "all", "flash-interop"}
+    if args.cmd in _RUN_PRODUCING:
+        rc = _lint_gate()
+        if rc:
+            return rc
     return args.func(args)
 
 

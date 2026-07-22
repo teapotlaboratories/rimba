@@ -172,8 +172,15 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">49</span></h2>
+<h2>July 2026 <span class="mcount">50</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-21-regtest-ledger-lint-gate.html">
+<div class="card-date">2026-07-21</div>
+<div class="card-title">Make the regtest suite unattended: flake ledger + lint gate</div>
+<div class="card-ex">Two slices of the "Loop-back: harden" umbrella, driven by one requirement: the harness must run fully automatically — nobody, not even the agent, should have to monitor a run. Two gaps stood in the way. (1) The per-tier build/regtest/&lt;tier&gt;-latest.json baselines are latest-wins: a passing retry silently overwrites a failed run, so a flake leaves no trace (this is what erased the first rimba-halow-sta FAIL, and it's why today's mesh-linux fail→retry-pass would have vanished). Fix — a run-history flake ledger: common.Reporter.add() (the one crash-safe chokepoint every tier flows through) now ALSO appends one JSONL line per result to build/regtest/history.jsonl, append-only, never overwritten, grouped by a per-run id (git SHA cached per run, not shelled per result). New tools/regtest/ledger.py classifies: a test that produced BOTH good (PASS/SKIP/XFAIL) and bad (FAIL/INCONCLUSIVE/XPASS) outcomes across runs is flaky (a bench/RF transient, not a code regression); always-bad is broken (a real defect). make test-flakes prints it; the HTML report carries a Flake ledger section. (2) A bench-out-of-scope edit once passed py_compile and only failed on the bench 10/12, deep in a run — py_compile doesn't catch undefined names, pyflakes does in ~0.1s. Fix — a pyflakes lint gate: new tools/regtest/lint.py runs the pyflakes API over tools/regtest/*.py + tools/*.py; run.py runs it at the top of every run-producing command and make test-all lints first, so a real finding aborts before any hardware is touched (no bypass; a missing pyflakes only warns). Turning the gate on immediately caught 6 pre-existing findings — including the two # noqa-suppressed reshape-later patterns #39 deferred (pyflakes ignores # noqa) and a redefinition of unused 'ap_teardown' — all fixed (unused imports in t1_smoke/t2_onair/tp_power, two placeholder-less f-strings, the import-ppk2_api probe → importlib.util.find_spec, the None-then-def ap_teardown → a named helper assigned to the var). A new persist flag on Reporter also closes a latent bug where a DRY_RUN=1 preview's per-add() crash-safe write clobbered the real baseline. Verified off-bench: 26 unit tests pass (was 11; ledger flake-detection + append-additive + torn-line tolerance + the real Reporter.add()→ledger hook via temp dirs + a dry-run-records-nothing test; pyflakes catches undefined-name/unused-import, passes clean code, real harness clean) under the IDF python, make test-lint clean over 19 files, and a fire-and-forget bench demo (2× make test-t1 board2 launched detached, docs written without watching it, ledger read afterward — the workflow the whole change exists to enable). Host-side plumbing only; no radio behaviour changed.</div>
+<div class="card-meta">6 min · implemented · regtest · ledger · lint gate</div>
+</a>
 
 <a class="card" href="2026-07-21-dscycle-hardening.html">
 <div class="card-date">2026-07-21</div>

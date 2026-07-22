@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>regtest: flake ledger + lint gate — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-21</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-21</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ implemented &amp; tested</span>
+    <span class="badge">regtest · ledger · lint gate</span>
+  </div>
+
+  <h1>Make the regtest suite unattended: flake ledger + lint gate</h1>
+  <p class="lead">Two slices of the "Loop-back: harden" umbrella, driven by one requirement: the harness
+  must run <strong>fully automatically — nobody, not even the agent, should have to monitor a run</strong>.
+  For that to hold you have to launch it, walk away, and trust the durable record afterwards. Two gaps
+  stood in the way — a latest-wins baseline that <em>erased</em> flakes, and a class of harness bug that
+  only surfaced mid-run on the bench. Both closed.</p>
+
+  <div class="callout ok">
+    <p class="ct">Bottom line</p>
+    <p>Every result is now <strong>appended to a run-history ledger</strong> (never overwritten), so a
+    flake a retry masked is still recorded and <code>make test-flakes</code> surfaces it. And a
+    <strong>pyflakes lint gate runs off-bench before every tier</strong>, so an undefined-name bug fails
+    in ~0.1 s instead of 40 min into a run. Turning the gate on immediately caught <strong>6 pre-existing
+    findings</strong>.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">26</div><div class="lbl">unit tests (was 11)</div></div>
+    <div class="stat"><div class="num acc">~0.1 s</div><div class="lbl">lint gate, off-bench</div></div>
+    <div class="stat"><div class="num">6</div><div class="lbl">pre-existing bugs the gate caught</div></div>
+    <div class="stat"><div class="num">0</div><div class="lbl">live monitoring needed</div></div>
+  </div>
+
+  <h2 id="problem">1 · Why the suite couldn't be left alone</h2>
+  <h3>Latest-wins erases flakes</h3>
+  <p>Each tier writes <code>build/regtest/&lt;tier&gt;-latest.json</code> and a retry <strong>overwrites</strong>
+  it. So a passing retry silently deletes the failed run — a flake leaves no trace. Earlier today
+  <code>mesh-linux</code> FAILed on a chronite transient and PASSed on retry; with latest-wins alone, that
+  flake would have vanished. If you're not watching the live run, you never learn it flapped.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node err"><div class="t">run 1</div><div class="s">mesh-linux FAIL</div></div>
+      <div class="node"><div class="t">latest.json</div><div class="s">= FAIL</div></div>
+      <div class="node ok"><div class="t">run 2 (retry)</div><div class="s">mesh-linux PASS</div></div>
+      <div class="node err"><div class="t">latest.json</div><div class="s">= PASS · FAIL erased</div></div>
+    </div>
+    <figcaption>Before: the retry overwrites the baseline; the flake is gone. After: both outcomes are
+    appended to <code>history.jsonl</code>, so the ledger shows <code>mesh-linux: 1 FAIL, 1 PASS → flaky</code>.</figcaption>
+  </figure>
+
+  <h3>py_compile misses the bug that shows up on the bench</h3>
+  <p>A <code>bench</code>-out-of-scope edit once passed <code>py_compile</code> and only failed
+  <strong>on the bench, 10/12 FAIL</strong>, deep into a run. <code>py_compile</code> compiles to bytecode
+  — it does <em>not</em> resolve names, so an undefined name sails through. pyflakes catches it in ~0.1 s.
+  Without an automatic gate you find out mid-run — exactly when nobody's watching.</p>
+
+  <h2 id="ledger">2 · The flake ledger</h2>
+  <p><code>common.Reporter.add()</code> already persists crash-safely after every result — the one
+  chokepoint every tier flows through. It now <strong>also appends one JSONL line per result</strong> to
+  <code>history.jsonl</code>, append-only, grouped by a per-run id:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">a test finishes</div><div class="s">Result</div></div>
+      <div class="node acc"><div class="t">Reporter.add()</div><div class="s">the one chokepoint</div></div>
+      <div class="node"><div class="t">latest.json</div><div class="s">overwrite (last run)</div></div>
+      <div class="node ok"><div class="t">history.jsonl</div><div class="s">append (all runs)</div></div>
+    </div>
+    <figcaption>The ledger is the durable counterpart to the latest-wins baseline — same chokepoint, but
+    append-only. <code>ledger.py</code> then classifies: both good &amp; bad outcomes across runs =
+    <b>flaky</b>; always-bad = <b>broken</b> (a real defect, not a flake).</figcaption>
+  </figure>
+
+  <p><code>make test-flakes</code> prints the ledger; the HTML report carries the same "Flake ledger"
+  section. A dry run records nothing (a new <code>persist</code> flag also closes a latent bug where the
+  per-<code>add()</code> crash-safe write clobbered the real baseline on <code>DRY_RUN=1</code>).</p>
+
+  <h2 id="lint">3 · The lint gate (and the 6 bugs it caught)</h2>
+  <p><code>run.py</code> runs pyflakes over the harness at the top of <em>every</em> run-producing command,
+  and <code>make test-all</code> lints first — a real finding aborts <strong>before any hardware is
+  touched</strong>, no bypass. A missing pyflakes only warns (never blocks the bench on a missing dev
+  tool). Turning it on flagged 6 findings the harness had been carrying — including the two
+  <code>#&nbsp;noqa</code>-suppressed "reshape later" patterns a prior batch deferred (pyflakes ignores
+  <code>#&nbsp;noqa</code>) and a <code>redefinition of unused 'ap_teardown'</code>:</p>
+  <table>
+    <thead><tr><th>file</th><th>finding → fix</th></tr></thead>
+    <tbody>
+      <tr><td><code>t1_smoke.py</code></td><td>unused <code>INCONCLUSIVE</code> import → removed</td></tr>
+      <tr><td><code>t2_onair.py</code></td><td>unused <code>capture_serial</code> import → removed; two placeholder-less f-strings → plain strings</td></tr>
+      <tr><td><code>tp_power.py</code></td><td>unused <code>REPO_ROOT</code> import → removed; <code>import ppk2_api # noqa</code> probe → <code>importlib.util.find_spec</code>; <code>ap_teardown</code> <code>None</code>-then-<code>def</code> → named helper assigned to the var</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="verify">4 · Verification</h2>
+  <p>All host-side plumbing — no radio — so it's unit-testable off-bench, which is itself in the spirit of
+  "no monitoring."</p>
+  <ul>
+    <li><strong>26 unit tests pass</strong> (<code>make test-unit</code>, now under the IDF python so
+      pyflakes is present): flake detection (flip=flaky, always-pass≠flaky, always-bad=broken,
+      INCONCLUSIVE=bad, SKIP/XFAIL=good), append-is-additive, torn-final-line tolerance, the real
+      <code>Reporter.add()</code>→ledger hook (temp dirs, never touches <code>build/regtest</code>), and a
+      dry-run-records-nothing test; pyflakes catches an undefined name + unused import, passes clean code,
+      and the real harness is clean.</li>
+    <li><strong>Dogfood:</strong> <code>make test-lint</code> → <em>clean, 19 harness files</em> after the
+      6 fixes.</li>
+    <li><strong>Fire-and-forget bench demo:</strong> launched <code>2× make test-t1 board2</code> detached,
+      wrote these docs <em>without watching it</em>, and read the ledger afterward — the workflow the whole
+      change exists to enable.</li>
+  </ul>
+
+  <div class="callout">
+    <p class="ct">The fire-and-forget workflow</p>
+    <pre style="margin:.4em 0 0"><code>make test-all BOARD_NAME=board2 AP=esp CYCLES=3 &gt;/tmp/run.log 2&gt;&amp;1 &amp;
+<span class="cm"># … later, nothing watched in between …</span>
+make test-flakes   <span class="cm"># what flipped verdict run-to-run (durable history)</span>
+make test-report   <span class="cm"># the HTML, incl. the flake section</span></code></pre>
+  </div>
+
+  <h2 id="drift">5 · Numbers that drift (trend + gitlink diff)</h2>
+  <p>The flake ledger catches pass↔fail flips; it does <strong>not</strong> catch a <em>number that drifts
+  while the test still passes</em> — the tp No-PS current creeping up (the fw-1.17.9 <strong>~2× power-save
+  regression was exactly this</strong>), a dscycle reconnect getting slower, throughput sagging. That's the
+  biggest regression <em>class</em> the suite missed. tp/dscycle already record rich numeric
+  <code>meta</code> (<code>median_ma</code>, <code>latencies_ms</code>, …) — the ledger just threw it away.</p>
+  <div class="callout">
+    <p class="ct">The command to run after a <code>components/halow</code> bump</p>
+    <pre style="margin:.4em 0 0"><code>make test-trend                          <span class="cm"># every metric over recent runs (sparkline + %)</span>
+make test-trend DIFF="7d7f76ad 88606f94" <span class="cm"># each metric A→B across two halow SDK gitlinks</span>
+<span class="cm">#   tp:no-ps (No-PS)   median_ma   A=63  B=126   +100%   &lt;-- &gt;20% MOVE</span></code></pre>
+  </div>
+  <p><code>ledger.append_result</code> now persists a <strong>bounded numeric <code>meta</code></strong>
+  (scalars, short strings, numeric lists ≤32) per history line; <code>run.py trend</code> shows each
+  metric over the last N runs (a numeric list trends as its mean), and <code>--diff</code> compares two
+  halow gitlinks (SHA prefixes) and <strong>flags a &gt;20% move</strong> — turning "still passes" into
+  "this number moved N%". The RC / A-MPDU numbers (the survey's next targets) need a public
+  <code>mmwlan_*</code> accessor first (only the internal <code>umac_rc_get_rc_stats</code> exists) —
+  deferred as a submodule follow-on. <strong>7 more unit tests</strong> (36 total), incl. the canonical
+  2× No-PS-mA diff across two SDK gitlinks, + a real-data <code>2× dscycle</code> demo.</p>
+
+  <h2 id="files">6 · Files</h2>
+  <ul>
+    <li><strong>New:</strong> <code>tools/regtest/ledger.py</code>, <code>lint.py</code>,
+      <code>tests/test_ledger.py</code>, <code>tests/test_lint.py</code>.</li>
+    <li><strong>Changed:</strong> <code>common.py</code> (persist flag + run_id + ledger hook),
+      <code>run.py</code> (lint gate + <code>lint</code>/<code>flakes</code> commands), <code>report.py</code>
+      (flake section), <code>t2_onair.py</code>/<code>tp_power.py</code>/<code>t1_smoke.py</code> (lint
+      fixes + <code>persist=not dry_run</code>), <code>Makefile</code>, <code>README.md</code>.</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0">Next in the umbrella: live-verify the serial-capture retry, and
+  root-cause the board2 PPK2-rail flake at source (the ~2–3%/capture USB re-enumeration the ledger will now
+  quantify).</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#problem">1 · Why it couldn't be left alone</a></li>
+    <li><a href="#ledger">2 · The flake ledger</a></li>
+    <li><a href="#lint">3 · The lint gate</a></li>
+    <li><a href="#verify">4 · Verification</a></li>
+    <li><a href="#drift">5 · Numbers that drift</a></li>
+    <li><a href="#files">6 · Files</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-21-regtest-ledger-lint-gate</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

@@ -201,15 +201,24 @@ def _tier_section(tier: str, data: Optional[dict]) -> str:
                 f'<p class="muted">No <code>{tier}-latest.json</code> — this tier has not been run '
                 f'in this tree.</p></section>')
     green = _tier_gated(data)
+    # complete is explicitly False only on a run reaped before it finished (old baselines lack the field
+    # → None → treated as unknown, not warned). A partial all-PASS prefix would otherwise read as green.
+    incomplete = data.get("complete") is False
     stamp = (f'{_esc(data.get("generated", "?"))} · git '
              f'<code>{_esc(data.get("git", "?"))}</code> · halow '
              f'<code>{_esc(data.get("halow_gitlink", "?"))}</code> · '
              f'{int(data.get("duration_s", 0))}s')
+    warn = ('<p style="margin:.4em 0;padding:.6em .9em;border-radius:8px;border:1px solid var(--err);'
+            'color:var(--err);background:color-mix(in srgb,var(--err) 12%,transparent);font-weight:600">'
+            '⚠ INCOMPLETE — this run did not finish (reaped / killed mid-way); the counts below are a '
+            'partial prefix, not a full result. Re-run this tier.</p>' if incomplete else '')
+    pill = ('<span class="pill err">INCOMPLETE</span>' if incomplete
+            else f'<span class="pill {"ok" if green else "err"}">{"green" if green else "RED"}</span>')
     return (
         f'<section class="tier">'
-        f'<h2>{tier} '
-        f'<span class="pill {"ok" if green else "err"}">{"green" if green else "RED"}</span></h2>'
+        f'<h2>{tier} {pill}</h2>'
         f'<p class="blurb">{_TIER_BLURB[tier]}</p>'
+        f'{warn}'
         f'<div class="stamp">{stamp}</div>'
         f'<div class="counts">{_counts_line(data.get("counts", {}))}</div>'
         f'<div class="tw"><table><thead><tr><th>status</th><th>test</th><th>measured</th>'
@@ -235,6 +244,90 @@ def _summary_cards(loaded: dict) -> str:
             f'<div class="card"><div class="cnum {"ok" if green else "err"}">{headline}</div>'
             f'<div class="clbl">{tier} — {_counts_line(c)}</div></div>')
     return f'<div class="cards">{"".join(cards)}</div>'
+
+
+def _flake_section() -> str:
+    """A flake-ledger block: which tests flipped verdict run-to-run (read from history.jsonl).
+
+    This is the durable counterpart to the latest-wins cards above -- the cards show the LAST run per
+    tier; this shows the whole history, so a transient that a retry overwrote is still visible."""
+    try:
+        from . import ledger
+        hist = ledger.load_history()
+    except Exception:
+        return ""
+    intro = ('Every result is appended to <code>build/regtest/history.jsonl</code> (never overwritten), '
+             'so a flake a retry masked is still recorded. <code>make test-flakes</code> for the CLI view.')
+    if not hist:
+        return (f'<section class="tier"><h2>Flake ledger</h2><p class="muted">No run history yet. {intro}'
+                f'</p></section>')
+    tests = ledger.summarize(hist)
+    flaky = sorted(((n, t) for n, t in tests.items() if t["flaky"]), key=lambda nt: -nt[1]["bad"])
+    brk = sorted(n for n, t in tests.items() if t["broken"])
+    run_ids = {r.get("run_id") for r in hist if r.get("run_id")}
+    head = (f'<section class="tier"><h2>Flake ledger '
+            f'<span class="sub">{len(hist)} results · {len(run_ids)} runs · {len(tests)} tests</span></h2>'
+            f'<p class="muted">{intro}</p>')
+    if not flaky and not brk:
+        return head + ('<p class="ok">No flakes — every test that ran more than once gave a consistent '
+                       'verdict.</p></section>')
+    body = ""
+    if flaky:
+        rows = ""
+        for name, t in flaky:
+            cnt = ", ".join(f'{v}&nbsp;{s}' for s, v in t["by_status"].items())
+            recent = " ".join(t.get("recent", []))
+            # A flip at ONE git SHA is a genuine transient; a flip that straddles SHAs may be a regression.
+            kind = ('<span class="ok">transient (same code)</span>' if t.get("same_code_flake")
+                    else '<span class="err">flipped across code — verify</span>')
+            last_cls = "err" if t["last_status"] in ("FAIL", "INCONCLUSIVE", "XPASS") else "ok"
+            rows += (f'<tr><td>{_esc(t["tier"])}</td><td><code>{_esc(name)}</code></td>'
+                     f'<td>{cnt}</td><td>{kind}</td><td><code>{_esc(recent)}</code></td>'
+                     f'<td class="{last_cls}">{_esc(t["last_status"])}</td></tr>')
+        body += ('<p><b>Flaky</b> — flipped verdict run-to-run. A flip at the <em>same</em> code SHA is a '
+                 'bench/RF/rig transient; one that <em>straddles a code change</em> may be a real '
+                 'regression (the <b>kind</b> column):</p>'
+                 '<table class="ledger"><thead><tr><th>tier</th><th>test</th><th>outcomes</th>'
+                 '<th>kind</th><th>recent</th><th>last</th></tr></thead><tbody>' + rows + '</tbody></table>')
+    if brk:
+        body += ('<p class="muted"><b>Consistently failing</b> (a bad outcome and never a good one → a '
+                 'real defect, not a flake; a rig-gated test that SKIPs-when-absent but FAILs-when-run '
+                 'lands here): ' + ", ".join(f'<code>{_esc(n)}</code>' for n in brk) + '.</p>')
+    return head + body + '</section>'
+
+
+def _trend_section() -> str:
+    """Numbers-that-drift: recorded numeric metrics with a sparkline over recent runs (from history.jsonl).
+
+    Complements the flake section: that catches pass<->fail flips, this catches a number that moves while
+    the test still PASSes (tp median_ma creeping up, a dscycle reconnect getting slower)."""
+    try:
+        from . import ledger
+        trends = ledger.metric_trends()
+    except Exception:
+        return ""
+    if not trends:
+        return ""
+    rows = ""
+    for tname in sorted(trends):
+        for metric in sorted(trends[tname]):
+            vals = [v for (_ts, _g, _hl, v) in trends[tname][metric][-8:]]
+            if len(vals) < 2:            # need at least 2 runs to show a trend
+                continue
+            first, latest = vals[0], vals[-1]
+            pct = 100.0 * (latest - first) / first if first else 0.0
+            cls = "err" if abs(pct) >= 20 else ("warn" if abs(pct) >= 5 else "muted")
+            rows += (f'<tr><td>{_esc(tname)}</td><td><code>{_esc(metric)}</code></td>'
+                     f'<td style="font-size:15px">{_esc(ledger.sparkline(vals))}</td>'
+                     f'<td>{latest:g}</td><td class="{cls}">{pct:+.0f}%</td></tr>')
+    if not rows:
+        return ""
+    return ('<section class="tier"><h2>Metric trends <span class="sub">numbers that drift</span></h2>'
+            '<p class="muted">A recorded number that moves while the test still PASSes (tp mA, dscycle '
+            'latency). Compare across SDK versions with <code>make test-trend DIFF="&lt;gitlinkA&gt; '
+            '&lt;gitlinkB&gt;"</code>; &ge;20% is flagged.</p>'
+            '<table class="ledger"><thead><tr><th>test</th><th>metric</th><th>recent</th><th>latest</th>'
+            '<th>&Delta; first&rarr;last</th></tr></thead><tbody>' + rows + '</tbody></table></section>')
 
 
 def generate(out_path: Optional[Path] = None) -> Path:
@@ -264,6 +357,8 @@ def generate(out_path: Optional[Path] = None) -> Path:
         f'chip/fw/country; <b>T0</b> = compiles + the pinned fw-blob. Doze <em>depth</em> and RF '
         f'numbers are benchmarks, reported not gated.</p>'
         f'{sections}'
+        f'{_flake_section()}'
+        f'{_trend_section()}'
         f'<p class="foot">Generated by <code>tools/regtest/report.py</code> from '
         f'<code>build/regtest/{{T0,T1,T2,TP}}-latest.json</code>. This is a view of the last run per '
         f'tier — re-run a tier to refresh it. Full narrative: '
