@@ -34,7 +34,6 @@ from typing import Optional
 from . import manifest as M
 from .common import (
     FAIL,
-    INCONCLUSIVE,
     PASS,
     SKIP,
     Reporter,

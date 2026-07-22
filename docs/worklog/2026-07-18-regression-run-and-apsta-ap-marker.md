@@ -84,3 +84,29 @@ and `dscycle` (both wait on the same `ap-ready` marker).
   morselib AP-path change in the currently-modified `components/halow`. It worked in the 2026-07-17
   14:00 run, so a diff of the submodule state (or bumping `CONFIG_ESP_MAIN_TASK_STACK_SIZE`) is the
   place to start. The interim marker move keeps the suite honest in the meantime.
+
+## Update 2026-07-21 — RESOLVED (a mid-migration artifact; workaround reverted)
+
+The stall **does not reproduce on the shipped 2.12.3 SDK** (`components/halow` @ `7d7f76ad`, on `main`).
+Reproduced on-bench on board2 with an instrumented build (a heartbeat + a stack/heap probe right after
+the netif-up), captured from a fresh boot **twice**:
+
+- `app_main` printed **straight through** `esp_netif_action_connected`: `ap-ready` and `netif up=1` at
+  3.8 s, then `DIAG post-netif: heap=8.6 MB, main_stack_hwm=1528`, then a **heartbeat every 1 s for 30+ s
+  past the netif-up** — no silence, no crash. Consistent across both runs (30 heartbeats total).
+- The main-task stack high-water-mark is **1528 B free** (of 3584) — comfortable, so the suspected
+  main-task **stack overflow is ruled out**; and there is no `esp_pm`/light-sleep on the ESP build
+  (`CONFIG_PM_ENABLE` unset; the only tickless-idle code is morselib's own ARM FreeRTOS, not compiled for
+  the ESP32) — so the "console powered down by light-sleep" theory is ruled out too.
+
+**Diagnosis:** the 2026-07-18 stall was an artifact of the **mid-migration** `components/halow` (the
+"currently-modified" submodule *during* the 2.10.4→2.12.3 forward-port). The exact intermediate cause
+can't be pinned — that uncommitted build state no longer exists — but it is **absent on the merged 2.12.3
+that ships**, which is the honest, verifiable conclusion (an unrooted mechanism on a build that's gone,
+vs. a proven-clean shipped SDK).
+
+**Fix:** the interim workaround is **reverted** — the `ap-ready` up-marker is back at its natural position
+(after `assign_static_ip`, so it truthfully means "SoftAP up + static IP pinned"); the diagnostics were
+removed (`firmware/test-apsta-ap/main/app_main.c`). **Verified end-to-end:** `make test-t2
+TEST="ap-sta-ping"` → **PASS** (213.5 s) — the orchestrator saw `ap-ready` in its natural position and the
+STA associated (SAE) + pinged. Bench left radio-silent. (Uncommitted; held for a post-17:00 commit.)

@@ -36,7 +36,7 @@ else:
     from . import manifest as M
     from . import common, linux_peer
 
-from .common import FAIL, INCONCLUSIVE, PASS, SKIP, REPO_ROOT, Reporter, Result
+from .common import FAIL, INCONCLUSIVE, PASS, SKIP, Reporter, Result
 
 _PPK2_VID = 0x1915
 _PPK2_PID = 0xC00A
@@ -373,7 +373,7 @@ def _dry_run(rep: Reporter, ap: str, light_sleep: bool = False) -> Reporter:
 
 def run(ap: str = "esp", dry_run: bool = False, append: bool = False,
         light_sleep: bool = False) -> Reporter:
-    rep = Reporter("TP")
+    rep = Reporter("TP", persist=not dry_run)
     if append:
         prior = common.RESULTS_DIR / "TP-latest.json"
         if prior.exists():
@@ -396,9 +396,8 @@ def run(ap: str = "esp", dry_run: bool = False, append: bool = False,
                        detail="no PPK2 found (Nordic 1915:C00A). Connect the PPK2 that powers "
                               "board2's rail (docs/reference/rimba-bench-devices.md)."))
         return rep
-    try:
-        import ppk2_api  # noqa: F401,PLC0415
-    except ImportError:
+    import importlib.util  # noqa: PLC0415
+    if importlib.util.find_spec("ppk2_api") is None:
         rep.add(Result("TP", "tp power ladder", SKIP,
                        detail="ppk2_api not importable. `pip install ppk2-api` in the IDF venv "
                               "(it is already installed on the bench host)."))
@@ -445,9 +444,10 @@ def run(ap: str = "esp", dry_run: bool = False, append: bool = False,
                                       "associate to."))
                 return rep
 
-            def ap_teardown():
+            def _teardown_esp_ap():
                 common.go_radio_silent([M.POWER_ESP_AP_BOARD], M.BENCH, M.IDLE_APP, M.BENCH_BOARD,
                                        verbose=False)
+            ap_teardown = _teardown_esp_ap   # assign (not a def) so it cleanly overrides the None default
         else:
             ok, detail, ap_teardown = linux_peer.bring_up_ap(M.POWER_LINUX_AP_HOST)
             print(f"  {detail}", flush=True)

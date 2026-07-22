@@ -85,7 +85,7 @@ require-var = @[ -n "$($(1))" ] || { echo "$@ requires $(1)=$(2)"; exit 2; }
 .PHONY: help build flash monitor flash-monitor clean fullclean \
         menuconfig size erase \
         test test-all test-t0 test-t1 test-t2 test-tp test-dscycle test-bench \
-        test-conn test-interop test-silence test-report test-unit
+        test-conn test-interop test-silence test-report test-unit test-lint test-flakes test-trend
 
 help:
 	@echo "Rimba firmware build (ESP-IDF wrapper)"
@@ -153,7 +153,8 @@ test-all:                      ## run EVERY tier t0->t1->t2->tp->dscycle (BOARD_
 	$(call require-var,BOARD_NAME,board0|board1|board2)
 	$(call require-var,AP,esp|linux)
 	$(call require-var,CYCLES,a positive integer e.g. 2)
-	@rc=0; \
+	@$(MAKE) test-lint || { echo "test-all: lint gate FAILED — fix the harness before a bench run"; exit 2; }; \
+	rc=0; \
 	$(MAKE) test-t0                            || rc=1; \
 	$(MAKE) test-t1 BOARD_NAME=$(BOARD_NAME)   || rc=1; \
 	$(MAKE) test-t2                            || rc=1; \
@@ -166,8 +167,18 @@ test-all:                      ## run EVERY tier t0->t1->t2->tp->dscycle (BOARD_
 test-t0:                       ## build matrix (no hardware)
 	$(RUNNER) t0
 
-test-unit:                     ## harness unit tests (pure Python, no hardware/bench)
+test-unit:                     ## harness unit tests (no hardware/bench; IDF env for pyflakes/pyserial)
+	@source "$(IDF_PATH)/export.sh" >/dev/null 2>&1; \
 	python3 -m unittest discover -s $(CURDIR)/tools/regtest/tests -p 'test_*.py'
+
+test-lint:                     ## pyflakes lint gate over the harness (no hardware; runs before every tier too)
+	$(RUNNER) lint
+
+test-flakes:                   ## run-history flake ledger — which tests flip verdict run-to-run (no hardware)
+	$(RUNNER) flakes
+
+test-trend:                    ## trend recorded numeric metrics over runs (TEST=slug LAST=N), or DIFF="A B" across gitlinks
+	$(RUNNER) trend $(if $(TEST),--test $(TEST),) $(if $(LAST),--last $(LAST),) $(if $(DIFF),--diff $(DIFF),)
 
 test-t1:                       ## smoke on BOARD_NAME=board0|board1|board2 (required); INCLUDE_SLEEP=1 adds the sleep apps (board2)
 	$(call require-var,BOARD_NAME,board0|board1|board2)

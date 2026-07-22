@@ -88,23 +88,22 @@ void app_main(void)
     mmhalow_wifi_start();
     vTaskDelay(pdMS_TO_TICKS(1500));   /* let the netif come up before pinning the IP */
 
-    /* Emit the up-marker (Role.up_marker="ap-ready") HERE -- BEFORE assign_static_ip. On the current
-     * components/halow build the app_main task stops producing console output the instant the AP netif
-     * is brought up (esp_netif_action_connected), so a marker printed AFTER that never reaches the
-     * orchestrator and the AP is wrongly judged "never came up". The SoftAP itself keeps serving --
-     * proven on-bench: a STA associates (SAE) and gets 15/15 ICMP replies through it. The static IP is
-     * pinned microseconds later, and the orchestrator only starts flashing the STA (tens of seconds)
-     * after this marker, so the AP is answering ICMP long before any association. This is an interim
-     * robustness fix; the underlying app_main-stall-after-netif-up is a separate firmware issue to
-     * root-cause (see docs/worklog/2026-07-18-regression-run-and-apsta-ap-marker.md). Support roles do
-     * NOT emit a RESULT -- the STA reporter's RESULT is the test verdict. */
-    TEST_INFO("ap-ready: SoftAP up + pinning IP %s (answers ICMP)", AP_IP);
-
     if (!assign_static_ip()) {
         TEST_FAIL("AP came up but could not configure its netif");
         TEST_END(NAME);
         while (1) { vTaskDelay(pdMS_TO_TICKS(10000)); }
     }
+
+    /* Up-marker (Role.up_marker="ap-ready"): the SoftAP is up AND its static IP is pinned, so lwIP now
+     * answers ICMP -- the orchestrator waits on this before flashing the STA. Support roles do NOT emit a
+     * RESULT; the STA reporter's RESULT is the test verdict.
+     *
+     * NOTE: this marker was briefly emitted BEFORE assign_static_ip (2026-07-18) as an interim workaround
+     * for an app_main console stall observed right after esp_netif_action_connected on a *mid-migration*
+     * components/halow build. That stall does NOT occur on the shipped 2.12.3 SDK -- verified on-bench
+     * 2026-07-21 (app_main prints cleanly through the netif-up, 30+ heartbeats past it, healthy stack) --
+     * so the marker is back at its natural position, where it truthfully means "up + IP pinned". */
+    TEST_INFO("ap-ready: SoftAP up + IP %s pinned (answers ICMP)", AP_IP);
 
     /* Stay up so the STA can associate + ping. Never sleep (keeps the USB reflashable). */
     while (1) { vTaskDelay(pdMS_TO_TICKS(10000)); }
