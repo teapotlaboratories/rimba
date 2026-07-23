@@ -102,6 +102,32 @@ morselib edit sites are under
 below predate the 2.12.3 forward-port and **must be re-grepped** on the current tree). Linux refs re-pin to
 the bench checkout before the code-map ships.
 
+**✅ S1 DONE + ON-AIR VERIFIED (2026-07-21)** — ESP gate RANN byte-identical to a live Linux gate on chronium
+`morse0` (worklog `2026-07-21-mesh-gate-s1-rann.md`). **✅ S2 DONE + ON-AIR VERIFIED (2026-07-22)** — ESP learns a
+live Linux gate's RANN (`known_gates=1`), re-floods it byte-exactly (hop+1/ttl−1/metric-accum, origin preserved),
+and advertises the Connected-to-Gate beacon bit (formation-info `0x03`); worklog `2026-07-22-mesh-gate-s2-rann-rx.md`.
+**✅ S3 DONE + ON-AIR VERIFIED (2026-07-22)** — the ESP builds + parses a 6-address `AE_A5_A6` mesh data frame and
+the MM6108 FW delivers/accepts it (ESP↔ESP eaddr round-trip byte-exact), resolving the §4 FW-AE-delivery risk;
+worklog `2026-07-22-mesh-gate-s3-ae-datapath.md`. **KEY FINDING: the §4 "CCMP offset/AAD re-derivation" risk does
+NOT apply — with host SW-CCMP the Mesh Control (incl. AE eaddrs) is in the encrypted body and the AAD is over the
+MAC header only, so AE is crypto-transparent (ccmp.c untouched).** **✅ S4 DONE + ON-AIR VERIFIED (2026-07-22)** —
+MPP table + learning (`mpp_path_add` on AE RX) + `send_to_gates`/`prepare_for_gate` (a node with no path to an
+off-mesh dest wraps the frame as an AE frame via a discovered gate); verified ESP↔ESP with a direct-peer gate;
+worklogs `2026-07-22-mesh-gate-s4a-mpp-learning.md` + `-s4b-send-to-gates.md`. **✅ S4c DONE + ON-AIR VERIFIED
+(2026-07-22)** — the relay now preserves AE (`umac_mesh_forward_data` carries eaddrs), so **multi-hop gates work**;
+verified 3-node (NODE↔RELAY↔GATE, gate 2 hops away got the endpoints intact); worklog
+`2026-07-22-mesh-gate-s4c-ae-relay-preserve.md`. **✅ S5a DONE + ON-AIR VERIFIED (2026-07-22)** — the mesh→AP bridge
+hook `mmwlan_mesh_register_ae_rx_cb` gives the app a received AE frame's (eaddr1, eaddr2, payload), which the plain
+RX ext-cb can't (stripped with the Mesh Control); worklog `2026-07-22-mesh-gate-s5a-ae-rx-app-hook.md`. **✅ S5b DONE
++ ON-AIR VERIFIED (2026-07-22)** — the gate app (`rimba-halow-mesh-ap`) bridges a proxied mesh AE frame onto its AP
+toward the target client (3-node mesh+AP+STA; **mesh+AP concurrency confirmed working on 2.12.3**); worklog
+`2026-07-22-mesh-gate-s5b-gate-egress.md`. **✅ S5c DONE + ON-AIR VERIFIED (2026-07-22)** — the gate proxies an AP
+client's frame INTO the mesh (new `mmwlan_mesh_tx_proxied`; `gw_ap_rx_cb`), the mesh node learns `mpp(client→gate)`;
+**so the GATE now BRIDGES BOTH DIRECTIONS** (3-node mesh+AP+STA); worklog `2026-07-22-mesh-gate-s5c-ap-ingress.md`.
+Remaining = L2-bridge finishing touches (bidirectional round-trip + single-subnet/retire `MESH_GATE_IP` + proxy-ARP
+via multicast AE). S1–S5c uncommitted in `components/halow`; S5b/S5c in the (tracked) gate app. Verified 2.12.3 anchors live in the S1–S4 code comments (the §3 table below still
+shows stale 2.10.4 line numbers — re-pin pending).
+
 **S1 — RANN element + HWMP builder extension + proactive-root timer (GATE side).** Gate periodically
 broadcasts a 21-octet RANN with `RANN_FLAG_IS_GATE`; no node behaviour change (fully additive). Edits:
 `umac_mesh.c:353` (RANN defines), `:2063` (builder `MPATH_RANN` case emitting `{flags,hopcount,ttl,addr[6],

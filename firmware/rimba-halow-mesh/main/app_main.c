@@ -13,6 +13,7 @@
 
 #include <inttypes.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -23,6 +24,13 @@
 #include "esp_system.h" /* esp_get_free_heap_size / esp_get_minimum_free_heap_size */
 #include "nvs_flash.h"
 #include "esp_netif.h"
+#ifdef TEST_PEER_MAC
+#include "lwip/etharp.h"
+#endif
+#ifdef TEST_PING_IP
+#include "ping/ping_sock.h"
+#include "lwip/ip4_addr.h"
+#endif
 
 #include "mmhalow.h"
 #include "umac/mesh/umac_mesh.h"
@@ -42,6 +50,25 @@ static const char *TAG = "rimba-mesh";
 
 /* This node's mesh MAC, derived from the ESP32 efuse MAC (unique per board). */
 static uint8_t g_mesh_mac[6];
+
+#ifdef TEST_PING_IP
+/* B2 test: this mesh node ORIGINATES a ping to an off-mesh AP client (behind a gate). Reaching it needs
+ * the gate to bridge our broadcast ARP request to its AP side (gate B2) so the client can reply. */
+static void mesh_ping_ok(esp_ping_handle_t hdl, void *args)
+{
+    (void)args;
+    uint16_t seq; uint32_t ms; ip_addr_t ra = { 0 };
+    esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seq, sizeof(seq));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &ms, sizeof(ms));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &ra, sizeof(ra));
+    ESP_LOGI(TAG, "reply from %s seq=%u time=%" PRIu32 " ms", ip4addr_ntoa(&ra.u_addr.ip4), seq, ms);
+}
+static void mesh_ping_timeout(esp_ping_handle_t hdl, void *args)
+{
+    (void)hdl; (void)args;
+    ESP_LOGW(TAG, "ping to %s timed out (gate B2 bridging the ARP?)", TEST_PING_IP);
+}
+#endif
 
 /* Pin a static mesh IP once the netif is up (distinct per node, derived from the mesh MAC). */
 static void mesh_net_task(void *arg)
@@ -76,6 +103,43 @@ static void mesh_net_task(void *arg)
 #else
     ESP_LOGI(TAG, "mesh static IP %s (no gateway) (netif up=%d) — responder", ipbuf,
              (int)esp_netif_is_netif_up(n));
+#endif
+#ifdef TEST_PEER_MAC
+    /* Round-trip test: a static ARP for the off-mesh peer (an AP client behind the gate at
+     * 10.9.9.50) so this node can reply to it without a broadcast ARP into the mesh (which the gate
+     * doesn't yet bridge). The reply's L2 dst = the peer's MAC → the datapath MPP-proxies it back
+     * through the gate (mpp(peer→gate) was learned from the peer's inbound AE frame). */
+    {
+        ip4_addr_t pip = { .addr = esp_ip4addr_aton("10.9.9.50") };
+        unsigned mv[6];
+        if (sscanf(TEST_PEER_MAC, "%x:%x:%x:%x:%x:%x",
+                   &mv[0], &mv[1], &mv[2], &mv[3], &mv[4], &mv[5]) == 6) {
+            struct eth_addr e;
+            for (int i = 0; i < 6; i++) e.addr[i] = (uint8_t)mv[i];
+            etharp_add_static_entry(&pip, &e);
+            ESP_LOGI(TAG, "round-trip: static ARP 10.9.9.50 -> %s", TEST_PEER_MAC);
+        }
+    }
+#endif
+#ifdef TEST_PING_IP
+    /* B2 test — originate a ping to an off-mesh AP client. NO static ARP: our lwIP broadcasts an ARP
+     * request for TEST_PING_IP, which the gate must bridge to its AP side (B2) so the client replies. */
+    {
+        ip_addr_t t = { 0 };
+        t.type = IPADDR_TYPE_V4;
+        t.u_addr.ip4.addr = esp_ip4addr_aton(TEST_PING_IP);
+        esp_ping_config_t c = ESP_PING_DEFAULT_CONFIG();
+        c.target_addr = t;
+        c.count = ESP_PING_COUNT_INFINITE;
+        c.interval_ms = 2000;
+        esp_ping_callbacks_t cb = { .on_ping_success = mesh_ping_ok, .on_ping_timeout = mesh_ping_timeout,
+                                    .on_ping_end = NULL, .cb_args = NULL };
+        esp_ping_handle_t p;
+        if (esp_ping_new_session(&c, &cb, &p) == ESP_OK) {
+            esp_ping_start(p);
+            ESP_LOGI(TAG, "B2 test: pinging off-mesh AP client %s (ARP bridged by the gate)", TEST_PING_IP);
+        }
+    }
 #endif
     vTaskDelete(NULL);
 }

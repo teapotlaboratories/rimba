@@ -1,0 +1,2 @@
+# test-mesh-ae app config (layered on top of boards/<BOARD>/ defaults).
+CONFIG_HALOW_AP_MODE=y
