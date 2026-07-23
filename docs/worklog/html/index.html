@@ -172,8 +172,15 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">63</span></h2>
+<h2>July 2026 <span class="mcount">64</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-23-mesh-gate-retire-l3.html">
+<div class="card-date">2026-07-23</div>
+<div class="card-title">Retire the L3 path → flat single-subnet L2 bridge (zero-config DHCP)</div>
+<div class="card-ex">Now that proxy-ARP made the L2 bridge zero-config for resolution, the redundant L3 router — a second 192.168.12.x AP subnet + CONFIG_LWIP_IP_FORWARD + a MESH_GATE_IP return route — is deleted. The gate is a pure L2 bridge on ONE flat 10.9.9.0/24: the AP vif moves to 10.9.9.1 and its DHCP server hands out 10.9.9.x (a small pool clear of the mesh nodes' 10.9.9.100–163), so an AP client is zero-config end-to-end — it DHCPs an address and reaches any mesh node directly, no static IP and no route. The STA became a DHCP client by default (mmhalow's netif auto-runs dhcpc); static IP is now opt-in (STA_IP=). On-air (3-node): STA `DHCP lease 10.9.9.2` → `reply from 10.9.9.100 seq=1`, gate `L2 bridge ready … no ip_forward`; the two-netif-same-subnet coexistence worked (no static fallback needed). App-level only. Footguns: idf.py CMake-cache accumulation (rm CMakeCache.txt), and a -D var does nothing until the CMakeLists forwards it.</div>
+<div class="card-meta">verified · mesh-gate · L2 bridge · zero-config DHCP</div>
+</a>
 
 <a class="card" href="2026-07-22-mesh-gate-proxy-arp.html">
 <div class="card-date">2026-07-22</div>

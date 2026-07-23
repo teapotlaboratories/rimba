@@ -1,17 +1,16 @@
 /*
- * rimba-halow-sta — join an 802.11ah HaLow SoftAP and ping it (the station example).
+ * rimba-halow-sta — join an 802.11ah HaLow SoftAP and ping across it (the station example).
  *
- * The station side of the two-board HaLow demo. It brings up the MM6108 radio,
- * associates to a HaLow SoftAP over SAE, pins a static IP on the AP's subnet (the
- * SoftAP runs no DHCP server), and pings the AP continuously, printing the round-trip
- * time so you can watch the link on the console. Pair it with the rimba-halow-ap
- * example running on another board:
+ * Brings up the MM6108 radio, associates to a HaLow SoftAP over SAE, and pings continuously,
+ * printing the round-trip time. By DEFAULT it is a DHCP client: against the all-ESP mesh-gate
+ * (rimba-halow-mesh-ap) whose SoftAP serves DHCP on the flat 10.9.9.0/24, it leases a 10.9.9.x and
+ * pings a mesh node zero-config (the gate L2-bridges + proxy-ARP resolves) — no static IP, no route.
+ * For an AP with no DHCP server (the plain rimba-halow-ap demo) pass a static IP:
  *
- *   make flash APP=rimba-halow-ap  BOARD=proto1-fgh100m PORT=/dev/ttyACM0   # the AP
- *   make flash APP=rimba-halow-sta BOARD=proto1-fgh100m PORT=/dev/ttyACM1   # this STA
- *   make monitor APP=rimba-halow-sta BOARD=proto1-fgh100m PORT=/dev/ttyACM1
- *
- * Change LINK_SSID / LINK_PSK and the IPs below for your own network.
+ *   # against the mesh-gate (default: DHCP + ping mesh node 10.9.9.100):
+ *   make flash APP=rimba-halow-sta BOARD=proto1-fgh100m PORT=/dev/ttyACM2
+ *   # against a plain rimba-halow-ap (static IP, ping the AP):
+ *   make flash APP=rimba-halow-sta ... STA_IP=192.168.12.2 PING_IP=192.168.12.1
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,23 +33,24 @@
 
 static const char *TAG = "rimba-halow-sta";
 
-/* Match the AP (rimba-halow-ap). */
+/* Match the AP (rimba-halow-ap / the mesh-gate SoftAP). */
 #define LINK_SSID  "rimba-ping"
 #define LINK_PSK   "rimbahalow"
-#ifdef TEST_L2_DST_MAC
-/* S5 zero-config round-trip: put the STA on the MESH subnet and ping a mesh node (10.9.9.100) same-subnet
- * with NO static ARP — the STA's ARP request broadcasts, the gate bridges it into the mesh (AE_A4), the
- * mesh node replies, and its reply rides the gate L2 bridge back. Proves the whole bidirectional bridge. */
-#define AP_IP      "10.9.9.1"          /* same-subnet gw placeholder (unused for a same-subnet ping) */
-#define STA_IP     "10.9.9.50"
-#define RT_DST_IP  "10.9.9.100"        /* the mesh node D's IP (rimba-halow-mesh derives .100) */
-#define PING_TARGET RT_DST_IP
+
+/* IP acquisition. The mesh-gate SoftAP serves DHCP on the flat 10.9.9.0/24, so by DEFAULT this STA is a
+ * DHCP CLIENT — zero-config: it leases a 10.9.9.x and reaches any mesh node directly (the gate L2-bridges
+ * + proxy-ARP resolves). For an AP with NO DHCP server (the plain rimba-halow-ap demo) or a fixed-address
+ * test, pass -D TEST_STATIC_IP="a.b.c.d" (make ... STA_IP=a.b.c.d). Ping target defaults to mesh node D
+ * (rimba-halow-mesh derives 10.9.9.100); override with -D TEST_PING_IP="a.b.c.d" (make ... PING_IP=...). */
+#ifdef TEST_PING_IP
+#define PING_TARGET TEST_PING_IP
 #else
-#define AP_IP      "192.168.12.1"     /* the AP — our ping target and default gateway */
-#define STA_IP     "192.168.12.2"
-#define PING_TARGET AP_IP
+#define PING_TARGET "10.9.9.100"
 #endif
-#define NETMASK    "255.255.255.0"
+#ifdef TEST_STATIC_IP
+#define STA_IP  TEST_STATIC_IP
+#define NETMASK "255.255.255.0"
+#endif
 
 #define CONNECT_TIMEOUT_MS 40000
 #define PING_INTERVAL_MS   2000
@@ -82,8 +82,10 @@ static void on_ping_timeout(esp_ping_handle_t hdl, void *args)
     ESP_LOGW(TAG, "ping timeout");
 }
 
-/* mmhalow's STA netif is a DHCP client, but the SoftAP runs no DHCP server, so pin a
- * static IP on the AP's subnet (mirrors rimba-halow-ap's assign_static_ip). */
+#ifdef TEST_STATIC_IP
+/* Pin a STATIC IP — for an AP with no DHCP server (the plain rimba-halow-ap demo) or a fixed-address
+ * test. mmhalow's STA netif is a DHCP client, so stop it first. On the flat single subnet there is no
+ * L3 gateway, so gw = 0. */
 static bool assign_static_ip(void)
 {
     esp_netif_t *n = mmhalow_get_netif();
@@ -95,16 +97,39 @@ static bool assign_static_ip(void)
 
     esp_netif_ip_info_t ip = { 0 };
     ip.ip.addr      = esp_ip4addr_aton(STA_IP);
-    ip.gw.addr      = esp_ip4addr_aton(AP_IP);
+    ip.gw.addr      = 0;
     ip.netmask.addr = esp_ip4addr_aton(NETMASK);
     if (esp_netif_set_ip_info(n, &ip) != ESP_OK) {
         ESP_LOGE(TAG, "set_ip_info failed");
         return false;
     }
     esp_netif_action_connected(n, NULL, 0, NULL);
-    ESP_LOGI(TAG, "STA static IP %s (gw %s)", STA_IP, AP_IP);
+    ESP_LOGI(TAG, "STA static IP %s", STA_IP);
     return true;
 }
+#else
+/* DHCP client (default): mmhalow's STA netif is ESP_NETIF_DEFAULT_WIFI_STA (AUTOUP + dhcpc) and mmhalow
+ * calls esp_netif_action_connected on link-up, so the DHCP client is already running once associated —
+ * just wait for the gate's SoftAP to hand out a 10.9.9.x lease. */
+static bool wait_for_dhcp_ip(void)
+{
+    esp_netif_t *n = mmhalow_get_netif();
+    if (n == NULL) {
+        ESP_LOGE(TAG, "STA netif is NULL");
+        return false;
+    }
+    esp_netif_ip_info_t ip = { 0 };
+    for (int i = 0; i < 60; i++) {   /* up to ~30 s */
+        if (esp_netif_get_ip_info(n, &ip) == ESP_OK && ip.ip.addr != 0) {
+            ESP_LOGI(TAG, "DHCP lease " IPSTR " — zero-config on the flat mesh subnet", IP2STR(&ip.ip));
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    ESP_LOGE(TAG, "no DHCP lease within 30 s — is the gate (rimba-halow-mesh-ap) up + serving DHCP?");
+    return false;
+}
+#endif
 
 static void idle_forever(void)
 {
@@ -116,7 +141,7 @@ static void idle_forever(void)
 void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(500));   /* let the USB-Serial-JTAG console attach */
-    ESP_LOGI(TAG, "joining HaLow AP \"%s\" (SAE), then pinging %s", LINK_SSID, AP_IP);
+    ESP_LOGI(TAG, "joining HaLow AP \"%s\" (SAE), then pinging %s", LINK_SSID, PING_TARGET);
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -145,15 +170,21 @@ void app_main(void)
         idle_forever();
     }
 
+#ifdef TEST_STATIC_IP
     if (!assign_static_ip()) {
         idle_forever();
     }
+#else
+    if (!wait_for_dhcp_ip()) {
+        idle_forever();
+    }
+#endif
 
 #ifdef TEST_NO_PING
     /* B2 test — responder-only: associate + hold a static IP, but DON'T originate any traffic (so this
      * client never ARPs and never teaches a mesh node its address). A mesh node then INITIATES to us,
      * forcing the gate to bridge the mesh node's broadcast ARP down to the AP (mesh->AP bridging = B2). */
-    ESP_LOGI(TAG, "B2 test: responder-only at %s (no ping) — waiting for a mesh node to reach us", STA_IP);
+    ESP_LOGI(TAG, "responder-only (no ping) — waiting for a mesh node to reach us");
     idle_forever();
 #else
     /* Ping continuously so the console shows the live link (the AP, or in round-trip mode a mesh node). */
@@ -177,12 +208,8 @@ void app_main(void)
         ESP_LOGE(TAG, "failed to create the ping session");
         idle_forever();
     }
-#ifdef TEST_L2_DST_MAC
-    ESP_LOGI(TAG, "S5 zero-config round-trip: pinging mesh node %s (ARP resolves via the gate L2 bridge)",
-             PING_TARGET);
-#else
-    ESP_LOGI(TAG, "pinging %s every %d ms...", PING_TARGET, PING_INTERVAL_MS);
-#endif
+    ESP_LOGI(TAG, "pinging %s every %d ms (zero-config via the gate L2 bridge + proxy-ARP)...",
+             PING_TARGET, PING_INTERVAL_MS);
     esp_ping_start(ping);
 
     idle_forever();

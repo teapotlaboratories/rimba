@@ -155,10 +155,13 @@ FW delivers RX AE frames to the host cb** (open risk, §4). **3–5 days.**
 `umac_mesh.c:138–142`) — re-verify a 6-addr forward delivers or the P5 host-SW-CCMP still covers it.
 **3–4 days.**
 
-**S5 — App: L2 bridge on the gate + single subnet + de-hardcode the node.** Replace the two-netif
-`ip_forward` (`rimba-halow-mesh-ap/app_main.c:156`) with an L2 bridge/portal (AP-client MACs proxied into
-the mesh); delete `rimba-halow-mesh/app_main.c:124` gw. L3-retain fallback: keep `ip_forward`, install a
-dynamic default route from the discovered gate (documented shim). **2–3 days.**
+**S5 — App: L2 bridge on the gate + single subnet + de-hardcode the node. ✅ DONE (S5a–c + round-trip +
+B1/B2 + proxy-ARP 2026-07-22; L3 retired 2026-07-23).** The gate is now a **pure L2 bridge on ONE flat
+`10.9.9.0/24`**: AP-client frames are proxied into the mesh (S5c) and mesh frames onto the AP vif (S5b),
+broadcasts bridged both ways (B1/B2), proxy-ARP resolves across the bridge. The two-netif `ip_forward` +
+the `192.168.12.x` AP subnet + the mesh node's `MESH_GATE_IP` gw are **deleted**; AP clients DHCP a
+`10.9.9.x` from the gate and reach mesh nodes zero-config (the L3-retain fallback was not needed). Worklogs:
+`2026-07-22-mesh-gate-{s5a..s5c,roundtrip,s5-finishing,b2…,proxy-arp}.md`, `2026-07-23-mesh-gate-retire-l3.md`.
 
 **S6 — On-air verify vs a live Linux gate + ship the code-map.** Whole bench matched Morse 1.17.8
 (`[[morse-fw-same-version]]`); byte-diff every new ESP frame vs live Linux (`[[verify-onair-chronium-monitor]]`);

@@ -674,8 +674,10 @@ rejects the {AP, MESH} pair; and `mmwlan_mesh_start` calls `umac_mesh_tear_down_
     MPP proxy + L2-bridge single subnet (NOT literal GANN/PXU; follow-Linux) — S1–S5c + bidirectional
     round-trip + broadcast bridging (both ways) + proxy-ARP, all on-air verified; landed via
     [mm-esp32-halow morselib PR](https://github.com/teapotlaboratories/mm-esp32-halow/pull/27) +
-    [rimba gate/app PR](https://github.com/teapotlaboratories/rimba/pull/42). Remaining: retire the L3
-    `MESH_GATE_IP`/`ip_forward` path (single subnet → proxy-ARP is zero-config) + **S6** live-Linux interop.
+    [rimba gate/app PR](https://github.com/teapotlaboratories/rimba/pull/42). **The L3 path is now ✅ RETIRED
+    (2026-07-23): a pure L2 bridge on ONE flat `10.9.9.0/24` — `ip_forward` / the `192.168.12.x` AP subnet /
+    `MESH_GATE_IP` all deleted; AP clients DHCP a `10.9.9.x` and reach mesh nodes zero-config, on-air verified
+    (STA `DHCP lease 10.9.9.2` → `reply from 10.9.9.100 seq=1`).** Remaining: **S6** live-Linux interop.
     Full design + code-map:
     [`rimba-mesh-ap-mesh-gate-discovery-design.md`](rimba-mesh-ap-mesh-gate-discovery-design.md); was ~12-19
     session-days (S1-S6). Pragmatic interim = DHCP — **STA zero-config DONE + hardware-verified
