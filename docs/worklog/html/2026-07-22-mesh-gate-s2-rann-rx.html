@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate S2: RANN RX + gate list + Connected-to-Gate beacon — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-22</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-22</span>
+    <span class="badge">6 min read</span>
+    <span class="badge ok">✓ on-air verified · uncommitted</span>
+    <span class="badge bug">mesh-gate · S2 · RANN RX</span>
+  </div>
+
+  <h1>Mesh-gate S2: RANN RX + gate list + Connected-to-Gate beacon<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">the receive side, on every node · byte-exact port of Linux <code>hwmp_rann_frame_process</code></small></h1>
+
+  <p class="lead">Second stage of the approved 802.11s <strong>Mesh-gate</strong> port. Where S1 made an ESP
+  <em>emit</em> a Root Announcement, S2 is the <strong>receive side that runs on ALL nodes</strong>: a node that
+  hears a RANN learns a path back to the root, records it as a <strong>gate</strong> when
+  <code>RANN_FLAG_IS_GATE</code> is set, kicks a root-confirmation PREQ to build a real forwarding path,
+  <strong>re-floods</strong> the RANN (TTL−1, hop+1, accumulated metric), and advertises
+  "Connected to Mesh Gate" in its beacon. Follow-Linux and byte-diffable — a port of
+  <code>net/mac80211/hwmp_rann_frame_process</code> (kernel 6.12.21, the bench interop tree).</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ All three S2 deliverables PASS on-air</p>
+    <p>An ESP node (<code>test-mesh-gate-rx</code>) peers with a live Linux gate, learns the gate from its RANN,
+    re-floods that RANN <strong>byte-correctly</strong>, and advertises the Connected-to-Gate beacon bit — all
+    three captured and machine-checked against the Linux transmission. Bonus: the ESP's root-confirmation PREQ
+    reached the gate and built a <strong>bidirectional</strong> active path.</p>
+  </div>
+
+  <h2 id="bottom-line">Bottom line</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">3 / 3</div><div class="lbl">S2 deliverables PASS on-air</div></div>
+    <div class="stat"><div class="num acc">known_gates = 1</div><div class="lbl">learned within ~15 s of peering</div></div>
+    <div class="stat"><div class="num acc">+264</div><div class="lbl">insertions in <code>umac_mesh.c</code> (S1+S2)</div></div>
+    <div class="stat"><div class="num ok">0x03 ≡ 0x03</div><div class="lbl">Formation Info byte-identical to Linux</div></div>
+    <div class="stat"><div class="num acc">4 lenses</div><div class="lbl">adversarial static review · 0 blockers</div></div>
+    <div class="stat"><div class="num ok">2 fixes</div><div class="lbl">applied + re-verified, no regression</div></div>
+  </div>
+
+  <p>The whole S2 receive-and-re-flood datapath, port-mapped one branch to Linux
+  <code>hwmp_rann_frame_process</code> — a new <code>DOT11_IE_RANN</code> arm inside
+  <code>umac_mesh_handle_hwmp</code>, placed <em>before</em> the PREQ arm:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">RANN RX</div><div class="s">from a peer</div></div>
+      <div class="node acc"><div class="t">parse + hop++</div><div class="s">flags/ttl/seq/metric</div></div>
+      <div class="node acc"><div class="t">freshness gate</div><div class="s">SN + metric test</div></div>
+      <div class="node ok"><div class="t">learn gate + PREQ</div><div class="s">add_gate · root-confirm</div></div>
+      <div class="node acc"><div class="t">re-flood</div><div class="s">TTL−1 · hop+1 · metric+</div></div>
+    </div>
+    <figcaption>A hop that fails the freshness gate (stale SN, or same SN with a worse metric) is dropped and
+    <em>not</em> re-flooded — combined with own-RANN ignore and TTL termination, that is what stops a flood
+    ping-pong loop. A gate learn also flips the beacon's Connected-to-Gate bit.</figcaption>
+  </figure>
+
+  <h2 id="goal">Goal</h2>
+  <p>Second stage of the approved
+  <a href="../mesh-ap/rimba-mesh-ap-mesh-gate-discovery-design.md"><code>rimba-mesh-ap-mesh-gate-discovery-design.md</code></a>
+  port, following S1 (gate RANN TX, verified 2026-07-21). S2 gives every node the receive behaviour: hear a Root
+  Announcement → learn a path back to the root, record it as a gate on <code>RANN_FLAG_IS_GATE</code>, kick a
+  root-confirmation PREQ to turn that into a real forwarding path, re-flood the RANN with the standard
+  transform, and set the "Connected to Mesh Gate" formation-info bit. Everything derives line-for-line from
+  <code>net/mac80211/hwmp_rann_frame_process</code> so each on-air frame is byte-diffable against a live Linux
+  transmission.</p>
+
+  <h2 id="implemented">What was implemented</h2>
+  <p><code>components/halow</code>, <strong>uncommitted</strong> (<code>git -C components/halow diff</code>).
+  <code>umac_mesh.c</code> gained <strong>~187 lines for S2</strong> (combined S1+S2 = 264 insertions);
+  <code>umac_mesh.h</code> +6 for S2.</p>
+
+  <h3><code>mesh_path_entry</code> — gate/root fields</h3>
+  <p><code>is_root</code>, <code>is_gate</code>, <code>rann_snd_addr[6]</code>, <code>rann_metric</code>,
+  <code>last_preq_to_root_ms</code> — the same fields Linux carries on <code>struct mesh_path</code>. The
+  memset-zero init leaves every path non-gate / non-root by default.</p>
+
+  <h3>RANN RX handler — the <code>hwmp_rann_frame_process</code> port</h3>
+  <ul>
+    <li>Parse <code>flags / hop / ttl / rann_addr / seq / interval / metric</code>; <code>hopcount++</code>.</li>
+    <li>Ignore our own RANN.</li>
+    <li>Require the sender be a <strong>known peer</strong> (== Linux <code>sta_info_get</code>).</li>
+    <li><code>new_metric = orig_metric + last_hop</code> (overflow-clamped).</li>
+    <li><code>mesh_path_get_or_add</code>.</li>
+    <li><strong>Freshness gate:</strong> <code>!MESH_SN_GT(orig_sn, sn) &amp;&amp; !(sn==orig_sn &amp;&amp; new_metric&lt;rann_metric)</code>
+      — the exact Linux <code>!SN_LT(mpath-&gt;sn, orig_sn) &amp;&amp; !(…)</code>.</li>
+    <li>On accept: update <code>sn / rann_metric / is_root / rann_snd_addr / expiry_ms</code>.</li>
+    <li><strong>Root-confirmation PREQ</strong> via <code>umac_mesh_start_discovery</code>, gated to
+      <code>MESH_ROOT_CONFIRM_INTERVAL_MS = 2000</code>.</li>
+    <li><code>mesh_path_add_gate</code> when the frame is a gate.</li>
+    <li><strong>Re-flood:</strong> TTL≤1 → stop; else TTL−1, hop+1, <code>new_metric</code>, original
+      addr/sn/interval/flags kept, via <code>umac_mesh_tx_hwmp</code>.</li>
+  </ul>
+
+  <h3>Gate list</h3>
+  <ul>
+    <li><code>mesh_path_add_gate</code> — idempotent, <code>g_mesh_num_gates++</code> (== Linux
+      <code>-EEXIST</code> / <code>num_gates++</code>).</li>
+    <li><code>mmwlan_mesh_gate_count()</code> — public accessor (== <code>mesh_gate_num</code>).</li>
+    <li>Eviction decrement in <code>mesh_path_get_or_add</code>; reset in <code>mesh_path_tbl_reset</code>.</li>
+  </ul>
+
+  <h3>Beacon Mesh Config IE — now dynamic</h3>
+  <p><code>mesh_formation_info_byte</code> + <code>mesh_capability_byte</code> (forward-declared before
+  <code>mesh_build_config_ie</code>):</p>
+  <ul>
+    <li><strong>Formation Info</strong> = <code>(neighbors&lt;&lt;1) | connected_to_gate(bit0)</code>
+      (== Linux <code>mesh_add_meshconf_ie</code>).</li>
+    <li><strong>Capability</strong> = <code>ACCEPT_PLINKS(0x01) | FORWARDING(0x08 if multihop)</code>.</li>
+  </ul>
+
+  <div class="callout">
+    <p class="ct">Fixture — <code>firmware/test-mesh-gate-rx</code></p>
+    <p>A plain (non-root) <code>rimba-smesh</code> secured-mesh relay node that peers with the Linux gate
+    (SAE, password <code>rimbamesh2026</code> compiled into morselib) and logs <code>estab_peers</code> +
+    <code>known_gates</code>. Derived from <code>test-mesh-linux</code> (peering trigger: beacon cb →
+    <code>mmwlan_mesh_peer_open</code>) and <code>test-mesh-gate</code>. Compile-verified
+    <code>make build APP=test-mesh-gate-rx BOARD=proto1-fgh100m</code> → exit 0 (app partition ~2% free — the
+    pre-existing near-full state; S2 fit).</p>
+  </div>
+
+  <h2 id="verify">Verification — on-air, all 3 deliverables</h2>
+  <p>Three-node bench, captured on a separate monitor and byte-diffed against the Linux gate:</p>
+  <ul>
+    <li><strong>chronite</strong> — Linux <code>rimba-smesh</code> gate. <code>wpa_supplicant_s1g</code> +
+      <code>iw dev wlan1 set mesh_param</code> <code>mesh_hwmp_rootmode 4</code> /
+      <code>mesh_gate_announcements 1</code> / <code>mesh_hwmp_rann_interval 5000</code>. MAC
+      <code>3c:22:7f:37:51:38</code>, mesh <code>10.9.9.2</code>.</li>
+    <li><strong>board0</strong> — ESP <code>test-mesh-gate-rx</code>, mesh MAC <code>e2:72:a1:f8:ef:a4</code>.</li>
+    <li><strong>chronium</strong> — <code>morse0</code> monitor (ch27 / 5560), capturing with
+      <code>tools/mesh_rann_cap.py</code> (RANN) + <code>tools/mesh_beacon_cap.py</code> (beacon Mesh Config IE).</li>
+  </ul>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 780 330" role="img" aria-label="Bench topology: chronite Linux gate floods a RANN to the board0 ESP node, which re-floods it and returns a root-confirmation PREQ; chronium morse0 monitor captures both frames for byte-diff.">
+        <defs>
+          <marker id="ar" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" style="fill:var(--accent)"/>
+          </marker>
+          <marker id="arg" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" style="fill:var(--ok)"/>
+          </marker>
+          <marker id="ard" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" style="fill:var(--muted)"/>
+          </marker>
+        </defs>
+
+        <!-- monitor -->
+        <rect x="250" y="14" width="280" height="72" rx="11" style="fill:var(--soft);stroke:var(--muted);stroke-dasharray:4 3"/>
+        <text x="390" y="40" text-anchor="middle" style="fill:var(--fg);font-size:14px;font-weight:700">chronium · morse0 monitor</text>
+        <text x="390" y="59" text-anchor="middle" style="fill:var(--muted);font-size:12px">ch27 / 5560 — captures on-air + byte-diffs</text>
+        <text x="390" y="76" text-anchor="middle" style="fill:var(--muted);font-size:12px">mesh_rann_cap.py · mesh_beacon_cap.py</text>
+
+        <!-- capture dashes -->
+        <path d="M330,86 L292,176" style="fill:none;stroke:var(--muted);stroke-width:1.4;stroke-dasharray:4 4" marker-end="url(#ard)"/>
+        <path d="M470,86 L602,178" style="fill:none;stroke:var(--muted);stroke-width:1.4;stroke-dasharray:4 4" marker-end="url(#ard)"/>
+
+        <!-- gate node -->
+        <rect x="40" y="150" width="200" height="102" rx="12" style="fill:var(--card);stroke:var(--accent);stroke-width:1.6"/>
+        <text x="140" y="178" text-anchor="middle" style="fill:var(--fg);font-size:14px;font-weight:700">chronite</text>
+        <text x="140" y="197" text-anchor="middle" style="fill:var(--muted);font-size:11.5px">Linux gate · root (rootmode 4)</text>
+        <text x="140" y="214" text-anchor="middle" style="fill:var(--muted);font-size:11.5px">3c:22:7f:37:51:38</text>
+        <text x="140" y="231" text-anchor="middle" style="fill:var(--muted);font-size:11.5px">mesh 10.9.9.2</text>
+        <text x="140" y="246" text-anchor="middle" style="fill:var(--muted);font-size:11.5px">RANN interval 5000</text>
+
+        <!-- esp node -->
+        <rect x="340" y="150" width="200" height="102" rx="12" style="fill:var(--card);stroke:var(--ok);stroke-width:1.6"/>
+        <text x="440" y="178" text-anchor="middle" style="fill:var(--fg);font-size:14px;font-weight:700">board0 · ESP</text>
+        <text x="440" y="197" text-anchor="middle" style="fill:var(--muted);font-size:11.5px">test-mesh-gate-rx (rimba-smesh)</text>
+        <text x="440" y="214" text-anchor="middle" style="fill:var(--muted);font-size:11.5px">e2:72:a1:f8:ef:a4</text>
+        <text x="440" y="231" text-anchor="middle" style="fill:var(--ok);font-size:11.5px;font-weight:650">known_gates = 1</text>
+        <text x="440" y="246" text-anchor="middle" style="fill:var(--muted);font-size:11.5px">beacon FormInfo 0x03</text>
+
+        <!-- RANN flood arrow -->
+        <path d="M240,182 L336,182" style="fill:none;stroke:var(--accent);stroke-width:2" marker-end="url(#ar)"/>
+        <text x="288" y="170" text-anchor="middle" style="fill:var(--accent);font-size:11.5px;font-weight:650">RANN sn=65</text>
+        <text x="288" y="200" text-anchor="middle" style="fill:var(--muted);font-size:10.5px">IS_GATE · ttl 31</text>
+
+        <!-- re-flood arrow -->
+        <path d="M540,182 L700,182" style="fill:none;stroke:var(--accent);stroke-width:2" marker-end="url(#ar)"/>
+        <text x="622" y="170" text-anchor="middle" style="fill:var(--accent);font-size:11.5px;font-weight:650">re-flood → air</text>
+        <text x="622" y="200" text-anchor="middle" style="fill:var(--muted);font-size:10.5px">ttl 30 · hop 1 · +2731</text>
+
+        <!-- PREQ return arrow -->
+        <path d="M360,252 C300,308 200,308 148,254" style="fill:none;stroke:var(--ok);stroke-width:2" marker-end="url(#arg)"/>
+        <text x="256" y="322" text-anchor="middle" style="fill:var(--ok);font-size:11.5px;font-weight:650">root-confirm PREQ → return path ESTAB (metric 2410, hop 1)</text>
+      </svg>
+    </div>
+    <figcaption>The bench: chronite floods a gate RANN, board0 learns the gate + re-floods it + returns a
+    root-confirmation PREQ (giving a bidirectional active path), and chronium's monitor captures both frames
+    for the byte-diff.</figcaption>
+  </figure>
+
+  <h3>1 · RANN RX → gate learned</h3>
+  <p>board0 peered with chronite (SAE+AMPE, <code>estab_peers=1 peer[0]=3c:22:7f:37:51:38</code>) and logged
+  <strong><code>known_gates=1</code></strong> within ~15 s — it received chronite's RANN, passed the freshness
+  gate, and ran <code>mesh_path_add_gate</code>.</p>
+
+  <h3>2 · RANN re-flood — byte-exact Linux relay</h3>
+  <p>The <em>same</em> RANN (sn=65) captured from both emitters. The transform matches
+  <code>hwmp_rann_frame_process</code> field-for-field:</p>
+
+  <table>
+    <thead><tr>
+      <th>field</th><th>chronite ORIGIN</th><th>board0 RE-FLOOD</th><th>rule (Linux)</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>category/action/eid/len/flags</td><td><code>0d 01 7e 15 01</code></td><td><code>0d 01 7e 15 01</code></td><td>preserved (flags keeps IS_GATE)</td></tr>
+      <tr><td>hop_count</td><td><code>00</code></td><td><code>01</code></td><td><strong>+1</strong></td></tr>
+      <tr><td>ttl</td><td><code>1f</code> (31)</td><td><code>1e</code> (30)</td><td><strong>−1</strong></td></tr>
+      <tr><td>rann_addr</td><td>chronite</td><td>chronite</td><td>preserved (the ORIGIN, not the relay)</td></tr>
+      <tr><td>rann_seq</td><td><code>41000000</code> (65)</td><td><code>41000000</code> (65)</td><td>preserved (not bumped)</td></tr>
+      <tr><td>interval</td><td><code>88130000</code> (5000)</td><td><code>88130000</code></td><td>preserved</td></tr>
+      <tr><td>metric</td><td><code>00000000</code> (0)</td><td><code>ab0a0000</code> (2731)</td><td><strong>accumulated</strong> (+last-hop airtime)</td></tr>
+      <tr><td>MAC-hdr FC / DA / SA</td><td>d000 / bcast / chronite</td><td>d000 / bcast / <strong>board0</strong></td><td>SA = the forwarder</td></tr>
+    </tbody>
+  </table>
+
+  <p>Machine-checked: <strong>TRANSFORM MATCHES <code>hwmp_rann_frame_process</code> = True</strong>.</p>
+  <pre><code><span class="cm"># relay action_hex</span>
+0d017e1501011e3c227f3751384100000088130000ab0a0000
+
+<span class="cm"># full frame</span>
+d0000000ffffffffffffe272a1f8efa4e272a1f8efa440040d017e1501011e3c227f3751384100000088130000ab0a0000&lt;FCS&gt;</code></pre>
+
+  <h3>3 · Beacon Connected-to-Gate bit</h3>
+  <p>board0's S1G beacon Mesh Config IE: <strong>Formation Info = <code>0x03</code></strong> → bit0
+  Connected-to-Gate = 1, peer_count (bits 1–6) = 1 — <em>byte-identical to the Linux gate's <code>0x03</code></em>.
+  Capability = <code>0x09</code> → <code>ACCEPT_PLINKS(0x01)</code> + <code>FORWARDING(0x08)</code>.</p>
+  <div class="callout"><p style="margin:0">The Linux gate additionally sets bit4 <code>0x10</code> → cap
+  <code>0x19</code>; that bit is <strong>out of S2 scope</strong> and is not compared in peer matching, so the
+  small difference is expected and harmless.</p></div>
+
+  <div class="callout ok">
+    <p class="ct">✓ Bonus — bidirectional path confirmed</p>
+    <p>chronite's <code>iw dev wlan1 mpath dump</code> shows an <strong>ACTIVE</strong> path to
+    <code>e2:72:a1:f8:ef:a4</code> (metric 2410, hop 1) and <code>station dump</code> shows it ESTAB — the ESP's
+    root-confirmation PREQ reached chronite and built the return path.</p>
+  </div>
+
+  <h2 id="fixes">Static review + two fixes</h2>
+  <div class="callout ok">
+    <p class="ct">✓ Independent static verification — MATCH on every lens, zero blockers</p>
+    <p>A 4-lens adversarial workflow (rx-parse-reflood · freshness-sn · gate-list-beacon · regression-loops) plus
+    synthesis confirmed: the RX offsets vs <code>struct ieee80211_rann_ie</code>, the freshness SN math (proven
+    identical including wraparound), the re-flood byte string, the gate-counter integrity, the beacon bits
+    (no peering regression — <code>mesh_matches_local</code> ignores those bytes), and <strong>no re-flood
+    ping-pong loop</strong> (freshness + own-RANN ignore + TTL terminate it).</p>
+  </div>
+  <p>Two workflow-surfaced risks were fixed, then re-verified on-air — both behaviour-neutral for the ESTAB
+  scenario, no regression:</p>
+  <ul>
+    <li><strong>(a) Sender check relaxed</strong> from <code>!= ESTAB → drop</code> to
+      <code>not-a-known-peer → drop</code> (== Linux <code>sta_info_get</code>: a non-ESTAB peer is processed at
+      MAX metric, not dropped).</li>
+    <li><strong>(b) Expiry set on accept</strong> — <code>expiry_ms = now + MESH_PATH_LIFETIME_MS</code> on an
+      accepted RANN, so a gate path learned purely from RANN isn't left at <code>expiry_ms=0</code> (the first
+      eviction victim).</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0"><strong>Radio-silent cleanup done.</strong> board0 →
+  <code>rimba-hello</code>; chronite + chronium <code>wlan1</code> down (chronium back to <code>type managed</code>).
+  Used the SAFE <code>pkill -9 -f wpa_supplicant_s1g</code> — a bare <code>pkill wpa_supplicant</code> earlier
+  knocked chronium off the LAN by killing its management supplicant; it recovered.</p></div>
+
+  <h2 id="next">Next — S3 (6-address AE datapath, the hard 20%)</h2>
+  <p>S3 emits/parses 6-address <strong>Address-Extension</strong> mesh data frames (proxied MACs) — the piece that
+  makes an off-mesh host reachable through the gate.</p>
+  <div class="callout warn">
+    <p class="ct">⚠ CCMP offset/AAD math must be re-derived</p>
+    <p>The +12 AE bytes shift the CCMP offset/AAD math (design §4). <strong>Probe on-air first</strong> that the
+    MM6108 FW delivers RX AE frames to the host cb <em>and</em> accepts AE forwards before building it. Design:
+    <code>rimba-mesh-ap-mesh-gate-discovery-design.md</code> (S3, ~3–5 d).</p>
+  </div>
+
+  <h2 id="footguns">Footguns</h2>
+  <ul>
+    <li><strong>Linux reference</strong> — re-<code>scp</code> each session from
+      <code>chronium:/home/chronium/halow/rpi-linux/net/mac80211/</code> (+ <code>include/linux/ieee80211.h</code>);
+      kernel 6.12.21.</li>
+    <li><strong>chronium radio silence</strong> — use <code>pkill -9 -f wpa_supplicant_s1g</code> (the mesh one),
+      NOT <code>pkill wpa_supplicant</code>; the bare form kills chronium's LAN management supplicant and drops it
+      off the network.</li>
+    <li><strong>S2 fixture is <code>rimba-smesh</code></strong> (peers with the Linux gate), unlike the S1
+      <code>test-mesh-gate</code> lone-<code>rimba-mesh</code> gate. The RANN bytes are independent of mesh ID.</li>
+    <li><strong>Interval units</strong> — the RANN interval is the RAW numeric value on the wire (label TU, no
+      ms→TU convert); the re-flood preserves it verbatim. Keep both sides at the same numeric value for the
+      byte-diff.</li>
+    <li><strong>Uncommitted</strong> in the submodule; lands as an <code>mm-esp32-halow</code> PR + a superproject
+      gitlink bump carrying <code>firmware/test-mesh-gate-rx</code> + <code>tools/mesh_rann_cap.py</code> +
+      <code>tools/mesh_beacon_cap.py</code>. No auto-commit; no Claude trailers.</li>
+  </ul>
+
+  <h2 id="files">Files</h2>
+  <ul>
+    <li><code>components/halow/.../umac/mesh/umac_mesh.c</code> (+264 S1+S2),
+      <code>.../umac_mesh.h</code> (+14) — <strong>uncommitted</strong>.</li>
+    <li><code>firmware/test-mesh-gate-rx/</code> — S2 RX/relay fixture (untracked).</li>
+    <li><code>tools/mesh_rann_cap.py</code>, <code>tools/mesh_beacon_cap.py</code> — RANN + beacon Mesh-Config
+      capture/decoders (untracked).</li>
+    <li><code>docs/mesh-ap/rimba-mesh-ap-mesh-gate-discovery-design.md</code> — the design + code-map
+      (§3 table re-pin still pending).</li>
+    <li>Memory: <code>mesh-gate-8021s-port-planned</code> (updated: S2 verified).</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0">Bench radio-silent after the run (board0 on <code>rimba-hello</code>;
+  chronite &amp; chronium <code>wlan1</code> down).</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#bottom-line">Bottom line</a></li>
+    <li><a href="#goal">Goal</a></li>
+    <li><a href="#implemented">What was implemented</a></li>
+    <li><a href="#verify">On-air verification</a></li>
+    <li><a href="#fixes">Static review + fixes</a></li>
+    <li><a href="#next">Next — S3</a></li>
+    <li><a href="#footguns">Footguns</a></li>
+    <li><a href="#files">Files</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-22-mesh-gate-s2-rann-rx</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

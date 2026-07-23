@@ -172,8 +172,99 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">50</span></h2>
+<h2>July 2026 <span class="mcount">63</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-22-mesh-gate-proxy-arp.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">Gate proxy-ARP: reliable mesh↔AP-client resolution</div>
+<div class="card-ex">Fixed the flaky mesh→AP-client resolution the B2 work exposed — a mesh node's on-demand ARP for an AP client is a lossy No-Ack mesh broadcast, so it hit-or-missed. The gate now (1) snoops IP↔MAC from every ARP + IPv4 frame it handles (both sides), (2) reactively proxy-answers an ARP request with the target's REAL MAC (not the gate's, so the S5b/S5c L2 datapath still carries the traffic) over a reliable link, and (3) PROACTIVELY pushes learned mappings to both sides every 3 s over reliable unicast (AP downlink / proxied mesh unicast). Neither side ever needs a broadcast ARP across the bridge. On-air: the gate logged the push refreshing 2 mappings every 3 s, and D — reset with an empty cache — reached the STA from seq 1 with 0 timeouts (vs the earlier 0–27). Gate-app only, no morselib change.</div>
+<div class="card-meta">verified · mesh-gate · proxy-ARP · reliability</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-b2-mesh-to-ap-broadcast.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">B2: mesh→AP broadcast bridging (+ a lossy-ARP root-cause)</div>
+<div class="card-ex">The symmetric counterpart to B1: the gate re-emits a mesh node's group-addressed frame onto the AP vif so AP clients see mesh broadcasts (loop-safe — fires only on mesh RX; RMC + own-SA drop the gate's echoes). Verified: the gate bridged D's DHCP DISCOVER (et=0x0800) to the AP, and a mesh node reached an AP client (12–19 replies). The investigation then root-caused the mesh→AP-client flakiness: it's NOT a B2 defect — a mesh node's resolution ARP is a lossy No-Ack broadcast (D reached the STA in one run, 0 in an identical re-flash), while the client's periodic gratuitous ARP (+TRUST_IP_MAC) is what usually resolves it. A self-inflicted build detour (an overwritten tracked sdkconfig.defaults, mis-read as a morselib bug) was fully reverted. The proper fix is proxy-ARP (done).</div>
+<div class="card-meta">verified · mesh-gate · broadcast · root-cause</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-s5-finishing.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">S5 finishing: zero-config L2 bridge (broadcast AE_A4 + double-delivery)</div>
+<div class="card-ex">Two finishing touches made the bridge zero-config. (A) The AE-rx callback returns a "handled" bool so the datapath skips local delivery when the gate consumes a frame — no spurious ip_forward double-delivery. (B) Multicast AE_A4 broadcast bridging (mmwlan_mesh_tx_group_proxied + re-broadcast preservation + RX extract → mpp_learn + deliver [dst=group][src=eaddr1], matching net/mac80211's ieee80211_strip_8023_mesh_hdr). Key insight: only the ARP request needs broadcast bridging; the reply + ICMP are unicast. Verified on-air with ZERO static ARP: the STA pinged a mesh node by IP (10.9.9.100) continuously, the ARP resolving through the bridge — the gate logged the full flow (ARP request→AE_A4 36 B → ARP reply 42 B → ICMP 100/106 B). Gated the RX rewrite on eaddr1==us (a design workflow caught the gate hits that line for S5b too).</div>
+<div class="card-meta">verified · mesh-gate · zero-config · AE_A4</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-roundtrip.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">Bidirectional round-trip through the gate L2 bridge</div>
+<div class="card-ex">An AP client and a mesh node hold a continuous two-way ping across the gate — STA (10.9.9.50) ↔ mesh node D (10.9.9.100), seq 41→52, 27–77 ms, no drops. Two datapath completions closed the loop: RX-deliver-eaddrs (a proxied AE frame delivered locally as [dst=eaddr1][src=eaddr2] so the endpoint replies to the real off-mesh source — GATED on eaddr1==us so the gate's proven S5b path is untouched), and TX-auto-proxy (an undeliverable unicast to a known-MPP dst auto-proxied toward the gate, else start_discovery — MPP-hit gating keeps plain multi-hop unicast unregressed). Because the STA's ping is L2-addressed to D (not the gate), a reply is unambiguous proof of the L2 bridge, both ways. A design workflow verified both changes; 3/4 review lenses clean.</div>
+<div class="card-meta">verified · mesh-gate · round-trip · datapath</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-s5c-ap-ingress.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">S5c: gate ingress (AP client → mesh)</div>
+<div class="card-ex">The AP→mesh leg of the L2 bridge, symmetric to S5b: an AP client's unicast frame to a mesh node (not the gate, not broadcast) is proxied INTO the mesh as an AE_A5_A6 frame (eaddr2 = client, eaddr1 = dst) via the new mmwlan_mesh_tx_proxied, and the mesh node learns mpp(client→gate). With S5b, the gate now bridges BOTH directions. Verified 3-node: the gate logged S5c AP→mesh (100 B from the STA to the mesh node), the node logged the AE-rx CB + the learned MPP. Confirmed a key unknown — the AP DOES deliver a STA's unicast-to-non-BSSID frame to gw_ap_rx_cb. mesh+AP concurrency confirmed on 2.12.3.</div>
+<div class="card-meta">verified · mesh-gate · S5c · both-ways</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-s5b-gate-egress.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">S5b: gate egress (mesh AE → AP client)</div>
+<div class="card-ex">The mesh→AP leg: a received proxied AE frame whose eaddr1 is one of the gate's AP clients is delivered onto the AP vif as an Ethernet II frame (dst=eaddr1, src=eaddr2), recovering the ethertype from the AE payload's LLC/SNAP. App-level in the gate, using the S5a AE-rx hook; no morselib change. Verified 3-node: a mesh node sent a proxied AE frame, the gate logged S5b mesh→AP (34 B to the AP client bc:2a:33:96:b2:33). Key: mesh+AP concurrency CONFIRMED working on 2.12.3 (the S5 feasibility gate) — the STA's AP-side MAC is the MM6108 MAC, not the efuse.</div>
+<div class="card-meta">verified · mesh-gate · S5b · mesh→AP</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-s5a-ae-rx-app-hook.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">S5a: AE-rx → app bridge hook</div>
+<div class="card-ex">The gate's plain mesh RX ext-cb sees frames AFTER morselib strips the Mesh Control, so it can't recover a proxied frame's eaddr1/eaddr2. S5a adds mmwlan_mesh_register_ae_rx_cb: the datapath fires it (via umac_mesh_ae_rx_deliver) for every received AE frame with the endpoints + post-strip payload — the foundational primitive for the gate's mesh→AP leg. Verified ESP↔ESP: the receiver logged the AE-rx CB with the full proxied endpoints + payload. Notification-only, so the relay/delivery path is unchanged (no regression).</div>
+<div class="card-meta">verified · mesh-gate · S5a · hook</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-s4c-ae-relay-preserve.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">S4c: preserve AE through the mesh relay</div>
+<div class="card-ex">An intermediate relay was stripping the AE Mesh Control and re-forwarding non-AE, so a 2+-hop gate lost the proxied endpoints (found by the S4b workflow). S4c makes umac_mesh_forward_data carry bool ae + eaddr1/eaddr2 and re-emit an AE_A5_A6 frame, so a multi-hop gate keeps the endpoints. Verified on a forced 3-node line (NODE↔RELAY↔GATE): the gate 2 hops away logged the eaddrs the origin's send_to_gates set, intact after the relay (before S4c the gate's ae_rx stays 0).</div>
+<div class="card-meta">verified · mesh-gate · S4c · multi-hop</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-s4b-send-to-gates.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">S4b: send-to-gates fallback</div>
+<div class="card-ex">mmwlan_mesh_send_to_gates(final_dst, src, …) walks the S2 known-gates, resolves the next hop to each, and sends an AE_A5_A6 frame via each gate (mesh DA=gate, eaddr1=final_dst, eaddr2=src) — the port of net/mac80211's mesh_path_send_to_gates + prepare_for_gate. Verified ESP↔ESP: the node logged send_to_gates sent, the gate logged the byte-correct proxied AE frame + learned the proxied source. Full path: discover the gate (S2) → fall back for an unreachable dest (S4b) → the gate gets a correct AE frame (S3) → learn the source (S4a). The workflow surfaced the multi-hop AE-strip limitation → fixed in S4c.</div>
+<div class="card-meta">verified · mesh-gate · S4b · fallback</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-s4a-mpp-learning.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">S4a: MPP (mesh-proxy-path) learning</div>
+<div class="card-ex">A node receiving a 6-address AE frame learns mpp(eaddr2 → mesh_sa) — the port of net/mac80211's mpp_path_add (mesh_pathtbl.c:722, called from rx.c:2891). New MPP table (MESH_MPP_MAX=32) + umac_mesh_mpp_learn + mmwlan_mesh_mpp_lookup, reset on mesh start; the datapath RX AE-extract calls it. Verified ESP↔ESP: the receiver logged the learned MPP entry (off-mesh source → the proxying mesh node) after the injected AE frames. This is the return-path half of the gate discovery.</div>
+<div class="card-meta">verified · mesh-gate · S4a · MPP</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-s3-ae-datapath.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">S3: 6-address AE_A5_A6 datapath primitive</div>
+<div class="card-ex">An ESP builds a proxied AE mesh data frame, the MM6108 FW transmits + delivers it, and the receiver decrypts + parses the AE Mesh Control byte-exactly — resolving the design's #1 open risk (the FW delivers/accepts 6-address AE frames). Major de-risk: CCMP is AE-transparent — the Mesh Control (incl. AE eaddrs) rides in the encrypted body; the AAD is over the 802.11 MAC header only (mesh unicast is already 4-addr), so ccmp.c is untouched and there is NO AE-specific CCMP re-derivation. TX builds the 18-byte AE_A5_A6 control (== struct ieee80211s_hdr); RX extracts eaddr1/eaddr2 (vs the old discard). A 3-lens adversarial workflow returned MATCH.</div>
+<div class="card-meta">verified · mesh-gate · S3 · AE datapath</div>
+</a>
+
+<a class="card" href="2026-07-22-mesh-gate-s2-rann-rx.html">
+<div class="card-date">2026-07-22</div>
+<div class="card-title">S2: RANN RX + gate list + Connected-to-Gate beacon bit</div>
+<div class="card-ex">An ESP peered with a live Linux gate (chronite, rootmode 4) and: learned the gate (known_gates=1), re-flooded the RANN byte-exactly (sn preserved, hop 0→1, ttl 31→30, metric accumulated), and set the beacon Formation-Info to 0x03 (Connected-to-Gate bit + peer count) — byte-identical to the Linux gate. Port of hwmp_rann_frame_process + mesh_path_add_gate + mesh_add_meshconf_ie. A 4-lens adversarial workflow returned MATCH; 2 flagged risks fixed (non-ESTAB peer processed at MAX metric == Linux sta_info_get; RANN-learned gate path sets expiry_ms) + re-verified on-air.</div>
+<div class="card-meta">verified · mesh-gate · S2 · RANN RX</div>
+</a>
+
+<a class="card" href="2026-07-21-mesh-gate-s1-rann.html">
+<div class="card-date">2026-07-21</div>
+<div class="card-title">S1: gate RANN TX — byte-identical to a live Linux gate</div>
+<div class="card-ex">The ESP gate's RANN (Root Announcement) is byte-for-byte identical to a live Linux gate's, captured simultaneously on chronium's morse0 monitor (gold-standard live A/B). Every invariant field matched (FC d000, cat 0d/act 01, eid 7e/len 15, flags 01=IS_GATE, hop 00/ttl 1f, interval 5000, metric 0); only the per-gate MACs + counters differ. Port of mesh_path_tx_root_frame + a self-rescheduling root timer; PREQ/PREP path untouched (no regression). A 4-lens adversarial workflow returned MATCH/go — incl. proving a lone gate with zero peers emits a capturable in-the-clear RANN (triple-safe unprotected: PMF-disabled, multicast DA, group-privacy action exempt).</div>
+<div class="card-meta">verified · mesh-gate · S1 · RANN TX</div>
+</a>
 
 <a class="card" href="2026-07-21-regtest-ledger-lint-gate.html">
 <div class="card-date">2026-07-21</div>

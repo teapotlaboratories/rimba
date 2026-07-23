@@ -172,27 +172,45 @@ discovery-only fallback (which does *not* by itself deliver standards-way reacha
 
 ## 3. Function-level code-map skeleton (ship per `[[porting-ships-verified-codemap]]`)
 
-Re-verify every Linux file:line against the **bench-pinned** checkout before this is treated as verified.
+**Verified 2026-07-22** (as-built). morselib paths are under
+`components/halow/.../framework/morselib/src/umac/` — `mesh/umac_mesh.c` (+ `.h`) and
+`datapath/umac_datapath.c`; app paths under `firmware/`. Linux reference = the bench-pinned
+`chronium:halow/rpi-linux` at commit `372414fd4` (kernel 6.12.x); `net/mac80211/` unless noted. Every
+`file:line` below was grepped in both trees on 2026-07-22 (definition sites, not call sites, except where
+marked "@call").
 
 | Stage | New/edited morselib symbol | morselib file:line | Linux reference | Linux file:line |
 |---|---|---|---|---|
-| S1 | `DOT11_IE_RANN`/`RANN_FLAG_IS_GATE`/`HWMP_RANN_IE_LEN` | `umac_mesh.c:353` | `WLAN_EID_RANN` / `ieee80211_rann_ie` | `ieee80211.h` |
-| S1 | HWMP builder `MPATH_RANN` case | `umac_mesh.c:2063` | `mesh_path_sel_frame_tx` RANN branch | `mesh_hwmp.c:146` |
-| S1 | `umac_mesh_tx_root_frame` (new) + root timer | *new* | `mesh_path_tx_root_frame` / `ieee80211_mesh_rootpath` | `mesh_hwmp.c:1434` / `mesh.c:1760` |
-| S2 | `mesh_path_entry` += is_gate/is_root/rann_* | `umac_mesh.c:1815` | `struct mesh_path` | `mesh.h` |
-| S2 | RANN RX → `hwmp_rann_process` port | `umac_mesh.c:2335` | `hwmp_rann_frame_process` (gate hook :992) | `mesh_hwmp.c:914` |
-| S2 | `mesh_path_add_gate`/`mesh_gate_num`/`known_gates` | *new* (near `:1829`) | same | `mesh_pathtbl.c:337/397/89` |
-| S2 | Formation-Info bit0 / Capability bit3 | `umac_mesh.c:184/185` | `mesh_add_meshconf_ie` | `mesh.c:261` |
-| S3 | TX AE mesh-control build | `umac_datapath.c:2138` | `ieee80211_new_mesh_header` | `mesh.c:884` |
-| S3 | TX 80211 addr (A5/A6) | `umac_datapath.c:3592` | `ieee80211_fill_mesh_addresses` | `mesh.c:851` |
-| S3 | forwarded-unicast AE | `umac_mesh.c:2540` | (forward path) | `tx.c:2726` |
-| S3 | RX AE extract (stop skip) | `umac_datapath.c:833` | AE parse | `rx.c:2875` |
-| S4 | `mpp_path_add`/`mpp_path_lookup` (new table) | *new* | same | `mesh_pathtbl.c:722/274` |
-| S4 | `prepare_for_gate`-equiv | *new* | `prepare_for_gate` | `mesh_pathtbl.c:134` |
-| S4 | `send_to_gates` fallback hook | `umac_mesh.c:1995` | `mesh_path_send_to_gates` (+trigger) | `mesh_pathtbl.c:969` / `mesh_hwmp.c:1425` |
-| S4 | RX MPP learning | `umac_datapath.c:833` | `mpp_path_add(proxied, h_source)` | `rx.c:2889` |
-| S5 | gate L2 bridge (replace ip_forward) | `rimba-halow-mesh-ap/app_main.c:156` | portal concept | — |
-| S5 | drive gw from the discovered gate (retire the optional `MESH_GATE_IP`) | `rimba-halow-mesh/app_main.c:39/70` | — | — |
+| S1 | RANN IE build — `MPATH_RANN` branch in `umac_mesh_build_hwmp` | `umac_mesh.c:2321` | `mesh_path_sel_frame_tx` RANN case | `mesh_hwmp.c:146` |
+| S1 | `umac_mesh_tx_root_frame` (new) | `umac_mesh.c:2463` | `mesh_path_tx_root_frame` | `mesh_hwmp.c:1434` |
+| S1 | `umac_mesh_rann_tick` root timer (new) | `umac_mesh.c:2487` | `ieee80211_mesh_rootpath` (rootann timer) | `mesh.c` (`ieee80211_mesh_root_setup`) |
+| S1 | `mmwlan_mesh_set_root_announcements` public setter | `umac_mesh.c:580` | `WLAN_EID_RANN` / `ieee80211_rann_ie` | `ieee80211.h:3665` / `:1092` |
+| S2 | `struct mesh_path_entry` += `is_gate/is_root/rann_*` | `umac_mesh.c:1877` | `struct mesh_path` | `mesh.h` |
+| S2 | RANN RX → `hwmp_rann_frame_process` port, in `umac_mesh_handle_hwmp` | `umac_mesh.c:2646` | `hwmp_rann_frame_process` (@call `:1066`) | `mesh_hwmp.c:914` |
+| S2 | `mesh_path_add_gate` (new) + `mmwlan_mesh_gate_count` | `umac_mesh.c:2020` / `:2034` | `mesh_path_add_gate` / `mesh_gate_num` | `mesh_pathtbl.c:337` / `:397` |
+| S2 | `mesh_formation_info_byte` (Connected-to-Gate bit) | `umac_mesh.c:2176` (@build `:190`) | `mesh_add_meshconf_ie` | `mesh.c:261` |
+| S3 | AE mesh-control + A4/A5/A6 build — `umac_mesh_build_forward` | `umac_mesh.c:2967` | `ieee80211_new_mesh_header` / `ieee80211_fill_mesh_addresses` | `mesh.c:884` / `:851` |
+| S3 | `mmwlan_mesh_send_ae_test` injector (new) | `umac_mesh.c:3068` | (AE originate) | `mesh.c:884` |
+| S3 | RX AE extract — `ae==0x02` branch + `umac_mesh_note_ae_rx` | `umac_datapath.c:892` / `umac_mesh.c:2047` | AE parse in `ieee80211_rx_mesh_data` | `rx.c:2875` |
+| S4 | `umac_mesh_mpp_learn` / `mmwlan_mesh_mpp_lookup` (new MPP table) | `umac_mesh.c:2121` / `:2159` | `mpp_path_add` / `mpp_path_lookup` | `mesh_pathtbl.c:722` / `:274` |
+| S4 | RX MPP learning call (`mpp_learn(eaddr2, mesh_sa)`) | `umac_datapath.c:909` | `mpp_path_add(proxied_addr, eth->h_source)` | `rx.c:2891` |
+| S4 | `mmwlan_mesh_send_to_gates` + `prepare_for_gate`-equiv | `umac_mesh.c:3119` | `mesh_path_send_to_gates` / `prepare_for_gate` | `mesh_pathtbl.c:969` / `:134` |
+| S4c | multi-hop AE relay preserve — `umac_mesh_forward_data(ae,…)` | `umac_mesh.c:3002` | forward path | `rx.c:2934`–`2988` |
+| S5a | AE-rx app hook — `umac_mesh_ae_rx_deliver` / `mmwlan_mesh_register_ae_rx_cb` | `umac_mesh.c:2066` / `:2060` | (host-bridge hook; no Linux equiv — bridge is in-kernel) | — |
+| S5c | `mmwlan_mesh_tx_proxied` (AP→mesh proxy inject) | `umac_mesh.c:3188` | proxied xmit into mesh | `rx.c:2934`; `tx.c` |
+| RT | RX-deliver-eaddrs — `deliver_ae` gated on `eaddr1==us` | `umac_datapath.c:1001` | `ieee80211_strip_8023_mesh_hdr` (AE_A5_A6→h_dest/h_source) | `net/wireless/util.c:555` (@call `rx.c:2998`) |
+| RT | TX-auto-proxy on an MPP hit — `umac_datapath_mesh_proxy_offmesh` / `…_frame_undeliverable` | `umac_datapath.c:2287` / `:2313` | `mesh_nexthop_lookup`→`send_to_gates` | `mesh_hwmp.c` / `mesh_pathtbl.c:969` |
+| S5-fin | AE_A4 multicast RX extract — `ae==0x01` branch (`mpp_learn(eaddr1,…)`, deliver `[dst=group][src=eaddr1]`) | `umac_datapath.c:878` | multicast-AE in `ieee80211_rx_mesh_data` (`proxied_addr=eaddr1`) + strip AE_A4→`h_source=eaddr1` | `rx.c:2880` / `util.c:583` |
+| S5-fin | AE_A4 originate/re-broadcast — `mmwlan_mesh_tx_group_proxied` / `umac_mesh_build_group_proxied` / `umac_mesh_handle_group_data(ae_a4)` | `umac_mesh.c:3420` / `:3393` / `:3344` | multicast forward + fill addrs | `rx.c:2937` / `mesh.c:851` |
+| S5-fin | double-delivery cleanup — `ae_rx` cb returns "handled" → `goto drop` | `umac_datapath.c:915` (goto-drop on consume) | `rx_accept` vs forward split | `rx.c:2909` |
+| S5b/S5c/B1/B2/proxy-ARP | gate L2 bridge (replaces ip_forward): egress/ingress + broadcast bridging + snoop/proxy-answer/push | `firmware/rimba-halow-mesh-ap/main/app_main.c` (`gate_ae_rx_cb`/`gw_ap_rx_cb`/`gw_mesh_rx_cb`/`gw_proxy_arp`/`gw_arp_announce_task`) | in-kernel L2 bridge + proxy-ARP (`net/bridge`) — no morselib equiv | — |
+
+**Deliberate divergences.** (1) MPP + gate lists are **fixed arrays** (`MESH_MPP_MAX`/`known_gates`), not Linux's
+rhashtable. (2) The gate's mesh↔AP bridge is **app-level** (`rimba-halow-mesh-ap` per-vif ext-cbs + AE proxy),
+not the in-kernel `net/bridge` Linux relies on — hence the S5a AE-rx **host hook** and the app-side **proxy-ARP**
+(snoop + reactive answer + proactive push) that have no `net/mac80211` counterpart. (3) The root/rootann timer is
+**host-timer scaffolding** (`umac_mesh_rann_tick`), not the kernel workqueue. (4) CCMP is **host SW-CCMP**, and AE
+rides in the encrypted body with a MAC-header-only AAD, so `ccmp.c` is untouched (no AE-specific CCMP re-derive).
 
 ---
 

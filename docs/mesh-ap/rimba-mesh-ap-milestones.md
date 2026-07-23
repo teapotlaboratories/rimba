@@ -373,9 +373,9 @@ Legend: ✅ implemented · 🟡 partial/minimal · ⬜ not implemented · n/a no
 | Originate PREQ for an unknown dest (source role) | ✅ | ✅ | `umac_mesh_start_discovery`; path-based TX with direct fallback |
 | Accept PREP / build mesh **path table** | ✅ | ✅ | `mesh_path_*`; fresh-info rule (SN/metric); next-hop lookup |
 | PERR (path error / broken link) | ✅ | ✅ | `umac_mesh_invalidate_paths_via` flushes paths via a lost next hop + announces each (one dest/PERR); RX tears down + floods on |
-| RANN / root mode / proactive PREP | ✅ | ⬜ | |
+| RANN / root mode / proactive PREP | ✅ | ✅ | mesh-gate S1/S2: `umac_mesh_tx_root_frame` + RANN RX/re-flood, byte-diffed vs a live Linux gate |
 | Airtime link metric | ✅ | 🟡 | fixed per-hop cost (accumulates correctly); not rate-derived |
-| Gate announcement protocol | ✅ | ⬜ | |
+| Gate announcement protocol | ✅ | ✅ | follow-Linux = RANN + `IS_GATE` + learned MPP (not literal GANN/PXU); mesh-gate S1–S4 |
 
 **Forwarding & data path (`mesh.c`, `mesh_pathtbl.c`)**
 | Feature | Linux | ESP32 | Notes |
@@ -670,9 +670,14 @@ rejects the {AP, MESH} pair; and `mmwlan_mesh_start` calls `umac_mesh_tear_down_
     Also confirmed: the `umac_keys.c` AP-downlink fix is **mesh-non-regressive** (board0↔board1 mesh ping
     5/5). NB the ESP mesh is **SAE**, so chronite's open mesh can't be the 2nd node.
   - **TODO (still open):** (a) **de-hardcode the mesh-node return gateway** — `rimba-halow-mesh` pins gw
-    `10.9.9.136`. **PLANNED (next big task): a proper 802.11s mesh-gate port** — RANN + `IS_GATE` + learned
-    MPP proxy + L2-bridge single subnet (NOT literal GANN/PXU; follow-Linux). Full design + code-map:
-    [`rimba-mesh-ap-mesh-gate-discovery-design.md`](rimba-mesh-ap-mesh-gate-discovery-design.md); ~12-19
+    `10.9.9.136`. **✅ DONE (2026-07-22): the 802.11s mesh-gate port** — RANN + `IS_GATE` + learned
+    MPP proxy + L2-bridge single subnet (NOT literal GANN/PXU; follow-Linux) — S1–S5c + bidirectional
+    round-trip + broadcast bridging (both ways) + proxy-ARP, all on-air verified; landed via
+    [mm-esp32-halow morselib PR](https://github.com/teapotlaboratories/mm-esp32-halow/pull/27) +
+    [rimba gate/app PR](https://github.com/teapotlaboratories/rimba/pull/42). Remaining: retire the L3
+    `MESH_GATE_IP`/`ip_forward` path (single subnet → proxy-ARP is zero-config) + **S6** live-Linux interop.
+    Full design + code-map:
+    [`rimba-mesh-ap-mesh-gate-discovery-design.md`](rimba-mesh-ap-mesh-gate-discovery-design.md); was ~12-19
     session-days (S1-S6). Pragmatic interim = DHCP — **STA zero-config DONE + hardware-verified
     2026-07-10** (task #5): the gateway AP runs a DHCP server (IP+gw in the inherent netif config), the
     STA is a DHCP client (`DHCP lease 192.168.12.2 gw 192.168.12.1`), end-to-end ping 10/10 ttl=63 on a
@@ -830,10 +835,11 @@ components overflow the default ~1 MB.)
 Open items only (resolved milestones are above). Each = marker + one line + pointer.
 
 **Mesh**
-- ☐ **P6c mesh hardening** — **RANN/root** mode, **proxy/gate (`mpp`)** so the Mesh-gate can bridge AP
-  leaves onto the mesh, **mesh power save**. Derive each from `net/mac80211/mesh*.c` +
-  `morse_driver/mesh.c`. *(RANN + proxy/gate are the substance of the [802.11s Mesh-gate port](#) —
-  track them there, not twice.)*
+- ◐ **P6c mesh hardening** — **RANN/root** mode ✅ + **proxy/gate (`mpp`)** ✅ so the Mesh-gate bridges AP
+  leaves onto the mesh (the 802.11s Mesh-gate port, S1–S5c + round-trip + broadcast + proxy-ARP, done
+  2026-07-22); **mesh power save** still open. Derive each from `net/mac80211/mesh*.c` +
+  `morse_driver/mesh.c`. *(RANN + proxy/gate landed via the mesh-gate PRs — see the Mesh-gate port entry
+  above; track there, not twice.)*
   **✅ The airtime metric is DONE, not open:** P6c ported `airtime_link_metric_get` byte-exact 2026-07-02,
   and real per-peer rate control (halow `838b23c2`, bench-verified **~2.2×**) now feeds it an mmrc-**learned**
   rate instead of an RSSI-seeded cold-start tier; memory [[mesh-real-rc-feasible-design]]. **Only residual:**

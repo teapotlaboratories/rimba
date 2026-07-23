@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate B2: mesh → AP broadcast bridging — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-22</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-22</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">✓ done &amp; on-air verified</span>
+    <span class="badge warn">⚠ honest D-ARP caveat</span>
+    <span class="badge bug">mesh-gate · L2 bridge · B2</span>
+  </div>
+
+  <h1>Mesh-gate B2: mesh → AP broadcast bridging<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">the last L2-bridge direction · gate app only · no morselib change</small></h1>
+
+  <p class="lead">The gate now forwards a mesh node's <strong>group-addressed</strong> frames down to its AP
+  clients — the symmetric counterpart to <strong>B1</strong> (the AP→mesh broadcast branch). This closes the
+  final datapath direction of the 802.11s mesh-gate L2 bridge, so a mesh node can <em>initiate</em> to an AP
+  client, not just reply to one. End-to-end verified on-air (continuous ICMP replies). One honest caveat
+  surfaced — documented, not papered over: a mesh node resolves an AP client from the <em>client's</em>
+  gratuitous ARP, not from its own resolution ARP.</p>
+
+  <p>The mesh-gate bridges an 802.11s mesh and a SoftAP on one MM6108. Four datapath directions cover the full
+  L2 bridge; B2 is the one that was still missing:</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 780 250" role="img" aria-label="Topology: mesh node D bridged through the gate to an AP-client STA">
+        <defs>
+          <marker id="ah-acc" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 Z" fill="var(--accent)"/>
+          </marker>
+          <marker id="ah-mut" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 Z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+
+        <!-- links (drawn first, under the nodes) -->
+        <line x1="174" y1="132" x2="305" y2="134" stroke="var(--muted)" stroke-width="2"/>
+        <text x="240" y="118" text-anchor="middle" font-size="11.5" fill="var(--muted)">802.11s mesh</text>
+        <line x1="485" y1="134" x2="606" y2="132" stroke="var(--muted)" stroke-width="2"/>
+        <text x="545" y="118" text-anchor="middle" font-size="11.5" fill="var(--muted)">SoftAP</text>
+
+        <!-- D node -->
+        <rect x="24" y="98" width="150" height="70" rx="10" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+        <text x="99" y="122" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--fg)">D — mesh node</text>
+        <text x="99" y="140" text-anchor="middle" font-size="11.5" fill="var(--muted)">board1 · 10.9.9.100</text>
+        <text x="99" y="156" text-anchor="middle" font-size="11" fill="var(--accent)">originates the ping</text>
+
+        <!-- GATE node -->
+        <rect x="290" y="40" width="200" height="185" rx="12" fill="var(--soft)" stroke="var(--accent)" stroke-width="1.8"/>
+        <text x="390" y="62" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--fg)">GATE — board0</text>
+        <text x="390" y="79" text-anchor="middle" font-size="11" fill="var(--muted)">rimba-halow-mesh-ap</text>
+
+        <!-- vif pills -->
+        <rect x="305" y="112" width="75" height="46" rx="8" fill="var(--card)" stroke="var(--line)" stroke-width="1.2"/>
+        <text x="342" y="132" text-anchor="middle" font-size="11.5" font-weight="650" fill="var(--fg)">mesh</text>
+        <text x="342" y="147" text-anchor="middle" font-size="11" fill="var(--muted)">STA vif</text>
+        <rect x="410" y="112" width="75" height="46" rx="8" fill="var(--card)" stroke="var(--line)" stroke-width="1.2"/>
+        <text x="447" y="132" text-anchor="middle" font-size="11.5" font-weight="650" fill="var(--fg)">AP vif</text>
+        <text x="447" y="147" text-anchor="middle" font-size="11" fill="var(--muted)">clients=1</text>
+
+        <!-- B2 arrow (mesh -> AP, new) -->
+        <line x1="381" y1="123" x2="409" y2="123" stroke="var(--accent)" stroke-width="2.2" marker-end="url(#ah-acc)"/>
+        <text x="395" y="107" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent)">B2 ▸</text>
+        <!-- B1 arrow (AP -> mesh) -->
+        <line x1="409" y1="150" x2="381" y2="150" stroke="var(--muted)" stroke-width="2" marker-end="url(#ah-mut)"/>
+        <text x="395" y="172" text-anchor="middle" font-size="10.5" fill="var(--muted)">◂ B1</text>
+
+        <text x="390" y="205" text-anchor="middle" font-size="11.5" font-weight="650" fill="var(--muted)">L2 bridge · floods to all ports</text>
+
+        <!-- STA node -->
+        <rect x="606" y="98" width="150" height="70" rx="10" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+        <text x="681" y="122" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--fg)">STA — AP client</text>
+        <text x="681" y="140" text-anchor="middle" font-size="11.5" fill="var(--muted)">board2 · 10.9.9.50</text>
+        <text x="681" y="156" text-anchor="middle" font-size="11" fill="var(--muted)">responder-only</text>
+      </svg>
+    </div>
+    <figcaption>3-node bench: mesh node <strong>D</strong> ↔ <strong>GATE</strong> (one MM6108, mesh STA vif + AP vif) ↔ AP-client <strong>STA</strong>. B2 (accent, new) bridges a mesh group frame out the AP vif; B1 is its already-landed mirror.</figcaption>
+  </figure>
+
+  <h2 id="bottom-line">Bottom line</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">B2 ✓</div><div class="lbl">mesh→AP bcast bridging done + on-air</div></div>
+    <div class="stat"><div class="num acc">12–19</div><div class="lbl">continuous ICMP replies D→STA</div></div>
+    <div class="stat"><div class="num">24–108 ms</div><div class="lbl">round-trip through the bridge</div></div>
+    <div class="stat"><div class="num acc">350 B</div><div class="lbl">DHCP DISCOVER bridged mesh→AP</div></div>
+    <div class="stat"><div class="num">14× / 14×</div><div class="lbl">S5b + S5c unicast flows (D↔STA)</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">morselib changes — gate app only</div></div>
+  </div>
+
+  <p>All four L2-bridge datapath directions are now covered. B2 is the newly-landed cell:</p>
+
+  <table>
+    <thead><tr><th>Direction</th><th>Unicast</th><th>Broadcast / multicast</th></tr></thead>
+    <tbody>
+      <tr><td><strong>mesh → AP</strong></td><td>S5b <span class="badge ok" style="margin-left:4px">landed</span></td><td><strong>B2</strong> <span class="badge ok" style="margin-left:4px">this worklog</span></td></tr>
+      <tr><td><strong>AP → mesh</strong></td><td>S5c <span class="badge ok" style="margin-left:4px">landed</span></td><td>B1 <span class="badge ok" style="margin-left:4px">landed</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <p class="ct">✓ Scope of the win</p>
+    <p>B2 is <strong>proven</strong> for the mesh→AP direction it owns (D's real DHCP broadcast is bridged out to
+    the AP client) and D reaches the STA end-to-end. The <strong>only</strong> caveat is <em>how</em> D learns the
+    STA's MAC in the first place — and that turns out to be a mesh-node lwIP / lossy-broadcast matter, entirely
+    distinct from B2. Details in §3.</p>
+  </div>
+
+  <h2 id="what-b2-does">1 · What B2 does — <code>gw_mesh_rx_cb</code></h2>
+  <p>The gate's mesh-RX ext-cb (<code>gw_mesh_rx_cb</code>, on <code>VIF_STA</code>) now inspects each
+  locally-delivered mesh frame. If the 802.3 dst is <strong>group-addressed</strong> (<code>eth[0] &amp; 0x01</code>)
+  and the gate has AP clients, it re-emits the frame <strong>verbatim onto the AP vif</strong>
+  (<code>mmwlan_tx_pkt</code>, <code>VIF_AP</code>), then <em>still</em> delivers it locally — because a bridge
+  floods to all ports:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">mesh RX</div><div class="s">gw_mesh_rx_cb · VIF_STA</div></div>
+      <div class="node acc"><div class="t">dst group?</div><div class="s">eth[0] &amp; 0x01<br>+ clients &gt; 0</div></div>
+      <div class="node ok"><div class="t">re-emit</div><div class="s">mmwlan_tx_pkt<br>VIF_AP · verbatim</div></div>
+      <div class="node"><div class="t">deliver local</div><div class="s">flood all ports</div></div>
+    </div>
+    <figcaption>B2 branch inside <code>gw_mesh_rx_cb</code>. The datapath already prepended the 802.3 header, so the bytes are correct as-is — no rewrite needed.</figcaption>
+  </figure>
+
+  <p>The datapath already prepended the 802.3 header for both frame shapes B2 must forward:</p>
+  <ul>
+    <li>plain mesh multicast → <code>[dst=group][src=mesh_sa]</code></li>
+    <li>proxied <code>AE_A4</code> multicast (the B1 / AE_A4 RX work) → <code>[dst=group][src=eaddr1]</code></li>
+  </ul>
+
+  <h3>Loop-safety (analysed + holds on-air)</h3>
+  <p>B2 fires <strong>only on mesh RX</strong>; the gate's own AP-inject and mesh re-broadcast are TX and never
+  return to the RX cbs; the mesh RMC + own-SA drop already suppress the gate's own re-broadcasts; and B1
+  (AP→mesh) fires only on AP RX. So an AP client's broadcast (AP→mesh→other-nodes) and a mesh node's broadcast
+  (mesh→AP→clients) each traverse the gate <strong>exactly once</strong> — no bridge loop.</p>
+
+  <h2 id="verification">2 · On-air verification — 3-node mesh+AP+STA</h2>
+  <p>Bench roster: <strong>board0 = GATE</strong> <code>rimba-halow-mesh-ap</code> (+ B2) ·
+  <strong>board1 = D</strong> <code>rimba-halow-mesh PING_IP=10.9.9.50</code> (the mesh node that <em>originates</em>
+  a ping to the AP client) · <strong>board2 = STA</strong> <code>rimba-halow-sta …NO_PING</code> (a responder-only
+  AP client at 10.9.9.50, so D is the sole initiator).</p>
+
+  <h3>B2 fires — a mesh broadcast is bridged to the AP</h3>
+  <p>ARP-detail logging was added to the gate bridge path:</p>
+<pre><code><span class="cm">// the gate receives D's group frame …</span>
+mesh group RX: <span class="nm">350 B</span> from e2:72:a1:f8:f9:40 et=<span class="nm">0x0800</span> clients=1
+<span class="cm">// … and injects it onto the AP vif — TX ok</span>
+B2 mesh->AP bcast: <span class="nm">350 B</span> from e2:72:a1:f8:f9:40 ... et=<span class="nm">0x0800</span></code></pre>
+  <p>The bridged frame is D's <strong>DHCP DISCOVER</strong> (IPv4 broadcast, 342 B + 8 SNAP = 350 B; a boot
+  artifact emitted before <code>dhcpc_stop</code>). So the gate correctly takes a <em>real</em> mesh group
+  broadcast and delivers it to the AP side.</p>
+
+  <h3>End-to-end — a mesh node reaches an AP client</h3>
+  <p>D's serial shows <code>reply from 10.9.9.50 seq=4..N</code> — <strong>12–19 continuous replies, 24–108 ms</strong>,
+  after the initial ARP-resolution timeouts. The gate shows the matching unicast flow:
+  <strong>14× <code>S5b mesh-&gt;AP: 106 B</code></strong> + <strong>14× <code>S5c AP-&gt;mesh: 100 B</code></strong>
+  = the D↔STA ICMP round-trips via TX-auto-proxy / S5b / S5c.</p>
+
+  <h2 id="arp-caveat">3 · The honest caveat — how D actually resolves the STA</h2>
+  <p>The instrumented logs settle <em>exactly</em> which frame drives the ARP resolution — and it is <strong>not</strong>
+  B2. In the working case, resolution rides in on the client's own gratuitous ARP (bridged the other way by B1):</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">STA garp</div><div class="s">op=1 spa=tpa=10.9.9.50</div></div>
+      <div class="node acc"><div class="t">B1 bridges</div><div class="s">AP→mesh bcast · 36 B</div></div>
+      <div class="node"><div class="t">D learns</div><div class="s">10.9.9.50 → STA_MAC<br>(TRUST_IP_MAC)</div></div>
+      <div class="node ok"><div class="t">D pings unicast</div><div class="s">S5b/S5c · no ARP</div></div>
+    </div>
+    <figcaption>The resolution path that actually works: the STA's <em>gratuitous</em> ARP (every 60 s) is bridged AP→mesh by <strong>B1</strong>, D caches it via <code>TRUST_IP_MAC</code>, then pings unicast. B2's job (mesh→AP) is proven separately by the DHCP bridge above.</figcaption>
+  </figure>
+
+  <div class="callout warn">
+    <p class="ct">⚠ B2 is not the resolver — the client's gratuitous ARP is</p>
+    <p>A diagnostic that logged <em>every</em> mesh group frame the gate receives showed it gets <strong>only</strong>
+    D's IPv4 (<code>et=0x0800</code>) group frames — <strong>D's own ARP request (<code>et=0x0806</code>) for the STA
+    never reaches the gate.</strong> In the one run where D was reset <em>after</em> the STA's gratuitous ARP (so D
+    never cached it), D pinged for 30 s with all timeouts and never emitted a bridged ARP → <strong>0 replies.</strong></p>
+  </div>
+
+  <h3>Root cause — isolated 2026-07-22</h3>
+  <p>The mesh node's lwIP <strong>does not emit a resolution ARP for the AP client on demand.</strong> With the STA's
+  periodic gratuitous ARP <em>disabled</em> (<code>CONFIG_LWIP_ESP_GRATUITOUS_ARP=n</code>) so D could only resolve
+  on its own, over 60 s / 27 ping timeouts D transmitted:</p>
+  <ul>
+    <li><strong>2×</strong> DHCP DISCOVER (<code>et=0x0800</code>)</li>
+    <li><strong>1×</strong> a gratuitous ARP for its <em>own</em> IP (<code>op=1 spa=10.9.9.100 tpa=10.9.9.100</code>)</li>
+    <li><strong>never</strong> a resolution ARP for the STA (<code>op=1 tpa=10.9.9.50</code>) — and 0 replies</li>
+  </ul>
+  <p>So the ICMP to 10.9.9.50 is queued/dropped without lwIP's <code>etharp_query</code> ever firing a request. It
+  is <strong>not</strong> a datapath-TX problem (D's own gratuitous ARP <em>does</em> go out over the mesh, proving
+  the datapath transmits ARP frames fine) and <strong>not</strong> a B2 problem (B2 bridges every mesh group frame it
+  receives — there is simply no resolution ARP to bridge).</p>
+
+  <h3>Deepened — and then revised to <em>flaky</em>, not <em>never</em></h3>
+  <ul>
+    <li><strong>D's netif is correct:</strong> readback <code>ip=10.9.9.100 mask=255.255.255.0 gw=0.0.0.0</code> →
+      10.9.9.50 is <strong>on-link</strong> (same /24), so this is NOT the <code>ERR_RTE</code> off-link-with-no-gateway
+      drop (<code>etharp.c:826-852</code>). D's own code comment already notes off-subnet replies "die in lwIP ARP"
+      without a gateway — but the STA is on-subnet here.</li>
+    <li>When D is <strong>peered</strong> (netif up=1), esp_ping's <code>sendto(10.9.9.50)</code> <strong>succeeds</strong>
+      — 0 send errors, 27 timeouts — so <code>etharp_output</code>→<code>etharp_query</code> IS reached and returns
+      <code>ERR_OK</code> (packet queued pending ARP). Per lwIP (<code>etharp.c:966-981</code>) a fresh EMPTY→PENDING
+      entry means <code>is_new_entry</code> and <code>etharp_request()</code> IS called. Yet the resolution ARP
+      (<code>op=1 tpa=10.9.9.50</code>) never appears on-air, while D's gratuitous ARP
+      (<code>op=1 tpa=10.9.9.100</code>) — a <strong>byte-identical broadcast ARP frame differing only in the target
+      IP</strong> — does. Both go <code>etharp_raw</code>→netif linkoutput→mesh TX, which is address-agnostic.</li>
+    <li>When D is <strong>alone</strong> (no peer, netif up=0), <code>sendto</code> fails outright
+      (<code>send error=0</code>) — expected (link down).</li>
+  </ul>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Real nature — an intermittent mesh-broadcast delivery failure</p>
+    <p>With <code>CONFIG_LWIP_ETHARP_DEBUG</code> on D and the STA's gratuitous ARP OFF: in <strong>one</strong> run D
+    reached the STA fine (<code>reply from 10.9.9.50 seq=37..50</code> continuously) — so its OWN resolution ARP DID
+    work that time. In an identical-config re-flash run D got <strong>0 replies / 18 timeouts</strong> and the gate saw
+    NO resolution ARP (only D's gratuitous ARP <code>tpa=100</code>). D's ETHARP trace shows
+    <code>ethernet_output: sending packet</code> (frames ARE handed to the link) but the resolution ARPs intermittently
+    don't reach the gate, while the gratuitous ARP + DHCP (fewer, periodic) do.</p>
+    <p>So mesh broadcast frames are sent <strong>No-Ack</strong> (unacked multicast, QoS ack policy <code>0x0020</code> —
+    <code>umac_datapath.c:2506</code>) and are lossy on-air, so lwIP's few ARP retries hit-or-miss. Passive learning via
+    the client's <em>periodic</em> gratuitous ARP (+ <code>TRUST_IP_MAC</code>) is what makes it usually work. NOT a clean
+    deterministic "no ARP" bug, and NOT a B2 defect. A robust fix = <strong>gate proxy-ARP for the mesh subnet</strong>,
+    or more ARP retries / reliable-multicast — not more B2.</p>
+  </div>
+
+  <h3>Why it "works" in practice (and the flakiness)</h3>
+  <p>ESP-IDF's <code>TRUST_IP_MAC</code> lets D create an ARP entry directly from the STA's <em>gratuitous</em> ARP
+  (bridged AP→mesh by B1), which the STA emits every <code>CONFIG_LWIP_GARP_TMR_INTERVAL=60</code> s. So D reaches the
+  STA once it catches one — up to a <strong>60 s wait</strong>, and <strong>never</strong> if the client is silent
+  (gratuitous ARP off → the 0-reply case above). B2 delivers mesh broadcasts to AP clients (its job); the gap is
+  entirely that the mesh node never issues the on-demand resolution ARP.</p>
+
+  <h2 id="build-detour">4 · Build detour (self-inflicted, resolved, net-zero)</h2>
+  <div class="callout warn">
+    <p class="ct">⚠ A tracked <code>sdkconfig.defaults</code> clobbered by a diagnostic — no code kept</p>
+    <p>Getting the ETHARP trace needed a clean sdkconfig regen, and the link failed with
+    <code>undefined reference to umac_ap_get_beacon</code>. I misdiagnosed this as a latent morselib bug and guarded
+    the AP calls in <code>umac_mmdrv_shim.c</code> — but the real cause was that my diagnostic
+    <code>cat &gt; firmware/rimba-halow-mesh/sdkconfig.defaults</code> had <strong>overwritten a tracked file</strong>
+    that intentionally sets <code>CONFIG_HALOW_AP_MODE=y</code> ("Mesh reuses the AP-type interface + beacon code path,
+    so the AP-mode morselib sources must be compiled in"), and my <code>rm</code> deleted it. So the mesh app is
+    <em>supposed</em> to build AP-on. <strong>Restored the <code>sdkconfig.defaults</code> and reverted the shim guard</strong>
+    — net-zero morselib change from this detour.</p>
+  </div>
+
+  <h2 id="follow-ups">5 · Not done / follow-ups</h2>
+  <ul>
+    <li><strong>Fix the mesh node's on-demand resolution ARP</strong> (root cause now known): make
+      <code>etharp_query</code> fire for an on-subnet AP client so a mesh node can reach a <em>silent</em> client
+      without waiting for its 60 s gratuitous ARP. Investigate D's lwIP routing for 10.9.9.50 (no-gateway static
+      config? the esp_ping raw-socket path?) with lwIP ARP/IP debug on D. Distinct from B2 — <strong>B2 is correct</strong>.</li>
+    <li>A <strong>broadcast-ping</strong> B2 test (D pings 10.9.9.255) would isolate B2 without ARP, but
+      <code>CONFIG_LWIP_BROADCAST_PING</code> is off in this build so the STA wouldn't answer — enable it for a future
+      clean B2-only end-to-end.</li>
+    <li>Retire <code>MESH_GATE_IP</code> / the L3 <code>ip_forward</code> path; S6 live-Linux interop.</li>
+  </ul>
+
+  <h2 id="files">6 · Files changed</h2>
+  <p>Gate app only; no morselib change. <strong>Uncommitted.</strong></p>
+  <ul>
+    <li><code>firmware/rimba-halow-mesh-ap/main/app_main.c</code> — <code>gw_mesh_rx_cb</code> B2 branch (mesh group
+      frame → AP vif) + ethertype/ARP-op detail in the B1/B2 bridge logs.</li>
+    <li><code>firmware/rimba-halow-mesh/main/app_main.c</code> (+ <code>CMakeLists.txt</code>) — <code>TEST_PING_IP</code>
+      (a mesh node originates a ping).</li>
+    <li><code>firmware/rimba-halow-sta/main/app_main.c</code> (+ <code>CMakeLists.txt</code>) — <code>TEST_NO_PING</code>
+      (responder-only AP client).</li>
+    <li><code>Makefile</code> — <code>PING_IP=</code> / <code>NO_PING=</code> flags.</li>
+    <li>Memory: <code>mesh-gate-8021s-port-planned</code> (B2 done + the D-ARP caveat).</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0">All four L2-bridge directions (S5b · S5c · B1 · B2) now landed. B2's job — bridge a mesh group frame to AP clients — is done and on-air proven; the residual is a mesh-node lwIP / lossy-multicast follow-up, not a B2 defect.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#bottom-line">Bottom line</a></li>
+    <li><a href="#what-b2-does">1 · What B2 does</a></li>
+    <li><a href="#verification">2 · On-air verification</a></li>
+    <li><a href="#arp-caveat">3 · The honest ARP caveat</a></li>
+    <li><a href="#build-detour">4 · Build detour</a></li>
+    <li><a href="#follow-ups">5 · Follow-ups</a></li>
+    <li><a href="#files">6 · Files changed</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-22-mesh-gate-b2-mesh-to-ap-broadcast</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

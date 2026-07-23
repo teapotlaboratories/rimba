@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate S4a: MPP proxy-path learning — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-22</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-22</span>
+    <span class="badge">5 min read</span>
+    <span class="badge ok">✓ on-air verified</span>
+    <span class="badge warn">uncommitted</span>
+    <span class="badge bug">mesh-gate · 802.11s · MPP</span>
+  </div>
+
+  <h1>Mesh-gate port S4a — MPP proxy-path table + learning<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">a node learns "which mesh node reaches this off-mesh host" · ESP↔ESP on-air PASS</small></h1>
+
+  <p class="lead">Fourth stage of the approved 802.11s <strong>Mesh-gate</strong> port. S3 gave the AE datapath
+  primitive (build / parse 6-address frames + extract the proxied endpoints); <strong>S4a turns those endpoints
+  into routing state.</strong> On RX of a 6-address AE frame, a node records that the off-mesh source
+  <code>eaddr2</code> is reachable via the mesh node that sent the frame — an <strong>MPP (Mesh Proxy Path)</strong>
+  entry <code>mpp(eaddr2 → mesh_sa)</code>, the exact port of Linux <code>mpp_path_add</code>.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Status — S4a WRITTEN + COMPILES + ON-AIR VERIFIED (PASS, ESP↔ESP)</p>
+    <p>The MPP-learning / RX half of S4 is done and bench-proven. <strong>Uncommitted</strong> in
+    <code>components/halow</code>. <strong>S4b</strong> (<code>send_to_gates</code> +
+    <code>prepare_for_gate</code>, the TX fallback) is <strong>not done</strong> — the remaining half of S4.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">PASS</div><div class="lbl">on-air ESP↔ESP</div></div>
+    <div class="stat"><div class="num acc">32</div><div class="lbl"><code>MESH_MPP_MAX</code> table slots</div></div>
+    <div class="stat"><div class="num">75</div><div class="lbl">AE frames received &amp; learned</div></div>
+    <div class="stat"><div class="num acc">+~85</div><div class="lbl"><code>umac_mesh.c</code> lines (S4a)</div></div>
+    <div class="stat"><div class="num">441</div><div class="lbl">S1–S4a combined insertions</div></div>
+    <div class="stat"><div class="num ok">exit 0</div><div class="lbl">compile-verified</div></div>
+  </div>
+
+  <h2 id="goal">Goal</h2>
+  <p>The S4 stage of the port (<code>docs/mesh-ap/rimba-mesh-ap-mesh-gate-discovery-design.md</code>). Split in two:</p>
+  <ul>
+    <li><strong>S4a (this worklog)</strong> — the <strong>MPP table + learning</strong> on RX: record that off-mesh
+      host <code>eaddr2</code> is reachable via the mesh node that sent the frame —
+      <code>mpp_path_add(eaddr2, mesh_sa)</code>.</li>
+    <li><strong>S4b (next)</strong> — the TX side: <code>prepare_for_gate</code> (rewrite a frame as an AE frame via a
+      gate) + <code>send_to_gates</code> (on a next-hop miss, fall back to a known gate from the S2
+      <code>known_gates</code>).</li>
+  </ul>
+  <p>Port of <code>net/mac80211</code> <code>mesh_pathtbl.c</code> (kernel 6.12.21).</p>
+
+  <h2 id="what">S4a — what was implemented</h2>
+  <p><em>All in <code>components/halow</code>, uncommitted.</em> <code>umac_mesh.c</code> (+~85 for S4a; combined
+  S1–S4a = 441 ins) + <code>umac_datapath.c</code> (+3) + <code>umac_mesh.h</code> (+~10):</p>
+
+  <ul>
+    <li><strong>MPP table</strong> — a compact <code>mpp_path_entry</code> array (<code>MESH_MPP_MAX</code> = 32):
+      <code>{ dst[6] (off-mesh host), mpp[6] (proxy mesh node), expiry_ms }</code>. <strong>Distinct from the mesh
+      path table</strong> (node → next hop): the MPP table answers <em>"which mesh node do I send to, to reach this
+      off-mesh host"</em>. Reset per-MBSS in <code>mmwlan_mesh_start</code> (alongside the path table).</li>
+    <li><strong><code>umac_mesh_mpp_learn(dst, mpp)</code></strong> (== <code>mpp_path_add</code>,
+      <code>mesh_pathtbl.c:722</code>) — find-or-add <code>dst</code>, set the proxy + expiry; guards: never proxy our
+      own MAC or a multicast <code>dst</code> (<code>:729-733</code>); evicts the oldest slot when full.</li>
+    <li><strong><code>mmwlan_mesh_mpp_lookup(dst, mpp_out)</code></strong> (== <code>mpp_path_lookup</code>) — the S4b
+      <code>send_to_gates</code> target-select + the S4a on-air probe.</li>
+    <li><strong>RX wiring</strong> — the datapath AE-extract block now calls
+      <code>umac_mesh_mpp_learn(eaddr2, mesh_sa)</code> (<code>mesh_sa = addr4</code>), the exact
+      <code>net/mac80211</code> <code>mpp_path_add</code> on AE RX (<code>rx.c:2889</code>). The S3
+      <code>note_ae_rx</code> probe accessor is kept.</li>
+    <li><strong>Probe poll</strong> in <code>test-mesh-gate-rx</code>: after an AE rx,
+      <code>mmwlan_mesh_mpp_lookup(eaddr2)</code> + log the proxy node.</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">AE frame RX</div><div class="s">6-address</div></div>
+      <div class="node acc"><div class="t">extract</div><div class="s">eaddr2 · addr4</div></div>
+      <div class="node acc"><div class="t">mpp_learn</div><div class="s">dst=eaddr2, mpp=mesh_sa</div></div>
+      <div class="node ok"><div class="t">MPP table</div><div class="s">off-mesh host → proxy node</div></div>
+    </div>
+    <figcaption>RX-side learning: the datapath AE-extract block feeds <code>umac_mesh_mpp_learn(eaddr2, mesh_sa=addr4)</code> — the exact <code>mpp_path_add</code> from <code>rx.c:2889</code>.</figcaption>
+  </figure>
+
+  <div class="callout"><p style="margin:0"><strong>Compile-verified:</strong>
+  <code>make build APP=test-mesh-gate-rx BOARD=proto1-fgh100m</code> → <strong>exit 0</strong>.</p></div>
+
+  <h2 id="verify">On-air verification — ESP↔ESP (PASS)</h2>
+  <p>Reused the S3 rig. <strong>board0</strong> (<code>test-mesh-ae</code>,
+  <code>LINUX_MAC=e2:72:a1:f8:f9:40</code>, mesh MAC <code>e2:72:a1:f8:ef:a4</code>) injects AE frames with
+  <code>eaddr2_sa=02:00:00:00:00:aa</code> to <strong>board1</strong> (<code>test-mesh-gate-rx</code> receiver, mesh
+  MAC <code>e2:72:a1:f8:f9:40</code>); both <code>rimba-smesh</code>, 1 dBm.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 640 234" role="img" aria-label="board0 injects an AE frame carrying off-mesh source 02:00:00:00:00:aa to board1; board1 learns MPP(02:00:00:00:00:aa via board0 mesh MAC)">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <style>
+        .lbl{fill:var(--fg);font:600 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+        .sub{fill:var(--muted);font:11px ui-monospace,Menlo,Consolas,monospace}
+        .tag{fill:var(--muted);font:11.5px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+        .wire{stroke:var(--accent);stroke-width:2;fill:none}
+        .boxf{fill:var(--card);stroke:var(--line);stroke-width:1.5}
+        .boxa{fill:var(--soft);stroke:var(--accent);stroke-width:1.5}
+        .boxo{fill:var(--ok-bg);stroke:var(--ok);stroke-width:1.5}
+      </style>
+
+      <!-- board0 -->
+      <rect class="boxf" x="14" y="46" width="180" height="66" rx="10"/>
+      <text class="lbl" x="30" y="72">board0 · test-mesh-ae</text>
+      <text class="sub" x="30" y="90">mesh e2:72:a1:f8:ef:a4</text>
+      <text class="tag" x="30" y="105">AE sender · 1 dBm</text>
+
+      <!-- board1 -->
+      <rect class="boxf" x="446" y="46" width="180" height="66" rx="10"/>
+      <text class="lbl" x="462" y="72">board1 · gate-rx</text>
+      <text class="sub" x="462" y="90">mesh e2:72:a1:f8:f9:40</text>
+      <text class="tag" x="462" y="105">receiver · 1 dBm</text>
+
+      <!-- arrow -->
+      <line class="wire" x1="196" y1="79" x2="444" y2="79" marker-end="url(#ah)"/>
+      <text class="tag" x="320" y="42" text-anchor="middle">6-address AE frame ×75</text>
+      <text class="sub" x="320" y="98" text-anchor="middle">eaddr2 = 02:00:00:00:00:aa</text>
+
+      <!-- learned entry -->
+      <rect class="boxo" x="176" y="150" width="288" height="60" rx="10"/>
+      <text class="lbl" x="192" y="176">MPP learned</text>
+      <text class="sub" x="192" y="196">02:00:00:00:00:aa  →  e2:72:a1:f8:ef:a4</text>
+      <line class="wire" style="stroke:var(--ok)" x1="470" y1="112" x2="400" y2="148" marker-end="url(#ah)"/>
+      <text class="tag" x="150" y="228">off-mesh host</text>
+      <text class="tag" x="360" y="228" text-anchor="end">proxy mesh node (board0)</text>
+    </svg>
+    <figcaption style="color:var(--muted);font-size:13px;margin-top:.5em">
+      board0 injects AE frames whose proxied source is <code>02:00:00:00:00:aa</code>; board1 receives 75 of them and
+      records <code>mpp(02:00:00:00:00:aa → board0)</code> — exactly <code>mpp_path_add(eaddr2 = proxied SA, mpp = mesh SA)</code>.
+    </figcaption>
+  </div>
+
+  <p>board1 serial:</p>
+<pre><code>AE rx count=75 ... eaddr2(SA)=02:00:00:00:00:aa
+MPP learned: 02:00:00:00:00:aa via e2:72:a1:f8:ef:a4</code></pre>
+
+  <p>The MPP table learned <strong>off-mesh host <code>02:00:00:00:00:aa</code> → proxy mesh node
+  <code>e2:72:a1:f8:ef:a4</code> (board0)</strong> — exactly <code>mpp_path_add(eaddr2 = proxied SA, mpp = mesh SA)</code>.
+  <code>mmwlan_mesh_mpp_lookup(02:..:aa)</code> returns board0's MAC. <strong>The learning is stable across every AE
+  frame.</strong></p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Radio-silent cleanup done</p>
+    <p>board0 + board1 → <code>rimba-hello</code>; chronite + chronium <code>wlan1</code> already down from S3.
+    <strong>Footgun hit:</strong> two concurrent <code>make flash APP=rimba-hello</code> to different ports raced on
+    the shared <code>build/rimba-hello/</code> dir — ninja failed. Reflash the SAME app <strong>sequentially</strong>.</p>
+  </div>
+
+  <h2 id="s4b">Not done — S4b (<code>send_to_gates</code> + <code>prepare_for_gate</code>)</h2>
+  <p>The MPP table is currently <strong>learned but not yet consumed</strong> (inert until a TX path uses it). S4b adds:</p>
+  <ul>
+    <li><strong><code>prepare_for_gate(frame, gate)</code></strong> (<code>mesh_pathtbl.c:134</code>) — rewrite an
+      ordinary mesh frame into an <code>AE_A5_A6</code> frame via a gate: <code>eaddr1</code> = the original mesh DA
+      (final off-mesh dest), <code>eaddr2</code> = the original mesh SA (source), <code>addr3</code> = the gate,
+      <code>addr1</code> = the next hop to the gate. The S3 AE build (<code>umac_mesh_build_forward</code> with
+      <code>ae</code>) is the reusable primitive.</li>
+    <li><strong><code>send_to_gates</code></strong> (<code>mesh_pathtbl.c:969</code>) — on a next-hop resolution miss
+      for a non-mesh dest, walk the S2 <code>known_gates</code> (paths with <code>is_gate</code>) and emit the frame
+      via a gate instead of dropping it. Hook: the mesh TX next-hop resolution
+      (<code>umac_mesh_lookup_next_hop</code> miss) + the datapath TX for the node's own off-mesh traffic.</li>
+    <li><strong>Verify:</strong> a node with a known gate (S2) tries to reach an off-mesh dest → the frame goes out as
+      an AE frame to the gate (observe on the gate: <code>mmwlan_mesh_ae_rx_probe</code> / mpp learning). Needs a gate
+      + off-mesh-dest scenario.</li>
+  </ul>
+
+  <div class="callout warn">
+    <p class="ct">⚠ S4b is regression-sensitive</p>
+    <p>S4b touches the <strong>datapath TX</strong> (the mesh+AP concurrency path) and intertwines with S5's routing
+    (the node's default route toward the mesh). Watch the FW <strong>A4≠TA withhold</strong> — though S3 already
+    proved the FW delivers 6-addr AE frames.</p>
+  </div>
+
+  <figure>
+    <div class="flow vert">
+      <div class="node ok"><div class="t">S4a · MPP learn (RX)</div><div class="s">done + on-air PASS</div></div>
+      <div class="node"><div class="t">S4b · send_to_gates (TX)</div><div class="s">next-hop miss → known gate</div></div>
+      <div class="node"><div class="t">S4b · prepare_for_gate</div><div class="s">rewrite as AE_A5_A6</div></div>
+      <div class="node acc"><div class="t">S5 · routing</div><div class="s">default route to mesh</div></div>
+    </div>
+    <figcaption>Where S4a sits: the RX-learned MPP table feeds the still-to-come S4b TX fallback, which in turn intertwines with S5 routing.</figcaption>
+  </figure>
+
+  <h2 id="footguns">Footguns</h2>
+  <ul>
+    <li><strong>CCMP is AE-transparent</strong> (established in S3): the AE eaddrs are encrypted body; the AAD is
+      MAC-header-only; <code>ccmp.c</code> untouched. <strong>Do NOT re-derive CCMP for AE.</strong></li>
+    <li><strong>morselib MMLOG is not on the ESP UART</strong> — expose an <code>mmwlan_*</code> probe accessor + poll
+      via <code>ESP_LOGI</code> (<code>mmwlan_mesh_mpp_lookup</code> / <code>mmwlan_mesh_ae_rx_probe</code>).</li>
+    <li><strong>Don't concurrently <code>make flash</code> the same APP to two ports</strong> — the shared
+      <code>build/&lt;APP&gt;/</code> dir races; do it sequentially (or use per-board build dirs).</li>
+    <li><strong>chronite mesh is flaky</strong> (S3): <code>type mesh point</code> with no channel; a driver reload can
+      hang. The MPP-learning verify used ESP↔ESP and didn't need a Linux node.</li>
+    <li>Re-<code>scp</code> the Linux ref from <code>chronium:/home/chronium/halow/rpi-linux/</code> each session
+      (kernel 6.12.21).</li>
+  </ul>
+
+  <h2 id="files">Files</h2>
+  <ul>
+    <li><code>components/halow/.../umac/mesh/umac_mesh.c</code> (+441 S1–S4a),
+      <code>.../umac_mesh.h</code> (+~63), <code>.../umac/datapath/umac_datapath.c</code> (+16) —
+      <strong>uncommitted</strong>.</li>
+    <li><code>firmware/test-mesh-ae/</code> (AE sender), <code>firmware/test-mesh-gate-rx/</code> (receiver: AE + MPP
+      probe polls).</li>
+    <li><code>docs/mesh-ap/rimba-mesh-ap-mesh-gate-discovery-design.md</code> — design (S1–S3 marked done; S4a here;
+      §3 table re-pin pending).</li>
+    <li>Memory: <code>mesh-gate-8021s-port-planned</code> (updated: S4a done, S4b remaining).</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0">Bench radio-silent after (board0 + board1 on
+  <code>rimba-hello</code>; Linux <code>wlan1</code> down).</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#goal">Goal</a></li>
+    <li><a href="#what">S4a — what was built</a></li>
+    <li><a href="#verify">On-air verification</a></li>
+    <li><a href="#s4b">Not done — S4b</a></li>
+    <li><a href="#footguns">Footguns</a></li>
+    <li><a href="#files">Files</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-22-mesh-gate-s4a-mpp-learning</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
