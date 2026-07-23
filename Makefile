@@ -55,7 +55,7 @@ IDF_EXTRA_D := $(if $(LINUX_MAC),-D TEST_LINUX_MAC="$(LINUX_MAC)") \
                $(if $(GATE),-D MESH_GATE_MODE=1) \
                $(if $(MESH_ID),-D TEST_MESH_ID="$(MESH_ID)") \
                $(if $(EADDR1),-D TEST_EADDR1="$(EADDR1)") \
-               $(if $(L2_DST_MAC),-D TEST_L2_DST_MAC="$(L2_DST_MAC)") \
+               $(if $(STA_IP),-D TEST_STATIC_IP="$(STA_IP)") \
                $(if $(PEER_MAC),-D TEST_PEER_MAC="$(PEER_MAC)") \
                $(if $(PING_IP),-D TEST_PING_IP="$(PING_IP)") \
                $(if $(NO_PING),-D TEST_NO_PING=1)

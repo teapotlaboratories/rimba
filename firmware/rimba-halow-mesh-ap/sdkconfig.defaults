@@ -3,7 +3,5 @@
 # the AP-mode morselib sources must be compiled in.
 CONFIG_HALOW_AP_MODE=y
 
-# All-ESP Mesh-gate routes between the AP subnet (192.168.12.0/24) and the mesh
-# subnet (10.9.9.0/24) via two esp_netifs — lwIP must forward between them.
-CONFIG_LWIP_IP_FORWARD=y
-CONFIG_LWIP_IPV4_NAPT=n
+# The all-ESP Mesh-gate is a pure L2 bridge on ONE flat 10.9.9.0/24 subnet (AP clients + mesh
+# nodes share it; the gate bridges at L2 + serves DHCP). No inter-subnet IP forwarding is needed.

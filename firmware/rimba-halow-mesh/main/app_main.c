@@ -40,11 +40,8 @@
 #define MESH_S1G_CHAN   27   /* US 915.5 MHz, 1 MHz BW (global op-class 68) */
 #define MESH_MAX_PLINKS 16
 
-/* OPTIONAL default gateway for a mesh node whose replies must leave the mesh subnet — e.g. when
- * a mesh gate bridges 10.9.9.0/24 to another subnet and off-mesh replies would otherwise die in
- * lwIP ARP. Leave undefined for a plain single-subnet mesh (no gateway is pinned). To route
- * off-mesh traffic through a gate, define it as that gate's mesh IP. Change for your network. */
-/* #define MESH_GATE_IP    "10.9.9.1" */
+/* This node lives on ONE flat 10.9.9.0/24 subnet shared with the mesh gate's AP clients — the gate
+ * L2-bridges + proxy-ARPs across the two, so no gateway or off-mesh route is ever pinned. */
 
 static const char *TAG = "rimba-mesh";
 
@@ -91,24 +88,15 @@ static void mesh_net_task(void *arg)
     esp_netif_ip_info_t ip = { 0 };
     ip.ip.addr = esp_ip4addr_aton(ipbuf);
     ip.netmask.addr = esp_ip4addr_aton("255.255.255.0");
-#ifdef MESH_GATE_IP
-    /* Route off-subnet replies (e.g. to a host behind a mesh gate) via the gate, else they die
-     * in lwIP ARP. Only pinned when MESH_GATE_IP is defined above. */
-    ip.gw.addr = esp_ip4addr_aton(MESH_GATE_IP);
-#endif
+    /* Flat single subnet — no gateway (gw stays 0); the gate L2-bridges to the AP side. */
     ESP_ERROR_CHECK(esp_netif_set_ip_info(n, &ip));
-#ifdef MESH_GATE_IP
-    ESP_LOGI(TAG, "mesh static IP %s gw %s (netif up=%d) — responder", ipbuf, MESH_GATE_IP,
+    ESP_LOGI(TAG, "mesh static IP %s (flat 10.9.9.0/24, no gateway) (netif up=%d) — responder", ipbuf,
              (int)esp_netif_is_netif_up(n));
-#else
-    ESP_LOGI(TAG, "mesh static IP %s (no gateway) (netif up=%d) — responder", ipbuf,
-             (int)esp_netif_is_netif_up(n));
-#endif
 #ifdef TEST_PEER_MAC
-    /* Round-trip test: a static ARP for the off-mesh peer (an AP client behind the gate at
-     * 10.9.9.50) so this node can reply to it without a broadcast ARP into the mesh (which the gate
-     * doesn't yet bridge). The reply's L2 dst = the peer's MAC → the datapath MPP-proxies it back
-     * through the gate (mpp(peer→gate) was learned from the peer's inbound AE frame). */
+    /* Optional test override: a static ARP for an AP client behind the gate at 10.9.9.50, so this node
+     * skips resolution entirely. NOT needed on the flat single subnet (the gate's proxy-ARP resolves an
+     * AP client's IP<->MAC across the bridge); kept only to pin the peer for a deterministic test. The
+     * reply's L2 dst = the peer's MAC → the datapath MPP-proxies it back through the gate. */
     {
         ip4_addr_t pip = { .addr = esp_ip4addr_aton("10.9.9.50") };
         unsigned mv[6];

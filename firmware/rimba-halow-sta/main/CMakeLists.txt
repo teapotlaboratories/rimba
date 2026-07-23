@@ -3,13 +3,18 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES halow nvs_flash esp_wifi esp_netif esp_event lwip
 )
-# S5c test: L2_DST_MAC=<mesh node MAC> makes the STA also ping a static-ARP'd fake IP whose MAC is a
-# mesh node, so the frame's L2 dst is the mesh node (the gate proxies it into the mesh, not L3-forward).
-if(DEFINED TEST_L2_DST_MAC)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_L2_DST_MAC=\"${TEST_L2_DST_MAC}\"")
+# STA_IP=<a.b.c.d> pins a STATIC IP (for an AP with no DHCP server, e.g. the plain rimba-halow-ap demo, or
+# a fixed-address test). Omit it to be a DHCP client — the default, against the mesh-gate's flat 10.9.9.x
+# SoftAP (zero-config: lease an address and reach any mesh node directly).
+if(DEFINED TEST_STATIC_IP)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_STATIC_IP=\"${TEST_STATIC_IP}\"")
 endif()
-# B2 test: NO_PING=1 makes the STA a responder-only (associate + static IP, no traffic of its own) so a
-# mesh node must INITIATE to it, forcing the gate's mesh->AP broadcast bridging.
+# PING_IP=<a.b.c.d> overrides the ping target (default: mesh node D at 10.9.9.100).
+if(DEFINED TEST_PING_IP)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_PING_IP=\"${TEST_PING_IP}\"")
+endif()
+# NO_PING=1 makes the STA a responder-only (associate + acquire an IP, no traffic of its own) so a mesh
+# node must INITIATE to it, forcing the gate's mesh->AP broadcast bridging (B2).
 if(DEFINED TEST_NO_PING)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_NO_PING=1")
 endif()

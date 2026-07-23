@@ -1,23 +1,25 @@
 /*
  * rimba-halow-mesh-ap — all-ESP32 Mesh-gate: 802.11s mesh + co-channel SoftAP on ONE MM6108,
- * ROUTING traffic between them (the full §A3 gateway, all-ESP).
+ * L2-BRIDGING traffic between them on ONE flat subnet (the all-ESP 802.11s gate).
  *
  * Bring-up order is MESH FIRST (mesh owns the primary vif) then the AP (secondary vif):
  *      mmhalow_init  ->  mmwlan_mesh_start  ->  mmwlan_ap_enable
- * then the L3 gateway wiring: a SECOND esp_netif for the AP vif, per-vif RX demux + TX tagging,
- * and lwIP IP forwarding between the two subnets:
+ * then the L2 bridge wiring: a SECOND esp_netif for the AP vif, per-vif RX demux + TX tagging.
+ * AP clients and mesh nodes share ONE flat 10.9.9.0/24:
  *      mesh netif  10.9.9.<gw>/24   (primary vif, MMWLAN_VIF_STA host-slot)
- *      AP   netif  192.168.12.1/24  (secondary vif, MMWLAN_VIF_AP)
+ *      AP   netif  10.9.9.1/24      (secondary vif, MMWLAN_VIF_AP; DHCP server for AP clients)
  *
- * PER-VIF WIRING (load-bearing, from the C-2 datapath review): in gateway mode morselib delivers
- * mesh RX to the MMWLAN_VIF_STA ext-cb slot and AP RX to MMWLAN_VIF_AP, and routes TX by
- * metadata.vif. So the mesh netif is fed from / tagged VIF_STA and the AP netif from / tagged
- * VIF_AP. Getting this backwards silently drops one direction.
+ * The gate bridges at L2 (802.11s Address-Extension): an AP client's frame to a mesh node is
+ * proxied into the mesh (S5c), a mesh node's frame to a client is delivered onto the AP vif (S5b),
+ * broadcasts are bridged both ways (B1/B2), and proxy-ARP resolves across the bridge. So an AP
+ * client is zero-config — it DHCPs a 10.9.9.x address and reaches any mesh node directly, with NO
+ * ip_forward, NO second subnet, and NO static route. (This replaced the earlier L3 router: two
+ * subnets + CONFIG_LWIP_IP_FORWARD + a MESH_GATE_IP return route.)
  *
- * Needs the components/halow feat/mesh-ap-concurrency branch (Stage 1/2 + datapath Gaps A–D/P0)
- * and CONFIG_LWIP_IP_FORWARD=y (sdkconfig.defaults). A STA under the AP (rimba-halow-sta, static
- * 192.168.12.2 gw .1) can then ping a mesh node (10.9.9.x), traversing the gate; the 2nd mesh node
- * needs a return route `192.168.12.0/24 via 10.9.9.<gw>`.
+ * PER-VIF WIRING (load-bearing, from the C-2 datapath review): morselib delivers mesh RX to the
+ * MMWLAN_VIF_STA ext-cb slot and AP RX to MMWLAN_VIF_AP, and routes TX by metadata.vif. So the
+ * mesh netif is fed from / tagged VIF_STA and the AP netif from / tagged VIF_AP. Getting this
+ * backwards silently drops one direction.
  */
 
 #include <string.h>
@@ -37,9 +39,9 @@
 #include "mmpkt.h"
 #include "umac/mesh/umac_mesh.h"
 
-/* Gateway forwarding needs a FORWARDABLE RX pbuf (see gw_rx_deliver): esp_netif's zero-copy RX pbuf
- * is a non-contiguous PBUF_REF, which lwIP's pbuf_add_header refuses to prepend an L2 header onto,
- * so ip_forward silently drops it. We copy RX into a contiguous PBUF_RAM and inject it directly. */
+/* Local delivery needs a self-owned, contiguous RX pbuf (see gw_rx_deliver): esp_netif's zero-copy RX
+ * pbuf is a non-contiguous PBUF_REF with a custom-free path, so we copy RX into a contiguous PBUF_RAM
+ * and inject it directly via netif->input — avoiding the PBUF_REF free-ownership + header-prepend traps. */
 #include "lwip/pbuf.h"
 #include "lwip/netif.h"
 #include "esp_netif_net_stack.h"
@@ -56,7 +58,7 @@
 #define LINK_OP_CLASS   68
 #define LINK_MAX_STAS   4
 
-#define AP_SUBNET_IP    "192.168.12.1"
+#define AP_SUBNET_IP    "10.9.9.1"       /* the gate's AP-side host on the FLAT mesh subnet */
 #define AP_SUBNET_MASK  "255.255.255.0"
 
 static const char *TAG = "rimba-mesh-ap";
@@ -166,19 +168,19 @@ static esp_err_t gw_ap_driver_post_attach(esp_netif_t *netif, void *args)
     return esp_netif_set_driver_config(netif, &ifcfg);
 }
 
-/* Per-vif RX: hand the frame to the netif for that vif (mesh->mesh netif, AP->AP netif).
+/* Per-vif RX LOCAL delivery: hand the frame to the netif for that vif (mesh->mesh netif, AP->AP netif)
+ * for delivery into the gate's OWN lwIP stack — the DHCP server, and ARP/ping addressed to the gate.
+ * The AP<->mesh BRIDGING is done at L2 by the S5b/S5c/B1/B2 branches in the RX cbs, not here.
  *
  * We DON'T use esp_netif_receive() here: it wraps the frame in a zero-copy, NON-CONTIGUOUS PBUF_REF
- * (esp_pbuf_allocate), and lwIP's pbuf_add_header() refuses to prepend an L2 header onto a
- * non-contiguous pbuf (pbuf.c: `else`/`!force` -> return 1). So when ip_forward re-transmits a
- * received frame on the OTHER vif, ethernet_output can't add the new 802.3/mesh header and drops it
- * (fw counted, but the frame never reaches halow_transmit). This is THE gateway forward-path bug.
+ * (esp_pbuf_allocate) with a custom-free callback. A contiguous, self-owned copy avoids two traps: (a)
+ * lwIP's pbuf_add_header() refuses to prepend an L2 header onto a non-contiguous pbuf (pbuf.c:
+ * `else`/`!force` -> return 1), and (b) the PBUF_REF custom-free path risks a double-free once we
+ * already own the mmpkt.
  *
- * Fix: copy the frame into a CONTIGUOUS PBUF_RAM (forwardable — pbuf_add_header takes the contiguous
- * branch) with link headroom, and inject it via netif->input (exactly what esp_netif's own
- * wlanif_input does). Applies to BOTH directions (AP->mesh forward and mesh->AP reply) since both
- * cbs funnel through here. We own the mmpkt (the ext-cb handed it over); we copied it, so we free it
- * exactly once and never pass it to esp_netif -> no double-free with the PBUF_REF custom-free path. */
+ * Fix: copy the frame into a CONTIGUOUS PBUF_RAM with link headroom and inject it via netif->input
+ * (exactly what esp_netif's own wlanif_input does). We own the mmpkt (the ext-cb handed it over); we
+ * copied it, so we free it exactly once and never pass it to esp_netif -> no double-free. */
 static void gw_rx_deliver(struct mmpkt *mmpkt, esp_netif_t *esp_netif)
 {
     struct mmpktview *v = mmpkt_open(mmpkt);
@@ -514,8 +516,8 @@ static bool gate_ae_rx_cb(const uint8_t *eaddr1, const uint8_t *eaddr2, const ui
     (void)arg;
     if (!gate_is_ap_client(eaddr1)) return false; /* not for our AP — leave the normal mesh delivery/relay */
     /* This proxied frame's final DA is one of OUR AP clients: WE own it — deliver it onto the AP vif and
-     * tell the datapath we consumed it (return true) so it does NOT also locally-deliver/ip_forward it
-     * (that would spuriously re-inject the frame into the mesh — the S5 double-delivery fix). */
+     * tell the datapath we consumed it (return true) so it does NOT also deliver it into the gate's own
+     * lwIP stack (that would spuriously re-inject the frame into the mesh — the S5 double-delivery fix). */
     if (len >= 8 && payload[0] == 0xaa && payload[1] == 0xaa && payload[2] == 0x03) { /* LLC/SNAP */
         uint32_t l3 = len - 8;
         if (l3 <= sizeof(s_ae2ap) - 14) {
@@ -538,17 +540,19 @@ static bool gate_ae_rx_cb(const uint8_t *eaddr1, const uint8_t *eaddr2, const ui
             }
         }
     }
-    return true; /* owned by us (delivered to the AP, or dropped) — never fall through to ip_forward */
+    return true; /* owned by us (delivered to the AP, or dropped) — never fall through to local delivery */
 }
 
 static void gw_setup_ap_netif(void)
 {
-    /* AP netif with a DHCP SERVER so STAs are zero-config (task #5 de-hardcode; superseded later by the
-     * 802.11s L2-bridge port). The IP goes in the INHERENT config (like stock WIFI_AP) so the netif is
-     * BORN with 192.168.12.1 and AUTOUP's auto-start of dhcps sees a valid server IP. (A 0.0.0.0 IP
-     * makes dhcps fail — dhcpserver.c: ip4_addr_isany -> "could not obtain pcb" — and a later
-     * set_ip_info would then abort with DHCP_NOT_STOPPED, boot-looping the gate.) So we do NOT call
-     * set_ip_info here. Reuse the WIFI_STA netstack (generic ethernet L2 glue); dhcps is L3/UDP. */
+    /* AP netif with a DHCP SERVER so AP clients are zero-config on the FLAT mesh subnet: the gate hands
+     * out 10.9.9.x and the L2 bridge + proxy-ARP let a client reach any mesh node directly (no route).
+     * The IP goes in the INHERENT config (like stock WIFI_AP) so the netif is BORN with 10.9.9.1 and
+     * AUTOUP's auto-start of dhcps sees a valid server IP. (A 0.0.0.0 IP makes dhcps fail — dhcpserver.c:
+     * ip4_addr_isany -> "could not obtain pcb" — and a later set_ip_info would then abort with
+     * DHCP_NOT_STOPPED, boot-looping the gate.) So we do NOT call set_ip_info here. The default dhcps pool
+     * is small (<= LINK_MAX_STAS leases from 10.9.9.2), so it stays clear of the mesh nodes' 10.9.9.100-163
+     * static range. Reuse the WIFI_STA netstack (generic ethernet L2 glue); dhcps is L3/UDP. */
     static esp_netif_ip_info_t ap_ip;              /* runtime-init: esp_ip4addr_aton is not const */
     ap_ip.ip.addr      = esp_ip4addr_aton(AP_SUBNET_IP);
     ap_ip.gw.addr      = esp_ip4addr_aton(AP_SUBNET_IP);   /* = router option offered to STAs */
@@ -584,7 +588,7 @@ static void gw_setup_ap_netif(void)
 
     /* Create/attach the underlying lwIP netif + input path (mirrors mmhalow's wifi_start) and bring it
      * up. WITHOUT action_start, esp_netif_receive() would deref a NULL input fn (PC=0 on first RX).
-     * AUTOUP + the inherent IP => dhcps auto-starts on 192.168.12.1. */
+     * AUTOUP + the inherent IP => dhcps auto-starts on 10.9.9.1. */
     esp_netif_action_start(g_ap_netif, NULL, 0, NULL);
     esp_netif_action_connected(g_ap_netif, NULL, 0, NULL); /* no link event in AP */
     ESP_LOGI(TAG, "AP netif up: %s/24 + DHCP server, BSSID/MAC=" MACSTR, AP_SUBNET_IP, MAC2STR(bssid));
@@ -607,17 +611,17 @@ static void mesh_net_task(void *arg)
     snprintf(ipbuf, sizeof(ipbuf), "10.9.9.%u", host);
     esp_netif_ip_info_t ip = { 0 };
     ip.ip.addr = esp_ip4addr_aton(ipbuf);
-    ip.gw.addr = esp_ip4addr_aton("10.9.9.1");
+    ip.gw.addr = 0; /* flat single subnet — the gate is an L2 bridge, not an L3 gateway */
     ip.netmask.addr = esp_ip4addr_aton("255.255.255.0");
     ESP_ERROR_CHECK(esp_netif_set_ip_info(n, &ip));
-    ESP_LOGI(TAG, "mesh netif static IP %s (gateway host)", ipbuf);
-    ESP_LOGI(TAG, "gateway ready: STA under the AP (192.168.12.0/24) routes to the mesh (10.9.9.0/24)");
+    ESP_LOGI(TAG, "mesh netif static IP %s (L2-bridge gate host)", ipbuf);
+    ESP_LOGI(TAG, "L2 bridge ready: AP clients + mesh nodes share 10.9.9.0/24 (DHCP + proxy-ARP, no ip_forward)");
     vTaskDelete(NULL);
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== all-ESP Mesh-gate: mesh + SoftAP + IP routing on one MM6108 ===");
+    ESP_LOGI(TAG, "=== all-ESP Mesh-gate: mesh + SoftAP L2-bridged on one MM6108 (flat 10.9.9.0/24) ===");
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -663,7 +667,7 @@ void app_main(void)
     if (st != MMWLAN_SUCCESS) { ESP_LOGE(TAG, "ap_enable FAILED %d (mesh stays up)", (int)st); return; }
     ESP_LOGI(TAG, "==> AP vif up (secondary) — CONCURRENT with mesh.");
 
-    /* --- 3) L3 gateway wiring: 2nd netif + per-vif RX demux + forwarding --- */
+    /* --- 3) L2 bridge wiring: 2nd netif + per-vif RX demux + TX tagging --- */
     gw_setup_ap_netif();
     /* Override mmhalow's single plain RX cb with per-vif ext cbs (gateway RX demux delivers mesh
      * as VIF_STA, AP clients as VIF_AP). */
@@ -673,8 +677,8 @@ void app_main(void)
                     MMWLAN_SUCCESS);
     /* S5b — mesh->AP bridge: deliver a proxied AE frame (eaddr1 = one of our AP clients) onto the AP vif.
      * The plain VIF_STA ext-cb can't see the AE endpoints (stripped with the Mesh Control), so this uses
-     * the S5a AE-rx hook. Coexists with the L3 ip_forward above (a proxied frame to an AP client goes via
-     * the AP-inject path; other mesh RX still reaches the mesh netif). */
+     * the S5a AE-rx hook. A proxied frame to an AP client goes via this AP-inject path; other mesh RX
+     * reaches the mesh netif for local delivery (gw_rx_deliver). */
     mmwlan_mesh_register_ae_rx_cb(gate_ae_rx_cb, NULL);
 
     xTaskCreate(mesh_net_task, "mesh_net", 4096, NULL, 5, NULL);
