@@ -27,6 +27,7 @@
 #include "ping/ping_sock.h"
 #include <stdio.h>
 #include "lwip/etharp.h"
+#include "lwip/ip4_addr.h"
 
 #include "mmhalow.h"
 #include "mmwlan.h"
@@ -120,7 +121,10 @@ static bool wait_for_dhcp_ip(void)
     }
     esp_netif_ip_info_t ip = { 0 };
     for (int i = 0; i < 60; i++) {   /* up to ~30 s */
-        if (esp_netif_get_ip_info(n, &ip) == ESP_OK && ip.ip.addr != 0) {
+        /* A real DHCP lease is a non-zero, non-link-local address; esp_netif leaves the IP at 0 until the
+         * gate's dhcps answers (no APIPA), so reject a stray/auto 169.254.x masquerading as a lease. */
+        if (esp_netif_get_ip_info(n, &ip) == ESP_OK && ip.ip.addr != 0 &&
+            !ip4_addr_islinklocal((const ip4_addr_t *)&ip.ip)) {
             ESP_LOGI(TAG, "DHCP lease " IPSTR " — zero-config on the flat mesh subnet", IP2STR(&ip.ip));
             return true;
         }

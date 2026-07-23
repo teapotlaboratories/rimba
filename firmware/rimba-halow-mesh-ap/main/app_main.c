@@ -550,12 +550,15 @@ static void gw_setup_ap_netif(void)
      * The IP goes in the INHERENT config (like stock WIFI_AP) so the netif is BORN with 10.9.9.1 and
      * AUTOUP's auto-start of dhcps sees a valid server IP. (A 0.0.0.0 IP makes dhcps fail — dhcpserver.c:
      * ip4_addr_isany -> "could not obtain pcb" — and a later set_ip_info would then abort with
-     * DHCP_NOT_STOPPED, boot-looping the gate.) So we do NOT call set_ip_info here. The default dhcps pool
-     * is small (<= LINK_MAX_STAS leases from 10.9.9.2), so it stays clear of the mesh nodes' 10.9.9.100-163
-     * static range. Reuse the WIFI_STA netstack (generic ethernet L2 glue); dhcps is L3/UDP. */
+     * DHCP_NOT_STOPPED, boot-looping the gate.) So we do NOT call set_ip_info here. The dhcps pool starts at
+     * 10.9.9.2 and spans CONFIG_LWIP_DHCPS_MAX_STATION_NUM leases (default 8 -> .2-.9), so at the default it
+     * stays clear of the mesh nodes' 10.9.9.100-163 static range; if that Kconfig is raised toward ~100, pin
+     * the range explicitly (esp_netif_dhcps_option) to keep the pool below .100. Reuse the WIFI_STA netstack
+     * (generic ethernet L2 glue); dhcps is L3/UDP. */
     static esp_netif_ip_info_t ap_ip;              /* runtime-init: esp_ip4addr_aton is not const */
     ap_ip.ip.addr      = esp_ip4addr_aton(AP_SUBNET_IP);
-    ap_ip.gw.addr      = esp_ip4addr_aton(AP_SUBNET_IP);   /* = router option offered to STAs */
+    ap_ip.gw.addr      = 0; /* no router option: a pure L2 bridge doesn't route off-subnet, so don't hand
+                             * clients a default route to 10.9.9.1 that would only black-hole their traffic */
     ap_ip.netmask.addr = esp_ip4addr_aton(AP_SUBNET_MASK);
     esp_netif_inherent_config_t ap_base_cfg = {
         .flags = (esp_netif_flags_t)(ESP_NETIF_DHCP_SERVER | ESP_NETIF_FLAG_AUTOUP),
@@ -585,6 +588,12 @@ static void gw_setup_ap_netif(void)
     ESP_ERROR_CHECK(mmwlan_ap_get_bssid(bssid) == MMWLAN_SUCCESS ? ESP_OK : ESP_FAIL);
     esp_netif_set_mac(g_ap_netif, bssid);
     memcpy(g_ap_bssid, bssid, 6); /* S5c: the AP-side MAC (frames to it are local, not proxied) */
+
+    /* NOTE — two esp_netifs (this AP + the mesh netif in mesh_net_task) share 10.9.9.0/24. That is safe:
+     * dhcps is netif-bound, the AP<->mesh datapath is L2-bridged on an explicit md.vif (neither uses lwIP
+     * routing), and lwIP answers a gate-addressed frame on its INPUT netif — so a client's ping to 10.9.9.1
+     * is replied on the AP vif (bench-verified). The gate originates no lwIP L3 to a subnet host, so the
+     * route_prio ambiguity between the two same-subnet netifs is never exercised. */
 
     /* Create/attach the underlying lwIP netif + input path (mirrors mmhalow's wifi_start) and bring it
      * up. WITHOUT action_start, esp_netif_receive() would deref a NULL input fn (PC=0 on first RX).

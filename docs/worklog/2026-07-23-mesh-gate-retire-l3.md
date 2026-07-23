@@ -64,6 +64,29 @@ Radio-silent cleanup done (`rimba-hello` to all three; board2 PPK2-powered off).
   `TEST_STATIC_IP` did nothing until the CMakeLists forwarded it (`py_compile`-style "it built" ≠ "the
   branch was exercised"; confirm the macro reached `build.ninja`).
 
+## Review findings (all resolved)
+
+`/code-review` over the branch surfaced 5 findings (all low–medium; no crash/security):
+
+1. **Two esp_netifs on `10.9.9.0/24` (mesh route_prio 100, AP 50) — the gate's own L3 to a subnet host
+   could egress the wrong vif.** **VERIFIED BENIGN + documented (no code change).** On-air: the STA
+   (`10.9.9.2`) pinged the gate's AP IP `10.9.9.1` → `reply from 10.9.9.1 seq=1` continuously (12–18 ms).
+   lwIP answers a gate-addressed frame on its INPUT netif, so the reply exits the correct vif; dhcps is
+   netif-bound and the AP↔mesh datapath is explicit-`md.vif` (neither uses lwIP routing), and the gate
+   originates no lwIP L3 to a subnet host, so the ambiguity is never exercised. A `route_prio` bump would be
+   a no-op (or trade the mesh-side ping-to-gate direction); an IP-less / bridge-netif rework would risk the
+   verified-working DHCP + bridge for zero real benefit.
+2. **DHCP advertised `10.9.9.1` as a default gateway the gate no longer routes → off-subnet client traffic
+   black-holed.** **FIXED:** AP netif `gw = 0` (no router option offered). Regression-verified: the STA
+   still DHCPs `10.9.9.2` and reaches the mesh node.
+3. **DHCP-pool safety comment cited the wrong constant** (`LINK_MAX_STAS` vs
+   `CONFIG_LWIP_DHCPS_MAX_STATION_NUM`). **FIXED:** comment corrected — default 8 leases (`.2–.9`), clear of
+   `.100`; pin the lease range explicitly if that Kconfig is raised.
+4. **`wait_for_dhcp_ip` accepted any non-zero IP as a lease.** **FIXED:** now also rejects a link-local
+   `169.254.x` (`ip4_addr_islinklocal`).
+5. **`NO_PING=1` alone no longer yields a fixed responder IP** (now DHCP-dynamic). **FIXED (doc):** the STA
+   `CMakeLists.txt` notes to pair `NO_PING=1` with `STA_IP=` for a deterministic responder address.
+
 ## Files
 - `firmware/rimba-halow-mesh-ap/main/app_main.c` + `sdkconfig.defaults` — AP on `10.9.9.1` + DHCP,
   no ip_forward, L2-bridge docs.

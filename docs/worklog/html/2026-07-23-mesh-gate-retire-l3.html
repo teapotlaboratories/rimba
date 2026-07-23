@@ -318,7 +318,29 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
     exercised". Confirm the macro actually reached <code>build.ninja</code>.</p>
   </div>
 
-  <h2 id="files">5 · Files</h2>
+  <h2 id="review">5 · Review — 5 findings, all resolved</h2>
+  <p><code>/code-review</code> over the branch surfaced 5 low–medium findings (no crash/security).</p>
+  <div class="callout ok">
+    <p class="ct">✓ #1 verified benign (no code change)</p>
+    <p>Two esp_netifs share <code>10.9.9.0/24</code> (mesh route_prio 100, AP 50), so the gate's own L3 to a
+    subnet host <em>could</em> exit the wrong vif. On-air it doesn't: the STA pinged the gate's AP IP
+    <code>10.9.9.1</code> → <strong><code>reply from 10.9.9.1 seq=1</code></strong> continuously. lwIP answers
+    a gate-addressed frame on its INPUT netif, dhcps is netif-bound, the bridge uses an explicit
+    <code>md.vif</code>, and the gate originates no lwIP L3 to a subnet host — so the ambiguity is never
+    exercised. A route_prio bump would be a no-op; an IP-less / bridge-netif rework would risk the working
+    DHCP + bridge for nothing.</p>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>Finding</th><th>Resolution</th></tr></thead>
+    <tbody>
+      <tr><td>2</td><td>DHCP advertised <code>10.9.9.1</code> as a default gateway the gate no longer routes → off-subnet client traffic black-holed</td><td><strong>Fixed:</strong> AP netif <code>gw = 0</code> (no router option). Regression-verified: STA still DHCPs <code>.2</code> + reaches the mesh node.</td></tr>
+      <tr><td>3</td><td>DHCP-pool comment cited <code>LINK_MAX_STAS</code> — the wrong constant</td><td><strong>Fixed:</strong> comment corrected to <code>CONFIG_LWIP_DHCPS_MAX_STATION_NUM</code> (default 8 → <code>.2–.9</code>, clear of <code>.100</code>).</td></tr>
+      <tr><td>4</td><td><code>wait_for_dhcp_ip</code> accepted any non-zero IP</td><td><strong>Fixed:</strong> also rejects a link-local <code>169.254.x</code>.</td></tr>
+      <tr><td>5</td><td><code>NO_PING=1</code> alone no longer gives a fixed responder IP (now DHCP-dynamic)</td><td><strong>Fixed (doc):</strong> CMakeLists notes to pair <code>NO_PING=1</code> with <code>STA_IP=</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="files">6 · Files</h2>
   <ul>
     <li><code>firmware/rimba-halow-mesh-ap/main/app_main.c</code> + <code>sdkconfig.defaults</code> — AP on
       <code>10.9.9.1</code> + DHCP, no ip_forward, L2-bridge docs.</li>
@@ -340,7 +362,8 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
     <li><a href="#changed">2 · What changed</a></li>
     <li><a href="#verify">3 · On-air verification</a></li>
     <li><a href="#footguns">4 · Footguns hit</a></li>
-    <li><a href="#files">5 · Files</a></li>
+    <li><a href="#review">5 · Review findings</a></li>
+    <li><a href="#files">6 · Files</a></li>
   </ul>
 </div></aside>
 </div>

@@ -14,7 +14,8 @@ if(DEFINED TEST_PING_IP)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_PING_IP=\"${TEST_PING_IP}\"")
 endif()
 # NO_PING=1 makes the STA a responder-only (associate + acquire an IP, no traffic of its own) so a mesh
-# node must INITIATE to it, forcing the gate's mesh->AP broadcast bridging (B2).
+# node must INITIATE to it, forcing the gate's mesh->AP broadcast bridging (B2). Pair it with STA_IP= for a
+# FIXED responder address — the DHCP default gives a dynamic IP a mesh node can't target ahead of time.
 if(DEFINED TEST_NO_PING)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_NO_PING=1")
 endif()
