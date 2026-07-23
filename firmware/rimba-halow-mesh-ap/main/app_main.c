@@ -72,12 +72,21 @@ static esp_netif_driver_base_t g_ap_driver_base;
 #define GATE_MAX_CLIENTS 8
 static uint8_t g_ap_clients[GATE_MAX_CLIENTS][6];
 static volatile int g_ap_client_n;
+/* g_ap_clients[]/g_ap_client_n are written by ap_sta_status_cb (AP status task) and read by
+ * gate_is_ap_client from the mesh-RX task; a short portMUX critical section keeps a reader from seeing a
+ * torn slot or a stale count mid-remove. No TX/blocking call runs inside it, so it cannot deadlock. */
+static portMUX_TYPE g_ap_clients_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void gw_arp_forget_mac(const uint8_t *mac); /* drop a departed host's proxy-ARP mapping (defined below) */
 
 static bool gate_is_ap_client(const uint8_t *mac)
 {
+    bool found = false;
+    taskENTER_CRITICAL(&g_ap_clients_mux);
     for (int i = 0; i < g_ap_client_n; i++)
-        if (memcmp(g_ap_clients[i], mac, 6) == 0) return true;
-    return false;
+        if (memcmp(g_ap_clients[i], mac, 6) == 0) { found = true; break; }
+    taskEXIT_CRITICAL(&g_ap_clients_mux);
+    return found;
 }
 
 /* Log AP client associations + maintain the client set (the status cb fires as a STA authorizes / leaves). */
@@ -86,16 +95,26 @@ static void ap_sta_status_cb(const struct mmwlan_ap_sta_status *st, void *arg)
     (void)arg;
     if (st == NULL) return;
     if (st->state == MMWLAN_AP_STA_AUTHORIZED) {
-        if (!gate_is_ap_client(st->mac_addr) && g_ap_client_n < GATE_MAX_CLIENTS)
+        taskENTER_CRITICAL(&g_ap_clients_mux);
+        bool present = false;
+        for (int i = 0; i < g_ap_client_n; i++)
+            if (memcmp(g_ap_clients[i], st->mac_addr, 6) == 0) { present = true; break; }
+        if (!present && g_ap_client_n < GATE_MAX_CLIENTS)
             memcpy(g_ap_clients[g_ap_client_n++], st->mac_addr, 6);
-        ESP_LOGI(TAG, "AP client joined: " MACSTR " (%d total)", MAC2STR(st->mac_addr), g_ap_client_n);
+        int n = g_ap_client_n;
+        taskEXIT_CRITICAL(&g_ap_clients_mux);
+        ESP_LOGI(TAG, "AP client joined: " MACSTR " (%d total)", MAC2STR(st->mac_addr), n);
     } else if (st->state == MMWLAN_AP_STA_UNKNOWN) {
+        taskENTER_CRITICAL(&g_ap_clients_mux);
         for (int i = 0; i < g_ap_client_n; i++)
             if (memcmp(g_ap_clients[i], st->mac_addr, 6) == 0) {
                 memcpy(g_ap_clients[i], g_ap_clients[--g_ap_client_n], 6); /* swap-with-last remove */
                 break;
             }
-        ESP_LOGI(TAG, "AP client left:   " MACSTR " (%d total)", MAC2STR(st->mac_addr), g_ap_client_n);
+        int n = g_ap_client_n;
+        taskEXIT_CRITICAL(&g_ap_clients_mux);
+        gw_arp_forget_mac(st->mac_addr); /* stop pushing this client's now-stale IP->MAC mapping */
+        ESP_LOGI(TAG, "AP client left:   " MACSTR " (%d total)", MAC2STR(st->mac_addr), n);
     }
 }
 
@@ -193,27 +212,42 @@ static void gw_rx_deliver(struct mmpkt *mmpkt, esp_netif_t *esp_netif)
  * peer, the gate just short-circuits the lossy resolution. */
 #define GW_ARP_MAX 24
 enum { GW_SIDE_AP = 0, GW_SIDE_MESH = 1 };
-struct gw_arp_entry { uint32_t ip; uint8_t mac[6]; uint8_t side; bool used; };
+struct gw_arp_entry { uint32_t ip; uint8_t mac[6]; uint8_t side; bool used; uint32_t last_ms; };
 static struct gw_arp_entry g_gw_arp[GW_ARP_MAX];
+#define GW_ARP_TTL_MS (5u * 60u * 1000u)  /* forget a host not seen/refreshed within this window */
+
+static uint32_t gw_now_ms(void) { return (uint32_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
 
 static void gw_arp_learn(uint32_t ip, const uint8_t *mac, uint8_t side)
 {
     if (ip == 0 || (mac[0] & 0x01)) return; /* skip 0.0.0.0 + broadcast/multicast MACs */
-    int free_i = -1;
+    uint32_t now = gw_now_ms();
+    int free_i = -1, lru_i = -1;
     for (int i = 0; i < GW_ARP_MAX; i++) {
         if (g_gw_arp[i].used) {
-            if (g_gw_arp[i].ip == ip) { memcpy(g_gw_arp[i].mac, mac, 6); g_gw_arp[i].side = side; return; }
+            if (g_gw_arp[i].ip == ip) {
+                memcpy(g_gw_arp[i].mac, mac, 6); g_gw_arp[i].side = side; g_gw_arp[i].last_ms = now; return;
+            }
+            if (lru_i < 0 || (int32_t)(g_gw_arp[i].last_ms - g_gw_arp[lru_i].last_ms) < 0) lru_i = i;
         } else if (free_i < 0) { free_i = i; }
     }
-    if (free_i >= 0) {
-        g_gw_arp[free_i].used = true; g_gw_arp[free_i].ip = ip;
-        memcpy(g_gw_arp[free_i].mac, mac, 6); g_gw_arp[free_i].side = side;
-    }
+    int slot = (free_i >= 0) ? free_i : lru_i; /* a free slot, else evict the least-recently-used entry */
+    if (slot < 0) return;
+    g_gw_arp[slot].ip = ip; memcpy(g_gw_arp[slot].mac, mac, 6);
+    g_gw_arp[slot].side = side; g_gw_arp[slot].last_ms = now;
+    g_gw_arp[slot].used = true; /* publish last, after the fields are populated */
+}
+static void gw_arp_forget_mac(const uint8_t *mac)
+{
+    for (int i = 0; i < GW_ARP_MAX; i++)
+        if (g_gw_arp[i].used && memcmp(g_gw_arp[i].mac, mac, 6) == 0) g_gw_arp[i].used = false;
 }
 static bool gw_arp_lookup(uint32_t ip, uint8_t *mac_out, uint8_t *side_out)
 {
+    uint32_t now = gw_now_ms();
     for (int i = 0; i < GW_ARP_MAX; i++)
         if (g_gw_arp[i].used && g_gw_arp[i].ip == ip) {
+            if ((uint32_t)(now - g_gw_arp[i].last_ms) > GW_ARP_TTL_MS) { g_gw_arp[i].used = false; return false; }
             memcpy(mac_out, g_gw_arp[i].mac, 6); *side_out = g_gw_arp[i].side; return true;
         }
     return false;
@@ -261,8 +295,6 @@ static void gw_tx_ap_frame(const uint8_t *frame, uint32_t len)
 }
 /* If `eth` is an ARP REQUEST for a host we know on `!from_side`, answer it (real MAC) over the reliable
  * link and return true (the caller then skips the lossy bridge for this frame). */
-static uint8_t s_arp_reply[42];
-static uint8_t s_arp_snap[8 + 28];
 static bool gw_proxy_arp(const uint8_t *eth, uint32_t elen, uint8_t from_side)
 {
     if (elen < 14 + 28 || eth[12] != 0x08 || eth[13] != 0x06) return false; /* not ARP */
@@ -274,17 +306,19 @@ static bool gw_proxy_arp(const uint8_t *eth, uint32_t elen, uint8_t from_side)
     uint32_t spa; memcpy(&spa, arp + 14, 4);
     const uint8_t *req_mac = arp + 8;
     if (from_side == GW_SIDE_AP) {
-        gw_arp_build_reply(s_arp_reply, req_mac, spa, tpa, tmac);
-        gw_tx_ap_frame(s_arp_reply, sizeof(s_arp_reply));
+        uint8_t reply[42]; /* per-call (was a shared static): no cross-task race with the announce push */
+        gw_arp_build_reply(reply, req_mac, spa, tpa, tmac);
+        gw_tx_ap_frame(reply, sizeof(reply));
     } else { /* mesh requester: proxy a unicast ARP reply back to it (eaddr1=requester, eaddr2=answered) */
-        s_arp_snap[0] = 0xaa; s_arp_snap[1] = 0xaa; s_arp_snap[2] = 0x03;
-        s_arp_snap[3] = 0x00; s_arp_snap[4] = 0x00; s_arp_snap[5] = 0x00;
-        s_arp_snap[6] = 0x08; s_arp_snap[7] = 0x06;                 /* ARP ethertype */
-        uint8_t *a = s_arp_snap + 8;
+        uint8_t snap[8 + 28]; /* per-call buffer — no shared-static race */
+        snap[0] = 0xaa; snap[1] = 0xaa; snap[2] = 0x03;
+        snap[3] = 0x00; snap[4] = 0x00; snap[5] = 0x00;
+        snap[6] = 0x08; snap[7] = 0x06;                 /* ARP ethertype */
+        uint8_t *a = snap + 8;
         a[0] = 0; a[1] = 1; a[2] = 0x08; a[3] = 0; a[4] = 6; a[5] = 4; a[6] = 0; a[7] = 2; /* reply */
         memcpy(a + 8, tmac, 6);  memcpy(a + 14, &tpa, 4);          /* sha/spa = answered host */
         memcpy(a + 18, req_mac, 6); memcpy(a + 24, &spa, 4);       /* tha/tpa = requester */
-        (void)mmwlan_mesh_tx_proxied(req_mac, tmac, s_arp_snap, sizeof(s_arp_snap));
+        (void)mmwlan_mesh_tx_proxied(req_mac, tmac, snap, sizeof(snap));
     }
     ESP_LOGI(TAG, "proxy-ARP: told %s " MACSTR " that 10.9.9.%u is-at " MACSTR,
              from_side == GW_SIDE_AP ? "AP" : "mesh", MAC2STR(req_mac), ((const uint8_t *)&tpa)[3],
@@ -299,17 +333,22 @@ static bool gw_proxy_arp(const uint8_t *eth, uint32_t elen, uint8_t from_side)
  * depending on lossy No-Ack multicast. (With TRUST_IP_MAC on, an unsolicited ARP reply populates the cache.) */
 static void gw_arp_push_to_mesh(uint32_t spa, const uint8_t *smac, const uint8_t *dst_mac, uint32_t dpa)
 {
-    s_arp_snap[0] = 0xaa; s_arp_snap[1] = 0xaa; s_arp_snap[2] = 0x03;
-    s_arp_snap[3] = 0x00; s_arp_snap[4] = 0x00; s_arp_snap[5] = 0x00;
-    s_arp_snap[6] = 0x08; s_arp_snap[7] = 0x06;
-    uint8_t *a = s_arp_snap + 8;
+    uint8_t snap[8 + 28]; /* per-call buffer — no shared-static race with the RX-context proxy-ARP */
+    snap[0] = 0xaa; snap[1] = 0xaa; snap[2] = 0x03;
+    snap[3] = 0x00; snap[4] = 0x00; snap[5] = 0x00;
+    snap[6] = 0x08; snap[7] = 0x06;
+    uint8_t *a = snap + 8;
     a[0] = 0; a[1] = 1; a[2] = 0x08; a[3] = 0; a[4] = 6; a[5] = 4; a[6] = 0; a[7] = 2; /* reply */
     memcpy(a + 8, smac, 6);  memcpy(a + 14, &spa, 4);   /* sha/spa = the announced host */
     memcpy(a + 18, dst_mac, 6); memcpy(a + 24, &dpa, 4);/* tha/tpa = the taught node    */
-    (void)mmwlan_mesh_tx_proxied(dst_mac, smac, s_arp_snap, sizeof(s_arp_snap));
+    (void)mmwlan_mesh_tx_proxied(dst_mac, smac, snap, sizeof(snap));
 }
 static void gw_arp_announce_once(void)
 {
+    uint32_t now = gw_now_ms();
+    for (int i = 0; i < GW_ARP_MAX; i++) /* age out departed/stale hosts before pushing */
+        if (g_gw_arp[i].used && (uint32_t)(now - g_gw_arp[i].last_ms) > GW_ARP_TTL_MS)
+            g_gw_arp[i].used = false;
     int pushed = 0;
     for (int a = 0; a < GW_ARP_MAX; a++) {
         if (!g_gw_arp[a].used) continue;
@@ -317,9 +356,10 @@ static void gw_arp_announce_once(void)
             if (!g_gw_arp[b].used || g_gw_arp[a].side == g_gw_arp[b].side) continue; /* other side only */
             /* teach host `a` that host `b` is-at b.mac, over a's reliable link */
             if (g_gw_arp[a].side == GW_SIDE_AP) {
-                gw_arp_build_reply(s_arp_reply, g_gw_arp[a].mac, g_gw_arp[a].ip,
+                uint8_t reply[42]; /* per-call buffer (was a shared static) */
+                gw_arp_build_reply(reply, g_gw_arp[a].mac, g_gw_arp[a].ip,
                                    g_gw_arp[b].ip, g_gw_arp[b].mac);
-                gw_tx_ap_frame(s_arp_reply, sizeof(s_arp_reply));       /* AP downlink (acked) */
+                gw_tx_ap_frame(reply, sizeof(reply));                   /* AP downlink (acked) */
             } else {
                 gw_arp_push_to_mesh(g_gw_arp[b].ip, g_gw_arp[b].mac,
                                     g_gw_arp[a].mac, g_gw_arp[a].ip);   /* proxied mesh unicast */
@@ -434,11 +474,14 @@ static void gw_ap_rx_cb(struct mmpkt *mmpkt, const struct mmwlan_rx_metadata *md
     }
     mmpkt_close(&v);
     if (do_unicast_proxy) {
-        if (mmwlan_mesh_tx_proxied(dst, src, s_ap2mesh, 8 + l3))
+        if (mmwlan_mesh_tx_proxied(dst, src, s_ap2mesh, 8 + l3)) {
             ESP_LOGI(TAG, "S5c AP->mesh: %u B from " MACSTR " to " MACSTR, (unsigned)(8 + l3),
                      MAC2STR(src), MAC2STR(dst));
-        mmpkt_release(mmpkt); /* we consumed it (copied the payload) — free once */
-        return;
+            mmpkt_release(mmpkt); /* proxied into the mesh (payload copied) — free once */
+            return;
+        }
+        /* No mesh route for this unicast (e.g. dst is another AP client or unresolvable): fall through to
+         * local delivery / L3 forwarding instead of silently dropping it. */
     }
     if (do_group_proxy) {
         /* Bridge an AP client's broadcast/multicast INTO the mesh as a proxied AE_A4 group frame, so mesh
@@ -531,12 +574,13 @@ static void gw_setup_ap_netif(void)
     g_ap_driver_base.post_attach = gw_ap_driver_post_attach;
     ESP_ERROR_CHECK(esp_netif_attach(g_ap_netif, &g_ap_driver_base));
 
-    /* AP netif L2 addr = the AP vif BSSID, so ARP on the AP subnet resolves to the AP vif. */
+    /* AP netif L2 addr = the AP vif BSSID, so ARP on the AP subnet resolves to the AP vif. Fail fast if the
+     * BSSID is unavailable: both the netif MAC and the S5c for_gate test (g_ap_bssid) require a valid one —
+     * a zero g_ap_bssid would misclassify a frame to the gate's own AP MAC as client->mesh and mis-proxy it. */
     uint8_t bssid[MMWLAN_MAC_ADDR_LEN] = { 0 };
-    if (mmwlan_ap_get_bssid(bssid) == MMWLAN_SUCCESS) {
-        esp_netif_set_mac(g_ap_netif, bssid);
-        memcpy(g_ap_bssid, bssid, 6); /* S5c: the AP-side MAC (frames to it are local, not proxied) */
-    }
+    ESP_ERROR_CHECK(mmwlan_ap_get_bssid(bssid) == MMWLAN_SUCCESS ? ESP_OK : ESP_FAIL);
+    esp_netif_set_mac(g_ap_netif, bssid);
+    memcpy(g_ap_bssid, bssid, 6); /* S5c: the AP-side MAC (frames to it are local, not proxied) */
 
     /* Create/attach the underlying lwIP netif + input path (mirrors mmhalow's wifi_start) and bring it
      * up. WITHOUT action_start, esp_netif_receive() would deref a NULL input fn (PC=0 on first RX).
