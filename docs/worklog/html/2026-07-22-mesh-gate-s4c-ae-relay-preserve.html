@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate S4c: preserve AE through the relay — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-22</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-22</span>
+    <span class="badge">4 min read</span>
+    <span class="badge ok">✓ on-air verified</span>
+    <span class="badge warn">uncommitted</span>
+    <span class="badge bug">mesh-gate · 802.11s · AE relay</span>
+  </div>
+
+  <h1>Mesh-gate S4c: preserve AE through the relay<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">6-address <code>AE_A5_A6</code> frames survive an intermediate hop · multi-hop gate on-air (PASS)</small></h1>
+
+  <p class="lead">An intermediate mesh <strong>relay</strong> used to strip the AE (Address Extension) Mesh Control
+  when re-forwarding, so a gate <strong>2+ hops away</strong> lost the proxied endpoints. S4c makes the relay
+  re-emit the 6-address AE frame with <code>eaddr1</code>/<code>eaddr2</code> <strong>intact</strong>. With
+  S4a + S4b + S4c, <strong>S4 now works for multi-hop gates</strong> — verified on-air on a 3-node forced line.</p>
+
+  <p>This closes the gap the <strong>S4b</strong> verification surfaced: <code>send_to_gates</code> emitted a correct
+  AE frame toward a gate, but only a directly-adjacent gate ever saw it. The middle hop was the problem — Linux
+  forwards the mesh header verbatim; our relay was rebuilding a plain (non-AE) frame.</p>
+
+  <h2 id="bottom-line">Bottom line</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">PASS</div><div class="lbl">3-node line, on-air</div></div>
+    <div class="stat"><div class="num acc">2 hops</div><div class="lbl">gate reached via relay</div></div>
+    <div class="stat"><div class="num acc">0 → 13</div><div class="lbl">gate <code>ae_rx</code> (before → after)</div></div>
+    <div class="stat"><div class="num">+33</div><div class="lbl">lines · S4c</div></div>
+    <div class="stat"><div class="num">609</div><div class="lbl">insertions · S1–S4c combined</div></div>
+  </div>
+
+  <h2 id="topology">1 · The 3-node line — what happens on air</h2>
+  <p>New fixture <code>firmware/test-mesh-gate-relay</code> (symmetric, role-by-MAC, forced line via a peer
+  allowlist + filtered peer-open — modeled on <code>test-mesh-relay</code>): <strong>NODE (board0) ↔ RELAY
+  (board1) ↔ GATE (board2)</strong>, all <code>rimba-smesh</code>, at 1 dBm. Discovery flows one way, the AE
+  datapath the other:</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 800 330" role="img" aria-label="Three-node line topology: NODE, RELAY, GATE. A gate RANN floods right-to-left for discovery; an AE frame with preserved endpoints flows left-to-right through the relay to the gate.">
+      <defs>
+        <marker id="arL" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M6,0 L0,3 L6,6 Z" fill="var(--muted)"/>
+        </marker>
+        <marker id="arR" markerWidth="9" markerHeight="9" refX="0" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+
+      <!-- top lane: RANN flood (discovery), right -> left, dashed -->
+      <text x="400" y="34" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--muted)">gate RANN re-flood (S2) — NODE learns the 2-hop gate + a path via the RELAY</text>
+      <line x1="585" y1="75" x2="493" y2="75" stroke="var(--muted)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arL)"/>
+      <line x1="308" y1="75" x2="216" y2="75" stroke="var(--muted)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arL)"/>
+
+      <!-- nodes -->
+      <g>
+        <rect x="40" y="130" width="172" height="66" rx="11" fill="var(--card)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="126" y="158" text-anchor="middle" font-size="15" font-weight="700" fill="var(--fg)">NODE</text>
+        <text x="126" y="178" text-anchor="middle" font-size="11.5" fill="var(--muted)">board0 · src 02:…:dd</text>
+      </g>
+      <g>
+        <rect x="314" y="130" width="172" height="66" rx="11" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+        <text x="400" y="158" text-anchor="middle" font-size="15" font-weight="700" fill="var(--fg)">RELAY</text>
+        <text x="400" y="178" text-anchor="middle" font-size="11.5" fill="var(--muted)">board1 · re-emits AE</text>
+      </g>
+      <g>
+        <rect x="588" y="130" width="172" height="66" rx="11" fill="var(--card)" stroke="var(--ok)" stroke-width="1.5"/>
+        <text x="674" y="158" text-anchor="middle" font-size="15" font-weight="700" fill="var(--fg)">GATE</text>
+        <text x="674" y="178" text-anchor="middle" font-size="11.5" fill="var(--muted)">board2 · dst 02:…:cc</text>
+      </g>
+
+      <!-- bottom lane: AE datapath, left -> right, solid accent -->
+      <line x1="215" y1="252" x2="307" y2="252" stroke="var(--accent)" stroke-width="2.5" marker-end="url(#arR)"/>
+      <line x1="489" y1="252" x2="581" y2="252" stroke="var(--accent)" stroke-width="2.5" marker-end="url(#arR)"/>
+      <text x="400" y="291" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--accent)">send_to_gates → AE_A5_A6 frame · eaddr1(DA)=02:…:cc · eaddr2(SA)=02:…:dd · preserved across the relay</text>
+
+      <!-- lane role tags -->
+      <text x="126" y="222" text-anchor="middle" font-size="10.5" fill="var(--muted)">send_to_gates (known_gates=1)</text>
+      <text x="400" y="222" text-anchor="middle" font-size="10.5" fill="var(--muted)">peers=2 · ae_rx=49</text>
+      <text x="674" y="222" text-anchor="middle" font-size="10.5" fill="var(--ok)">parses AE · learns mpp · ae_rx=13</text>
+    </svg>
+    <figcaption>Discovery (dashed, right→left): the GATE floods a RANN, the RELAY re-floods it, the NODE learns a
+    2-hop gate. Datapath (solid, left→right): the NODE's <code>send_to_gates</code> AE frame reaches the GATE
+    <em>through</em> the RELAY with both proxied endpoints intact.</figcaption>
+  </div>
+
+  <h2 id="gap">2 · The gap S4b surfaced</h2>
+  <p><code>send_to_gates</code> emits a correct AE frame toward a gate, but for a gate 2+ hops away the
+  <strong>intermediate relay</strong> broke it. In <code>umac_datapath.c</code>, the relay path
+  <code>mmpkt_remove_from_start(mctrl_len)</code> removes the 18-byte Mesh Control header — <strong>including the
+  12 eaddr bytes</strong> — then re-forwarded via <code>umac_mesh_forward_data</code>, which built a
+  <strong>non-AE</strong> frame (<code>.ae</code> was never set). The far gate lost the proxied endpoints.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">RX AE frame</div><div class="s">eaddr1/eaddr2 present</div></div>
+      <div class="node err"><div class="t">strip mesh-ctrl</div><div class="s">−18 B (−12 eaddr)</div></div>
+      <div class="node err"><div class="t">forward_data</div><div class="s">.ae never set</div></div>
+      <div class="node"><div class="t">GATE (2 hops)</div><div class="s">plain frame · ae_rx=0</div></div>
+    </div>
+    <figcaption><strong>Before S4c</strong> — the relay stripped AE and rebuilt a plain frame; the far gate's
+    <code>ae_rx</code> stayed <strong>0</strong>. Linux, by contrast, forwards the mesh header verbatim.</figcaption>
+  </figure>
+
+  <h2 id="fix">3 · What S4c changed <span style="font-weight:500;color:var(--muted);font-size:.85em">(components/halow, uncommitted, +~33 lines)</span></h2>
+  <ul>
+    <li><strong><code>umac_mesh_forward_data</code> gains AE params.</strong> Signature is now
+      <code>umac_mesh_forward_data(mesh_da, mesh_sa, bool ae, eaddr1, eaddr2, payload, len)</code>. When
+      <code>ae</code>, the rebuilt frame carries <code>MESH_FLAGS_AE_A5_A6</code> +
+      <code>eaddr1</code>/<code>eaddr2</code> (via the S3 <code>umac_mesh_build_forward</code> <code>ae</code>
+      path). The mesh SA (addr4) was already preserved end-to-end; only addr2/TA changes per hop, matching
+      802.11s.</li>
+    <li><strong>RX relay branch (<code>umac_datapath.c</code>).</strong> The AE flag +
+      <code>eaddr1</code>/<code>eaddr2</code> are captured into <code>rx_ae</code>/<code>rx_eaddr1</code>/
+      <code>rx_eaddr2</code> at the Mesh-Control extraction (the same place S3/S4a already parse them) and passed
+      to <code>umac_mesh_forward_data</code> on relay. A non-AE frame relays exactly as before
+      (<code>ae=false</code>, eaddrs ignored).</li>
+  </ul>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">RX AE frame</div><div class="s">eaddr1/eaddr2 present</div></div>
+      <div class="node acc"><div class="t">capture</div><div class="s">rx_ae · rx_eaddr1/2</div></div>
+      <div class="node acc"><div class="t">forward_data</div><div class="s">ae=true, eaddrs</div></div>
+      <div class="node ok"><div class="t">GATE (2 hops)</div><div class="s">AE frame · ae_rx=13</div></div>
+    </div>
+    <figcaption><strong>After S4c</strong> — the relay re-emits a fresh Mesh Control carrying
+    <code>MESH_FLAGS_AE_A5_A6</code> with the endpoints preserved; the far gate parses the AE and learns the mpp.</figcaption>
+  </figure>
+
+  <p>Combined S1–S4c diff: <strong>609 insertions</strong> across <code>umac_mesh.c</code> / <code>.h</code> /
+  <code>umac_datapath.c</code>. Compile-verified.</p>
+
+  <h2 id="verification">4 · Verification — on-air, 3-node forced line (PASS)</h2>
+  <p>The GATE floods a gate RANN → the RELAY re-floods it (S2) → the NODE learns the 2-hop gate + a path via the
+  RELAY → the NODE runs <code>send_to_gates(final_dst=02:…:cc, src=02:…:dd)</code> → the frame goes
+  NODE → RELAY → GATE. Serial from all three nodes:</p>
+
+  <pre><code><span class="cm"># NODE (board0)</span>
+send_to_gates: sent (known_gates=<span class="nm">1</span>)          <span class="cm">← learned the 2-hop gate + sending</span>
+
+<span class="cm"># RELAY (board1)</span>
+role=RELAY  peers=<span class="nm">2</span>  gates=<span class="nm">1</span>  ae_rx=<span class="nm">49</span>       <span class="cm">← middle of the line, relaying</span>
+
+<span class="cm"># GATE (board2)</span>
+role=GATE  peers=<span class="nm">1</span> ...  ae_rx=<span class="nm">13</span>
+  last AE: eaddr1(DA)=<span class="st">02:00:00:00:00:cc</span>  eaddr2(SA)=<span class="st">02:00:00:00:00:dd</span></code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ Proof: the exact eaddrs survived the relay</p>
+    <p>The gate, <strong>two hops away</strong>, received the AE frame with <code>eaddr1=02:…:cc</code> +
+    <code>eaddr2=02:…:dd</code> — <strong>exactly</strong> what the NODE's <code>send_to_gates</code> set. Before
+    S4c the gate's <code>ae_rx</code> would stay <strong>0</strong> (the relay strips AE → the gate gets a plain
+    frame). Receiving the exact eaddrs after the relay proves S4c preserves AE end-to-end.</p>
+  </div>
+
+  <p>Full chain verified through one on-air run:</p>
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">S2</div><div class="s">RANN flood + PREQ path via relay</div></div>
+      <div class="node"><div class="t">S4b</div><div class="s">send_to_gates</div></div>
+      <div class="node acc"><div class="t">S4c</div><div class="s">AE survives the relay</div></div>
+      <div class="node"><div class="t">S3</div><div class="s">gate parses AE</div></div>
+      <div class="node ok"><div class="t">S4a</div><div class="s">gate learns mpp</div></div>
+    </div>
+    <figcaption>One continuous chain — discovery through datapath — exercised on the 3-node line.</figcaption>
+  </figure>
+
+  <div class="callout"><p style="margin:0"><strong>Radio-silent cleanup done:</strong> board0/1/2 →
+  <code>rimba-hello</code>; chronite + chronium <code>wlan1</code> down.</p></div>
+
+  <h2 id="notes">5 · Notes &amp; caveats</h2>
+  <div class="callout warn">
+    <p class="ct">⚠ Mesh TTL is not decremented per hop (pre-existing)</p>
+    <p>The relay reconstructs a <em>fresh</em> Mesh Control (new mesh seqnum, <code>ttl=HWMP_ELEMENT_TTL</code>)
+    with the eaddrs preserved. The mesh-TTL-not-decremented behaviour is <strong>pre-existing</strong> — it applies
+    to all relayed frames, not just S4c. A per-hop mesh TTL decrement is a separate faithfulness item; loop safety
+    today comes from HWMP path-selection + the RMC for group frames.</p>
+  </div>
+  <div class="callout bug">
+    <p class="ct">🐛 Bench gotcha — ports re-enumerate</p>
+    <p><code>board2</code> was found on <strong><code>ttyACM2</code></strong> this session (not
+    <code>ttyACM4</code>). Identify ESPs by <strong>efuse MAC</strong>, never by port.</p>
+  </div>
+
+  <h2 id="next">6 · Next step — S5 (gate L2 bridge)</h2>
+  <p>S1–S4 give the full discovery + AE datapath: RANN gate discovery, MPP learning, <code>send_to_gates</code>
+  (direct + multi-hop). S5 makes the gate actually <strong>BRIDGE</strong>:</p>
+  <ul>
+    <li>On the gate, deliver a received AE frame's payload to <code>eaddr1</code> off-mesh (the AP side).</li>
+    <li>Proxy AP-client MACs into the mesh (AE frames with the client as <code>eaddr2</code>).</li>
+    <li>Consume the MPP table (S4a) for return traffic.</li>
+    <li>Retire the hard-coded <code>MESH_GATE_IP</code>.</li>
+    <li>Replace the two-netif <code>ip_forward</code> (<code>rimba-halow-mesh-ap/app_main.c</code>) with the L2 bridge.</li>
+  </ul>
+  <p>Then <strong>S6</strong> — full live-Linux interop (needs a healthy chronite mesh; it was flaky this session).</p>
+
+  <h2 id="files">7 · Files</h2>
+  <ul>
+    <li><code>components/halow/…/umac/mesh/umac_mesh.c</code> + <code>.h</code> — <code>umac_mesh_forward_data</code>
+      AE params.</li>
+    <li><code>components/halow/…/umac/datapath/umac_datapath.c</code> — relay preserves AE.
+      <span style="color:var(--muted)">(<strong>uncommitted</strong>; S1–S4c = 609 ins.)</span></li>
+    <li><code>firmware/test-mesh-gate-relay/</code> — the 3-role line-topology fixture (untracked).</li>
+    <li>Memory: <code>mesh-gate-8021s-port-planned</code> (updated: S4 complete incl. multi-hop).</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#bottom-line">Bottom line</a></li>
+    <li><a href="#topology">1 · The 3-node line</a></li>
+    <li><a href="#gap">2 · The gap S4b surfaced</a></li>
+    <li><a href="#fix">3 · What S4c changed</a></li>
+    <li><a href="#verification">4 · Verification (PASS)</a></li>
+    <li><a href="#notes">5 · Notes &amp; caveats</a></li>
+    <li><a href="#next">6 · Next — S5 bridge</a></li>
+    <li><a href="#files">7 · Files</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-22-mesh-gate-s4c-ae-relay-preserve</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

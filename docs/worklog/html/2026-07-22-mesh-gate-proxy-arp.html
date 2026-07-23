@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate proxy-ARP: reliable mesh↔AP-client resolution — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-22</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-22</span>
+    <span class="badge">4 min read</span>
+    <span class="badge ok">✓ done · on-air verified</span>
+    <span class="badge bug">mesh-gate · proxy-ARP · L2 bridge</span>
+  </div>
+
+  <h1>Mesh-gate proxy-ARP: reliable mesh↔AP-client resolution<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">stop depending on lossy No-Ack broadcast ARP · gate app only · uncommitted</small></h1>
+
+  <p class="lead">The L2 bridge already carries <strong>unicast</strong> reliably — but ARP <em>resolution</em>
+  crossed it as a <strong>broadcast</strong>, and mesh broadcasts are <strong>No-Ack (lossy)</strong>. So a mesh
+  node reaching an AP client was hit-or-miss. The gate now keeps <em>both</em> sides' ARP caches populated over
+  reliable unicast, so neither side ever needs to broadcast-ARP across the bridge. Gate app only
+  (<code>rimba-halow-mesh-ap</code>) — no morselib change.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Bottom line</p>
+    <p>Fresh-cache mesh node <strong>D</strong> resolved the AP-client <strong>STA</strong> in <strong>~5 s</strong>
+    after a cache reset and stayed reliable — <strong>18 replies / 2 timeouts</strong>, no lossy-broadcast
+    dependency. Previously the same silent-host / missed-gratuitous-ARP direction was <strong>0-reply</strong>.</p>
+  </div>
+
+  <h2 id="topology">The bridge + the fix, at a glance</h2>
+  <p>Three nodes: mesh node <strong>D</strong> pings AP-client <strong>STA</strong> (<code>10.9.9.50</code>) across
+  the gate. The gate snoops each host's IP↔MAC from traffic it already handles, then a 3&nbsp;s task
+  <em>proactively pushes</em> every learned host's <strong>real MAC</strong> to the other side over reliable
+  unicast — so both caches stay warm without any broadcast crossing the bridge.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 780 330" role="img" aria-label="Mesh node D and AP client STA both resolve through the gate; the gate snoops both sides and proactively pushes real-MAC mappings over reliable unicast">
+      <defs>
+        <marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/>
+        </marker>
+        <marker id="arwm" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+
+      <!-- mesh node D -->
+      <rect x="24" y="118" width="168" height="94" rx="11" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+      <text x="108" y="146" text-anchor="middle" font-size="15" font-weight="700" fill="var(--fg)">mesh node D</text>
+      <text x="108" y="166" text-anchor="middle" font-size="11.5" fill="var(--muted)">board1 · rimba-halow-mesh</text>
+      <text x="108" y="184" text-anchor="middle" font-size="11.5" fill="var(--muted)">PING_IP=10.9.9.50</text>
+      <text x="108" y="201" text-anchor="middle" font-size="11" fill="var(--accent)">802.11s mesh side</text>
+
+      <!-- gate -->
+      <rect x="300" y="52" width="180" height="226" rx="13" fill="var(--soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="390" y="80" text-anchor="middle" font-size="15" font-weight="700" fill="var(--fg)">GATE — board0</text>
+      <text x="390" y="98" text-anchor="middle" font-size="11.5" fill="var(--muted)">rimba-halow-mesh-ap</text>
+      <!-- snoop table -->
+      <rect x="322" y="116" width="136" height="86" rx="9" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+      <text x="390" y="136" text-anchor="middle" font-size="12" font-weight="700" fill="var(--fg)">IP↔MAC snoop</text>
+      <text x="390" y="153" text-anchor="middle" font-size="10.5" fill="var(--muted)">24 entries · tagged</text>
+      <text x="390" y="169" text-anchor="middle" font-size="10.5" fill="var(--muted)">AP-side / mesh-side</text>
+      <text x="390" y="188" text-anchor="middle" font-size="10.5" fill="var(--muted)">learns ARP + IPv4</text>
+      <text x="390" y="228" text-anchor="middle" font-size="11" font-weight="650" fill="var(--accent)">gw_arp_announce_task</text>
+      <text x="390" y="245" text-anchor="middle" font-size="10.5" fill="var(--muted)">3 s proactive push</text>
+      <text x="390" y="262" text-anchor="middle" font-size="10.5" fill="var(--muted)">reliable unicast, acked</text>
+
+      <!-- STA -->
+      <rect x="588" y="118" width="168" height="94" rx="11" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+      <text x="672" y="146" text-anchor="middle" font-size="15" font-weight="700" fill="var(--fg)">AP client STA</text>
+      <text x="672" y="166" text-anchor="middle" font-size="11.5" fill="var(--muted)">board2 · rimba-halow-sta</text>
+      <text x="672" y="184" text-anchor="middle" font-size="11.5" fill="var(--muted)">10.9.9.50 (NO_PING)</text>
+      <text x="672" y="201" text-anchor="middle" font-size="11" fill="var(--accent)">SoftAP client side</text>
+
+      <!-- data links (bidirectional datapath) -->
+      <line x1="192" y1="150" x2="300" y2="150" stroke="var(--muted)" stroke-width="1.6" marker-end="url(#arwm)" marker-start="url(#arwm)"/>
+      <text x="246" y="140" text-anchor="middle" font-size="10.5" fill="var(--muted)">mesh link</text>
+      <text x="246" y="115" text-anchor="middle" font-size="10" fill="var(--muted)">proxied unicast /</text>
+      <text x="246" y="127" text-anchor="middle" font-size="10" fill="var(--muted)">AE frames</text>
+
+      <line x1="480" y1="150" x2="588" y2="150" stroke="var(--muted)" stroke-width="1.6" marker-end="url(#arwm)" marker-start="url(#arwm)"/>
+      <text x="534" y="140" text-anchor="middle" font-size="10.5" fill="var(--muted)">AP link</text>
+      <text x="534" y="121" text-anchor="middle" font-size="10" fill="var(--muted)">downlink unicast</text>
+
+      <!-- proactive push arrows (reliable unicast, real MAC) -->
+      <path d="M300,258 C250,258 220,240 194,214" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#arw)"/>
+      <path d="M480,258 C530,258 560,240 586,214" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#arw)"/>
+      <text x="390" y="308" text-anchor="middle" font-size="11.5" font-weight="650" fill="var(--accent)">proactive push — teach each host the other's REAL MAC (reliable unicast, both acked)</text>
+    </svg>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">18 / 2</div><div class="lbl">replies / timeouts (D → STA)</div></div>
+    <div class="stat"><div class="num acc">~5 s</div><div class="lbl">to first reply after cache reset</div></div>
+    <div class="stat"><div class="num">3 s</div><div class="lbl">proactive push interval</div></div>
+    <div class="stat"><div class="num">16×</div><div class="lbl">cross-bridge pushes in the capture</div></div>
+    <div class="stat"><div class="num acc">2</div><div class="lbl">mappings refreshed per cycle</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">morselib changes (gate app only)</div></div>
+  </div>
+
+  <h2 id="problem">1 · The problem (from the B2 investigation)</h2>
+  <p>The L2 bridge carries unicast reliably, but <em>resolution</em> crossed the bridge as a <strong>broadcast
+  ARP</strong> — and mesh broadcasts are <strong>No-Ack (lossy)</strong>. So a mesh node reaching an AP client
+  needed its ARP request to reach the far host <em>and</em> the reply to come back, <strong>both over lossy
+  multicast</strong> — hit-or-miss.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">mesh node</div><div class="s">wants AP client</div></div>
+      <div class="node err"><div class="t">broadcast ARP</div><div class="s">No-Ack multicast</div></div>
+      <div class="node err"><div class="t">cross bridge</div><div class="s">lossy both ways</div></div>
+      <div class="node"><div class="t">AP client</div><div class="s">hit-or-miss</div></div>
+    </div>
+    <figcaption>The old resolution path — request out and reply back both ride lossy mesh multicast.</figcaption>
+  </figure>
+
+  <p>It "worked" only via the client's periodic <strong>gratuitous ARP</strong>
+  (<code>GARP_TMR_INTERVAL=60&nbsp;s</code> + <code>TRUST_IP_MAC</code>) — i.e. up to <strong>60&nbsp;s</strong> of
+  latency, and <strong>never</strong> for a silent host.</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">old (worst)</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">up to 60 s</span></div>
+    <div class="bar-row"><span class="lbl">new (measured)</span><span class="bar-track"><span class="bar-fill fast" style="width:8.3%"></span></span><span class="val">~5 s</span></div>
+  </div>
+  <p style="font-size:13.5px;color:var(--muted);margin-top:-.4em">Bars to scale — old-worst = one <code>GARP</code> interval (and infinite for a silent host); new = time to D's first reply after a forced cache reset.</p>
+
+  <h2 id="implemented">2 · What was implemented — two layers, both in the gate app</h2>
+
+  <h3>2.1 · IP↔MAC snoop table</h3>
+  <p>The gate learns each host's IP↔MAC from <strong>every frame it already handles</strong> — from ARP <em>and</em>
+  IPv4, so it learns a host from ANY traffic (e.g. a ping), not just a once-a-minute gratuitous ARP. Learned in:</p>
+  <ul>
+    <li><code>gw_ap_rx_cb</code> — AP side</li>
+    <li><code>gw_mesh_rx_cb</code> — mesh group frames</li>
+    <li><code>gate_ae_rx_cb</code> / S5b — mesh nodes, from the reliable AE frames</li>
+  </ul>
+  <p>Each entry is tagged <strong>AP-side</strong> or <strong>mesh-side</strong>.</p>
+
+  <h3>2.2 · Reactive proxy-ARP</h3>
+  <p>When the gate receives an ARP REQUEST for a host it knows on the <strong>other</strong> side, it answers
+  directly with that host's <strong>REAL MAC</strong> (not the gate's) over a reliable link — a unicast on the AP,
+  a proxied unicast (<code>mmwlan_mesh_tx_proxied</code>) on the mesh — and skips the lossy bridge for that frame.
+  Answering with the real MAC keeps the L2-bridge datapath (S5b/S5c) carrying the actual traffic; the gate only
+  short-circuits the <em>resolution</em>.</p>
+  <div class="callout warn">
+    <p class="ct">⚠ Reactive alone is only a partial win</p>
+    <p>Reactive proxy-ARP still needs the requester's broadcast ARP to reach the gate, and is often <em>masked</em>
+    by the passive gratuitous-ARP learning already happening. On its own it doesn't guarantee reliability — hence
+    layer 2.3.</p>
+  </div>
+
+  <h3>2.3 · Proactive push — the reliable fix</h3>
+  <p>A 3&nbsp;s task (<code>gw_arp_announce_task</code>) teaches <strong>every learned host about every learned
+  host on the other side</strong> over <strong>reliable unicast</strong> (AP downlink / proxied mesh unicast, both
+  acked). So neither side ever needs to broadcast-ARP across the bridge — resolution stops depending on lossy
+  multicast. With <code>TRUST_IP_MAC</code> on, an unsolicited ARP reply populates the receiver's cache.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">gate snoops</div><div class="s">both sides</div></div>
+      <div class="node acc"><div class="t">3 s push</div><div class="s">gw_arp_announce_task</div></div>
+      <div class="node acc"><div class="t">reliable unicast</div><div class="s">real MAC, acked</div></div>
+      <div class="node ok"><div class="t">both caches warm</div><div class="s">no broadcast crossing</div></div>
+    </div>
+    <figcaption>The proactive push — the gate keeps each side's cache populated before either host needs to ask.</figcaption>
+  </figure>
+
+  <h2 id="verification">3 · On-air verification — 3-node, the flaky direction</h2>
+  <p>Mesh node <strong>D</strong> pings AP-client <strong>STA</strong> — the previously flaky mesh→AP-client
+  direction.</p>
+  <ul>
+    <li><strong>board0 = GATE</strong> — <code>rimba-halow-mesh-ap</code> (+ proxy-ARP).</li>
+    <li><strong>board1 = D</strong> — <code>rimba-halow-mesh PING_IP=10.9.9.50</code> (mesh node initiating).</li>
+    <li><strong>board2 = STA</strong> — <code>rimba-halow-sta …NO_PING</code> (AP-client responder at
+      <code>10.9.9.50</code>).</li>
+    <li>Settle so the gate learns both sides, then <strong>reset D</strong> (empty cache) to force a fresh
+      resolution.</li>
+  </ul>
+
+  <div class="callout ok">
+    <p class="ct">✓ Gate log — proactive push firing</p>
+    <p><code>proxy-ARP push: refreshed 2 cross-bridge ARP mapping(s) via reliable unicast</code> — every 3&nbsp;s
+    (<strong>16×</strong> in the capture): the gate knows the STA (AP) + D (mesh) and proactively pushes
+    <strong>both</strong> mappings over reliable unicast.</p>
+  </div>
+  <div class="callout ok">
+    <p class="ct">✓ D log — reached the STA fast and reliably</p>
+    <p><code>reply from 10.9.9.50</code> from <strong>seq 3</strong>, <strong>18 replies / 2 timeouts</strong> — D
+    reached the STA fast (<strong>~5&nbsp;s after reset</strong>) and reliably, with no lossy-broadcast dependency.
+    Earlier silent-host / missed-GARP runs were <strong>0-reply</strong>.</p>
+  </div>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">old runs</span><span class="bar-track"><span class="bar-fill slow" style="width:2px"></span></span><span class="val">0 replies</span></div>
+    <div class="bar-row"><span class="lbl">this run</span><span class="bar-track"><span class="bar-fill fast" style="width:90%"></span></span><span class="val">18 replies · 2 timeouts</span></div>
+  </div>
+
+  <h2 id="notes">4 · Notes / follow-ups</h2>
+  <ul>
+    <li>The <strong>reactive</strong> path is masked by passive learning; the <strong>proactive push</strong> is
+      what provides the reliability guarantee.</li>
+    <li>Snoop table is <strong>24 entries</strong>, plain overwrite when full — fine for a small mesh; size it for
+      larger deployments.</li>
+    <li>The push is <strong>O(AP × mesh) per 3&nbsp;s</strong> — trivial at bench scale; for a large mesh,
+      rate-limit / only push changed entries.</li>
+  </ul>
+  <div class="callout warn">
+    <p class="ct">⚠ Single-subnet assumption</p>
+    <p>Proxy-ARP + the L2 bridge assume a <strong>SINGLE subnet</strong> (AP clients + mesh nodes on
+    <code>10.9.9.x</code>). The gate app still runs the AP on <code>192.168.12.1</code> with a DHCP server (two
+    subnets); <em>"retire <code>MESH_GATE_IP</code> / single subnet"</em> makes proxy-ARP the zero-config default
+    rather than needing a static-IP client. Tested here with the STA static on <code>10.9.9.50</code>.</p>
+  </div>
+
+  <h2 id="files">5 · Files</h2>
+  <ul>
+    <li><code>firmware/rimba-halow-mesh-ap/main/app_main.c</code> — snoop table + <code>gw_arp_snoop</code>
+      (ARP+IPv4) + reactive <code>gw_proxy_arp</code> (hooked in <code>gw_ap_rx_cb</code> / <code>gw_mesh_rx_cb</code>)
+      + <code>gw_arp_snoop</code> in <code>gate_ae_rx_cb</code> + proactive <code>gw_arp_announce_task</code>.
+      <strong>Uncommitted.</strong></li>
+    <li>Memory: <code>mesh-gate-8021s-port-planned</code> (proxy-ARP done — mesh↔AP-client reliable).</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0">Status: ✅ <strong>DONE + ON-AIR VERIFIED.</strong> Gate app only; no morselib change. Uncommitted.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#topology">At a glance</a></li>
+    <li><a href="#problem">1 · The problem</a></li>
+    <li><a href="#implemented">2 · What was implemented</a></li>
+    <li><a href="#verification">3 · On-air verification</a></li>
+    <li><a href="#notes">4 · Notes / follow-ups</a></li>
+    <li><a href="#files">5 · Files</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-22-mesh-gate-proxy-arp</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

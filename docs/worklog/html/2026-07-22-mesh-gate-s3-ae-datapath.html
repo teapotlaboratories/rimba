@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate S3: the 6-address AE_A5_A6 datapath — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-22</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-22</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">✓ on-air verified (ESP↔ESP)</span>
+    <span class="badge bug">mesh-gate · S3 · AE datapath</span>
+  </div>
+
+  <h1>Mesh-gate S3: the 6-address AE_A5_A6 datapath<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">proxied mesh frames verified on-air · CCMP is AE-transparent · zero crypto change</small></h1>
+
+  <p class="lead">Third stage of the approved 802.11s <strong>Mesh-gate</strong> port, after S1 (gate RANN TX)
+  and S2 (RANN RX). S3 is the <strong>6-address Address-Extension (AE_A5_A6) datapath primitive</strong>: emit and
+  parse a <em>proxied</em> mesh data frame whose Mesh Control carries two extra addresses —
+  <strong>eaddr1 (addr5 = final DA)</strong> and <strong>eaddr2 (addr6 = original off-mesh SA)</strong> — the
+  mechanism a gate uses to carry an off-mesh host's traffic through the mesh. It is a line-by-line port of
+  <code>net/mac80211</code> <code>ieee80211_new_mesh_header</code> (TX) + <code>ieee80211_rx_mesh_data</code> (RX),
+  kernel 6.12.21.</p>
+
+  <div class="callout ok">
+    <p class="ct">✓ Status — WRITTEN · COMPILES · ON-AIR VERIFIED (PASS)</p>
+    <p>An ESP builds a 6-address AE mesh data frame, the MM6108 FW transmits and delivers it, and the receiving ESP
+    decrypts + parses the AE Mesh Control and extracts the proxied endpoints <strong>byte-exactly</strong>.
+    Uncommitted in the <code>components/halow</code> submodule; new <code>firmware/test-mesh-ae</code> + probe
+    additions to <code>firmware/test-mesh-gate-rx</code> are untracked.</p>
+  </div>
+
+  <h2 id="bottom-line">Bottom line</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">18 B</div><div class="lbl">AE_A5_A6 Mesh Control (vs 6 B non-AE)</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">CCMP lines changed (<code>ccmp.c</code> untouched)</div></div>
+    <div class="stat"><div class="num">+12 B</div><div class="lbl">AE bytes absorbed by <code>body_len</code></div></div>
+    <div class="stat"><div class="num ok">24</div><div class="lbl">AE frames received, eaddrs byte-exact</div></div>
+    <div class="stat"><div class="num acc">3 / 3</div><div class="lbl">adversarial lenses — MATCH, zero blockers</div></div>
+    <div class="stat"><div class="num">358</div><div class="lbl">S1+S2+S3 insertions (<code>umac_mesh.c</code>)</div></div>
+  </div>
+
+  <p>The headline of the session is not the code volume — it is a <strong>major de-risk</strong>: the design's
+  flagged "hard 20%" (re-deriving CCMP for the +12 AE bytes) turned out to be a no-op for our architecture, and the
+  primitive is already proven on-air ESP↔ESP, which also <strong>resolves the design's #1 open risk</strong> — that
+  the MM6108 firmware might refuse to deliver or accept 6-address AE frames.</p>
+
+  <h2 id="derisk">1 · The major de-risk — CCMP is AE-transparent</h2>
+  <p>The design flagged S3 as the "hard 20%" with a headline risk:</p>
+  <div class="callout warn">
+    <p class="ct">⚠ The predicted blocker (from the design)</p>
+    <p><em>"CCMP offset/AAD math (~528–628) must be re-derived for the +12 AE bytes or proxied frames MIC-fail on
+    relay."</em></p>
+  </div>
+  <p><strong>This does not apply to our architecture.</strong> The mesh datapath already uses <strong>host
+  SW-CCMP</strong> (built for <code>#20</code>, because the MM6108 HW-crypto path has an A4-sensitive delivery gate).
+  Under SW-CCMP the AE bytes land entirely inside a region the CCMP authentication never covers:</p>
+  <ul>
+    <li>The <strong>Mesh Control (incl. the AE eaddrs) is part of the CCMP-encrypted BODY</strong>, not the 802.11
+      MAC header.</li>
+    <li>The <strong>CCMP AAD is over the MAC header only</strong> — <code>mesh_ccmp_aad_nonce</code>
+      (<code>ccmp.c</code>) reads masked FC + A1/A2/A3 + masked Seq + A4 (present, since mesh unicast is already
+      4-addr) + masked QoS. It never touches the Mesh Control or body. The nonce reads only A2 + the PN.</li>
+    <li><code>body_len</code> is computed dynamically (<code>total − hdr_total</code>), so the +12 AE bytes are
+      absorbed automatically.</li>
+  </ul>
+  <p>Adding the 12 AE bytes only <em>lengthens the encrypted plaintext</em>; the AAD, nonce and MIC are
+  byte-identical to the non-AE case, and a Linux peer computes the same MIC.
+  <strong>Zero CCMP change was needed.</strong> The frame diagram below shows exactly why:</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 740 222" role="img" aria-label="AE_A5_A6 mesh frame layout: the CCMP AAD covers only the MAC header while the 18-byte AE Mesh Control lives inside the encrypted body">
+        <!-- bracket above: CCMP AAD (MAC header only) -->
+        <path d="M20,49 V43 H170 V49" fill="none" style="stroke:var(--muted)" stroke-width="1.2"/>
+        <text x="95" y="35" text-anchor="middle" font-size="11.5" font-weight="700" style="fill:var(--muted)">CCMP AAD — MAC header only</text>
+
+        <!-- frame row -->
+        <rect x="20" y="54" width="150" height="46" rx="5" style="fill:var(--soft);stroke:var(--line)" stroke-width="1"/>
+        <text x="95" y="76" text-anchor="middle" font-size="12" font-weight="650" style="fill:var(--fg)">MAC header</text>
+        <text x="95" y="91" text-anchor="middle" font-size="10" style="fill:var(--muted)">4-addr · FC/A1/A2/A3/Seq/A4 · QoS</text>
+
+        <rect x="170" y="54" width="180" height="46" rx="5" style="fill:var(--accent);stroke:var(--accent)" stroke-width="1"/>
+        <text x="260" y="76" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">AE Mesh Control</text>
+        <text x="260" y="91" text-anchor="middle" font-size="10" fill="#eef3ff">18 B · flags 0x02</text>
+
+        <rect x="350" y="54" width="280" height="46" rx="5" style="fill:var(--card);stroke:var(--line)" stroke-width="1"/>
+        <text x="490" y="80" text-anchor="middle" font-size="12" font-weight="650" style="fill:var(--fg)">encrypted payload</text>
+
+        <rect x="630" y="54" width="90" height="46" rx="5" style="fill:var(--ok-bg);stroke:var(--ok)" stroke-width="1"/>
+        <text x="675" y="80" text-anchor="middle" font-size="11.5" font-weight="650" style="fill:var(--ok)">MIC 8 B</text>
+
+        <!-- bracket below: CCMP-encrypted body -->
+        <path d="M170,105 V111 H630 V105" fill="none" style="stroke:var(--accent2)" stroke-width="1.2"/>
+        <text x="400" y="127" text-anchor="middle" font-size="11.5" font-weight="700" style="fill:var(--accent2)">CCMP-encrypted body — the +12 AE bytes live here, absorbed by body_len</text>
+
+        <!-- expansion connectors -->
+        <line x1="170" y1="100" x2="170" y2="150" style="stroke:var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>
+        <line x1="350" y1="100" x2="630" y2="150" style="stroke:var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>
+
+        <!-- AE Mesh Control field breakout (18 bytes across 170..630) -->
+        <rect x="170" y="150" width="26"  height="32" rx="3" style="fill:var(--card);stroke:var(--line)"/>
+        <text x="183" y="170" text-anchor="middle" font-size="9" style="fill:var(--fg)">0x02</text>
+        <text x="183" y="196" text-anchor="middle" font-size="9.5" style="fill:var(--muted)">flg</text>
+
+        <rect x="196" y="150" width="26"  height="32" rx="3" style="fill:var(--card);stroke:var(--line)"/>
+        <text x="209" y="170" text-anchor="middle" font-size="9" style="fill:var(--fg)">ttl</text>
+        <text x="209" y="196" text-anchor="middle" font-size="9.5" style="fill:var(--muted)">1</text>
+
+        <rect x="222" y="150" width="102" height="32" rx="3" style="fill:var(--card);stroke:var(--line)"/>
+        <text x="273" y="170" text-anchor="middle" font-size="10.5" font-weight="600" style="fill:var(--fg)">seqnum le32</text>
+        <text x="273" y="196" text-anchor="middle" font-size="9.5" style="fill:var(--muted)">4 B</text>
+
+        <rect x="324" y="150" width="153" height="32" rx="3" style="fill:var(--soft);stroke:var(--accent)"/>
+        <text x="400" y="170" text-anchor="middle" font-size="10.5" font-weight="700" style="fill:var(--accent)">eaddr1 = addr5</text>
+        <text x="400" y="196" text-anchor="middle" font-size="9.5" style="fill:var(--muted)">final DA (6 B)</text>
+
+        <rect x="477" y="150" width="153" height="32" rx="3" style="fill:var(--soft);stroke:var(--accent)"/>
+        <text x="553" y="170" text-anchor="middle" font-size="10.5" font-weight="700" style="fill:var(--accent)">eaddr2 = addr6</text>
+        <text x="553" y="196" text-anchor="middle" font-size="9.5" style="fill:var(--muted)">off-mesh SA (6 B)</text>
+      </svg>
+    </div>
+    <figcaption>The 18-byte <code>AE_A5_A6</code> Mesh Control (<code>== struct ieee80211s_hdr</code>) sits after the
+    QoS + 4-address header, entirely <em>inside</em> the CCMP-encrypted body. The AAD covers only the MAC header, so
+    the two extra addresses never change the MIC.</figcaption>
+  </figure>
+
+  <p>The 6→18-byte growth is contained purely in the encrypted plaintext — nothing the authentication tag sees moves:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">non-AE control</span><span class="bar-track"><span class="bar-fill" style="width:33.3%"></span></span><span class="val">6 B · flags 0x00</span></div>
+    <div class="bar-row"><span class="lbl">AE_A5_A6 control</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="val">18 B · flags 0x02</span></div>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">🐛 Footgun — do NOT re-derive CCMP for AE</p>
+    <p>The design's warning predates the SW-CCMP architecture. The AE eaddrs are encrypted body; the AAD is
+    MAC-header-only; the frame is already 4-addr so A4 is in the AAD regardless. <code>ccmp.c</code> stays
+    <strong>untouched</strong>.</p>
+  </div>
+
+  <h2 id="implemented">2 · What was implemented</h2>
+  <p>In <code>components/halow</code> (uncommitted): <code>umac_mesh.c</code> (+~180 for S3; combined S1+S2+S3 = 358
+  insertions) + <code>umac_datapath.c</code> (+13) + <code>umac_mesh.h</code> (+~20).</p>
+
+  <h3>TX — build the AE frame</h3>
+  <ul>
+    <li><strong>AE build</strong> — <code>struct mesh_forward_params</code> gains <code>ae</code> + <code>eaddr1[6]</code>
+      + <code>eaddr2[6]</code>. <code>umac_mesh_build_forward</code> emits an <strong>18-byte</strong>
+      <code>AE_A5_A6</code> Mesh Control when <code>ae</code> is set (flags=0x02, ttl, seqnum le32, eaddr1, eaddr2) —
+      the exact <code>struct ieee80211s_hdr</code> layout — after the QoS(0x0100) + 4-addr header. Non-AE stays the
+      6-byte flags=0x00 control (the existing relay path, <strong>byte-unchanged</strong>).</li>
+    <li><strong>TX injector</strong> — <code>mmwlan_mesh_send_ae_test(mesh_da, eaddr1_da, eaddr2_sa, payload, len)</code>
+      originates a proxied AE frame to a directly-peered node, reusing the proven forward TX path (next-hop peer stad,
+      SW-CCMP, <code>umac_datapath_tx_mesh_unicast_frame</code>). A manual injector to verify S3 — <em>not</em> the gate
+      proxy datapath (that is S4/S5).</li>
+  </ul>
+
+  <h3>RX — extract the proxied endpoints</h3>
+  <ul>
+    <li><strong>eaddr extract</strong> — the RX Mesh-Control block (<code>umac_datapath.c</code>) already computed the
+      AE length (6/12/18); S3 makes it <strong>extract</strong> <code>eaddr1 = mctrl[6..11]</code> /
+      <code>eaddr2 = mctrl[12..17]</code> (bounds-checked) instead of discarding them, and records them via
+      <code>umac_mesh_note_ae_rx</code>. S4 will replace the record with <code>mpp_path_add(eaddr2, mesh_sa)</code> +
+      proxied delivery to eaddr1.</li>
+    <li><strong>Probe accessor</strong> — <code>mmwlan_mesh_ae_rx_probe(eaddr1_out, eaddr2_out)</code> returns the
+      count of received AE frames + the latest eaddrs, so a fixture can confirm the FW delivered and the host parsed
+      the frame (morselib MMLOG is not on the ESP UART).</li>
+  </ul>
+
+  <div class="callout">
+    <p class="ct">🧪 Fixtures</p>
+    <p><code>firmware/test-mesh-ae</code> — the AE sender; targets a mesh node via <code>LINUX_MAC=</code> (default
+    chronite); peers + injects every 3 s. <code>firmware/test-mesh-gate-rx</code> — the receiver; a probe poll was
+    added to log <code>AE rx count</code> + the eaddrs.</p>
+  </div>
+
+  <h2 id="verify">3 · Verification — on-air, ESP↔ESP (PASS)</h2>
+  <p>Because mesh data is <strong>encrypted</strong>, a passive monitor (chronium) cannot byte-diff the plaintext AE
+  Mesh Control — so verification is <strong>receiver-side decode</strong>: board0 sends AE frames with known eaddrs;
+  board1 extracts them.</p>
+
+  <h4>Bench</h4>
+  <table>
+    <thead><tr><th>Role</th><th>Board</th><th>Mesh MAC</th><th>App</th></tr></thead>
+    <tbody>
+      <tr><td>sender</td><td>board0 · ttyACM0</td><td><code>e2:72:a1:f8:ef:a4</code></td><td><code>test-mesh-ae</code> → board1</td></tr>
+      <tr><td>receiver</td><td>board1 · ttyACM1</td><td><code>e2:72:a1:f8:f9:40</code></td><td><code>test-mesh-gate-rx</code></td></tr>
+    </tbody>
+  </table>
+  <p>Both on <code>rimba-smesh</code> (SAE), TX power 1 dBm. board0 injects <code>eaddr1_da=02:00:00:00:00:bb</code>,
+  <code>eaddr2_sa=02:00:00:00:00:aa</code> every 3 s. board1 serial:</p>
+  <pre><code>AE rx count=24  last eaddr1(DA)=02:00:00:00:00:bb  eaddr2(SA)=02:00:00:00:00:aa</code></pre>
+  <p>The count climbs steadily (board1 receives ~every 3 s) and the extracted eaddrs are <strong>byte-exact</strong>
+  to what board0 sent. That proves the whole AE datapath primitive, end to end:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">1 · build</div><div class="s">AE_A5_A6 · 18 B ctrl</div></div>
+      <div class="node acc"><div class="t">2 · SW-CCMP enc</div><div class="s">AE in the body</div></div>
+      <div class="node"><div class="t">3 · FW TX</div><div class="s">accepts + transmits</div></div>
+      <div class="node ok"><div class="t">4 · FW RX deliver</div><div class="s">resolves #1 risk</div></div>
+      <div class="node acc"><div class="t">5 · SW-CCMP dec</div><div class="s">MIC OK</div></div>
+      <div class="node ok"><div class="t">6 · parse</div><div class="s">eaddr1/eaddr2 exact</div></div>
+    </div>
+    <figcaption>The six links of the AE round-trip. Step 4 — the MM6108 firmware <em>delivering</em> a 6-address AE
+    frame to the host — is the design's #1 open risk, now <strong>resolved</strong>.</figcaption>
+  </figure>
+
+  <div class="callout ok">
+    <p class="ct">✓ Independent static verification — 3-lens adversarial workflow, all MATCH</p>
+    <p>Lenses <code>ae-bytes-semantics</code>, <code>ccmp-transparent-regression</code>, <code>rx-safety-flow</code>
+    + synthesis returned <strong>MATCH on every lens, zero blockers</strong>, confirming:</p>
+    <ul style="margin:.2em 0">
+      <li>the 18-byte AE Mesh Control <code>== struct ieee80211s_hdr</code>;</li>
+      <li>the eaddr semantics (eaddr1 = addr5 = proxied DA, eaddr2 = addr6 = proxied SA) match Linux
+        <code>ieee80211_rx_mesh_data</code> / <code>ieee80211_new_mesh_header</code>;</li>
+      <li>the RX offsets + bounds-check are safe;</li>
+      <li>the non-AE relay path is byte-unchanged;</li>
+      <li>and — proven, not assumed — <strong>CCMP is AE-transparent</strong> (AAD reads only the MAC header,
+        <code>body_len</code> absorbs +12, the frame is 4-addr so A4 is in the AAD regardless).</li>
+    </ul>
+  </div>
+
+  <div class="callout"><p style="margin:0">Radio-silent cleanup done: board0 + board1 → <code>rimba-hello</code>;
+  chronite + chronium <code>wlan1</code> down (chronium <code>type managed</code>).</p></div>
+
+  <h2 id="deferred">4 · Deferred / not done</h2>
+  <ul>
+    <li><strong>Linux-interop probe (bonus, not required).</strong> The stronger gold-standard check — ESP → a Linux
+      mesh node, then <code>iw dev wlan1 mpp dump</code> shows the proxied eaddr2 via the ESP (Linux's
+      <code>mpp_path_add</code> validates the AE bytes) — was <strong>blocked by chronite's flaky mesh</strong> this
+      session (it came up <code>type mesh point</code> with <strong>no channel</strong> repeatedly; a morse-driver
+      reload hung). The ESP↔ESP round-trip already proves the primitive + resolves the FW-delivery risk; the
+      Linux-interop A/B is a nice-to-have for when chronite's mesh is healthy (or use chronogen).
+      <code>test-mesh-ae</code> already supports it:
+      <code>make flash APP=test-mesh-ae LINUX_MAC=&lt;linux wlan1 MAC&gt;</code>.</li>
+    <li><strong>Multicast AE_A4</strong> (mcast/ARP proxy, flags 0x1, proxied_addr=eaddr1) — out of S3 (A5_A6) scope;
+      future gate-proxy coverage (the workflow flagged it as <code>na</code>).</li>
+  </ul>
+
+  <h2 id="next">5 · Next — S4 (MPP proxy table + learning + send_to_gates)</h2>
+  <p>S3 extracts eaddr1/eaddr2 but only <em>records</em> them. S4 adds a real <strong>MPP table</strong>:</p>
+  <ul>
+    <li>on AE RX, <code>mpp_path_add(eaddr2, mesh_sa)</code> — learn the off-mesh host is reachable via that mesh
+      node — + proxied delivery to eaddr1;</li>
+    <li>on TX-to-an-unknown-dest, a <code>send_to_gates</code> fallback that walks the S2 <code>known_gates</code> and
+      emits an AE frame via the gate.</li>
+  </ul>
+  <p>Design §S4; watch the FW A4≠TA withhold for 6-address forwards. ~3–4 days.</p>
+
+  <h2 id="footguns">6 · Footguns</h2>
+  <ul>
+    <li><strong>CCMP is AE-transparent here</strong> — do not "re-derive the CCMP for AE"; the design's warning
+      predates the SW-CCMP architecture. The AE eaddrs are encrypted body; the AAD is MAC-header-only; the frame is
+      already 4-addr.</li>
+    <li><strong>morselib MMLOG is not on the ESP UART</strong> — to observe a datapath event from a fixture, add an
+      <code>mmwlan_*</code> probe accessor + poll it via <code>ESP_LOGI</code> (that is what
+      <code>mmwlan_mesh_ae_rx_probe</code> is for). This bit both S1/S2 and S3.</li>
+    <li><strong><code>LINUX_MAC=</code> needs CMake propagation</strong> — a fixture's
+      <code>main/CMakeLists.txt</code> must
+      <code>target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_LINUX_MAC=\"${TEST_LINUX_MAC}\"")</code> or the
+      <code>-D</code> is ignored and the <code>#ifndef</code> default is used (this silently made board0 target
+      chronite, not board1, at first).</li>
+    <li><strong>chronium radio silence:</strong> <code>pkill -9 -f wpa_supplicant_s1g</code>, NOT bare
+      <code>wpa_supplicant</code> (kills its LAN supplicant).</li>
+    <li><strong>chronite mesh is flaky</strong> — <code>type mesh point</code> with no channel = the FW mesh BSS
+      didn't start; a Pi 5 driver reload sometimes hangs. Re-scp <code>wpa-smesh.conf</code>, retry, or use another
+      Linux node.</li>
+    <li>Re-<code>scp</code> the Linux ref (<code>net/mac80211/{mesh,mesh_hwmp,mesh_pathtbl,rx,tx}.c</code> +
+      <code>include/linux/ieee80211.h</code>) from <code>chronium:/home/chronium/halow/rpi-linux/</code> each session
+      (kernel 6.12.21).</li>
+  </ul>
+
+  <h2 id="files">7 · Files</h2>
+  <ul>
+    <li><code>components/halow/.../umac/mesh/umac_mesh.c</code> (+358 S1+S2+S3),
+      <code>.../umac_mesh.h</code> (+~53), <code>.../umac/datapath/umac_datapath.c</code> (+13) —
+      <strong>uncommitted</strong>.</li>
+    <li><code>firmware/test-mesh-ae/</code> — AE sender/injector fixture (untracked).
+      <code>firmware/test-mesh-gate-rx/</code> — receiver (AE probe poll added).</li>
+    <li><code>docs/mesh-ap/rimba-mesh-ap-mesh-gate-discovery-design.md</code> — design (S1/S2/S3 marked done; §3 table
+      re-pin pending).</li>
+    <li>Memory: <code>mesh-gate-8021s-port-planned</code> (updated: S3 verified).</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#bottom-line">Bottom line</a></li>
+    <li><a href="#derisk">1 · The major de-risk</a></li>
+    <li><a href="#implemented">2 · What was implemented</a></li>
+    <li><a href="#verify">3 · Verification (on-air)</a></li>
+    <li><a href="#deferred">4 · Deferred / not done</a></li>
+    <li><a href="#next">5 · Next — S4</a></li>
+    <li><a href="#footguns">6 · Footguns</a></li>
+    <li><a href="#files">7 · Files</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-22-mesh-gate-s3-ae-datapath</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

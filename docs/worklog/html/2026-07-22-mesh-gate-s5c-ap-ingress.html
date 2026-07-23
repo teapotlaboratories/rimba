@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate S5c (AP → mesh ingress) — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-22</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-22</span>
+    <span class="badge">4 min read</span>
+    <span class="badge ok">✓ on-air verified</span>
+    <span class="badge bug">mesh · gate · L2 bridge</span>
+  </div>
+
+  <h1>Mesh-gate S5c: AP → mesh ingress<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">the gate now bridges BOTH directions · verified end-to-end</small></h1>
+
+  <p class="lead">S5c — the <strong>AP→mesh</strong> leg of the gate 802.11s L2 bridge — is written, compiles, and is
+  <strong>on-air verified (PASS, 3-node mesh+AP+STA)</strong>. When an AP client sends a unicast frame to a mesh node,
+  the gate proxies it <em>into</em> the mesh as an <code>AE_A5_A6</code> frame and the mesh node learns the client's
+  MPP. Paired with S5b (mesh→AP), the gate now <strong>bridges both directions</strong> — the core L2-bridge datapath
+  is complete.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">PASS</div><div class="lbl">on-air, 3-node mesh+AP+STA</div></div>
+    <div class="stat"><div class="num acc">2 dirs</div><div class="lbl">bridge legs (S5b + S5c)</div></div>
+    <div class="stat"><div class="num">740</div><div class="lbl">morselib insertions (S1–S5c)</div></div>
+    <div class="stat"><div class="num">+85</div><div class="lbl">lines for S5c (<code>tx_proxied</code>)</div></div>
+    <div class="stat"><div class="num acc">100 B</div><div class="lbl">SNAP+ICMP proxied intact</div></div>
+    <div class="stat"><div class="num ok">MPP</div><div class="lbl">client→gate learned by mesh node</div></div>
+  </div>
+
+  <h2 id="goal">Goal</h2>
+  <p>The AP→mesh direction of the gate L2 bridge, symmetric to S5b's mesh→AP: when an AP client <code>C</code> sends a
+  unicast frame to a <em>mesh</em> node <code>D</code>, the gate proxies it INTO the mesh as an <code>AE_A5_A6</code>
+  frame (<code>eaddr2=C</code>, <code>eaddr1=D</code>), so <code>D</code> receives the client's traffic and learns
+  <code>mpp(C → gate)</code> for the return path. This mirrors the Linux gate, which xmits the AP client's frame into
+  the mesh with address extension (AE).</p>
+
+  <h2 id="topology">The bidirectional bridge</h2>
+  <p>Three ESP32 nodes: a STA associated to the gate's SoftAP, the GATE running mesh (primary) + AP (secondary) on one
+  MM6108, and a mesh destination node. S5c carries the AP client's frame rightward into the mesh; S5b (already landed)
+  carries the mesh node's reply leftward back to the AP client. The gate is the single bridge point between the two L2
+  domains.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 300" role="img" aria-label="Three-node topology: STA associated to the gate AP, the gate bridging into the mesh, and the mesh destination node — with S5c AP→mesh and S5b mesh→AP paths.">
+      <defs>
+        <marker id="arrTx" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/>
+        </marker>
+        <marker id="arrRx" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent2)"/>
+        </marker>
+      </defs>
+
+      <!-- domain labels -->
+      <text x="120" y="30" text-anchor="middle" font-size="11" fill="var(--muted)" letter-spacing=".08em">AP DOMAIN</text>
+      <text x="638" y="30" text-anchor="middle" font-size="11" fill="var(--muted)" letter-spacing=".08em">MESH DOMAIN</text>
+      <line x1="380" y1="18" x2="380" y2="282" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="5 6"/>
+
+      <!-- STA node -->
+      <rect x="30" y="112" width="180" height="78" rx="11" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+      <text x="120" y="138" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--fg)">STA · board2</text>
+      <text x="120" y="157" text-anchor="middle" font-size="11" fill="var(--muted)">bc:2a:33:96:b2:33</text>
+      <text x="120" y="174" text-anchor="middle" font-size="10.5" fill="var(--muted)">assoc to AP + static ARP</text>
+
+      <!-- GATE node -->
+      <rect x="305" y="92" width="150" height="118" rx="11" fill="var(--soft)" stroke="var(--accent)" stroke-width="1.7"/>
+      <text x="380" y="118" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--fg)">GATE · board0</text>
+      <text x="380" y="137" text-anchor="middle" font-size="10.5" fill="var(--muted)">mesh e2:72:a1:f8:ef:a4</text>
+      <text x="380" y="153" text-anchor="middle" font-size="10.5" fill="var(--muted)">+ AP rimba-ping</text>
+      <text x="380" y="176" text-anchor="middle" font-size="11" font-weight="650" fill="var(--accent)">gw_ap_rx_cb</text>
+      <text x="380" y="192" text-anchor="middle" font-size="10.5" fill="var(--muted)">L2 bridge</text>
+
+      <!-- MESH DEST node -->
+      <rect x="550" y="112" width="180" height="78" rx="11" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+      <text x="640" y="138" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--fg)">MESH · board1</text>
+      <text x="640" y="157" text-anchor="middle" font-size="11" fill="var(--muted)">e2:72:a1:f8:f9:40</text>
+      <text x="640" y="174" text-anchor="middle" font-size="10.5" fill="var(--muted)">ae_rx_cb + MPP</text>
+
+      <!-- S5c: AP -> mesh (top band, accent) -->
+      <line x1="210" y1="128" x2="303" y2="128" stroke="var(--accent)" stroke-width="2.2" marker-end="url(#arrTx)"/>
+      <text x="256" y="119" text-anchor="middle" font-size="10" fill="var(--accent)">unicast → D</text>
+      <line x1="457" y1="128" x2="548" y2="128" stroke="var(--accent)" stroke-width="2.2" marker-end="url(#arrTx)"/>
+      <text x="502" y="119" text-anchor="middle" font-size="10" fill="var(--accent)">AE e1=D e2=C</text>
+
+      <!-- S5b: mesh -> AP (bottom band, accent2) -->
+      <line x1="548" y1="176" x2="457" y2="176" stroke="var(--accent2)" stroke-width="2.2" marker-end="url(#arrRx)"/>
+      <text x="502" y="197" text-anchor="middle" font-size="10" fill="var(--accent2)">AE → gate</text>
+      <line x1="303" y1="176" x2="210" y2="176" stroke="var(--accent2)" stroke-width="2.2" marker-end="url(#arrRx)"/>
+      <text x="256" y="197" text-anchor="middle" font-size="10" fill="var(--accent2)">to AP client</text>
+
+      <!-- legend -->
+      <rect x="250" y="248" width="16" height="4" rx="2" fill="var(--accent)"/>
+      <text x="272" y="255" font-size="11" fill="var(--muted)">S5c · AP → mesh (this worklog)</text>
+      <rect x="250" y="266" width="16" height="4" rx="2" fill="var(--accent2)"/>
+      <text x="272" y="273" font-size="11" fill="var(--muted)">S5b · mesh → AP (return path)</text>
+    </svg>
+    <figcaption>The gate straddles two L2 domains on one radio. S5c (blue) proxies the STA's frame into the mesh; S5b
+    (purple) is the return leg — together the gate bridges both ways.</figcaption>
+  </div>
+
+  <h2 id="implemented">What was implemented — S5c</h2>
+
+  <h3>morselib — new primitive <code>mmwlan_mesh_tx_proxied</code></h3>
+  <p>In <code>components/halow</code> (uncommitted, <strong>+~85 lines</strong>):
+  <code>mmwlan_mesh_tx_proxied(final_dst, src, payload, len)</code> injects a proxied <code>AE_A5_A6</code> frame
+  (<code>eaddr1=final_dst</code>, <code>eaddr2=src</code>, mesh SA = us), resolving where to send by walking the same
+  reachability ladder the datapath already uses. It reuses the S3 <code>umac_mesh_build_forward</code> AE path and the
+  next-hop keying of <code>umac_mesh_forward_data</code>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">reachable node</div><div class="s">direct peer / HWMP</div></div>
+      <div class="node"><div class="t">else MPP proxy</div><div class="s">S4a → DA = proxy</div></div>
+      <div class="node"><div class="t">else gates</div><div class="s">S4b send_to_gates</div></div>
+    </div>
+    <figcaption>How <code>mmwlan_mesh_tx_proxied</code> resolves the mesh DA for <code>final_dst</code>: a reachable
+    mesh node (direct peer / HWMP path) → mesh DA = <code>final_dst</code>; else its MPP proxy → mesh DA = the proxy;
+    else <code>send_to_gates</code>.</figcaption>
+  </figure>
+
+  <h3>Gate app — <code>gw_ap_rx_cb</code> ingress</h3>
+  <p>In <code>rimba-halow-mesh-ap</code> (tracked, modified): <code>gw_ap_rx_cb</code> now inspects the AP RX Ethernet
+  frame. A <strong>unicast</strong> frame whose dst is <em>not</em> the gate (neither <code>g_ap_bssid</code> nor
+  <code>g_mesh_mac</code>) is re-encapsulated and proxied into the mesh; frames addressed to the gate (DHCP / ping)
+  and broadcast fall through to the existing L3 path. <code>g_ap_bssid</code> is stashed from
+  <code>mmwlan_ap_get_bssid</code>.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">STA frame</div><div class="s">L2 dst = board1</div></div>
+      <div class="node acc"><div class="t">AP → host</div><div class="s">gw_ap_rx_cb</div></div>
+      <div class="node"><div class="t">re-encap</div><div class="s">[dst][src][etype][L3] → [LLC/SNAP][L3]</div></div>
+      <div class="node acc"><div class="t">tx_proxied</div><div class="s">mmwlan_mesh_tx_proxied(dst, src)</div></div>
+      <div class="node"><div class="t">mesh AE</div><div class="s">eaddr1=D · eaddr2=C</div></div>
+      <div class="node ok"><div class="t">board1</div><div class="s">ae_rx_cb + MPP learned</div></div>
+    </div>
+    <figcaption>The S5c datapath: the AP delivers a STA's non-BSSID unicast to the host, the gate re-encapsulates it
+    to LLC/SNAP + L3 and proxies it into the mesh, and the mesh node delivers the AE frame + learns the client's MPP.</figcaption>
+  </figure>
+
+  <p>Combined S1–S5c morselib diff: <strong>740 insertions</strong> across <code>umac_mesh.c</code> / <code>.h</code>
+  / <code>umac_datapath.c</code>. Compile-verified.</p>
+
+  <h2 id="verify">On-air verification — PASS</h2>
+  <p>Bench: 3-node mesh+AP+STA, all on one MM6108 gate radio.</p>
+
+  <table>
+    <thead><tr><th>Node</th><th>Role</th><th>App / config</th></tr></thead>
+    <tbody>
+      <tr><td><strong>board0</strong></td><td>GATE</td><td><code>rimba-halow-mesh-ap</code> + S5b + S5c · mesh <code>rimba-mesh</code> (<code>e2:72:a1:f8:ef:a4</code>) + AP <code>rimba-ping</code></td></tr>
+      <tr><td><strong>board2</strong></td><td>STA</td><td><code>rimba-halow-sta L2_DST_MAC=e2:72:a1:f8:f9:40</code> · assoc to AP (<code>bc:2a:33:96:b2:33</code>) + static ARP <code>192.168.12.99</code> → board1's mesh MAC</td></tr>
+      <tr><td><strong>board1</strong></td><td>MESH DEST</td><td><code>test-mesh-gate-rx MESH_ID=rimba-mesh</code> · peers with the gate + has the S5a <code>ae_rx_cb</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>The STA's static ARP maps a fake IP (<code>192.168.12.99</code>) to board1's mesh MAC, so its ping frames leave
+  with L2 dst = board1 (not the gate) — that is the L2-bridge trigger. Gate serial, every 2 s:</p>
+  <pre><code>S5c AP-&gt;mesh: 100 B from bc:2a:33:96:b2:33 to e2:72:a1:f8:f9:40</code></pre>
+  <p>board1 serial:</p>
+  <pre><code>AE-rx CB: eaddr1(DA)=e2:72:a1:f8:f9:40 eaddr2(SA)=bc:2a:33:96:b2:33 payload_len=100 payload[0..3]=aaaa0300
+MPP learned: bc:2a:33:96:b2:33 via e2:72:a1:f8:ef:a4</code></pre>
+
+  <div class="callout ok">
+    <p class="ct">✓ End-to-end result</p>
+    <p>The STA's frame (L2 dst = board1) was <strong>delivered by the AP to the gate's <code>gw_ap_rx_cb</code></strong>
+    — resolving a key unknown: the AP forwards a STA's non-BSSID unicast to the host — then <strong>proxied into the
+    mesh</strong> (<code>eaddr2</code> = the STA, <code>eaddr1</code> = board1, 100 B SNAP+ICMP intact), and board1
+    <strong>learned <code>mpp(STA → gate)</code></strong>. The gate bridged an AP client's frame INTO the mesh, and the
+    mesh node can now reach the client for return traffic.</p>
+  </div>
+
+  <div class="callout">
+    <p class="ct">Both directions verified</p>
+    <p>S5b (mesh AE → AP client) + S5c (AP client → mesh) + MPP learning tie the return path together. The
+    <strong>core L2-bridge datapath is complete.</strong> Radio-silent cleanup done: board0/1/2 → <code>rimba-hello</code>;
+    chronite + chronium <code>wlan1</code> down.</p>
+  </div>
+
+  <h2 id="notdone">Not done — L2-bridge finishing touches</h2>
+  <ul>
+    <li><strong>A true bidirectional round-trip</strong> (STA ↔ mesh node ping through the bridge, both ways). The
+      datapath is all present (S5b+S5c+MPP); it needs the mesh node to hold the STA's target IP and reply (its reply
+      uses <code>mpp(STA→gate)</code> → <code>mmwlan_mesh_tx_proxied</code> / <code>send_to_gates</code> → the gate →
+      S5b to the STA). The current ICMP is to <code>192.168.12.99</code>, which board1 doesn't own, so it drops it — a
+      real round-trip needs the single-subnet IP plan below.</li>
+    <li><strong>Single subnet + retire <code>MESH_GATE_IP</code></strong> (<code>rimba-halow-mesh/app_main.c</code>):
+      put AP clients + mesh nodes on one subnet so reachability is by MAC (via MPP), no L3 gateway. Replace the L3
+      <code>ip_forward</code> with the L2 proxy as the primary path (they currently coexist).</li>
+    <li><strong>Proxy-ARP / broadcast bridging:</strong> a real ARP-driven flow (vs the static ARP used here) needs the
+      gate to bridge broadcast/multicast AP↔mesh — the <strong>multicast AE (<code>AE_A4</code>)</strong> path, which
+      was out of S3 scope. That's the last datapath piece for a zero-config L2 bridge.</li>
+    <li><strong>S6:</strong> live-Linux interop.</li>
+  </ul>
+
+  <h2 id="footguns">Footguns</h2>
+  <div class="callout bug">
+    <p class="ct">🐛 Ownership on the proxy path — don't double-free</p>
+    <p><code>gw_ap_rx_cb</code> copies the frame + <code>mmpkt_release</code>s it on the proxy path (it owns it); the
+    local path instead hands it to <code>gw_rx_deliver</code>, which releases. Mixing the two frees the same buffer
+    twice.</p>
+  </div>
+  <ul>
+    <li>The AP <strong>does</strong> deliver a STA's unicast-to-non-BSSID frame to <code>gw_ap_rx_cb</code> — S5c relies
+      on it, confirmed on-air.</li>
+    <li>The STA's AP-MAC is the <strong>MM6108 MAC</strong> (<code>bc:2a:33:96:b2:33</code>), read from the gate
+      <code>AP client joined</code> log — not the efuse MAC.</li>
+    <li><code>s_ap2mesh</code> / <code>s_ae2ap</code> static buffers are safe (single mesh-RX task);
+      <code>mmwlan_mesh_tx_proxied</code> copies the payload.</li>
+  </ul>
+
+  <h2 id="files">Files</h2>
+  <ul>
+    <li><code>components/halow/.../umac/mesh/umac_mesh.c</code> + <code>.h</code> (<code>mmwlan_mesh_tx_proxied</code>)
+      — <strong>uncommitted</strong> (S1–S5c = 740 ins).</li>
+    <li><code>firmware/rimba-halow-mesh-ap/main/app_main.c</code> — S5b egress + S5c ingress (tracked,
+      <strong>modified</strong>).</li>
+    <li><code>firmware/test-mesh-gate-rx</code> (+ <code>MESH_ID=</code>), <code>firmware/rimba-halow-sta</code>
+      (+ <code>L2_DST_MAC=</code> static-ARP ping), <code>firmware/test-mesh-ae</code> (+ <code>MESH_ID=</code> /
+      <code>EADDR1=</code>), <code>Makefile</code> (threads the flags) — untracked / modified.</li>
+    <li>Memory: <code>mesh-gate-8021s-port-planned</code> (updated: S5c done, both bridge legs verified).</li>
+  </ul>
+
+  <div class="callout"><p style="margin:0">Bench radio-silent after (board0/1/2 on <code>rimba-hello</code>; chronite
+  + chronium <code>wlan1</code> down).</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#goal">Goal</a></li>
+    <li><a href="#topology">The bidirectional bridge</a></li>
+    <li><a href="#implemented">What was implemented — S5c</a></li>
+    <li><a href="#verify">On-air verification — PASS</a></li>
+    <li><a href="#notdone">Not done — finishing touches</a></li>
+    <li><a href="#footguns">Footguns</a></li>
+    <li><a href="#files">Files</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-22-mesh-gate-s5c-ap-ingress</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
