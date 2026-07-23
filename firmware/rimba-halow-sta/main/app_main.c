@@ -26,6 +26,8 @@
 #include "esp_netif.h"
 #include "nvs_flash.h"
 #include "ping/ping_sock.h"
+#include <stdio.h>
+#include "lwip/etharp.h"
 
 #include "mmhalow.h"
 #include "mmwlan.h"
@@ -35,8 +37,19 @@ static const char *TAG = "rimba-halow-sta";
 /* Match the AP (rimba-halow-ap). */
 #define LINK_SSID  "rimba-ping"
 #define LINK_PSK   "rimbahalow"
+#ifdef TEST_L2_DST_MAC
+/* S5 zero-config round-trip: put the STA on the MESH subnet and ping a mesh node (10.9.9.100) same-subnet
+ * with NO static ARP — the STA's ARP request broadcasts, the gate bridges it into the mesh (AE_A4), the
+ * mesh node replies, and its reply rides the gate L2 bridge back. Proves the whole bidirectional bridge. */
+#define AP_IP      "10.9.9.1"          /* same-subnet gw placeholder (unused for a same-subnet ping) */
+#define STA_IP     "10.9.9.50"
+#define RT_DST_IP  "10.9.9.100"        /* the mesh node D's IP (rimba-halow-mesh derives .100) */
+#define PING_TARGET RT_DST_IP
+#else
 #define AP_IP      "192.168.12.1"     /* the AP — our ping target and default gateway */
 #define STA_IP     "192.168.12.2"
+#define PING_TARGET AP_IP
+#endif
 #define NETMASK    "255.255.255.0"
 
 #define CONNECT_TIMEOUT_MS 40000
@@ -56,9 +69,12 @@ static void on_ping_success(esp_ping_handle_t hdl, void *args)
 {
     uint16_t seqno;
     uint32_t elapsed_ms;
+    ip_addr_t raddr;
     esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
     esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed_ms, sizeof(elapsed_ms));
-    ESP_LOGI(TAG, "reply from %s seq=%u time=%" PRIu32 " ms", AP_IP, seqno, elapsed_ms);
+    esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &raddr, sizeof(raddr)); /* the actual responder */
+    ESP_LOGI(TAG, "reply from %s seq=%u time=%" PRIu32 " ms", ip4addr_ntoa(&raddr.u_addr.ip4), seqno,
+             elapsed_ms);
 }
 
 static void on_ping_timeout(esp_ping_handle_t hdl, void *args)
@@ -133,10 +149,17 @@ void app_main(void)
         idle_forever();
     }
 
-    /* Ping the AP continuously so the console shows the live link. */
+#ifdef TEST_NO_PING
+    /* B2 test — responder-only: associate + hold a static IP, but DON'T originate any traffic (so this
+     * client never ARPs and never teaches a mesh node its address). A mesh node then INITIATES to us,
+     * forcing the gate to bridge the mesh node's broadcast ARP down to the AP (mesh->AP bridging = B2). */
+    ESP_LOGI(TAG, "B2 test: responder-only at %s (no ping) — waiting for a mesh node to reach us", STA_IP);
+    idle_forever();
+#else
+    /* Ping continuously so the console shows the live link (the AP, or in round-trip mode a mesh node). */
     ip_addr_t target = { 0 };
     target.type = IPADDR_TYPE_V4;
-    target.u_addr.ip4.addr = esp_ip4addr_aton(AP_IP);
+    target.u_addr.ip4.addr = esp_ip4addr_aton(PING_TARGET);
 
     esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
     cfg.target_addr = target;
@@ -154,8 +177,14 @@ void app_main(void)
         ESP_LOGE(TAG, "failed to create the ping session");
         idle_forever();
     }
-    ESP_LOGI(TAG, "pinging %s every %d ms...", AP_IP, PING_INTERVAL_MS);
+#ifdef TEST_L2_DST_MAC
+    ESP_LOGI(TAG, "S5 zero-config round-trip: pinging mesh node %s (ARP resolves via the gate L2 bridge)",
+             PING_TARGET);
+#else
+    ESP_LOGI(TAG, "pinging %s every %d ms...", PING_TARGET, PING_INTERVAL_MS);
+#endif
     esp_ping_start(ping);
 
     idle_forever();
+#endif
 }

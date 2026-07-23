@@ -1,0 +1,4 @@
+# test-mesh-gate app config (layered on top of boards/<BOARD>/ defaults).
+# Mesh (like IBSS) reuses the AP-type interface + BSS_CONFIG/beacon code path,
+# so the AP-mode morselib sources must be compiled in.
+CONFIG_HALOW_AP_MODE=y
