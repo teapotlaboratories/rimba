@@ -400,6 +400,44 @@ APPS: tuple[App, ...] = (
     App("test-mesh-linux",
         notes="T2 mesh-linux: ESP<->Linux mesh interop reporter. Mesh ID rimba-smesh (matches the "
               "Linux wpa-smesh.conf); peers with + pings chronite. Needs CONFIG_HALOW_AP_MODE=y."),
+    # ---- mesh-gate (802.11s gate discovery + Address-Extension datapath) ----
+    # The S1-S5 dev fixtures, now wired into T2 (mesh-gate-* T2Tests). Case B reuses
+    # test-mesh-gate-relay as a self-reporter; S1/S2 byte-diff (test-mesh-gate) is the
+    # deferred Linux tier (S6). See docs/mesh-ap/rimba-mesh-ap-s6-interop-plan.md.
+    App("test-mesh-gate",
+        notes="mesh-gate S1: lone PROACTIVE_RANN gate emitter (flags=0x01 IS_GATE, 5000ms). No on-box "
+              "verdict -- the check is an off-line RANN byte-diff vs a live Linux gate (Case E / S6). "
+              "Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-gate-rx",
+        notes="mesh-gate S2/S3: mesh node -- RANN RX + re-flood + gate learner; polls "
+              "mmwlan_mesh_gate_count (known_gates>0) + mmwlan_mesh_ae_rx_probe (AE eaddrs). GATE=1 makes "
+              "it a gate emitter; MESH_ID= sets the mesh. Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-gate-fwd",
+        notes="mesh-gate S4b: send_to_gates TX fallback -- learns a gate, then sends an AE frame via it "
+              "every 3s. Paired with a gate's AE-rx probe for the full proof. Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-gate-relay",
+        notes="mesh-gate S4c (Case B reporter): symmetric 3-role NODE<->RELAY<->GATE (role-by-MAC, "
+              "forced-line allowlist). GATE asserts ae_rx>0 with eaddr1/eaddr2 preserved through the "
+              "relay -- covers S2-learn + S3 + S4a + S4b + S4c. GATE=board2 (require_wired). "
+              "Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-ae",
+        notes="mesh-gate S3/S5b: AE injector -- originates 6-address AE_A5_A6 frames (LINUX_MAC/EADDR1/"
+              "MESH_ID configurable). Verdict is receiver-side (Linux `iw mpp dump` or a paired "
+              "test-mesh-gate-rx AE probe). Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-gate-sta",
+        notes="mesh-gate-bridge (Case C) STA REPORTER: DHCP client behind the retire-L3 gate's AP; pings "
+              "a mesh node (10.9.9.100) zero-config across the flat-subnet L2 bridge. PASS iff associated + "
+              "leased + >=6 replies + ttl==64 (pure L2 bridge, no ip_forward). Gate = the test-mesh-gate-ap "
+              "fixture; proves retire-L3 + round-trip + S5b/S5c + B1 + proxy-ARP."),
+    App("test-mesh-gate-node",
+        notes="mesh-gate endpoint mesh-node: DEFAULT = pinger REPORTER (mesh-gate-b2 Case D, pings a silent "
+              "static AP-client 10.9.9.50; PASS iff >=15/30 -- proxy-ARP-backed reliability, not the lossy "
+              "raw B2 broadcast). NO_PING=1 = a plain static mesh RESPONDER (mesh-gate-bridge Case C support). "
+              "Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-gate-ap",
+        notes="mesh-gate GATE fixture (support role for both mesh-gate-bridge + mesh-gate-b2): the retire-L3 "
+              "mesh + co-channel SoftAP L2 bridge + proxy-ARP + DHCP on one MM6108 (a test-* clone of the "
+              "rimba-halow-mesh-ap example). board2, up_marker 'L2 bridge ready'. Needs CONFIG_HALOW_AP_MODE=y."),
     # ---- tp (power) tier (firmware/test-power) -------------------------
     App("test-power",
         notes="tp power tier: the C6-triggered 4-tier PS ladder DUT (board2, require_wired). The "
@@ -481,6 +519,11 @@ class Role:
     #: to EVERY flash of that app, so all boards agree on the topology without a source edit.
     #: Compiled as TEST_<build_mac_var> (see the app's CMakeLists.txt). None for asymmetric roles.
     build_mac_var: Optional[str] = None
+    #: FIXED per-role build vars, as (make-shorthand, value) pairs threaded verbatim to this role's flash
+    #: (e.g. (("STA_IP","10.9.9.50"),("NO_PING","1")) to pin a production STA as a static responder). The
+    #: shorthand must be one the root Makefile threads into a -D (see IDF_EXTRA_D). A tuple (not a dict) so
+    #: the frozen dataclass stays hashable. NOTE: applied per-APP, so two roles sharing an app share vars.
+    build_vars: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

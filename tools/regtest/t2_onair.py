@@ -20,12 +20,14 @@ firmware asserts; the orchestrator transports and combines.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import Optional
 
 from . import manifest as M
 from .common import (
+    BUILD_DIR,
     FAIL,
     INCONCLUSIVE,
     PASS,
@@ -41,6 +43,41 @@ from .t2_tests import T2_BY_SLUG, T2_TESTS
 
 RE_RESULT = re.compile(r"TEST\|RESULT\|(PASS|FAIL|INCONCLUSIVE)\|(.*)")
 RE_STEP = re.compile(r"TEST\|STEP\|(\S+?)\|(PASS|FAIL)\|(.*)")
+
+
+def _flash(app: str, board: str, port: Optional[str], timeout: int,
+           make_vars: Optional[dict] = None):
+    """Flash an app, first clearing its CMake cache if the build config changed since its last flash.
+
+    idf.py keeps a persistent CMakeCache under build/<app>/<board>/, and a `-D TEST_*` from a prior flash
+    (e.g. a dual-mode fixture built with NO_PING=1) STAYS in that cache. So a later flash of the SAME app
+    in a DIFFERENT config -- exactly what a build_vars dual-mode fixture does across two tests -- would
+    otherwise silently reuse the stale binary (the cache-accumulation footgun that once flashed wrong
+    configs mid-bench). We stamp each build's make_vars; when they differ we drop CMakeCache.txt so idf.py
+    reconfigures with precisely the requested -D set (ninja still reuses any object file the change doesn't
+    touch, so a same-config flash only pays a quick reconfigure, and only a real config change recompiles).
+    """
+    board_build = BUILD_DIR / app / board
+    want = dict(make_vars or {})
+    cache = board_build / "CMakeCache.txt"
+    stamp = board_build / ".regtest_build_config"
+    if cache.exists():
+        have = None
+        if stamp.exists():
+            try:
+                have = json.loads(stamp.read_text())
+            except (ValueError, OSError):
+                have = None
+        if have != want:
+            cache.unlink()          # force a clean reconfigure with exactly `want`
+    cp = make("flash", app, board, port=port, timeout=timeout, make_vars=make_vars or None)
+    if cp.returncode == 0:
+        try:
+            board_build.mkdir(parents=True, exist_ok=True)
+            stamp.write_text(json.dumps(want, sort_keys=True))
+        except OSError:
+            pass
+    return cp
 
 #: How long to wait for a reporter's TEST|RESULT after flashing it. Covers connect +
 #: the in-app measurement window. The mesh multi-hop tests are the long pole (peering can take
@@ -149,7 +186,7 @@ def _run_single(rep: Reporter, t, used_boards: set[str]) -> None:
         return
 
     port = resolve_port(M.BENCH[board_name].efuse_mac)
-    cp = make("flash", t.app, M.BENCH_BOARD, port=port, timeout=600)
+    cp = _flash(t.app, M.BENCH_BOARD, port, 600)
     if cp.returncode != 0:
         rep.add(Result("T2", t.slug, FAIL, duration_s=time.time() - t0,
                        detail=f"flash failed (exit {cp.returncode})\n"
@@ -230,8 +267,7 @@ def _run_orchestrated(rep: Reporter, t, used_boards: set[str],
                 return
             port = resolve_port(M.BENCH[handle].efuse_mac)
             make_vars = build_vars_by_app.get(reporter.app)
-            cp = make("flash", reporter.app, M.BENCH_BOARD, port=port, timeout=600,
-                      make_vars=make_vars or None)
+            cp = _flash(reporter.app, M.BENCH_BOARD, port, 600, make_vars=make_vars or None)
             if cp.returncode != 0:
                 rep.add(Result("T2", t.slug, FAIL, duration_s=time.time() - t0,
                                detail=f"reporter '{reporter.name}' ({handle}) flash failed "
@@ -299,6 +335,11 @@ def _resolve_build_vars(t, assign: dict, linux_mac: Optional[str],
             if board is not None:
                 add(role.app, role.build_mac_var, board.mesh_mac)
 
+    # (c) Fixed per-role build vars (e.g. a production STA pinned as a static NO_PING responder).
+    for role in t.roles:
+        for key, val in role.build_vars:
+            add(role.app, key, val)
+
     return by_app
 
 
@@ -341,8 +382,7 @@ def _bring_up_esp_support(role, board_name: str, used_boards: set[str],
                           make_vars: Optional[dict] = None) -> tuple[bool, str]:
     """Flash a support ESP role and confirm it started (via its up_marker, if any)."""
     port = resolve_port(M.BENCH[board_name].efuse_mac)
-    cp = make("flash", role.app, M.BENCH_BOARD, port=port, timeout=600,
-              make_vars=make_vars or None)
+    cp = _flash(role.app, M.BENCH_BOARD, port, 600, make_vars=make_vars or None)
     if cp.returncode != 0:
         return False, f"flash exit {cp.returncode}: " + "; ".join(
             cp.stderr.strip().splitlines()[-2:])

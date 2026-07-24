@@ -501,6 +501,153 @@ MESH_RELAY_NOCRASH = T2Test(
     ),
 )
 
+MESH_GATE_RELAY = T2Test(
+    slug="mesh-gate-relay",
+    pass_if="a 6-address AE frame reaches a 2-hop gate with its proxied endpoints intact (S2+S3+S4a-c)",
+    title="Mesh-gate multi-hop AE relay-preserve (S4c)",
+    rig={
+        "relay": "board2 — test-mesh-gate-relay (re-floods RANN + relays the AE frame; MANDATORY fully wired)",
+        "node": "board1 — test-mesh-gate-relay (learns the 2-hop gate, send_to_gates every 3s)",
+        "gate": "board0 — test-mesh-gate-relay (emits gate RANN; asserts the AE frame arrived eaddrs-intact; reporter)",
+    },
+    roles=(
+        # Symmetric 3-role app, role self-selected by MAC; a forced-line allowlist makes NODE reach GATE
+        # ONLY via RELAY. Support roles (relay, node) boot first; the GATE is the reporter. The RELAY does
+        # the forwarding so it takes the fully-wired board2 (require_wired). build_mac_var feeds each board's
+        # mesh MAC to every flash (no MAC hardcoded).
+        Role(name="relay", device="board2", app="test-mesh-gate-relay", require_wired=True,
+             boot_wait_s=30.0, up_marker="mesh-up", build_mac_var="MESH_RELAY_MAC"),
+        Role(name="node", device="board1", app="test-mesh-gate-relay",
+             boot_wait_s=30.0, up_marker="mesh-up", build_mac_var="MESH_ORIGIN_MAC"),
+        Role(name="gate", device="board0", app="test-mesh-gate-relay", reporter=True,
+             build_mac_var="MESH_DEST_MAC"),
+    ),
+    what_it_proves=(
+        "The full 802.11s mesh-gate discovery + datapath chain over a multi-hop line: the NODE learns a gate "
+        "from a relay-reflooded RANN (S2), falls back to send_to_gates for an off-mesh dest (S4b), the RELAY "
+        "preserves the 6-address AE endpoints while forwarding (S4c), and the GATE parses the AE frame (S3) + "
+        "learns the proxy path (S4a) -- verified by the gate receiving eaddr1/eaddr2 byte-intact 2 hops away."
+    ),
+    what_it_does_not_prove=(
+        "The gate's L2 bridge to an AP client (S5b/S5c), zero-config round-trip, broadcast bridging, and "
+        "proxy-ARP -- those are the mesh+AP+STA bridge test (mesh-gate-bridge). And the RANN byte-diff vs a "
+        "live Linux gate (S1/S2 wire format), which needs the Linux monitor tier (S6)."
+    ),
+    expectations=(
+        Expectation(
+            metric="AE relay-preserve (S4c)",
+            value="gate ae_rx>0 with eaddr1(DA)=02:..:cc eaddr2(SA)=02:..:dd intact (before S4c ae_rx stays 0)",
+            source="docs/worklog/2026-07-22-mesh-gate-s4c-ae-relay-preserve.md",
+            noisy=True,
+            assertion="PASS iff the gate received >=1 AE frame with BOTH proxied endpoints byte-exact "
+                      "(02:..:cc / 02:..:dd). ae_rx>0 with wrong eaddrs = FAIL (relay stripped the AE = the "
+                      "S4c regression). No peer = INCONCLUSIVE (RF/rig, not a code bug).",
+        ),
+    ),
+    manual_steps=(
+        "THE RELAY MUST BE board2 (the only fully-wired ESP); a relay on board0/board1 can false-crash "
+        "under load. Ensure tools/ppk2_hold.py is running so board2 enumerates."
+    ),
+)
+
+MESH_GATE_BRIDGE = T2Test(
+    slug="mesh-gate-bridge",
+    pass_if="a DHCP AP-client reaches a mesh node zero-config across the flat-subnet L2 bridge (retire-L3), ttl=64",
+    title="Mesh-gate L2 bridge, zero-config (retire-L3 + round-trip + S5b/S5c + B1 + proxy-ARP)",
+    rig={
+        "gate": "board2 — test-mesh-gate-ap (retire-L3: mesh+AP, flat 10.9.9.0/24, DHCP, L2 bridge + proxy-ARP; MANDATORY wired)",
+        "mesh_node": "board1 — test-mesh-gate-node NO_PING (10.9.9.100 responder on the flat subnet)",
+        "sta": "board0 — test-mesh-gate-sta (DHCP AP client; pings the mesh node zero-config; reporter)",
+    },
+    roles=(
+        # test-* fixtures cloned from the retire-L3 gate + mesh node (the split rule: the harness flashes ONLY
+        # test-* apps). Support roles boot first; the STA is the reporter. The gate runs mesh+AP concurrency +
+        # sustained bridging so it takes the fully-wired board2. The mesh node runs NO_PING (a plain static
+        # responder) and derives 10.9.9.100 from board1's MAC (100 + (mac[5]&0x3f)) -- so it MUST be board1.
+        Role(name="gate", device="board2", app="test-mesh-gate-ap", require_wired=True,
+             boot_wait_s=35.0, up_marker="L2 bridge ready"),
+        Role(name="mesh_node", device="board1", app="test-mesh-gate-node",
+             boot_wait_s=30.0, up_marker="mesh node IP", build_vars=(("NO_PING", "1"),)),
+        Role(name="sta", device="board0", app="test-mesh-gate-sta", reporter=True),
+    ),
+    what_it_proves=(
+        "The retire-L3 mesh-gate as a pure L2 bridge on ONE flat 10.9.9.0/24: an AP client DHCPs a lease "
+        "and reaches a mesh node zero-config -- exercising DHCP, cross-bridge ARP (B1), the S5c AP->mesh + "
+        "S5b mesh->AP legs, the bidirectional round-trip, and proxy-ARP, all in one boot. ttl=64 proves it "
+        "is a pure L2 bridge (no ip_forward hop) -- the retire-L3 property."
+    ),
+    what_it_does_not_prove=(
+        "The mesh-INITIATED broadcast direction (B2) -- separate mesh-gate-b2 case. The multi-hop AE "
+        "relay-preserve (S4c) -- that is mesh-gate-relay. And the RANN byte-diff vs a live Linux gate (S6)."
+    ),
+    expectations=(
+        Expectation(
+            metric="zero-config L2-bridge round-trip (retire-L3)",
+            value="STA DHCP 10.9.9.2 -> reply from 10.9.9.100 seq=1, continuous, ttl=64",
+            source="docs/worklog/2026-07-23-mesh-gate-retire-l3.md",
+            noisy=True,
+            assertion="PASS iff associated + DHCP-leased + >=6/15 replies + ttl==64. ttl==63 with replies = "
+                      "INCONCLUSIVE: an L3 hop crept back (ip_forward re-added). 0 replies despite a lease = "
+                      "FAIL (the bridge/proxy-ARP did not deliver). No lease/assoc = FAIL (gate down / rig).",
+        ),
+    ),
+    manual_steps=(
+        "THE GATE MUST BE board2 (mesh+AP concurrency + sustained bridging; the only fully-wired ESP). The "
+        "mesh node MUST be board1 (its MAC derives 10.9.9.100, which the STA pings). Ensure "
+        "tools/ppk2_hold.py is running so board2 enumerates."
+    ),
+)
+
+MESH_GATE_B2 = T2Test(
+    slug="mesh-gate-b2",
+    pass_if="a mesh node reliably reaches a SILENT static AP-client across the gate (B2 + proxy-ARP)",
+    title="Mesh-gate B2 mesh->AP + proxy-ARP (the historically-flaky direction)",
+    rig={
+        "gate": "board2 — test-mesh-gate-ap (retire-L3 L2 bridge + proxy-ARP; MANDATORY wired)",
+        "sta": "board0 — test-mesh-gate-sta STA_IP=10.9.9.50 NO_PING (a SILENT static AP-client responder)",
+        "node": "board1 — test-mesh-gate-node (mesh node pinging the silent AP-client; reporter)",
+    },
+    roles=(
+        # All test-* fixtures (the split rule). The STA fixture is pinned as a static SILENT responder via
+        # build_vars so the mesh node must resolve it COLD across the bridge -- the flaky direction. The node
+        # reporter asserts on proxy-ARP-BACKED reliability (a wide floor), not the lossy raw B2 broadcast.
+        Role(name="gate", device="board2", app="test-mesh-gate-ap", require_wired=True,
+             boot_wait_s=35.0, up_marker="L2 bridge ready"),
+        Role(name="sta", device="board0", app="test-mesh-gate-sta",
+             boot_wait_s=30.0, up_marker="STA static IP",
+             build_vars=(("STA_IP", "10.9.9.50"), ("NO_PING", "1"))),
+        Role(name="node", device="board1", app="test-mesh-gate-node", reporter=True),
+    ),
+    what_it_proves=(
+        "The mesh->AP-client direction (B2): a mesh node reaches an AP client behind the gate, and does so "
+        "RELIABLY even for a SILENT static responder -- which forces cold resolution across the bridge. The "
+        "gate bridges the node's ARP broadcast down to the AP (B2, lossy No-Ack) and its proxy-ARP proactive "
+        "push makes the resolution reliable. This is the exact direction that was 0-reply flaky before "
+        "proxy-ARP -- the highest-value regression to guard."
+    ),
+    what_it_does_not_prove=(
+        "The STA-initiated round-trip + B1 (that is mesh-gate-bridge). The multi-hop AE datapath "
+        "(mesh-gate-relay). And the RANN byte-diff vs a live Linux gate (S6)."
+    ),
+    expectations=(
+        Expectation(
+            metric="mesh->AP-client reliability (B2 + proxy-ARP)",
+            value="cold node reaches 10.9.9.50 from ~seq 3, 18 replies / 2 timeouts (vs 0-reply pre-proxy-ARP)",
+            source="docs/worklog/2026-07-22-mesh-gate-proxy-arp.md",
+            noisy=True,
+            assertion="PASS iff >=15/30 replies -- a WIDE floor: proxy-ARP-reliable is ~25-30, broken is ~0-3, "
+                      "and the floor absorbs the lossy B2 warmup (the first few misses) + RF. Do NOT assert on "
+                      "the raw No-Ack broadcast (would flake); assert on the proxy-ARP-backed steady state. "
+                      "Some but < floor = INCONCLUSIVE (marginal). 0 = FAIL. No peer = INCONCLUSIVE.",
+        ),
+    ),
+    manual_steps=(
+        "THE GATE MUST BE board2 (mesh+AP + bridging; the only fully-wired ESP). The STA is a SILENT static "
+        "responder at 10.9.9.50 (build_vars STA_IP + NO_PING) so the node's resolution is cold -- do not give "
+        "it a pinger or it teaches the gate proactively and defeats the test. Ensure tools/ppk2_hold.py runs."
+    ),
+)
+
 MESH_AP = T2Test(
     slug="mesh-ap",
     pass_if="both vifs beacon + STA routes through, ttl=63 (1 hop)",
@@ -728,6 +875,9 @@ T2_TESTS: tuple[T2Test, ...] = (
     MESH_LARGE_FRAME,
     MESH_LEAF,
     MESH_RELAY_NOCRASH,
+    MESH_GATE_RELAY,
+    MESH_GATE_BRIDGE,
+    MESH_GATE_B2,
     MESH_AP,
     MESH_AP_MULTI_TWT,
 )

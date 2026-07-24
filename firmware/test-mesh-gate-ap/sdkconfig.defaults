@@ -1,0 +1,7 @@
+# rimba-halow-mesh-ap app config (layered on top of boards/<BOARD>/ defaults).
+# Mesh AND SoftAP share the AP-type interface + BSS_CONFIG/beacon code path, so
+# the AP-mode morselib sources must be compiled in.
+CONFIG_HALOW_AP_MODE=y
+
+# The all-ESP Mesh-gate is a pure L2 bridge on ONE flat 10.9.9.0/24 subnet (AP clients + mesh
+# nodes share it; the gate bridges at L2 + serves DHCP). No inter-subnet IP forwarding is needed.
