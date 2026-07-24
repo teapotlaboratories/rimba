@@ -85,6 +85,102 @@ def _check_fw_blob(rep: Reporter) -> None:
                    meta={"got_size": size, "got_sha256": sha, "got_version": ver}))
 
 
+def _mirror_body(raw: bytes):
+    """Strip a C source's leading /* */ banner, returning (body_lines, None) or (None, reason).
+
+    A wrong file shape returns a reason (a caller FAIL), never a silent pass. Robust by construction:
+    operates on BYTES (encoding-agnostic); collapses CRLF and lone CR to LF (line-ending-agnostic);
+    anchors the body on the shared first `#include` SENTINEL, not a fixed line count (so re-editing
+    either banner to a different length can't shift the boundary); asserts the region between the banner
+    and that sentinel is blank so drift can't hide ABOVE the boundary; and drops one trailing empty line
+    (trailing-newline-agnostic). Only line terminators and the final newline are normalized -- every
+    other byte (indentation, interior whitespace) is preserved, so real content drift still fails.
+    """
+    norm = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    lines = norm.split(b"\n")
+    inc = next((i for i, ln in enumerate(lines) if ln.startswith(b"#include")), None)
+    if inc is None:
+        return None, "no `#include` sentinel found (empty or unexpected source shape)"
+    header = b"\n".join(lines[:inc])
+    if b"/*" not in header or b"*/" not in header:
+        return None, "no leading /* */ banner before the first #include"
+    if header.split(b"/*", 1)[0].strip():
+        return None, "unexpected content before the leading /* banner"
+    if header.split(b"*/", 1)[1].strip():
+        return None, "non-blank content between the banner and the first #include (drift could hide here)"
+    body = lines[inc:]
+    if body and body[-1] == b"":
+        body = body[:-1]
+    return body, None
+
+
+def _check_clone_mirrors(rep: Reporter) -> None:
+    """Assert every faithful test-* clone's app_main.c BODY still matches its rimba-* source.
+
+    A no-hardware source-drift tripwire (the verbatim analog of _check_fw_blob). A mesh-gate T2 fixture
+    is a body clone of a shipped example; if someone patches one app_main.c and forgets the other, the
+    fixture silently exercises stale code. The intentionally-different /* */ banner is excluded via the
+    first-`#include` sentinel, and the banner-to-sentinel gap is asserted blank so drift can't hide there.
+    A missing or mis-shaped file is a FAIL, never a silent pass. One Result per (clone, file); any FAIL
+    flips rep.green and gates T0. The pairs live in M.CLONE_MIRRORS.
+    """
+    import difflib
+    from .common import REPO_ROOT
+
+    for clone, (prod, files) in sorted(M.CLONE_MIRRORS.items()):
+        for rel in files:
+            t0 = time.time()
+            name = f"clone-mirror: {clone}/{rel}"
+            targets = {
+                "clone":  (clone, REPO_ROOT / "firmware" / clone / rel),
+                "source": (prod,  REPO_ROOT / "firmware" / prod / rel),
+            }
+            bodies, aborted = {}, False
+            for label, (app, path) in targets.items():
+                try:
+                    raw = path.read_bytes()
+                except OSError as e:
+                    rep.add(Result("T0", name, FAIL,
+                                   detail=f"{label} file unreadable: firmware/{app}/{rel} "
+                                          f"({type(e).__name__})",
+                                   evidence=str(e), duration_s=time.time() - t0))
+                    aborted = True
+                    break
+                body, err = _mirror_body(raw)
+                if err is not None:
+                    rep.add(Result("T0", name, FAIL,
+                                   detail=f"{label} firmware/{app}/{rel}: {err}",
+                                   duration_s=time.time() - t0))
+                    aborted = True
+                    break
+                bodies[label] = body
+            if aborted:
+                continue
+
+            cb, sb = bodies["clone"], bodies["source"]
+            if cb == sb:
+                rep.add(Result("T0", name, PASS,
+                               detail=f"{clone}/{rel} body == {prod}/{rel} "
+                                      f"({len(cb)} lines below the banner)",
+                               duration_s=time.time() - t0,
+                               meta={"clone": clone, "source": prod, "file": rel, "body_lines": len(cb)}))
+                continue
+
+            diff = difflib.unified_diff(
+                [x.decode("utf-8", "replace") for x in cb],
+                [x.decode("utf-8", "replace") for x in sb],
+                fromfile=f"firmware/{clone}/{rel}", tofile=f"firmware/{prod}/{rel}",
+                lineterm="", n=2)
+            ev = "\n".join(list(diff)[:40]) or "(bodies differ in length only)"
+            rep.add(Result("T0", name, FAIL,
+                           detail=(f"{clone}/{rel} has DRIFTED from its source {prod}/{rel}: the "
+                                   f"app_main.c body below the banner no longer matches. Re-sync them "
+                                   f"(copy the body, keep each file's own /* */ banner): "
+                                   f"diff firmware/{clone}/{rel} firmware/{prod}/{rel}"),
+                           evidence=ev, duration_s=time.time() - t0,
+                           meta={"clone": clone, "source": prod, "file": rel}))
+
+
 def _tail(text: str, lines: int = 12) -> str:
     """The last N non-empty lines — enough to identify a compile error."""
     keep = [l for l in text.splitlines() if l.strip()]
@@ -111,6 +207,10 @@ def run(apps: Optional[list[str]] = None, boards: Optional[list[str]] = None,
     # Version-pin the MM6108 firmware blob: a no-hardware tripwire for a silent fw bump (1.17.9
     # roughly doubles STA power-save current -- the regression the tp tier exists to catch).
     _check_fw_blob(rep)
+
+    # Clone-drift tripwire: a faithful test-* fixture must not silently diverge from the rimba-* example
+    # it clones (app_main.c body below the banner), or the fixture would test stale code. No hardware.
+    _check_clone_mirrors(rep)
 
     selected = [a for a in M.T0_APPS if not apps or a.name in apps]
     if apps:

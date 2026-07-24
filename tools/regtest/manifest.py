@@ -453,6 +453,18 @@ T2_NOT_IMPLEMENTED: dict[str, str] = {}
 
 APPS_BY_NAME = {a.name: a for a in APPS}
 
+#: Faithful test-* fixtures whose app_main.c BODY must stay byte-for-byte identical to a production
+#: rimba-* example. The leading /* */ banner is intentionally per-app (it names the fixture) and is
+#: EXCLUDED from the compare; everything from the first `#include` to EOF must match. T0 asserts this
+#: (t0_build._check_clone_mirrors) so a clone can't silently drift from its source -- a patch to one
+#: app_main.c that forgets the other would leave the fixture testing stale code. ONLY verbatim body
+#: clones belong here (an explicit allowlist): test-mesh-gate-ap is a byte clone of the shipped gate;
+#: DERIVED fixtures (test-idle, test-deepsleep-cycle) are deliberately absent. Adding a clone later =
+#: one new row. clone -> (source_app, (repo-relative files under firmware/<app>/, ...)).
+CLONE_MIRRORS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "test-mesh-gate-ap": ("rimba-halow-mesh-ap", ("main/app_main.c",)),
+}
+
 #: Apps that participate in the T0 matrix.
 T0_APPS = tuple(a for a in APPS if a.boards)
 
