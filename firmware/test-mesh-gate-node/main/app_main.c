@@ -164,7 +164,10 @@ void app_main(void)
                  STA_TARGET, PING_COUNT);
     esp_ping_start(ping);
     int guard = 0;
-    while (!s_ping_done && guard < (PING_COUNT + 15)) { vTaskDelay(pdMS_TO_TICKS(1000)); guard++; }
+    /* +8 slack (not +15): a PING_COUNT-at-1s session self-terminates in ~PING_COUNT s (esp_ping counts
+     * timeouts and ends), so tighter dead-wait here keeps the reporter's worst-case timeline (bring-up +
+     * PEER_WAIT_S + settle + ping) comfortably under the harness REPORTER_TIMEOUT_S capture window. */
+    while (!s_ping_done && guard < (PING_COUNT + 8)) { vTaskDelay(pdMS_TO_TICKS(1000)); guard++; }
 
     TEST_STEP("delivery", s_replies >= REPLY_FLOOR, "replies=%d/%d timeouts=%d first_reply_seq=%d",
                  s_replies, PING_COUNT, s_timeouts, s_first_reply_seq);

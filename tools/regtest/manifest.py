@@ -418,8 +418,8 @@ APPS: tuple[App, ...] = (
     App("test-mesh-gate-relay",
         notes="mesh-gate S4c (Case B reporter): symmetric 3-role NODE<->RELAY<->GATE (role-by-MAC, "
               "forced-line allowlist). GATE asserts ae_rx>0 with eaddr1/eaddr2 preserved through the "
-              "relay -- covers S2-learn + S3 + S4a + S4b + S4c. GATE=board2 (require_wired). "
-              "Needs CONFIG_HALOW_AP_MODE=y."),
+              "relay -- covers S2-learn + S3 + S4a + S4b + S4c. RELAY=board2 (require_wired; does the "
+              "forwarding), GATE=board0 (the reporter). Needs CONFIG_HALOW_AP_MODE=y."),
     App("test-mesh-ae",
         notes="mesh-gate S3/S5b: AE injector -- originates 6-address AE_A5_A6 frames (LINUX_MAC/EADDR1/"
               "MESH_ID configurable). Verdict is receiver-side (Linux `iw mpp dump` or a paired "

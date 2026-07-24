@@ -1,4 +1,4 @@
-# rimba-halow-mesh-ap app config (layered on top of boards/<BOARD>/ defaults).
+# test-mesh-gate-ap app config (a test-* clone of rimba-halow-mesh-ap; layered on top of boards/<BOARD>/ defaults).
 # Mesh AND SoftAP share the AP-type interface + BSS_CONFIG/beacon code path, so
 # the AP-mode morselib sources must be compiled in.
 CONFIG_HALOW_AP_MODE=y
