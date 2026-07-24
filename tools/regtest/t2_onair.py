@@ -69,7 +69,13 @@ def _flash(app: str, board: str, port: Optional[str], timeout: int,
             except (ValueError, OSError):
                 have = None
         if have != want:
-            cache.unlink()          # force a clean reconfigure with exactly `want`
+            # Config changed: drop the cache to force a clean reconfigure with exactly `want`, AND drop the
+            # now-stale stamp. The stamp is (re)written only on a SUCCESSFUL flash below, so if THIS flash
+            # fails after idf.py has already reconfigured the cache to `want`, the next flash must still see
+            # "no stamp" and reset again. Leaving the old stamp in place would let a later flash whose config
+            # equals it skip a needed reset and flash the stale (already-reconfigured) binary.
+            cache.unlink()
+            stamp.unlink(missing_ok=True)
     cp = make("flash", app, board, port=port, timeout=timeout, make_vars=make_vars or None)
     if cp.returncode == 0:
         try:

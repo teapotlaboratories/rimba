@@ -30,6 +30,14 @@
 
 #include "test_report.h"
 
+/* The two build flags are coupled: the NO_PING responder branch needs assign_static_ip() (TEST_STATIC_IP)
+ * and the DHCP reporter branch needs wait_for_dhcp_ip() (the #else) -- so exactly one of them defined is a
+ * broken build. Fail loudly here instead of with an opaque "undefined reference". Valid: both (silent static
+ * responder) or neither (DHCP pinger reporter). */
+#if defined(TEST_NO_PING) ^ defined(TEST_STATIC_IP)
+#error "test-mesh-gate-sta: pass STA_IP= and NO_PING=1 together (silent static responder), or neither (DHCP reporter)."
+#endif
+
 #define NAME       "mesh-gate-bridge"
 #define RIG        "STA (DHCP) behind the gate's AP; pings a mesh node zero-config across the L2 bridge"
 

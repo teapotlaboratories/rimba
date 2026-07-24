@@ -1,6 +1,7 @@
 /*
- * rimba-halow-mesh-ap — all-ESP32 Mesh-gate: 802.11s mesh + co-channel SoftAP on ONE MM6108,
- * L2-BRIDGING traffic between them on ONE flat subnet (the all-ESP 802.11s gate).
+ * test-mesh-gate-ap — the GATE fixture for the mesh-gate T2 tests; a test-* clone of the
+ * rimba-halow-mesh-ap example (keep them in sync). All-ESP32 Mesh-gate: 802.11s mesh + co-channel
+ * SoftAP on ONE MM6108, L2-BRIDGING traffic between them on ONE flat subnet (the all-ESP 802.11s gate).
  *
  * Bring-up order is MESH FIRST (mesh owns the primary vif) then the AP (secondary vif):
  *      mmhalow_init  ->  mmwlan_mesh_start  ->  mmwlan_ap_enable
