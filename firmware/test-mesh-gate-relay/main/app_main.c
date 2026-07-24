@@ -35,21 +35,25 @@
 #include "mmhalow.h"
 #include "mmwlan.h"
 #include "umac/mesh/umac_mesh.h"
+#include "test_report.h"
 
 #define MESH_ID         "rimba-smesh"
 #define MESH_S1G_CHAN   27
 #define MESH_MAX_PLINKS 16
 
-/* The line topology (build-time, defaults board0/board1/board2). */
-#ifndef TEST_NODE_MAC
-#define TEST_NODE_MAC  "e2:72:a1:f8:ef:a4"   /* board0 — the send_to_gates node   */
+/* The line topology (build-time, defaults board0/board1/board2). Uses the harness-threaded MESH_*_MAC
+ * flags (Makefile -> TEST_MESH_*_MAC) so the T2 orchestrator's build_mac_var feeds each board's mesh_mac:
+ * ORIGIN = NODE (the send_to_gates initiator), RELAY = the relay, DEST = the GATE (2 hops away). */
+#ifndef TEST_MESH_ORIGIN_MAC
+#define TEST_MESH_ORIGIN_MAC "e2:72:a1:f8:ef:a4"   /* board0 — NODE (send_to_gates initiator) */
 #endif
-#ifndef TEST_RELAY_MAC
-#define TEST_RELAY_MAC "e2:72:a1:f8:f9:40"   /* board1 — the intermediate relay   */
+#ifndef TEST_MESH_RELAY_MAC
+#define TEST_MESH_RELAY_MAC  "e2:72:a1:f8:f9:40"   /* board1 — the intermediate RELAY         */
 #endif
-#ifndef TEST_GATE_MAC
-#define TEST_GATE_MAC  "e2:72:a1:f8:f0:08"   /* board2 — the gate (2 hops away)   */
+#ifndef TEST_MESH_DEST_MAC
+#define TEST_MESH_DEST_MAC   "e2:72:a1:f8:f0:08"   /* board2 — the GATE (2 hops away)         */
 #endif
+#define GATE_DEADLINE_S 100   /* GATE emits its TEST verdict by this uptime (< the harness 130s window) */
 
 /* The off-mesh endpoints the node's send_to_gates frame carries. */
 static const uint8_t FINAL_DST[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0xcc }; /* eaddr1 (addr5) */
@@ -111,9 +115,9 @@ static void peer_beacon_cb(const struct mmwlan_rx_frame_info *info, void *arg)
 
 void app_main(void)
 {
-    parse_mac(TEST_NODE_MAC, MAC_NODE);
-    parse_mac(TEST_RELAY_MAC, MAC_RELAY);
-    parse_mac(TEST_GATE_MAC, MAC_GATE);
+    parse_mac(TEST_MESH_ORIGIN_MAC, MAC_NODE);
+    parse_mac(TEST_MESH_RELAY_MAC, MAC_RELAY);
+    parse_mac(TEST_MESH_DEST_MAC, MAC_GATE);
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -157,12 +161,14 @@ void app_main(void)
     if (is_gate)
     {
         mmwlan_mesh_set_root_announcements(true, true, 5000); /* GATE emits gate RANNs */
+        TEST_BEGIN("mesh-gate-relay", "3-ESP forced line NODE<->RELAY<->GATE (S2 gate-learn + S3 + S4a-c)");
         ESP_LOGI(TAG, "==> GATE up (RANN + gate). Watching for the AE frame relayed via the RELAY.");
     }
     else
     {
         ESP_LOGI(TAG, "==> %s up.", role);
     }
+    ESP_LOGI(TAG, "mesh-up: role=%s", role); /* harness up_marker for the support (NODE/RELAY) roles */
 
     uint32_t s = 0;
     bool announced = false;
@@ -195,6 +201,36 @@ void app_main(void)
          * proves the proxied endpoints survived the 2-hop relay (S4c). */
         uint8_t ae1[6] = {0}, ae2[6] = {0};
         uint32_t ae_rx = mmwlan_mesh_ae_rx_probe(ae1, ae2);
+
+        /* GATE is the harness REPORTER: it PASSes when it has received an AE frame two hops away with the
+         * proxied endpoints intact (eaddr1==02:..:cc, eaddr2==02:..:dd). That single condition exercises
+         * the whole chain: S2 (the NODE learned this gate via the relay-reflooded RANN), S4b (send_to_gates),
+         * S4c (the RELAY preserved the AE endpoints), S3 (this gate parsed the AE), S4a (mpp learned). */
+        if (is_gate)
+        {
+            if (ae_rx > 0 && memcmp(ae1, FINAL_DST, 6) == 0 && memcmp(ae2, SRC_HOST, 6) == 0)
+            {
+                TEST_PASS("ae_rx=%" PRIu32 " eaddr1(DA)=02:00:00:00:00:cc eaddr2(SA)=02:00:00:00:00:dd "
+                          "preserved through the 2-hop relay (S2+S3+S4a-c); peers=%u", ae_rx, (unsigned)n_peers);
+                TEST_END("mesh-gate-relay");
+                for (;;) vTaskDelay(pdMS_TO_TICKS(10000)); /* park: radio stays up; harness reflashes idle after */
+            }
+            if (s >= GATE_DEADLINE_S)
+            {
+                if (ae_rx > 0)
+                    TEST_FAIL("ae_rx=%" PRIu32 " but eaddr mismatch (eaddr1=%02x:%02x:%02x:%02x:%02x:%02x) "
+                              "-- endpoints NOT preserved through the relay (S4c broke)", ae_rx,
+                              ae1[0], ae1[1], ae1[2], ae1[3], ae1[4], ae1[5]);
+                else if (n_peers == 0)
+                    TEST_INCONCLUSIVE("no mesh peer within %" PRIu32 "s -- GATE never peered the RELAY (RF/rig?)", s);
+                else
+                    TEST_FAIL("no AE frame in %" PRIu32 "s (peers=%u) -- RANN discovery / send_to_gates / relay "
+                              "chain did not deliver an AE frame to the gate", s, (unsigned)n_peers);
+                TEST_END("mesh-gate-relay");
+                for (;;) vTaskDelay(pdMS_TO_TICKS(10000));
+            }
+        }
+
         if (s % 5 == 0)
         {
             ESP_LOGI(TAG, "role=%s uptime=%" PRIu32 "s peers=%u gates=%u ae_rx=%" PRIu32, role, s,

@@ -1,0 +1,5 @@
+# The Morse Micro components are vendored locally at the repo root under
+# components/ and added via EXTRA_COMPONENT_DIRS (see ../CMakeLists.txt), so there
+# are no registry dependencies here — only the ESP-IDF version floor.
+dependencies:
+  idf: ">=5.4.2,<6.0"
