@@ -124,9 +124,13 @@ toward the target client (3-node mesh+AP+STA; **mesh+AP concurrency confirmed wo
 `2026-07-22-mesh-gate-s5b-gate-egress.md`. **✅ S5c DONE + ON-AIR VERIFIED (2026-07-22)** — the gate proxies an AP
 client's frame INTO the mesh (new `mmwlan_mesh_tx_proxied`; `gw_ap_rx_cb`), the mesh node learns `mpp(client→gate)`;
 **so the GATE now BRIDGES BOTH DIRECTIONS** (3-node mesh+AP+STA); worklog `2026-07-22-mesh-gate-s5c-ap-ingress.md`.
-Remaining = L2-bridge finishing touches (bidirectional round-trip + single-subnet/retire `MESH_GATE_IP` + proxy-ARP
-via multicast AE). S1–S5c uncommitted in `components/halow`; S5b/S5c in the (tracked) gate app. Verified 2.12.3 anchors live in the S1–S4 code comments (the §3 table below still
-shows stale 2.10.4 line numbers — re-pin pending).
+The whole L2 bridge (S1–S5c + round-trip + broadcast both ways + proxy-ARP + retire-L3) is **MERGED**
+(rimba#42/#43/#44; mm-esp32-halow#27; `components/halow` `8a70405c`). **The §3 table below is re-pinned to the
+as-built 2.12.3 anchors and RE-VERIFIED 2026-07-24** against morselib `8a70405c` (files under `umac/mesh/` +
+`umac/datapath/`) + Linux `372414fd4` (6.12.21): every morselib and Linux `file:line` was re-grepped in both
+trees — all valid (exact, or within 1–2 lines for the AE-parse region). The one open item before S6 is the
+S6-Part-0 gate-emit change (`mmwlan_mesh_set_root_announcements(true,true,5000)` in the production gate app),
+done + bench-verified 2026-07-24 (`2026-07-24-mesh-gate-part0-gate-emit-rann.md`).
 
 **S1 — RANN element + HWMP builder extension + proactive-root timer (GATE side).** Gate periodically
 broadcasts a 21-octet RANN with `RANN_FLAG_IS_GATE`; no node behaviour change (fully additive). Edits:
@@ -175,12 +179,13 @@ discovery-only fallback (which does *not* by itself deliver standards-way reacha
 
 ## 3. Function-level code-map skeleton (ship per `[[porting-ships-verified-codemap]]`)
 
-**Verified 2026-07-22** (as-built). morselib paths are under
+**Verified 2026-07-22 (as-built); RE-VERIFIED 2026-07-24** against morselib `8a70405c` + Linux `372414fd4`
+(6.12.21) — every anchor below re-grepped in both trees, all valid. morselib paths are under
 `components/halow/.../framework/morselib/src/umac/` — `mesh/umac_mesh.c` (+ `.h`) and
 `datapath/umac_datapath.c`; app paths under `firmware/`. Linux reference = the bench-pinned
-`chronium:halow/rpi-linux` at commit `372414fd4` (kernel 6.12.x); `net/mac80211/` unless noted. Every
-`file:line` below was grepped in both trees on 2026-07-22 (definition sites, not call sites, except where
-marked "@call").
+`chronium:~/halow/rpi-linux` at commit `372414fd4` (kernel 6.12.21); `net/mac80211/` unless noted. Every
+`file:line` below was grepped in both trees (definition sites, not call sites, except where marked "@call").
+Per `[[porting-ships-verified-codemap]]`.
 
 | Stage | New/edited morselib symbol | morselib file:line | Linux reference | Linux file:line |
 |---|---|---|---|---|

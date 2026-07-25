@@ -7,3 +7,7 @@ idf_component_register(
 if(DEFINED TEST_NO_PING)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_NO_PING=1")
 endif()
+# MESH_ID=rimba-smesh to peer with a live Linux gate (S6 interop Case A).
+if(DEFINED TEST_MESH_ID)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_MESH_ID=\"${TEST_MESH_ID}\"")
+endif()

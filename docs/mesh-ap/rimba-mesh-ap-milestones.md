@@ -677,7 +677,15 @@ rejects the {AP, MESH} pair; and `mmwlan_mesh_start` calls `umac_mesh_tear_down_
     [rimba gate/app PR](https://github.com/teapotlaboratories/rimba/pull/42). **The L3 path is now ✅ RETIRED
     (2026-07-23): a pure L2 bridge on ONE flat `10.9.9.0/24` — `ip_forward` / the `192.168.12.x` AP subnet /
     `MESH_GATE_IP` all deleted; AP clients DHCP a `10.9.9.x` and reach mesh nodes zero-config, on-air verified
-    (STA `DHCP lease 10.9.9.2` → `reply from 10.9.9.100 seq=1`).** Remaining: **S6** live-Linux interop.
+    (STA `DHCP lease 10.9.9.2` → `reply from 10.9.9.100 seq=1`).** **S6 live-Linux interop is now ✅ DONE
+    (2026-07-24) → the mesh-gate port is FEATURE-COMPLETE + live-Linux interop-verified both directions:**
+    Part 0 (the production gate `rimba-halow-mesh-ap` now emits a discoverable RANN via
+    `mmwlan_mesh_set_root_announcements(true,true,5000)`; branch `feat/gate-emit-rann`, held), P1 Case A (a
+    Linux gate L2-bridges an off-mesh host to an ESP node — the "can the morse mesh vif be bridged?" wildcard,
+    resolved YES via enslave-first on a mesh-point iface; 14/14 through the bridge), P2 Case B (a live Linux
+    node discovers the production ESP gate + re-floods its RANN + `iw mpp dump` learns an ESP AE source), P3
+    (production RANN + gate-bit beacon byte-identical to a live Linux gate). Worklogs
+    `docs/worklog/2026-07-24-mesh-gate-{part0-gate-emit-rann,s6-p1-linux-gate-bridge,s6-p2-p3-case-b-signoff}.md`.
     Full design + code-map:
     [`rimba-mesh-ap-mesh-gate-discovery-design.md`](rimba-mesh-ap-mesh-gate-discovery-design.md); was ~12-19
     session-days (S1-S6). Pragmatic interim = DHCP — **STA zero-config DONE + hardware-verified
