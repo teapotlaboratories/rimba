@@ -172,6 +172,41 @@ def bring_up_mesh(host: str) -> tuple[bool, str, Optional[Callable[[], None]]]:
     return True, detail, teardown
 
 
+def bring_up_gate(host: str) -> tuple[bool, str, Optional[Callable[[], None]]]:
+    """Bring a Linux node up as a `rimba-smesh` mesh point AND a PROACTIVE_RANN gate.
+
+    = bring_up_mesh + the documented S6 gate recipe layered at runtime after MESH-GROUP-STARTED:
+    `iw dev wlan1 set mesh_param mesh_hwmp_rootmode 4 / mesh_gate_announcements 1 /
+    mesh_hwmp_rann_interval 5000 / mesh_fwding 1`. An ESP node on the same mesh then learns this node
+    as a gate from its RANN (mmwlan_mesh_gate_count() > 0) -- the S6 `mesh-gate-linux` discovery test.
+    Returns (ok, detail, teardown); teardown is the mesh teardown (gate mode dies with the mesh).
+
+    Hardware-verified 2026-07-24 (chronite + chronogen): the ESP learned the live Linux gate via RANN.
+    """
+    ok, detail, teardown = bring_up_mesh(host)
+    if not ok:
+        return ok, detail, teardown
+
+    # The RANN interval is a RAW numeric on the wire (no ms->TU convert), so it MUST match the ESP's
+    # value (5000) or a byte-diff would differ -- see docs/mesh-ap/rimba-mesh-ap-s6-interop-plan.md.
+    gate = ssh_run(host,
+                   "sudo iw dev wlan1 set mesh_param mesh_hwmp_rootmode 4; "
+                   "sudo iw dev wlan1 set mesh_param mesh_gate_announcements 1; "
+                   "sudo iw dev wlan1 set mesh_param mesh_hwmp_rann_interval 5000; "
+                   "sudo iw dev wlan1 set mesh_param mesh_fwding 1; "
+                   "printf 'rootmode='; sudo iw dev wlan1 get mesh_param mesh_hwmp_rootmode; "
+                   "printf 'gate_ann='; sudo iw dev wlan1 get mesh_param mesh_gate_announcements",
+                   timeout=25)
+    flat = gate.stdout.replace(" ", "")
+    if "rootmode=4" not in flat or "gate_ann=1" not in flat:
+        # Gate mode did not take -> the ESP would never learn a gate. Surface it as a bring-up failure
+        # (teardown is still valid so the mesh is torn down after).
+        return (False,
+                f"{host}: mesh up but gate mode did not apply (readback: {gate.stdout.strip()[:160]!r})",
+                teardown)
+    return True, detail + " + PROACTIVE_RANN gate (rootmode 4 / gate_ann 1 / rann 5000)", teardown
+
+
 # --- AP (hostapd_s1g) bring-up, for the tp power tier -----------------------
 
 #: The reference hostapd_s1g AP config (SSID rimba-ping / SAE rimbahalow / dtim1 / PMF / ch27) —

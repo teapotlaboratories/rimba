@@ -326,12 +326,15 @@ def _resolve_build_vars(t, assign: dict, linux_mac: Optional[str],
     # and needs no MAC/IP -- so it is excluded here (no unused -D on that reporter's build).
     reporter = t.reporter_role
     linux_role = next((r for r in t.roles if r.device.startswith("linux:")
-                       and r.linux_setup == "mesh-peer"), None)
+                       and r.linux_setup in ("mesh-peer", "mesh-gate")), None)
     if linux_role is not None and reporter is not None:
         host = M.DEFAULT_LINUX_PEER
         node = M.LINUX_NODES.get(host)
         add(reporter.app, "LINUX_MAC", linux_mac or (node.mesh_mac if node else None))
-        add(reporter.app, "LINUX_IP", linux_ip or (node.mesh_ip if node else None))
+        # Only the ping-based mesh-peer reporter needs the peer IP; the mesh-gate discovery reporter
+        # (test-mesh-gate-linux) recognises the gate by MAC + asserts known_gates>0, no ping.
+        if linux_role.linux_setup == "mesh-peer":
+            add(reporter.app, "LINUX_IP", linux_ip or (node.mesh_ip if node else None))
 
     # (b) Symmetric MAC-topology roles -> their shared app (all get all the MACs).
     for role in t.roles:
@@ -420,6 +423,10 @@ def _bring_up_linux(role, host: str):
 
     if role.linux_setup == "mesh-peer":
         return linux_peer.bring_up_mesh(host)
+    if role.linux_setup == "mesh-gate":
+        # A `rimba-smesh` mesh point in PROACTIVE_RANN GATE mode -- the ESP reporter
+        # (test-mesh-gate-linux) learns it as a gate from its RANN (S6 discovery interop).
+        return linux_peer.bring_up_gate(host)
     if role.linux_setup == "hostapd-ap":
         # A Linux hostapd_s1g SoftAP (rimba-ping/SAE/dtim1/PMF/ch27) the ESP STA associates to --
         # used by twt-assoc to prove the assoc-embedded path on a REAL Linux AP.

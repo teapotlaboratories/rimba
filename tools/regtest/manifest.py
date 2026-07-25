@@ -438,6 +438,12 @@ APPS: tuple[App, ...] = (
         notes="mesh-gate GATE fixture (support role for both mesh-gate-bridge + mesh-gate-b2): the retire-L3 "
               "mesh + co-channel SoftAP L2 bridge + proxy-ARP + DHCP on one MM6108 (a test-* clone of the "
               "rimba-halow-mesh-ap example). board2, up_marker 'L2 bridge ready'. Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-gate-linux",
+        notes="mesh-gate S6 (Case B / discovery interop) REPORTER: joins a live Linux mesh whose node is a "
+              "PROACTIVE_RANN gate (linux_peer.bring_up_gate over ssh), peers with it, and asserts it LEARNED "
+              "that node as a gate via RANN (mmwlan_mesh_gate_count>0). PASS = peered + known_gates>0; FAIL = "
+              "peered but known_gates stayed 0 (S2 RX interop regressed); INCONCLUSIVE = no Linux plink (gate "
+              "down/RF). LINUX_MAC= from LINUX_NODES. board2. Needs CONFIG_HALOW_AP_MODE=y."),
     # ---- tp (power) tier (firmware/test-power) -------------------------
     App("test-power",
         notes="tp power tier: the C6-triggered 4-tier PS ladder DUT (board2, require_wired). The "
