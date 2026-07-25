@@ -939,6 +939,13 @@ needs attention is the part that is silently rig-specific.*
 - ☐ **Dead toggles / apps** (unchanged, low priority) — the `MESH_LINUX_INTEROP` toggle; the disabled
   static-ARP path in `app_main.c` (`g_static_arp_*`, superseded by group forwarding); one-off test apps
   (`rimba-halow-meshscan`, `rimba-halow-mesh-monitor`).
+- ☐ **`mesh-gate-linux` test strictness + a mesh-gate accessor** *(low priority)* — the T2 `mesh-gate-linux`
+  interop test asserts `mmwlan_mesh_gate_count() > 0` (the ESP learned *a* gate), not that the learned gate
+  is specifically the Linux peer's MAC. Exact in the harness's 2-node topology (the Linux node is the only
+  possible gate on the mesh), but a multi-gate mesh could pass on the wrong gate. morselib exposes no
+  gate-MAC accessor today; add one (e.g. `mmwlan_mesh_gate_at(i, mac_out)` / a gate-list dump, mirroring
+  `mmwlan_mesh_peer_count`), then tighten `test-mesh-gate-linux` to assert the learned gate == `LINUX_MAC`.
+  Not reachable on the current rig. Surfaced in the branch review of the S6 mesh-gate work.
 
 **AP / TWT / RAW**
 - ☐ **AID ≥ 64 on air** — the 2nd–4th TIM blocks aren't exercised (the dense allocator only reaches
