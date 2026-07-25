@@ -51,6 +51,9 @@
 #define MESH_ID         "rimba-mesh"
 #define MESH_S1G_CHAN   27
 #define MESH_MAX_PLINKS 16
+/* RANN gate-announcement interval. RAW numeric on the wire (no ms->TU convert), so the ESP gate and
+ * the bench Linux gate MUST use the SAME value; 5000 matches the Linux bench default + test-mesh-gate. */
+#define MESH_RANN_INTERVAL_MS 5000
 
 /* ---- AP params (match rimba-halow-ap / rimba-halow-sta) -------------------- */
 #define LINK_SSID       "rimba-ping"
@@ -658,6 +661,15 @@ void app_main(void)
     enum mmwlan_status st = mmwlan_mesh_start(&mesh_args);
     if (st != MMWLAN_SUCCESS) { ESP_LOGE(TAG, "mesh_start FAILED %d", (int)st); return; }
     ESP_LOGI(TAG, "==> MESH vif up (primary).");
+
+    /* Advertise as a discoverable 802.11s gate: emit a PROACTIVE_RANN with RANN_FLAG_IS_GATE every
+     * MESH_RANN_INTERVAL_MS (mirrors dot11MeshHWMPRootMode=PROACTIVE_RANN + dot11MeshGateAnnouncementProtocol
+     * on a Linux gate; ref firmware/test-mesh-gate). Additive/safe: the ESP<->ESP L2 bridge learns MPP
+     * from proxied data frames, so this only ADDS standards gate discovery (Case B: a Linux node
+     * discovering this ESP gate). Multihop defaults on (g_mesh_multihop) so this is not a no-op. */
+    mmwlan_mesh_set_root_announcements(/*root_rann=*/true, /*is_gate=*/true, MESH_RANN_INTERVAL_MS);
+    ESP_LOGI(TAG, "==> gate RANN announcements ON (IS_GATE, interval=%dms) on chan %d.",
+             MESH_RANN_INTERVAL_MS, MESH_S1G_CHAN);
 
     /* --- 2) SoftAP on the SECONDARY vif ----------------------------------- */
     struct mmwlan_ap_args ap_args = MMWLAN_AP_ARGS_INIT;
