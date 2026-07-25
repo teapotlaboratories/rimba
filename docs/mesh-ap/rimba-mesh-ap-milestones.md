@@ -953,8 +953,17 @@ needs attention is the part that is silently rig-specific.*
 - ☐ **Linux STA as TWT *requester*** vs the ESP32 AP responder — the strongest responder interop test.
   Needs the morse driver's requester-role bring-up (`twt_requester=1` global + assoc-time negotiation;
   `morse_cli twt conf` alone returns -1 / "non-requester").
-- ◐ **RAW (Restricted Access Window) — AP-side, port from Linux.** morselib has only RAW *types/caps*
-  today (`MORSE_CAPS_RAW`, the S1G cap-6 bit, `raw_sta_priority`) — **no AP-side implementation**.
+- ◐ **RAW (Restricted Access Window) — AP-side, port from Linux.**
+  **What it gives us:** the AP partitions the post-beacon airtime into time slots and assigns groups of
+  STAs (by AID) to them, so only a subset may contend at once. Three payoffs, all at HaLow scale: (1)
+  **contention control / throughput** as the client count grows into the 100s–1000s (fewer collisions,
+  goodput holds up); (2) **STA power-save** — a STA knows its slot, so it dozes the rest of the beacon
+  interval (complements TWT service periods); (3) **per-priority grouping** (QoS UP → own window). The
+  driver is an **ESP gate/AP serving a dense HaLow fleet**; it pairs with AID ≥ 64 + TWT. (Note: *STA-side*
+  RAW — a client *obeying* the schedule — already works on the ESP via the MM6108 firmware; this item is
+  the *AP-side* that *defines* the schedule.)
+  morselib has only RAW *types/caps* today (`MORSE_CAPS_RAW`, the S1G cap-6 bit, `raw_sta_priority`) —
+  **no AP-side implementation**.
   **✅ Recon/feasibility DONE 2026-07-24 → [`docs/design-specification/rimba-raw-apside-design.md`](../design-specification/rimba-raw-apside-design.md)
   (verdict: GO-WITH-CAVEATS).** The advertise-half (build + insert the RPS IE, EID 66) is a tractable
   host-IE port modeled on the mesh RANN + the existing S1G-TIM builder; the enforce-half hinges on whether
