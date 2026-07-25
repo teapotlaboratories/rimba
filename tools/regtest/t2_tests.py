@@ -732,6 +732,57 @@ MESH_LINUX = T2Test(
     ),
 )
 
+MESH_GATE_LINUX = T2Test(
+    slug="mesh-gate-linux",
+    pass_if="ESTAB peer == the Linux gate's MAC + known_gates>0 (learned it via RANN)",
+    title="ESP discovers a live Linux 802.11s gate via RANN (S6 Case B)",
+    rig={"linux": "chronite — a real Linux mesh node in PROACTIVE_RANN gate mode (rootmode 4 / "
+                  "gate_announcements 1 / rann 5000), brought up over ssh",
+         "esp": "board2 — test-mesh-gate-linux (reporter): peers with the Linux gate + asserts it "
+                "learned it as a gate"},
+    roles=(
+        # Linux support role: the orchestrator brings chronite up as a `rimba-smesh` mesh point AND a
+        # PROACTIVE_RANN gate over ssh (linux_peer.bring_up_gate), then tears it back down. No app / no
+        # up-marker (it's a Linux node, not an ESP the orchestrator flashes).
+        Role(name="linux", device="linux:chronite", linux_setup="mesh-gate"),
+        # ESP reporter: joins the same mesh, asserts an ESTAB peer == the Linux node's MAC, then that
+        # it learned that node as a gate (known_gates>0). LINUX_MAC comes from LINUX_NODES.
+        Role(name="esp", device="board2", app="test-mesh-gate-linux", reporter=True),
+    ),
+    what_it_proves=(
+        "The ESP's S2 RANN-RX path interoperates with a REAL mac80211 gate: the ESP peers with the "
+        "Linux stack (SAE+AMPE) AND records that node as a gate from its live RANN (RANN_FLAG_IS_GATE) "
+        "-- the receive mirror of Part 0 (the production ESP gate emitting a discoverable RANN). "
+        "Verified 2026-07-24: board2 peered with chronite/chronogen + known_gates=1."
+    ),
+    what_it_does_not_prove=(
+        "The AE datapath THROUGH the gate (that is test-mesh-ae + `iw dev wlan1 mpp dump` on the Linux "
+        "node -- S6 P2b), or on-air RANN byte-equivalence (the chronium-monitor byte-diff -- S6 P3). "
+        "This test is discovery-only."
+    ),
+    expectations=(
+        Expectation(
+            metric="ESTAB peer == the Linux gate MAC + known_gates>0",
+            value="peered (SAE+AMPE) with chronite (3c:22:7f:37:51:38) + known_gates>=1 within ~25s of peering",
+            source="docs/mesh-ap/rimba-mesh-ap-s6-interop-plan.md (P2 / Case B); worklog "
+                   "2026-07-24-mesh-gate-s6-p2-p3-case-b-signoff.md (the symmetric ESP-learns-Linux-gate "
+                   "direction of the RANN interop); docs/reference/captures/wpa-smesh.conf",
+            noisy=False,
+            assertion="peering is the binary structural half (SAE+AMPE closed against mac80211 or not); "
+                      "known_gates>0 is the S2 RX interop assertion (the ESP received + accepted + recorded "
+                      "the Linux gate's RANN). Both are RF-independent once peered -- peered-but-no-gate=FAIL "
+                      "(a real RANN-RX interop regression), never-peered=INCONCLUSIVE (gate down / RF / rig).",
+        ),
+    ),
+    manual_steps=(
+        "The Linux side is automated: linux_peer.bring_up_gate(chronite) brings the node up as a "
+        "rimba-smesh mesh point then layers gate mode (`iw set mesh_param mesh_hwmp_rootmode 4 / "
+        "mesh_gate_announcements 1 / mesh_hwmp_rann_interval 5000`), and tears it down after. chronite "
+        "must be reachable by ssh. The ESP mesh ID rimba-smesh MUST match the Linux config (it does). "
+        "chronite's mesh can be flaky (radio-up/bridge load); chronogen is the documented fallback."
+    ),
+)
+
 TWT_ASSOC = T2Test(
     slug="twt-assoc",
     pass_if="assoc-embedded TWT INSTALLED (flow 0..3) on a Linux AP",
@@ -871,6 +922,7 @@ T2_TESTS: tuple[T2Test, ...] = (
     MULTI_TWT,
     MESH_PEERING,
     MESH_LINUX,
+    MESH_GATE_LINUX,
     MESH_RELAY,
     MESH_LARGE_FRAME,
     MESH_LEAF,

@@ -1,0 +1,2 @@
+# Mesh reuses the AP-type interface + beacon path, so AP-mode morselib sources must compile in.
+CONFIG_HALOW_AP_MODE=y
