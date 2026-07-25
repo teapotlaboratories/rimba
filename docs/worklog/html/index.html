@@ -168,12 +168,33 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>74</b> worklogs · 2026-06-17 – 2026-07-18</p>
+<p class="stat"><b>95</b> worklogs · 2026-06-17 – 2026-07-24</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">64</span></h2>
+<h2>July 2026 <span class="mcount">68</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-24-mesh-gate-s6-p2-p3-case-b-signoff.html">
+<div class="card-date">2026-07-24</div>
+<div class="card-title">S6 P2 + P3 (Case B + byte-diff sign-off): S6 COMPLETE</div>
+<div class="card-ex">The last mesh-gate stage, closed. On rimba-mesh (board0 = production ESP gate w/ Part 0 RANN; chronite = Linux node/gate; chronium = sniffer): P2a discovery — chronite peers with board0 and RE-FLOODS its gate RANN on-air (rann_addr + flags=0x01 IS_GATE + seq preserved, hop 0→1/ttl 31→30/metric 0→2410 = a byte-perfect hwmp_rann_frame_process; the mirror of S2). P2b AE/MPP leg (S3-deferred, now closed) — board1 = test-mesh-ae injects AE_A5_A6 frames; chronite iw mpp dump shows 02:00:00:00:00:aa → e2:72:a1:f8:f9:40, the ESP-proxied source learned by Linux mpp_path_add. P3 byte-diff — the production ESP gate's RANN is byte-identical to a live Linux gate's (normalized mask; only rann_addr + seq differ); mesh beacon Formation Info = 0x05 (connected-to-gate) on both sides. So the all-ESP 802.11s mesh-gate now interoperates with mainline Linux net/mac80211 BOTH directions — S6 (Part 0 + P0–P3) done. New artifact: docs/reference/captures/wpa-rmesh.conf.</div>
+<div class="card-meta">S6 COMPLETE · mesh-gate · Case B · byte-diff</div>
+</a>
+
+<a class="card" href="2026-07-24-mesh-gate-s6-p1-linux-gate-bridge.html">
+<div class="card-date">2026-07-24</div>
+<div class="card-title">S6 P1 (Case A): a Linux mesh gate L2-bridges an off-mesh host to an ESP node</div>
+<div class="card-ex">S6 is the last mesh-gate stage — live-Linux interop; P1 is its wildcard: build the Linux-side L2 bridge (mesh vif ↔ a DS segment) so an ESP mesh node reaches an off-mesh host through a Linux gate. The load-bearing unknown — can the morse driver even bridge the 802.11s mesh vif? — is resolved POSITIVELY, with a non-obvious 4-clause recipe: enslave while type=mesh-point (managed is rejected), enslave-FIRST before the mesh joins (survives the join), warm the radio first (a cold bridged channel-set fails -32768), and set the veth DOWN before master (rc=0 silently no-ops otherwise). Proven on-air: off-mesh DS host 10.9.9.60 ↔ ESP node 10.9.9.108 = 14/14 replies, 0% loss, 9–21 ms through the gate's bridge (bidirectional — reply via the ESP's tx_proxied); iw mpp dump shows the ESP-proxied source learned by Linux mpp_path_add. chronite wedged mid-test (mgmt WiFi dropped, needs a power-cycle) → pivoted to chronogen (fallback). ESP change: TEST_MESH_ID override added to test-mesh-gate-node (fixture-only).</div>
+<div class="card-meta">on-air proven · mesh-gate · S6 · Case A</div>
+</a>
+
+<a class="card" href="2026-07-24-mesh-gate-part0-gate-emit-rann.html">
+<div class="card-date">2026-07-24</div>
+<div class="card-title">Part 0: the production gate emits a discoverable RANN (S6 pre-step)</div>
+<div class="card-ex">The all-ESP mesh-gate learns proxy paths from proxied data frames, so the production gate app rimba-halow-mesh-ap never announced itself on-air. S6 Case B (a Linux node discovering the ESP gate the standards way) needs it to emit a RANN with RANN_FLAG_IS_GATE — so after mmwlan_mesh_start() the gate now calls mmwlan_mesh_set_root_announcements(true, true, 5000). Additive/safe: g_mesh_multihop defaults true so it's no silent no-op, and the MPP-from-proxied-frames datapath is untouched. Verified on-air, 3 boards + chronium monitor: (a) the gate's RANN is byte-identical to the S1-verified frame (flags=0x01, ttl=31, interval=5000); (b) the zero-config round-trip is intact (STA DHCPs 10.9.9.2 → pings a mesh node 14/14, 0 drops); (c) a real ESP node peers, receives, and records the gate (known_gates=1). +24 lines across the production gate and its T0-guarded clone; no morselib change. /code-review clean. Held for the work-hours commit rule.</div>
+<div class="card-meta">verified · mesh-gate · Part 0 · gate-emit RANN</div>
+</a>
 
 <a class="card" href="2026-07-23-mesh-gate-retire-l3.html">
 <div class="card-date">2026-07-23</div>
