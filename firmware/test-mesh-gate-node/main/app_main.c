@@ -37,7 +37,13 @@
 #define NAME       "mesh-gate-b2"
 #define RIG        "mesh node pings a silent static AP-client (10.9.9.50) across the gate (B2 + proxy-ARP)"
 
-#define MESH_ID         "rimba-mesh"      /* MATCH the gate's mesh (test-mesh-gate-ap / rimba-halow-mesh-ap) */
+/* Default mesh = "rimba-mesh" (the ESP gate app). Override to "rimba-smesh" (MESH_ID=rimba-smesh) to peer
+ * with a live Linux gate for S6 interop (Case A: this node is the far mesh endpoint reached through the
+ * Linux gate's L2 bridge). */
+#ifndef TEST_MESH_ID
+#define TEST_MESH_ID    "rimba-mesh"
+#endif
+#define MESH_ID         TEST_MESH_ID
 #define MESH_S1G_CHAN   27
 #define MESH_MAX_PLINKS 16
 #define STA_TARGET      "10.9.9.50"       /* the static-IP silent AP-client responder (reporter mode) */
