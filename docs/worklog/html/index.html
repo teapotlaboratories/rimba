@@ -168,12 +168,19 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>95</b> worklogs · 2026-06-17 – 2026-07-24</p>
+<p class="stat"><b>96</b> worklogs · 2026-06-17 – 2026-07-25</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">68</span></h2>
+<h2>July 2026 <span class="mcount">69</span></h2>
 <div class="grid">
+
+<a class="card" href="2026-07-25-risk02-warm-reattach-handoff.html">
+<div class="card-date">2026-07-25</div>
+<div class="card-title">RISK-02 re-measured (~1.7 s / ~367 mJ per wake) + a warm-reattach that crashed</div>
+<div class="card-ex">Two things. Test A re-measured RISK-02 on the current bench (board2 + PPK2 + fw 1.17.8 / morselib 2.12.3, n=12): cold-boot → IBSS-joined → first-frame is ~1.52 s CPU-active (~1.7 s power-on → joined incl. rail/ROM), ~367 mJ (≈20 µAh) per wake, ~64 mA steady joined idle; the two levers are the fw reload (~650 ms) + ibss-join (~800 ms) = 94% of boot. Test C — the "keep the MM6108 warm across sleep, skip the fw reload" optimization — was IMPLEMENTED (6 morselib edits behind a warm_boot gate + a TEST_WARM_CYCLE fixture) and its control path works end-to-end (boot: reset_reason=3 → WARM re-attach fires), but every warm boot then panics with an Interrupt-WDT in mmhalow_init: re-establishing the SPI transport against a chip running application fw storms interrupts. That's the BIT9 HW_REATTACH gap — skipping reset+download is necessary but not sufficient without the reattach handshake. Per the owner's decision it was REVERTED (submodule back to clean main, branch deleted, fixture stripped to the cold Test A tool), with the 6 edits fully specified so it's resumable. Footguns: deep-sleep timer-wake is unachievable on board2 while USB attached (ESP_RST_USB); and a host-clock energy window mis-reads ~34 s/12 J due to USB re-enumeration — anchor at the physical current-rise.</div>
+<div class="card-meta">Test A solid · warm-reattach reverted · RISK-02 · IBSS boottime</div>
+</a>
 
 <a class="card" href="2026-07-24-mesh-gate-s6-p2-p3-case-b-signoff.html">
 <div class="card-date">2026-07-24</div>
