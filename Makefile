@@ -58,8 +58,7 @@ IDF_EXTRA_D := $(if $(LINUX_MAC),-D TEST_LINUX_MAC="$(LINUX_MAC)") \
                $(if $(STA_IP),-D TEST_STATIC_IP="$(STA_IP)") \
                $(if $(PEER_MAC),-D TEST_PEER_MAC="$(PEER_MAC)") \
                $(if $(PING_IP),-D TEST_PING_IP="$(PING_IP)") \
-               $(if $(CREATE),-D TEST_IBSS_CREATE=1) \
-               $(if $(PEER_IP),-D TEST_PEER_IP="$(PEER_IP)") \
+               $(if $(IBSS_CREATE),-D TEST_IBSS_CREATE=1) \
                $(if $(NO_PING),-D TEST_NO_PING=1)
 
 # Source the IDF environment, enter the app dir, then run idf.py with our

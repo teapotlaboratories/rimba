@@ -5,12 +5,13 @@
  *   - CREATE (TEST_IBSS_CREATE=1)  -> the peer/creator. Creates the provisioned cell, pins a static
  *     IP, and lwIP auto-responds to the DUT's pings. Always-on support role (board0). Prints its IP.
  *   - MEASURE (default)            -> the DUT (board2). JOINs the cell, times each cold-boot phase with
- *     esp_timer, pings the peer (TEST_PEER_IP) as soon as its IP is up, and prints ONE summary line
+ *     esp_timer, pings the peer (TEST_PING_IP) as soon as its IP is up, and prints ONE summary line
  *     at the first ICMP reply:  BOOTTIME_MS app=.. fw=.. ibss=.. frame=.. total=..
  *
- * Phase clock: esp_timer_get_time() (us since the ESP-IDF timer started, i.e. early boot). It does NOT
- * see the power-on-edge -> timer-start gap (ROM/2nd-stage bootloader + power ramp) -- that piece is
- * measured host-side from the PPK2 power-on edge to first current activity, and ADDED to `total`.
+ * Phase clock: esp_timer_get_time() (us since the ESP-IDF timer started, i.e. early boot). The printed
+ * `total` therefore EXCLUDES the power-on-edge -> timer-start gap (power ramp + ROM/2nd-stage
+ * bootloader); that piece is measured separately, host-side, from the PPK2 power-on edge to first
+ * current activity, and the host adds it to this number to get the true cold-boot figure.
  * Phases:
  *   app   = timer-start -> app_main entry (ESP-IDF startup before app_main)
  *   fw    = mmhalow_init (mmwlan_boot: MM6108 .mbin load over SPI + chip init) + netif
@@ -45,10 +46,12 @@
 static const uint8_t LINK_BSSID[6] = { 0x02, 0x12, 0x34, 0x56, 0x78, 0x9a };
 static const char *TAG = "ibss-boottime";
 
-/* MEASURE mode pings this peer (the CREATE node's IP); pass at build time. Default = board0's IP on the
- * bench (192.168.13.<board0 mac[5]>). Overridden via PEER_IP= -> TEST_PEER_IP. */
-#ifndef TEST_PEER_IP
-#define TEST_PEER_IP "192.168.13.164"
+/* MEASURE mode pings this peer (the CREATE node's IP); pass it at build time via PING_IP= .
+ * The default exists ONLY so a bare `make build` (i.e. the T0 matrix, which passes no flags) still
+ * compiles -- it is a placeholder, not a bench fact. Any real run must pass PING_IP=<creator's IP>;
+ * the creator prints its own IP at boot for exactly this purpose. */
+#ifndef TEST_PING_IP
+#define TEST_PING_IP "192.168.13.1"
 #endif
 
 static void mac_to_ip(const uint8_t *mac, char *out, size_t outlen)
@@ -97,7 +100,7 @@ static void on_ping_success(esp_ping_handle_t hdl, void *args)
     esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed, sizeof(elapsed));
     /* The single machine-parseable result line. */
     printf("BOOTTIME_MS app=%.1f fw=%.1f ibss=%.1f frame=%.1f total=%.1f (peer=%s seq=%u rtt=%" PRIu32 "ms)\n",
-           app, fw, ibss, frame, total, TEST_PEER_IP, seqno, elapsed);
+           app, fw, ibss, frame, total, TEST_PING_IP, seqno, elapsed);
     fflush(stdout);
     ESP_LOGI(TAG, "==> first frame exchanged: total cold-boot(CPU)->first-reply = %.1f ms", total);
 }
@@ -105,6 +108,13 @@ static void on_ping_success(esp_ping_handle_t hdl, void *args)
 void app_main(void)
 {
     int64_t t0 = esp_timer_get_time();     /* CPU-active reference */
+
+    /* Announce the compiled role FIRST. idf.py's CMakeCache under build/<app>/<board>/ is persistent,
+     * so a -D TEST_IBSS_CREATE from an earlier `make ... IBSS_CREATE=1` SURVIVES a later build that
+     * omits the flag -- the same cache-accumulation footgun tools/regtest/t2_onair.py:50 clears for
+     * harness-driven apps. This fixture is driven BY HAND, so nothing clears it for us: print the role
+     * so a stale-cache misflash is obvious here instead of looking like a dead link. */
+    ESP_LOGW(TAG, "ROLE=MEASURE (DUT) -- will JOIN and time the boot; peer=%s", TEST_PING_IP);
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -115,7 +125,12 @@ void app_main(void)
     ESP_LOGI(TAG, "fw phase (mmhalow_init) done @ %.1f ms", (s_t_fw_us - t0) / 1000.0);
 
     uint8_t mac[6] = { 0 };
-    mmwlan_get_mac_addr(mac);
+    /* A failure here leaves mac all-zero, which derives a bogus if_addr AND a bogus IP -- on the
+     * bench that reads as "the cell never formed" rather than "we never got our MAC". Say so. */
+    if (mmwlan_get_mac_addr(mac) != MMWLAN_SUCCESS) {
+        ESP_LOGE(TAG, "mmwlan_get_mac_addr FAILED -- cannot derive if_addr/IP; halting");
+        for (;;) vTaskDelay(pdMS_TO_TICKS(5000));
+    }
     char my_ip[16];
     mac_to_ip(mac, my_ip, sizeof(my_ip));
 
@@ -135,15 +150,19 @@ void app_main(void)
     }
     s_t_ibss_us = esp_timer_get_time();
     ESP_LOGI(TAG, "ibss JOINED @ %.1f ms (my ip %s); pinging peer %s ...",
-             (s_t_ibss_us - t0) / 1000.0, my_ip, TEST_PEER_IP);
+             (s_t_ibss_us - t0) / 1000.0, my_ip, TEST_PING_IP);
 
+    /* No settle delay here, deliberately: rimba-halow-ibss waits 1500 ms before this call, but that
+     * wait would land inside the measured `frame` phase and inflate the very number we are after.
+     * The netif already exists (mmhalow_init created it in the `fw` phase), so assigning the address
+     * is safe this early; the ping retry loop below absorbs however long the link takes to carry. */
     setup_static_ip(my_ip);
 
     /* Ping the peer immediately (retries every 500 ms until the link carries it). First reply = the
      * first frame exchanged -> on_ping_success stamps the total. */
     ip_addr_t target = { 0 };
     target.type = IPADDR_TYPE_V4;
-    target.u_addr.ip4.addr = esp_ip4addr_aton(TEST_PEER_IP);
+    target.u_addr.ip4.addr = esp_ip4addr_aton(TEST_PING_IP);
     esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
     cfg.target_addr = target;
     cfg.count = ESP_PING_COUNT_INFINITE;
@@ -151,8 +170,16 @@ void app_main(void)
     cfg.timeout_ms  = 500;
     esp_ping_callbacks_t cbs = { .on_ping_success = on_ping_success,
                                  .cb_args = (void *)(intptr_t)t0 };
+    /* Without this branch a failed session is indistinguishable on the console from a link that never
+     * came up: no BOOTTIME_MS line, no error, just an idle board. */
     esp_ping_handle_t ping;
-    if (esp_ping_new_session(&cfg, &cbs, &ping) == ESP_OK) esp_ping_start(ping);
+    esp_err_t perr = esp_ping_new_session(&cfg, &cbs, &ping);
+    if (perr == ESP_OK) {
+        esp_ping_start(ping);
+    } else {
+        ESP_LOGE(TAG, "esp_ping_new_session FAILED (%s) -- no BOOTTIME_MS line will be printed",
+                 esp_err_to_name(perr));
+    }
 
     for (;;) vTaskDelay(pdMS_TO_TICKS(5000));   /* the PPK2 power-cycles us for the next sample */
 }
@@ -161,6 +188,10 @@ void app_main(void)
 
 void app_main(void)
 {
+    /* See the MEASURE-side note: the role flag is sticky in idf.py's persistent CMakeCache, so state
+     * which role actually got compiled in. */
+    ESP_LOGW(TAG, "ROLE=CREATE (peer) -- will CREATE the cell and answer pings, not measure anything");
+
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(esp_netif_init());
@@ -169,7 +200,12 @@ void app_main(void)
     mmhalow_print_version_info();
 
     uint8_t mac[6] = { 0 };
-    mmwlan_get_mac_addr(mac);
+    /* A failure here leaves mac all-zero, which derives a bogus if_addr AND a bogus IP -- on the
+     * bench that reads as "the cell never formed" rather than "we never got our MAC". Say so. */
+    if (mmwlan_get_mac_addr(mac) != MMWLAN_SUCCESS) {
+        ESP_LOGE(TAG, "mmwlan_get_mac_addr FAILED -- cannot derive if_addr/IP; halting");
+        for (;;) vTaskDelay(pdMS_TO_TICKS(5000));
+    }
     char my_ip[16];
     mac_to_ip(mac, my_ip, sizeof(my_ip));
 

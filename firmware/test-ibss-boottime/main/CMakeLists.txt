@@ -4,11 +4,12 @@ idf_component_register(
     REQUIRES halow nvs_flash esp_wifi esp_netif esp_event lwip esp_timer
 )
 
-# CREATE=1 builds the peer/creator (board0); default builds the MEASURE DUT (board2).
+# IBSS_CREATE=1 builds the peer/creator (board0); default builds the MEASURE DUT (board2).
 if(DEFINED TEST_IBSS_CREATE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_IBSS_CREATE=1")
 endif()
-# PEER_IP= the creator's IP the DUT pings (its first reply is the "first frame").
-if(DEFINED TEST_PEER_IP)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_PEER_IP=\"${TEST_PEER_IP}\"")
+# PING_IP= the creator's IP the DUT pings (its first reply is the "first frame"). Same
+# make flag every other pinging fixture uses.
+if(DEFINED TEST_PING_IP)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_PING_IP=\"${TEST_PING_IP}\"")
 endif()
