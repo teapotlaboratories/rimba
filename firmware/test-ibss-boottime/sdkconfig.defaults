@@ -1,0 +1,2 @@
+# IBSS reuses the AP-type interface + BSS_CONFIG/beacon code path, so AP-mode morselib sources compile in.
+CONFIG_HALOW_AP_MODE=y
