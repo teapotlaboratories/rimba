@@ -449,6 +449,16 @@ APPS: tuple[App, ...] = (
         notes="tp power tier: the C6-triggered 4-tier PS ladder DUT (board2, require_wired). The "
               "PPK2 meters the rail; tp_power.py segments the current stream + scores Dyn-PS + "
               "WNM against calibrated bands. STA + TEST| markers; no RESULT (verdict is host-side)."),
+    # ---- RISK-02 boot-time measurement fixture -------------------------
+    # Measured, not scored: like test-power it emits no TEST|RESULT, so it is NOT a T2 test.
+    # It is here so T0 keeps it compiling; the number is read from its console by hand.
+    App("test-ibss-boottime",
+        notes="RISK-02 cold-boot -> IBSS-joined -> first-frame timing fixture. ONE binary, role by a "
+              "build flag: CREATE=1 -> the always-on creator/peer (board0, static IP, lwIP auto-replies); "
+              "default -> the MEASURE DUT (board2) which JOINs, pings PEER_IP=, and prints one "
+              "'BOOTTIME_MS app=.. fw=.. ibss=.. frame=.. total=..' line at the first ICMP reply. No "
+              "TEST|RESULT -- the esp_timer phases miss the power-on-edge gap, which is added host-side "
+              "from the PPK2 trace. Needs CONFIG_HALOW_AP_MODE=y (IBSS reuses the AP-type vif)."),
 )
 
 #: test-* apps that are DEFINED (rig + expectations, in t2_tests.py) and have a README,
