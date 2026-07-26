@@ -60,19 +60,19 @@ When unsure whether a change counts as "doc-only," treat it as code and branch.
 
 ### Review before merge
 
-**Run a code review of the branch before merging, and resolve what it finds.**
-Once the owner asks to land a PR (or before you merge one yourself), first run
-`/review` (`/code-review`) over the branch diff, then triage every finding:
-fix the real ones (or, for a finding the owner decides to defer, record it as a
-tracked TODO — see [Plan first](#plan-first--every-feature-starts-as-a-documented-todo))
-before the merge. Do **not** merge with unaddressed correctness findings still
-open. State the review outcome (what it found, what was fixed vs deferred) when
-you report the merge.
+**Run `/review <PR #>` before merging, and resolve what it finds.** Once the
+owner asks to land a PR (or before you merge one yourself), open the PR first,
+then run `/review <PR #>` against it and triage every finding: fix the real ones
+(or, for a finding the owner decides to defer, record it as a tracked TODO — see
+[Plan first](#plan-first--every-feature-starts-as-a-documented-todo)) before the
+merge. Do **not** merge with unaddressed correctness findings still open. State
+the review outcome (what it found, what was fixed vs deferred) when you report
+the merge.
 
-**`/review` (`/code-review`) is sufficient** — that is the standing review for
-every branch, large or risky included. Do **not** reach for or suggest
-`/code-review ultra` (the billed multi-agent cloud review); the owner will ask
-for it explicitly on the rare occasion they want it.
+**`/review <PR #>` is the only review required** — it is the standing review for
+every PR, large or risky included. Do **not** reach for or suggest the billed
+multi-agent cloud review; the owner will ask for it explicitly on the rare
+occasion they want it.
 
 ### Merging pull requests
 
