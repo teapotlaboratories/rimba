@@ -97,11 +97,22 @@ def _c6_port() -> str | None:
     return cands[0].device
 
 
+class _C6Gone(Exception):
+    """The C6's serial handle died mid-run -- almost always a USB re-enumeration.
+
+    Distinct from "the C6 answered nothing": a write that raises means the fd is dead, so every
+    later command is a no-op. Silently returning [] here once cost a whole dscycle run -- the C6
+    moved ttyUSB0 -> ttyUSB1 mid-run, every wake pulse went into the dead fd, and the tier reported
+    "did it deep-sleep and get woken?" for what was a pure USB event.
+    """
+
+
 class _C6:
     """A thin line-protocol client for firmware/test-c6-trigger over the C6 UART0 console.
 
     Opened ONCE per run and held open (opening can auto-reset the C6 via DTR/RTS, so we do it once and
-    tolerate a single boot). dtr/rts are deasserted to minimise that reset.
+    tolerate a single boot). dtr/rts are deasserted to minimise that reset. If the underlying device
+    re-enumerates the handle goes dead -- see reopen(), which re-resolves the port by USB serial.
     """
 
     def __init__(self, port: str):
@@ -114,13 +125,36 @@ class _C6:
         self._ser.rts = False
         self._ser.open()
 
+    def reopen(self) -> bool:
+        """Re-resolve the port (the ttyUSB number moves) and reopen. True if the C6 answers again."""
+        try:
+            self._ser.close()
+        except Exception:
+            pass
+        port = _c6_port()
+        if not port:
+            return False
+        try:
+            import serial  # noqa: PLC0415
+            self._ser = serial.Serial()
+            self._ser.port = port
+            self._ser.baudrate = 115200
+            self._ser.timeout = 0.3
+            self._ser.dtr = False
+            self._ser.rts = False
+            self._ser.open()
+        except Exception:
+            return False
+        time.sleep(1.2)   # tolerate the DTR/RTS reset-on-open before probing
+        return self.ping()
+
     def cmd(self, text: str, read_ms: int = 300) -> list[str]:
         try:
             self._ser.reset_input_buffer()
             self._ser.write((text + "\n").encode())
             self._ser.flush()
-        except Exception:
-            return []
+        except Exception as e:
+            raise _C6Gone(f"write to the C6 failed ({e.__class__.__name__}: {e})") from e
         out: list[str] = []
         t_end = time.time() + read_ms / 1000.0
         while time.time() < t_end:
@@ -135,8 +169,12 @@ class _C6:
         return out
 
     def ping(self) -> bool:
+        """Probe -- never raises. A dead handle is just 'not answering' to a prober."""
         for _ in range(4):
-            resp = self.cmd("ping", read_ms=400)
+            try:
+                resp = self.cmd("ping", read_ms=400)
+            except _C6Gone:
+                return False
             if any("C6|" in r for r in resp):
                 return True
             time.sleep(0.3)
@@ -334,15 +372,19 @@ def _ensure_holder(efuse_mac: str) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
-def _capture(efuse_mac: str, c6: "_C6 | None", budget_s: float, need: int) -> tuple[list, int, int]:
+def _capture(efuse_mac: str, c6: "_C6 | None", budget_s: float, need: int) -> tuple[list, int, int, str]:
     """Watch the flapping port and drive the commanded wake.
 
-    Returns (reconnect_latencies_ms, deep_sleep_gaps, wake_cycles). A wake cycle = a genuine deep-sleep
-    (a long port-gone gap and/or the DUT's "DEEP SLEEP" marker) FOLLOWED by a reconnect. The one-off
-    fresh-boot association after flashing is deliberately NOT counted.
+    Returns (reconnect_latencies_ms, deep_sleep_gaps, wake_cycles, c6_lost). A wake cycle = a genuine
+    deep-sleep (a long port-gone gap and/or the DUT's "DEEP SLEEP" marker) FOLLOWED by a reconnect.
+    The one-off fresh-boot association after flashing is deliberately NOT counted.
+
+    `c6_lost` is "" normally, or a reason string if the trigger died mid-run and could not be
+    recovered -- the caller must surface that instead of blaming the DUT for not sleeping.
     """
     import serial  # noqa: PLC0415
 
+    c6_lost = ""             # non-empty => the trigger died mid-run; no wake was possible after that
     recons: list[int] = []
     deep_sleeps = 0
     cycles = 0
@@ -367,7 +409,28 @@ def _capture(efuse_mac: str, c6: "_C6 | None", budget_s: float, need: int) -> tu
                         last_pulse_at is None or (now - last_pulse_at) >= _WAKE_RETRY_S):
                     print("dscycle -- board2 asleep; commanding C6 wake pulse"
                           + (" (retry)" if last_pulse_at is not None else ""), flush=True)
-                    c6.pulse(120)
+                    try:
+                        c6.pulse(120)
+                    except _C6Gone as e:
+                        # The handle died (USB re-enumeration). Re-resolve + reopen ONCE; if the C6
+                        # is really gone, stop pretending we can wake the DUT and record why -- an
+                        # unreported dead trigger reads as "board2 never deep-slept".
+                        print(f"dscycle -- C6 handle died ({e}); re-resolving the port ...", flush=True)
+                        if c6.reopen():
+                            print(f"dscycle -- C6 recovered on {_c6_port()}; re-issuing the pulse", flush=True)
+                            try:
+                                c6.pulse(120)
+                            except _C6Gone:
+                                c6_lost = ("the C6 trigger reopened but died again immediately "
+                                           "(USB re-enumeration); the link is not stable")
+                                print(f"dscycle -- {c6_lost}. No further wake can be commanded.",
+                                      flush=True)
+                                c6 = None
+                        else:
+                            c6_lost = "the C6 trigger went away mid-run (USB re-enumeration) and did not recover"
+                            print(f"dscycle -- {c6_lost}. No further wake can be commanded; the run "
+                                  "continues on the DUT's 60 s backup timer only.", flush=True)
+                            c6 = None
                     last_pulse_at = now
                 time.sleep(0.3)
                 continue
@@ -427,7 +490,7 @@ def _capture(efuse_mac: str, c6: "_C6 | None", budget_s: float, need: int) -> tu
             ser.close()
         except Exception:
             pass
-    return recons, deep_sleeps, cycles
+    return recons, deep_sleeps, cycles, c6_lost
 
 
 def _recover_board2(efuse_mac: str) -> bool:
@@ -532,7 +595,13 @@ def run(cycles: int = 2, append: bool = True) -> Reporter:
               "control). Falling back to the DUT's 60 s backup timer — slow. Flash the C6 for a fast, "
               "dependable wake.", flush=True)
     else:
-        c6.hiz()   # rest D5 so the DUT boots via its own pull-down (=run) and we wake it on command
+        try:
+            c6.hiz()   # rest D5 so the DUT boots via its own pull-down (=run) and we wake it on command
+        except _C6Gone as e:
+            print(f"dscycle -- WARNING: C6 died before the run started ({e}); "
+                  "falling back to the DUT's 60 s backup timer.", flush=True)
+            c6.close()
+            c6 = None
 
     t0 = time.time()
     try:
@@ -561,12 +630,21 @@ def run(cycles: int = 2, append: bool = True) -> Reporter:
         #    to recover via a re-pulse. Without the C6 it falls to the 60 s backup timer (~130 s/cycle).
         per_cycle = 55.0 if c6 else 130.0
         budget = 45.0 + cycles * per_cycle
-        recons, deep_sleeps, wake_cycles = _capture(dut.efuse_mac, c6, budget, cycles)
+        recons, deep_sleeps, wake_cycles, c6_lost = _capture(dut.efuse_mac, c6, budget, cycles)
+        if c6_lost:
+            c6 = None   # the teardown must not try to drive a dead handle
         lat_str = ", ".join(f"{ms}ms" for ms in recons) or "none"
         meta = {"cycles_target": cycles, "wake_cycles": wake_cycles, "deep_sleep_gaps": deep_sleeps,
                 "reconnects_total": len(recons), "latencies_ms": recons,
-                "wake": "commanded-c6" if c6 else "backup-timer"}
+                "wake": "commanded-c6" if c6 else "backup-timer",
+                "c6_lost": c6_lost or None}
         dur = time.time() - t0
+        # If the trigger died mid-run we could not command a wake after that instant, so EVERY
+        # shortfall below is explained by the bench, not the DUT. Say so in whichever branch we land
+        # in -- naming it in only one of them is how this misdiagnosed itself the first time. It also
+        # downgrades the no-reconnect FAIL to INCONCLUSIVE: a DUT that was never woken has not failed.
+        fault = (f" [BENCH FAULT, not a DUT result: {c6_lost} — no wake could be commanded after that]"
+                 if c6_lost else "")
         if wake_cycles >= cycles:
             rep.add(Result("T2", slug, PASS, duration_s=dur,
                            detail=f"{wake_cycles}/{cycles} deep-sleep→wake→reassoc cycles "
@@ -576,16 +654,19 @@ def run(cycles: int = 2, append: bool = True) -> Reporter:
             rep.add(Result("T2", slug, INCONCLUSIVE, duration_s=dur,
                            detail=f"only {wake_cycles}/{cycles} deep-sleep→wake→reassoc cycles within "
                                   f"{budget:.0f}s ({deep_sleeps} deep-sleep gaps, {len(recons)} reconnects) "
-                                  f"— a flaky link/wake (latencies {lat_str})", meta=meta))
+                                  f"— {'a flaky link/wake' if not c6_lost else 'cut short'} "
+                                  f"(latencies {lat_str}){fault}", meta=meta))
         elif recons:
+            # A dead trigger and a DUT that never slept look identical from here.
+            why = "cut short" if c6_lost else "did it deep-sleep and get woken?"
             rep.add(Result("T2", slug, INCONCLUSIVE, duration_s=dur,
                            detail=f"board2 associated ({len(recons)} reconnect(s), latencies {lat_str}) "
                                   f"but completed 0/{cycles} deep-sleep→wake cycles ({deep_sleeps} gaps) "
-                                  f"— did it deep-sleep and get woken?", meta=meta))
+                                  f"— {why}{fault}", meta=meta))
         else:
-            rep.add(Result("T2", slug, FAIL, duration_s=dur,
+            rep.add(Result("T2", slug, INCONCLUSIVE if c6_lost else FAIL, duration_s=dur,
                            detail=f"0/{cycles} reconnects ({deep_sleeps} deep-sleep gaps) — the leaf did "
-                                  f"not rejoin on wake. Is the AP up and the C6 wake reaching D5?",
+                                  f"not rejoin on wake. Is the AP up and the C6 wake reaching D5?{fault}",
                            meta=meta))
         return rep
     finally:
@@ -594,7 +675,23 @@ def run(cycles: int = 2, append: bool = True) -> Reporter:
         print("dscycle -- recovering board2 (rimba-hello) + restarting ppk2_hold + AP silence...",
               flush=True)
         if c6:
-            c6.trigger()   # restore the free-running default the tp tier depends on (bench contract)
+            # Restore the free-running default the tp tier depends on (bench contract). If the handle
+            # died, try once to get it back -- leaving D5 parked would silently break the NEXT tier.
+            try:
+                c6.trigger()
+            except _C6Gone:
+                print("dscycle -- C6 handle died before teardown; re-resolving to restore the "
+                      "free-running trigger ...", flush=True)
+                restored = False
+                if c6.reopen():
+                    try:
+                        c6.trigger()
+                        restored = True
+                    except _C6Gone:
+                        pass
+                if not restored:
+                    print("dscycle -- WARNING: could NOT restore the C6 free-running trigger. The tp "
+                          "tier expects it; re-flash/replug the C6 before running tp.", flush=True)
             c6.close()
         _recover_board2(dut.efuse_mac)
         if not _holder_running():   # recover freed the PPK2; re-hold so board2 stays powered
