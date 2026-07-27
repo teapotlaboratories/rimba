@@ -168,13 +168,19 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>96</b> worklogs · 2026-06-17 – 2026-07-25</p>
+<p class="stat"><b>97</b> worklogs · 2026-06-17 – 2026-07-26</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">69</span></h2>
+<h2>July 2026 <span class="mcount">70</span></h2>
 <div class="grid">
 
+<a class="card" href="2026-07-26-full-regression-bench-drift-dscycle-c6.html">
+<div class="card-date">2026-07-26</div>
+<div class="card-title">Full regression on the boottime-rig branch: bench drift, a flaky C6, and a silent-failure fix</div>
+<div class="card-ex">Ran every tier to land the test-ibss-boottime fixture and prove nothing else broke. All green — T0 42/0 (incl. the new app), T1 12/0, T2 22/0 with zero INCONCLUSIVE, TP 4/0, dscycle 2/2 after a re-run. Four things came out of it. (1) The T0 manifest guard was red: the fixture was in the tree but not in APPS. (2) A sticky-role-flag bug — idf.py's CMakeCache persists per build dir and both roles share one, so building the creator then "the DUT" silently reflashes the creator; t2_onair.py:50 clears this cache but only for harness-driven apps, and this measured-not-scored fixture falls through that gap. (3) Two bench-doc defects, each resolved against the live bench rather than by preference: the topology diagram had chronosalt/chronogen as .4/.5 contradicting the prose .3/.4 (chronosalt reports 10.9.9.3/24, so the prose wins), and the C6 was pinned to a ttyUSB0 it had left. New .ai rule: check the bench against the inventory before every hardware tier. (4) dscycle went INCONCLUSIVE blaming the DUT — root cause was the C6 re-enumerating mid-run into a dead fd that cmd() silently swallowed. Fixed with _C6Gone + reopen() + every verdict naming the trigger; the fix's own first version was incomplete and a real run proved it.</div>
+<div class="card-meta">all tiers green · 2 bench-doc defects · dscycle silent-failure fixed · C6 hardware suspect</div>
+</a>
 <a class="card" href="2026-07-25-risk02-warm-reattach-handoff.html">
 <div class="card-date">2026-07-25</div>
 <div class="card-title">RISK-02 re-measured (~1.7 s / ~367 mJ per wake) + a warm-reattach that crashed</div>
