@@ -1,10 +1,41 @@
 # Rimba HaLow bench — device inventory (for agents)
 
 Practical reference to the physical test bench: what's connected, how to reach each
-device, and the gotchas. Stable facts (ports, MACs, addresses) are reliable; the
-"currently running" notes are a snapshot — verify live before depending on them.
+device, and the gotchas.
+
+> ## ⚠ Check the bench before every test run
+>
+> **Run `make test-bench` and reconcile it against this document before starting any hardware tier
+> (`test-t1` / `test-t2` / `test-tp` / `test-dscycle`) or any manual bench work.** Parts of this
+> inventory are a *snapshot*, not a guarantee:
+>
+> | Volatile — re-check every run | Stable — resolve by this instead |
+> |---|---|
+> | `/dev/ttyACM*` and `/dev/ttyUSB*` numbers | ESP **efuse MAC**, USB **serial number** |
+> | `10.9.9.x` mesh IPs on the Linux nodes | node **hostname** (`ssh chronite`) |
+> | whether board2 is powered / enumerated | — (needs `tools/ppk2_hold.py` running) |
+> | which app is currently flashed | — (flash the one you want) |
+>
+> **USB port numbers re-enumerate on any hotplug — and can change *mid-run*.** A C6 trigger that
+> moved `ttyUSB0` → `ttyUSB1` in the middle of a `dscycle` run left the runner writing wake pulses
+> into a dead file descriptor; the tier reported INCONCLUSIVE for what was purely a USB event. Never
+> hardcode a port number: the harness resolves ports from `/dev/serial/by-id/` by MAC/serial, and so
+> should anything you write.
+>
+> **Mesh IPs are assigned by hand and are not persistent** — a `wpa_supplicant` restart or a reboot
+> wipes them, and a node with no IP fails a ping with an empty `mpath`, which reads like a forwarding
+> bug. Confirm the address on the node before blaming the datapath.
+>
+> If what you find differs from this document in any way beyond port numbering — a node missing, a
+> different mesh IP, a different firmware version — **stop and reconcile it**, and correct this file
+> in the same session. A known-stale inventory is worse than no inventory.
 
 Last verified: 2026-06-29 (inventory); **all component versions re-verified 2026-07-08 = matched 1.17.8** (table below).
+**Bench re-checked 2026-07-26** against a full regression run: all 3 ESP efuse MACs, the PPK2 and all 4
+Linux nodes present and matching; `mm6108.bin` 1.17.8 confirmed by T0's blob pin (480664 B, sha `ce2702b7…`).
+Two corrections came out of it — the topology diagram had chronosalt/chronogen as `10.9.9.4`/`10.9.9.5`
+(live check on chronosalt reads `10.9.9.3/24`, so the prose was right and the diagram wrong), and the C6
+was documented at a fixed `ttyUSB0` when it had moved to `ttyUSB1`. Both fixed here.
 **Re-confirmed 2026-07-10** (post power-cycle, all 4 Linux nodes): kernel `6.12.21-v8-16k+` (Pi 5) / `v8+`
 (Pi Zero); loaded `morse` srcver `BF1E275566B824AA47A47BF` (Pi 5) / `405F9B141F0F4AD2DB83F8F` (Pi Zero),
 `dot11ah` `3758BE40F4C0734ED6FBF05` (all); `mm6108.bin` 480664 B / md5 `cfe56db2`; `wpa_supplicant_s1g` +
@@ -73,7 +104,9 @@ Steady-state roles:
     - **chronogen** (mesh `10.9.9.4`) — distant node for the airtime test (stayed stable through the same test).
 - **Dev host** — the machine these run from: holds the `rimba` repo + ESP-IDF
   toolchain; all builds/flashing happen here; SSH to the Pis over the LAN.
-- **1× ESP32-C6-DevKitC-1** — measurement-harness companion for board2 (`/dev/ttyUSB0`, target `esp32c6`):
+- **1× ESP32-C6-DevKitC-1** — measurement-harness companion for board2 (a CP2102N bridge; **the
+  `/dev/ttyUSB*` number moves — resolve by USB serial `7831fdc6…`, as `dscycle._c6_port()` does**;
+  target `esp32c6`):
   drives the trigger pin / reads phase markers over a single wire, **GPIO20 → board2 D5 + GND** (link
   verified 2026-07-07). See the **Measurement harness** section below.
 
@@ -122,7 +155,7 @@ Steady-state roles:
                                                           v                       v
                                                    +-------------+       +-------------+
                                                    | chronosalt  | ===== |  chronogen  |
-                                                   | 10.9.9.4    | mesh  |  10.9.9.5   |
+                                                   | 10.9.9.3    | mesh  |  10.9.9.4   |
                                                    +-------------+       +-------------+
 
    +------------+
@@ -319,8 +352,9 @@ would re-wedge it). NB the ESPs re-enumerate on the same or a new `ttyACM*`; re-
 
 ## Measurement harness — ESP32-C6-DevKitC-1 (board2 trigger / phase companion)
 
-An **ESP32-C6-DevKitC-1** on the dev host's USB (**`/dev/ttyUSB0`**, its CP210x bridge; build target
-**`esp32c6`**) is the digital companion for board2's PPK2 power measurements. The PPK2 measures current but
+An **ESP32-C6-DevKitC-1** on the dev host's USB (a CP210x bridge on **`/dev/ttyUSB*` — the number
+moves, resolve by USB serial `7831fdc6…`**; build target **`esp32c6`**) is the digital companion for
+board2's PPK2 power measurements. The PPK2 measures current but
 its 8 logic pins are **input-only**; the C6 can **drive** a pin, so it supplies the *trigger* that starts
 board2's ladder (and can timestamp the *phase markers* board2 pulses back). The PPK2 still does the power
 measurement — the C6 is the control/digital side, in parallel on the same DUT.
@@ -347,7 +381,9 @@ is S3-only). Its `MODE` selects **TRIGGER** / **HOLD_HIGH** (force board2 flash-
 ```sh
 cd firmware/test-c6-trigger
 export IDF_PATH=<repo>/vendor/esp-idf && source $IDF_PATH/export.sh
-idf.py set-target esp32c6 build && idf.py -p /dev/ttyUSB0 flash monitor   # C6 = CP210x on ttyUSB0
+# resolve the port first -- the ttyUSB number moves between (and during) sessions
+C6_PORT=$(readlink -f /dev/serial/by-id/*CP2102N*7831fdc6*)
+idf.py set-target esp32c6 build && idf.py -p "$C6_PORT" flash monitor
 ```
 
 **board2 free XIAO pads** (not used by the FGH100M): **D5/GPIO6** (the harness pin — RTC-capable, so it can

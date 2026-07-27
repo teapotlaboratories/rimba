@@ -65,3 +65,8 @@ Most important rules:
 - **Connect to bench nodes by hostname, never raw IP** — `ssh chronium` (or `chronium.local`), not
   `ssh user@192.168.x.x`; the IP lives only in `~/.ssh/config`. See
   [AGENTS.md → Bench access](AGENTS.md#bench-access--connect-by-hostname-never-raw-ip).
+- **Check the bench before every test run** — `make test-bench`, reconciled against
+  `docs/reference/rimba-bench-devices.md`. USB port numbers and the `10.9.9.x` mesh IPs drift (and
+  can change *mid-run*); resolve by efuse MAC / USB serial / hostname instead. A mismatch that isn't
+  just port numbering means stop and reconcile — fix the bench or the doc — before trusting a
+  result. See [AGENTS.md → Bench state](AGENTS.md#bench-state--check-it-against-the-inventory-before-every-test-run).

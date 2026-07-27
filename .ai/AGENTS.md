@@ -405,6 +405,32 @@ code is a latent breakage.
 - **In docs/inventory** (`docs/reference/rimba-bench-devices.md`) refer to nodes by hostname, not IP.
   The mesh data-plane addresses (`10.9.9.x`) are functional test addresses and stay.
 
+## Bench state — check it against the inventory before every test run
+
+**Before any hardware tier (`test-t1` / `test-t2` / `test-tp` / `test-dscycle`) or any manual bench
+work, run `make test-bench` and reconcile what it prints against
+[`docs/reference/rimba-bench-devices.md`](../docs/reference/rimba-bench-devices.md).** The bench
+drifts between sessions; a run started on a stale assumption wastes an hour and can report a bench
+artefact as a code regression.
+
+- **Volatile — re-check every time, never hardcode:** `/dev/ttyACM*` and `/dev/ttyUSB*` numbers (they
+  re-enumerate on any hotplug, *and mid-run*), the `10.9.9.x` mesh IPs on the Linux nodes (assigned by
+  hand, wiped by a `wpa_supplicant` restart or a reboot), and whether board2 is powered at all (it
+  only enumerates while `tools/ppk2_hold.py` holds the PPK2 rail).
+- **Stable — resolve by these instead:** ESP efuse MACs, USB serial numbers, and node hostnames. The
+  harness already resolves ports by MAC via `/dev/serial/by-id/`; do the same in anything you write.
+- **A mismatch that is NOT just port numbering is a stop-and-reconcile.** A node missing, a different
+  mesh IP, a different firmware version, an unexpected app still flashed — fix the bench or fix the
+  doc *before* trusting any result from it. If the doc is what is wrong, correct the doc in the same
+  session; a known-stale inventory is worse than none.
+- **State the bench state when you report results.** Say what was present, what was missing, and
+  anything you changed (e.g. "I started `ppk2_hold`"), so a verdict can be read in context.
+
+This is not hypothetical: the C6 trigger re-enumerated `ttyUSB0` → `ttyUSB1` *during* a `dscycle` run.
+The runner holds one serial handle for the whole run and its `cmd()` swallows write errors, so every
+wake pulse after that went into a dead file descriptor and the tier reported INCONCLUSIVE — "did it
+deep-sleep and get woken?" — for what was purely a USB event.
+
 ## Operational runbooks
 
 - [radio-silent-workflow.md](radio-silent-workflow.md) — keep the MM6108 radios
