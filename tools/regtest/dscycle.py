@@ -631,12 +631,14 @@ def run(cycles: int = 2, append: bool = True) -> Reporter:
         per_cycle = 55.0 if c6 else 130.0
         budget = 45.0 + cycles * per_cycle
         recons, deep_sleeps, wake_cycles, c6_lost = _capture(dut.efuse_mac, c6, budget, cycles)
-        if c6_lost:
-            c6 = None   # the teardown must not try to drive a dead handle
+        # NOTE: deliberately do NOT drop the c6 reference here. Teardown is the one place that SHOULD
+        # drive a dead handle -- it reopens and restores the free-running trigger the tp tier depends
+        # on. Nulling it would skip that restore in exactly the case it exists for (the C6 died
+        # mid-run), leaving D5 parked and silently breaking the next tier.
         lat_str = ", ".join(f"{ms}ms" for ms in recons) or "none"
         meta = {"cycles_target": cycles, "wake_cycles": wake_cycles, "deep_sleep_gaps": deep_sleeps,
                 "reconnects_total": len(recons), "latencies_ms": recons,
-                "wake": "commanded-c6" if c6 else "backup-timer",
+                "wake": "backup-timer" if (c6 is None or c6_lost) else "commanded-c6",
                 "c6_lost": c6_lost or None}
         dur = time.time() - t0
         # If the trigger died mid-run we could not command a wake after that instant, so EVERY
