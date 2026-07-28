@@ -168,11 +168,11 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>97</b> worklogs · 2026-06-17 – 2026-07-26</p>
+<p class="stat"><b>100</b> worklogs · 2026-06-17 – 2026-07-26</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">70</span></h2>
+<h2>July 2026 <span class="mcount">73</span></h2>
 <div class="grid">
 
 <a class="card" href="2026-07-26-full-regression-bench-drift-dscycle-c6.html">
@@ -187,482 +187,500 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <div class="card-ex">Two things. Test A re-measured RISK-02 on the current bench (board2 + PPK2 + fw 1.17.8 / morselib 2.12.3, n=12): cold-boot → IBSS-joined → first-frame is ~1.52 s CPU-active (~1.7 s power-on → joined incl. rail/ROM), ~367 mJ (≈20 µAh) per wake, ~64 mA steady joined idle; the two levers are the fw reload (~650 ms) + ibss-join (~800 ms) = 94% of boot. Test C — the "keep the MM6108 warm across sleep, skip the fw reload" optimization — was IMPLEMENTED (6 morselib edits behind a warm_boot gate + a TEST_WARM_CYCLE fixture) and its control path works end-to-end (boot: reset_reason=3 → WARM re-attach fires), but every warm boot then panics with an Interrupt-WDT in mmhalow_init: re-establishing the SPI transport against a chip running application fw storms interrupts. That's the BIT9 HW_REATTACH gap — skipping reset+download is necessary but not sufficient without the reattach handshake. Per the owner's decision it was REVERTED (submodule back to clean main, branch deleted, fixture stripped to the cold Test A tool), with the 6 edits fully specified so it's resumable. Footguns: deep-sleep timer-wake is unachievable on board2 while USB attached (ESP_RST_USB); and a host-clock energy window mis-reads ~34 s/12 J due to USB re-enumeration — anchor at the physical current-rise.</div>
 <div class="card-meta">Test A solid · warm-reattach reverted · RISK-02 · IBSS boottime</div>
 </a>
-
+<a class="card" href="2026-07-24-s6-interop-handoff.html">
+<div class="card-date">2026-07-24</div>
+<div class="card-title">Handoff — resume S6 (ESP mesh-gate ↔ live-Linux 802.11s interop)</div>
+<div class="card-ex">Written just before a context clear. State: mesh-gate S1–S5c + round-trip + broadcast-both-ways + proxy-ARP + retire-L3 ALL LANDED (rimba #42/#43/#44, mm-esp32-halow #27); ESP↔ESP is fully proven on-air. This session re-ran make test-all ALL GREEN (T0 40✓/1skip · T1 12✓/2skip · T2 22✓ incl. full chronite interop · TP 4✓ · dscycle PASS) and merged PR #45 (test-unit 46→53). THE NEXT STEP is Part 0, its own PR: the production gate app rimba-halow-mesh-ap never advertises as a gate on-air, so add mmwlan_mesh_set_root_announcements(true, true, 5000) after mmwlan_mesh_start at app_main.c:657 — two ways it silently no-ops (the setter is gated on g_mesh_multihop, and the RANN interval is a RAW on-wire numeric so ESP and Linux MUST both use 5000). Then S6 P0 code-map re-pin, P1 Case A (the wildcard: nobody has bridged a Linux mesh vif on this bench), P2 Case B, P3 byte-diff sign-off. Sandbox caveat: git remote is SSH with no key, so fetch/push fail — use gh.</div>
+<div class="card-meta">handoff · Part 0 first · S6 P0–P3 · bench + footguns</div>
+</a>
 <a class="card" href="2026-07-24-mesh-gate-s6-p2-p3-case-b-signoff.html">
 <div class="card-date">2026-07-24</div>
 <div class="card-title">S6 P2 + P3 (Case B + byte-diff sign-off): S6 COMPLETE</div>
 <div class="card-ex">The last mesh-gate stage, closed. On rimba-mesh (board0 = production ESP gate w/ Part 0 RANN; chronite = Linux node/gate; chronium = sniffer): P2a discovery — chronite peers with board0 and RE-FLOODS its gate RANN on-air (rann_addr + flags=0x01 IS_GATE + seq preserved, hop 0→1/ttl 31→30/metric 0→2410 = a byte-perfect hwmp_rann_frame_process; the mirror of S2). P2b AE/MPP leg (S3-deferred, now closed) — board1 = test-mesh-ae injects AE_A5_A6 frames; chronite iw mpp dump shows 02:00:00:00:00:aa → e2:72:a1:f8:f9:40, the ESP-proxied source learned by Linux mpp_path_add. P3 byte-diff — the production ESP gate's RANN is byte-identical to a live Linux gate's (normalized mask; only rann_addr + seq differ); mesh beacon Formation Info = 0x05 (connected-to-gate) on both sides. So the all-ESP 802.11s mesh-gate now interoperates with mainline Linux net/mac80211 BOTH directions — S6 (Part 0 + P0–P3) done. New artifact: docs/reference/captures/wpa-rmesh.conf.</div>
 <div class="card-meta">S6 COMPLETE · mesh-gate · Case B · byte-diff</div>
 </a>
-
 <a class="card" href="2026-07-24-mesh-gate-s6-p1-linux-gate-bridge.html">
 <div class="card-date">2026-07-24</div>
 <div class="card-title">S6 P1 (Case A): a Linux mesh gate L2-bridges an off-mesh host to an ESP node</div>
 <div class="card-ex">S6 is the last mesh-gate stage — live-Linux interop; P1 is its wildcard: build the Linux-side L2 bridge (mesh vif ↔ a DS segment) so an ESP mesh node reaches an off-mesh host through a Linux gate. The load-bearing unknown — can the morse driver even bridge the 802.11s mesh vif? — is resolved POSITIVELY, with a non-obvious 4-clause recipe: enslave while type=mesh-point (managed is rejected), enslave-FIRST before the mesh joins (survives the join), warm the radio first (a cold bridged channel-set fails -32768), and set the veth DOWN before master (rc=0 silently no-ops otherwise). Proven on-air: off-mesh DS host 10.9.9.60 ↔ ESP node 10.9.9.108 = 14/14 replies, 0% loss, 9–21 ms through the gate's bridge (bidirectional — reply via the ESP's tx_proxied); iw mpp dump shows the ESP-proxied source learned by Linux mpp_path_add. chronite wedged mid-test (mgmt WiFi dropped, needs a power-cycle) → pivoted to chronogen (fallback). ESP change: TEST_MESH_ID override added to test-mesh-gate-node (fixture-only).</div>
 <div class="card-meta">on-air proven · mesh-gate · S6 · Case A</div>
 </a>
-
 <a class="card" href="2026-07-24-mesh-gate-part0-gate-emit-rann.html">
 <div class="card-date">2026-07-24</div>
 <div class="card-title">Part 0: the production gate emits a discoverable RANN (S6 pre-step)</div>
 <div class="card-ex">The all-ESP mesh-gate learns proxy paths from proxied data frames, so the production gate app rimba-halow-mesh-ap never announced itself on-air. S6 Case B (a Linux node discovering the ESP gate the standards way) needs it to emit a RANN with RANN_FLAG_IS_GATE — so after mmwlan_mesh_start() the gate now calls mmwlan_mesh_set_root_announcements(true, true, 5000). Additive/safe: g_mesh_multihop defaults true so it's no silent no-op, and the MPP-from-proxied-frames datapath is untouched. Verified on-air, 3 boards + chronium monitor: (a) the gate's RANN is byte-identical to the S1-verified frame (flags=0x01, ttl=31, interval=5000); (b) the zero-config round-trip is intact (STA DHCPs 10.9.9.2 → pings a mesh node 14/14, 0 drops); (c) a real ESP node peers, receives, and records the gate (known_gates=1). +24 lines across the production gate and its T0-guarded clone; no morselib change. /code-review clean. Held for the work-hours commit rule.</div>
 <div class="card-meta">verified · mesh-gate · Part 0 · gate-emit RANN</div>
 </a>
-
+<a class="card" href="2026-07-23-regression-full-sweep-screen-handoff.html">
+<div class="card-date">2026-07-23</div>
+<div class="card-title">Handoff — re-run the full regression sweep (make test-all) via screen</div>
+<div class="card-ex">Written just before a context clear. The previous sweep was green on every tier except T2, which never ran: unfiltered make test-t2 (as test-all invokes it) HARD-REQUIRES LINUX_HOST/MAC/IP because the full suite includes mesh-linux + twt-assoc, and that is where the rc=2 came from — a filtered make test-t2 TEST="…" does not require them. Three options recorded (bring chronite in, run ESP-only T2 filtered, or accept the gap since the mesh-gate T2 tests are ESP-only and already 9/9). Key mechanism: the agent's tracked run_in_background tasks get REAPED (killed at 65s/20min/34min; even a zero-CPU waiter died in ~1-2min) and it is NOT resource pressure — 6 cores, zero OOM, box responsive. A detached screen session is owned by the shell, survives, and completed test-all in ~35 min. Previous results, bench state, and the pkill-self-match footgun (exit 144) all recorded.</div>
+<div class="card-meta">handoff · screen not background tasks · the T2/Linux gap</div>
+</a>
 <a class="card" href="2026-07-23-mesh-gate-retire-l3.html">
 <div class="card-date">2026-07-23</div>
 <div class="card-title">Retire the L3 path → flat single-subnet L2 bridge (zero-config DHCP)</div>
 <div class="card-ex">Now that proxy-ARP made the L2 bridge zero-config for resolution, the redundant L3 router — a second 192.168.12.x AP subnet + CONFIG_LWIP_IP_FORWARD + a MESH_GATE_IP return route — is deleted. The gate is a pure L2 bridge on ONE flat 10.9.9.0/24: the AP vif moves to 10.9.9.1 and its DHCP server hands out 10.9.9.x (a small pool clear of the mesh nodes' 10.9.9.100–163), so an AP client is zero-config end-to-end — it DHCPs an address and reaches any mesh node directly, no static IP and no route. The STA became a DHCP client by default (mmhalow's netif auto-runs dhcpc); static IP is now opt-in (STA_IP=). On-air (3-node): STA `DHCP lease 10.9.9.2` → `reply from 10.9.9.100 seq=1`, gate `L2 bridge ready … no ip_forward`; the two-netif-same-subnet coexistence worked (no static fallback needed). App-level only. Footguns: idf.py CMake-cache accumulation (rm CMakeCache.txt), and a -D var does nothing until the CMakeLists forwards it.</div>
 <div class="card-meta">verified · mesh-gate · L2 bridge · zero-config DHCP</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-proxy-arp.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">Gate proxy-ARP: reliable mesh↔AP-client resolution</div>
 <div class="card-ex">Fixed the flaky mesh→AP-client resolution the B2 work exposed — a mesh node's on-demand ARP for an AP client is a lossy No-Ack mesh broadcast, so it hit-or-missed. The gate now (1) snoops IP↔MAC from every ARP + IPv4 frame it handles (both sides), (2) reactively proxy-answers an ARP request with the target's REAL MAC (not the gate's, so the S5b/S5c L2 datapath still carries the traffic) over a reliable link, and (3) PROACTIVELY pushes learned mappings to both sides every 3 s over reliable unicast (AP downlink / proxied mesh unicast). Neither side ever needs a broadcast ARP across the bridge. On-air: the gate logged the push refreshing 2 mappings every 3 s, and D — reset with an empty cache — reached the STA from seq 1 with 0 timeouts (vs the earlier 0–27). Gate-app only, no morselib change.</div>
 <div class="card-meta">verified · mesh-gate · proxy-ARP · reliability</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-b2-mesh-to-ap-broadcast.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">B2: mesh→AP broadcast bridging (+ a lossy-ARP root-cause)</div>
 <div class="card-ex">The symmetric counterpart to B1: the gate re-emits a mesh node's group-addressed frame onto the AP vif so AP clients see mesh broadcasts (loop-safe — fires only on mesh RX; RMC + own-SA drop the gate's echoes). Verified: the gate bridged D's DHCP DISCOVER (et=0x0800) to the AP, and a mesh node reached an AP client (12–19 replies). The investigation then root-caused the mesh→AP-client flakiness: it's NOT a B2 defect — a mesh node's resolution ARP is a lossy No-Ack broadcast (D reached the STA in one run, 0 in an identical re-flash), while the client's periodic gratuitous ARP (+TRUST_IP_MAC) is what usually resolves it. A self-inflicted build detour (an overwritten tracked sdkconfig.defaults, mis-read as a morselib bug) was fully reverted. The proper fix is proxy-ARP (done).</div>
 <div class="card-meta">verified · mesh-gate · broadcast · root-cause</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-s5-finishing.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">S5 finishing: zero-config L2 bridge (broadcast AE_A4 + double-delivery)</div>
 <div class="card-ex">Two finishing touches made the bridge zero-config. (A) The AE-rx callback returns a "handled" bool so the datapath skips local delivery when the gate consumes a frame — no spurious ip_forward double-delivery. (B) Multicast AE_A4 broadcast bridging (mmwlan_mesh_tx_group_proxied + re-broadcast preservation + RX extract → mpp_learn + deliver [dst=group][src=eaddr1], matching net/mac80211's ieee80211_strip_8023_mesh_hdr). Key insight: only the ARP request needs broadcast bridging; the reply + ICMP are unicast. Verified on-air with ZERO static ARP: the STA pinged a mesh node by IP (10.9.9.100) continuously, the ARP resolving through the bridge — the gate logged the full flow (ARP request→AE_A4 36 B → ARP reply 42 B → ICMP 100/106 B). Gated the RX rewrite on eaddr1==us (a design workflow caught the gate hits that line for S5b too).</div>
 <div class="card-meta">verified · mesh-gate · zero-config · AE_A4</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-roundtrip.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">Bidirectional round-trip through the gate L2 bridge</div>
 <div class="card-ex">An AP client and a mesh node hold a continuous two-way ping across the gate — STA (10.9.9.50) ↔ mesh node D (10.9.9.100), seq 41→52, 27–77 ms, no drops. Two datapath completions closed the loop: RX-deliver-eaddrs (a proxied AE frame delivered locally as [dst=eaddr1][src=eaddr2] so the endpoint replies to the real off-mesh source — GATED on eaddr1==us so the gate's proven S5b path is untouched), and TX-auto-proxy (an undeliverable unicast to a known-MPP dst auto-proxied toward the gate, else start_discovery — MPP-hit gating keeps plain multi-hop unicast unregressed). Because the STA's ping is L2-addressed to D (not the gate), a reply is unambiguous proof of the L2 bridge, both ways. A design workflow verified both changes; 3/4 review lenses clean.</div>
 <div class="card-meta">verified · mesh-gate · round-trip · datapath</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-s5c-ap-ingress.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">S5c: gate ingress (AP client → mesh)</div>
 <div class="card-ex">The AP→mesh leg of the L2 bridge, symmetric to S5b: an AP client's unicast frame to a mesh node (not the gate, not broadcast) is proxied INTO the mesh as an AE_A5_A6 frame (eaddr2 = client, eaddr1 = dst) via the new mmwlan_mesh_tx_proxied, and the mesh node learns mpp(client→gate). With S5b, the gate now bridges BOTH directions. Verified 3-node: the gate logged S5c AP→mesh (100 B from the STA to the mesh node), the node logged the AE-rx CB + the learned MPP. Confirmed a key unknown — the AP DOES deliver a STA's unicast-to-non-BSSID frame to gw_ap_rx_cb. mesh+AP concurrency confirmed on 2.12.3.</div>
 <div class="card-meta">verified · mesh-gate · S5c · both-ways</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-s5b-gate-egress.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">S5b: gate egress (mesh AE → AP client)</div>
 <div class="card-ex">The mesh→AP leg: a received proxied AE frame whose eaddr1 is one of the gate's AP clients is delivered onto the AP vif as an Ethernet II frame (dst=eaddr1, src=eaddr2), recovering the ethertype from the AE payload's LLC/SNAP. App-level in the gate, using the S5a AE-rx hook; no morselib change. Verified 3-node: a mesh node sent a proxied AE frame, the gate logged S5b mesh→AP (34 B to the AP client bc:2a:33:96:b2:33). Key: mesh+AP concurrency CONFIRMED working on 2.12.3 (the S5 feasibility gate) — the STA's AP-side MAC is the MM6108 MAC, not the efuse.</div>
 <div class="card-meta">verified · mesh-gate · S5b · mesh→AP</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-s5a-ae-rx-app-hook.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">S5a: AE-rx → app bridge hook</div>
 <div class="card-ex">The gate's plain mesh RX ext-cb sees frames AFTER morselib strips the Mesh Control, so it can't recover a proxied frame's eaddr1/eaddr2. S5a adds mmwlan_mesh_register_ae_rx_cb: the datapath fires it (via umac_mesh_ae_rx_deliver) for every received AE frame with the endpoints + post-strip payload — the foundational primitive for the gate's mesh→AP leg. Verified ESP↔ESP: the receiver logged the AE-rx CB with the full proxied endpoints + payload. Notification-only, so the relay/delivery path is unchanged (no regression).</div>
 <div class="card-meta">verified · mesh-gate · S5a · hook</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-s4c-ae-relay-preserve.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">S4c: preserve AE through the mesh relay</div>
 <div class="card-ex">An intermediate relay was stripping the AE Mesh Control and re-forwarding non-AE, so a 2+-hop gate lost the proxied endpoints (found by the S4b workflow). S4c makes umac_mesh_forward_data carry bool ae + eaddr1/eaddr2 and re-emit an AE_A5_A6 frame, so a multi-hop gate keeps the endpoints. Verified on a forced 3-node line (NODE↔RELAY↔GATE): the gate 2 hops away logged the eaddrs the origin's send_to_gates set, intact after the relay (before S4c the gate's ae_rx stays 0).</div>
 <div class="card-meta">verified · mesh-gate · S4c · multi-hop</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-s4b-send-to-gates.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">S4b: send-to-gates fallback</div>
 <div class="card-ex">mmwlan_mesh_send_to_gates(final_dst, src, …) walks the S2 known-gates, resolves the next hop to each, and sends an AE_A5_A6 frame via each gate (mesh DA=gate, eaddr1=final_dst, eaddr2=src) — the port of net/mac80211's mesh_path_send_to_gates + prepare_for_gate. Verified ESP↔ESP: the node logged send_to_gates sent, the gate logged the byte-correct proxied AE frame + learned the proxied source. Full path: discover the gate (S2) → fall back for an unreachable dest (S4b) → the gate gets a correct AE frame (S3) → learn the source (S4a). The workflow surfaced the multi-hop AE-strip limitation → fixed in S4c.</div>
 <div class="card-meta">verified · mesh-gate · S4b · fallback</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-s4a-mpp-learning.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">S4a: MPP (mesh-proxy-path) learning</div>
 <div class="card-ex">A node receiving a 6-address AE frame learns mpp(eaddr2 → mesh_sa) — the port of net/mac80211's mpp_path_add (mesh_pathtbl.c:722, called from rx.c:2891). New MPP table (MESH_MPP_MAX=32) + umac_mesh_mpp_learn + mmwlan_mesh_mpp_lookup, reset on mesh start; the datapath RX AE-extract calls it. Verified ESP↔ESP: the receiver logged the learned MPP entry (off-mesh source → the proxying mesh node) after the injected AE frames. This is the return-path half of the gate discovery.</div>
 <div class="card-meta">verified · mesh-gate · S4a · MPP</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-s3-ae-datapath.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">S3: 6-address AE_A5_A6 datapath primitive</div>
 <div class="card-ex">An ESP builds a proxied AE mesh data frame, the MM6108 FW transmits + delivers it, and the receiver decrypts + parses the AE Mesh Control byte-exactly — resolving the design's #1 open risk (the FW delivers/accepts 6-address AE frames). Major de-risk: CCMP is AE-transparent — the Mesh Control (incl. AE eaddrs) rides in the encrypted body; the AAD is over the 802.11 MAC header only (mesh unicast is already 4-addr), so ccmp.c is untouched and there is NO AE-specific CCMP re-derivation. TX builds the 18-byte AE_A5_A6 control (== struct ieee80211s_hdr); RX extracts eaddr1/eaddr2 (vs the old discard). A 3-lens adversarial workflow returned MATCH.</div>
 <div class="card-meta">verified · mesh-gate · S3 · AE datapath</div>
 </a>
-
 <a class="card" href="2026-07-22-mesh-gate-s2-rann-rx.html">
 <div class="card-date">2026-07-22</div>
 <div class="card-title">S2: RANN RX + gate list + Connected-to-Gate beacon bit</div>
 <div class="card-ex">An ESP peered with a live Linux gate (chronite, rootmode 4) and: learned the gate (known_gates=1), re-flooded the RANN byte-exactly (sn preserved, hop 0→1, ttl 31→30, metric accumulated), and set the beacon Formation-Info to 0x03 (Connected-to-Gate bit + peer count) — byte-identical to the Linux gate. Port of hwmp_rann_frame_process + mesh_path_add_gate + mesh_add_meshconf_ie. A 4-lens adversarial workflow returned MATCH; 2 flagged risks fixed (non-ESTAB peer processed at MAX metric == Linux sta_info_get; RANN-learned gate path sets expiry_ms) + re-verified on-air.</div>
 <div class="card-meta">verified · mesh-gate · S2 · RANN RX</div>
 </a>
-
 <a class="card" href="2026-07-21-mesh-gate-s1-rann.html">
 <div class="card-date">2026-07-21</div>
 <div class="card-title">S1: gate RANN TX — byte-identical to a live Linux gate</div>
 <div class="card-ex">The ESP gate's RANN (Root Announcement) is byte-for-byte identical to a live Linux gate's, captured simultaneously on chronium's morse0 monitor (gold-standard live A/B). Every invariant field matched (FC d000, cat 0d/act 01, eid 7e/len 15, flags 01=IS_GATE, hop 00/ttl 1f, interval 5000, metric 0); only the per-gate MACs + counters differ. Port of mesh_path_tx_root_frame + a self-rescheduling root timer; PREQ/PREP path untouched (no regression). A 4-lens adversarial workflow returned MATCH/go — incl. proving a lone gate with zero peers emits a capturable in-the-clear RANN (triple-safe unprotected: PMF-disabled, multicast DA, group-privacy action exempt).</div>
 <div class="card-meta">verified · mesh-gate · S1 · RANN TX</div>
 </a>
-
 <a class="card" href="2026-07-21-regtest-ledger-lint-gate.html">
 <div class="card-date">2026-07-21</div>
 <div class="card-title">Make the regtest suite unattended: flake ledger + lint gate</div>
 <div class="card-ex">Two slices of the "Loop-back: harden" umbrella, driven by one requirement: the harness must run fully automatically — nobody, not even the agent, should have to monitor a run. Two gaps stood in the way. (1) The per-tier build/regtest/&lt;tier&gt;-latest.json baselines are latest-wins: a passing retry silently overwrites a failed run, so a flake leaves no trace (this is what erased the first rimba-halow-sta FAIL, and it's why today's mesh-linux fail→retry-pass would have vanished). Fix — a run-history flake ledger: common.Reporter.add() (the one crash-safe chokepoint every tier flows through) now ALSO appends one JSONL line per result to build/regtest/history.jsonl, append-only, never overwritten, grouped by a per-run id (git SHA cached per run, not shelled per result). New tools/regtest/ledger.py classifies: a test that produced BOTH good (PASS/SKIP/XFAIL) and bad (FAIL/INCONCLUSIVE/XPASS) outcomes across runs is flaky (a bench/RF transient, not a code regression); always-bad is broken (a real defect). make test-flakes prints it; the HTML report carries a Flake ledger section. (2) A bench-out-of-scope edit once passed py_compile and only failed on the bench 10/12, deep in a run — py_compile doesn't catch undefined names, pyflakes does in ~0.1s. Fix — a pyflakes lint gate: new tools/regtest/lint.py runs the pyflakes API over tools/regtest/*.py + tools/*.py; run.py runs it at the top of every run-producing command and make test-all lints first, so a real finding aborts before any hardware is touched (no bypass; a missing pyflakes only warns). Turning the gate on immediately caught 6 pre-existing findings — including the two # noqa-suppressed reshape-later patterns #39 deferred (pyflakes ignores # noqa) and a redefinition of unused 'ap_teardown' — all fixed (unused imports in t1_smoke/t2_onair/tp_power, two placeholder-less f-strings, the import-ppk2_api probe → importlib.util.find_spec, the None-then-def ap_teardown → a named helper assigned to the var). A new persist flag on Reporter also closes a latent bug where a DRY_RUN=1 preview's per-add() crash-safe write clobbered the real baseline. Verified off-bench: 26 unit tests pass (was 11; ledger flake-detection + append-additive + torn-line tolerance + the real Reporter.add()→ledger hook via temp dirs + a dry-run-records-nothing test; pyflakes catches undefined-name/unused-import, passes clean code, real harness clean) under the IDF python, make test-lint clean over 19 files, and a fire-and-forget bench demo (2× make test-t1 board2 launched detached, docs written without watching it, ledger read afterward — the workflow the whole change exists to enable). Host-side plumbing only; no radio behaviour changed.</div>
 <div class="card-meta">6 min · implemented · regtest · ledger · lint gate</div>
 </a>
-
 <a class="card" href="2026-07-21-dscycle-hardening.html">
 <div class="card-date">2026-07-21</div>
 <div class="card-title">dscycle deep-sleep tier: reliable + self-contained</div>
 <div class="card-ex">The dscycle regression tier (deep-sleeps board2, proves it re-associates on every wake) had been landing INCONCLUSIVE run-to-run and wasn't self-contained. Reproduced the baseline (INCONCLUSIVE 333.6s) and pinned two root causes: (A) an off-by-one — the capture counted the one-off fresh-boot association as a cycle, so for CYCLES=2 it stopped one real cycle short (2 reconnects but only 1 deep-sleep gap → the n≥cycles-but-deep_sleeps&lt;cycles INCONCLUSIVE branch, even when the wake worked); and (B) a free-running C6 pulse every 30s that raced board2's short awake window, usually missing and falling through to the DUT's 60s backup timer (~130s/cycle). Fixed all five hardening items. #5 (the enabler): rewrote firmware/test-c6-trigger into a serial-latched fixture — a UART0 command loop (pulse/hiz/high/low/trigger/toggle/save/status/ping, responses prefixed C6|, runtime mode + optional NVS) so the D5 behaviour is driven over serial, no re-flash; the compile-time MODE is now just the power-on default so tp's free-run is unchanged. #1: _capture now commands the wake — it waits for board2's USB port to vanish (asleep), settles 1.5s so the ext1 D5-low wake is armed, then sends `pulse` for a deterministic wake; falls back to the 60s backup timer (loud warning) if the C6 doesn't answer. Off-by-one fixed: a cycle = a deep-sleep gap FOLLOWED by a reconnect (the fresh-boot recon is ignored). #2/#4: _ensure_holder() self-starts tools/ppk2_hold.py if board2 isn't powered (fixes the test-all tp-before-dscycle silent SKIP) and _start_holder() re-holds it after recovery — only a missing PPK2 SKIPs, loudly. #3: _free_ppk2() kills only the process actually holding the PPK2 fd (/proc/&lt;pid&gt;/fd scan) + the pidfile PID, not a broad pgrep -f ppk2_hold.py; ppk2_hold.py now writes /tmp/ppk2_hold.pid. Bench-verified: C6 protocol smoke-tested; 5/5 clean PASS since the fix (2/2, 2/2 self-started from a dark board2, 3/3, 2/2, + a post-review confirmation) vs the baseline's single INCONCLUSIVE, ~20s/cycle vs ~130s. A /code-review of the diff surfaced 4 low-severity findings, all triaged (fd leak → with-block; C6 pulse ms clamped to 2000; doc wording; a pre-existing IDLE_APP dependency left). Design validation: the commanded wake's real port-gone gap is only ~2.5s (shorter than any reset-vs-sleep threshold), so the DUT's DEEP SLEEP log marker — not a gap heuristic — is the primary deep-sleep proof. Precise kill proven (a bystander whose cmdline mentions ppk2_hold.py survived while the real fd-holder died). Harness unit tests (11) still pass; bench left radio-silent.</div>
 <div class="card-meta">7 min · verified · regtest · dscycle · power-save</div>
 </a>
-
 <a class="card" href="2026-07-20-regtest-hardening-new-testcases.html">
 <div class="card-date">2026-07-20</div>
 <div class="card-title">Regtest hardening + 3 new mesh T2 tests</div>
 <div class="card-ex">Hardened the tools/regtest suite and added three on-air (T2) test cases, developed against the known-good morselib 2.10.4 baseline (3c8ded0d) so a later failure — including against the 2.12.3 forward-port — is a real regression. Batch A: manifest._validate_bench() config-validation guards (a WIRED_BOARD typo → no wired DUT; a malformed BOARDx_MAC → empty derived mesh_mac/ip; two boards colliding on the derived 10.9.9.x) + a make test-unit target with 10 stdlib-unittest tests (import-safety preserved: absent config still {}). Scope calls: the LINUX_MAC guard dropped (empty is a supported read-live mode); the strict pyflakes gate deferred (it surfaced 7 pre-existing findings, 2 intentional patterns to reshape first). Three new T2 tests, each a copy of test-mesh-relay reusing the 3-node forced-line rig + existing accessors (T2 12→15): mesh-large-frame (1400 B payload → the FW fragments the encrypted mesh frame → exercises the defrag-before-decrypt RX path, whose inverse was reverted); mesh-leaf (relay calls mmwlan_mesh_set_multihop(false); the origin INVERTS deterministically → PASS iff its sole peer is still the relay AND exactly 0 replies — the shipped-but-unguarded leaf opt-out P6d); mesh-relay-nocrash (roles re-cast so the RELAY is the sole reporter and the origin drives a 90-ping burst — because the orchestrator flashes reporters and blocks per-reporter, a relay-then-origin multi-reporter would deadlock; the relay forwards then asserts hw_restart_counter unchanged across a ~40s window, INCONCLUSIVE if it never peers both endpoints so a no-load run can't false-PASS — guards the interrupt-WDT SPI-host-teardown crash). All three build green on 2.10.4; one compile error caught (nocrash used is_dest with only is_origin/is_relay declared). Bench-verified on the 2.10.4 baseline: T2 6 pass / 0 fail / 0 skip (mesh-large-frame 189.3s, mesh-leaf 182.8s, mesh-relay-nocrash 207.6s), no timing tuning needed, bench left radio-silent (board0/1/2 → test-idle). LANDED 2026-07-21 via PR #39 (rebase-merge, gitlink unchanged at 7d7f76ad): bench-verified green on 2.10.4, rebuilt clean against 2.12.3, pre-merge review SAFE TO MERGE (2 findings fixed — _validate_bench now full-shape-validates every MAC — + 2 non-blocking robustness caveats deferred as tracked TODOs). The suite is now at 15 T2 tests + a make test-unit host tier.</div>
 <div class="card-meta">5 min · green · regtest · 3 new T2 tests</div>
 </a>
-
 <a class="card" href="2026-07-19-sdk-hop1-2.11.2-report.html">
 <div class="card-date">2026-07-19</div>
 <div class="card-title">SDK Hop 1 — morselib 2.10.4 → 2.11.2</div>
 <div class="card-ex">The first hop of the staged forward-port that pulls MorseMicro's upstream mm-iot-sdk INTO our vendored tree — morselib 2.10.4 → 2.11.2, keeping our 24 PRs. Three layers on one commit: (1) the upstream refactor from a single global datapath ops table (data-&gt;ops, one active vif) to a per-VIF ops model (two fixed slots VIF_STA/VIF_AP, TX stamped with tx_metadata-&gt;vif_id, RX demuxed by fw vif) — with signature changes to umac_interface_add (+datapath_ops), umac_datapath_tx_frame (5→4 arg), morse_cmd_tx (+skip_errlog, int→enum), and driver_health moved to umac/health_check; (2) re-architecting our all-ESP mesh-gate onto it — deleting datapath_ops_gateway/gw_*/configure_gateway_mode/ap_vif_id and creating native umac_datapath_mesh.c + umac_datapath_ibss.c, mesh on VIF_STA + concurrent AP on VIF_AP; (3) SIX fixes found by on-air regression — get_tx_seq key_type→key_id, mesh config_beacon_timer non-fatal (fw 1.17.8 rejects standalone BSS_BEACON_CONFIG on a mesh vif), mmhalow AP egress vif-tag (0 ICMP → 15/15), an unconditional RX vif-reassignment LUT (concurrent mesh claimed the client's PROBE_REQ so the AP never answered), mmhalow_set_tx_vif for the gate's mesh netif (STA→AP→ip_forward→mesh forwarding), and (6) a twt-assoc REGRESSION — the hostap 2.11.2 forward-port guarded the assoc-time TWT-seed on CONFIG_DRIVER_NL80211_MORSE, which the ESP (MM_IOT) build does not define, so the .twt_conf op compiled out; fixed by adding || defined(MM_IOT). None a re-arch logic bug. Firmware is UNCHANGED at 1.17.8 bench-wide — the ESP .mbin is regenerated from vendor/morse-firmware (the single source of truth) at build time, so the committed submodule mbin is never used and there was no version to reconcile. T0 build matrix green + T2 on-air green (STA, IBSS, TWT, SW-CCMP, A-MPDU, mesh peering/relay, ap-sta-ping 15/15, the concurrent mesh-ap + mesh-ap-multi-twt, ESP↔Linux mesh interop mesh-linux, and twt-assoc — full T2 12 PASS / 0 INCONCLUSIVE). Uncommitted; tagging 2.11.2-esp32-1 is the owner's call.</div>
 <div class="card-meta">8 min · green · SDK forward-port · Hop 1</div>
 </a>
-
 <a class="card" href="2026-07-18-fork-migration-esp-halow-handoff.html">
 <div class="card-date">2026-07-18</div>
 <div class="card-title">Fork migration handoff — mm-esp32-halow → esp-halow</div>
 <div class="card-ex">Scoping + strategy handoff for moving all our morselib work from teapotlaboratories/mm-esp32-halow (the current components/halow submodule) onto teapotlaboratories/esp-halow (the proper fork of the OFFICIAL MorseMicro/esp-halow SDK), then repointing the submodule. This is the long-deferred "fork migration" backlog item, now unblocked (suite green, rimba#36 merged). Verified with gh+git: mm-esp32-halow is STANDALONE (isFork:false, parent:null), 70 commits with base 68ddbd8d "Import morsemicro/halow 2.10.4-esp32-2 (pristine from ESP Component Registry)" — the 69 commits above it = ALL our work across 24 merged PRs (#1–#24: IBSS, 802.11s mesh+SAE/AMPE/CCMP, mesh-gate AP concurrency, TWT, SW-CCMP bulk-AES, A-MPDU, real-RC, accessors). esp-halow forks MorseMicro/esp-halow, tip "mm-iot-sdk: update to 2.12 tag" = Morse SDK 2.12. THREE DECISIVE FINDINGS: (1) DISJOINT histories — git merge-base = none, so no shared-base rebase; commits must be REPLAYED (cherry-pick / format-patch+am -3). (2) VERSION GAP 2.10.4→2.12 — a forward-port across SDK versions, not a clean transplant, conflicts expected. (3) POSSIBLE LAYOUT MISMATCH — ESP Component Registry package vs mm-iot-sdk source tree, so patches may not apply by path; FIRST STEP = diff 68ddbd8d tree vs esphalow/main to map the layout. "Preserve history" = per-commit author/date/msg survive but land as new SHAs on 2.12; "preserve PRs" = recreate (GitHub PRs can't move repos). Strategy options (a) cherry-pick range (b) format-patch+am (c) per-PR replay (d) one cumulative PR. Footguns: submodule gitlink SHA caveat, re-run the WHOLE suite against 2.12, no-commit-work-hours/owner-attribution/branch+PR/review-before-merge, fw-driver parity may force a bench Linux/fw bump. Migration NOT started — owner clearing context to restart fresh.</div>
 <div class="card-meta">4 min · planning · fork migration · handoff</div>
 </a>
-
 <a class="card" href="2026-07-18-bench-stress-and-capture-retry.html">
 <div class="card-date">2026-07-18</div>
 <div class="card-title">Stress-testing the harness + a serial-capture retry hardening</div>
 <div class="card-ex">One T1 run had failed on a lone serial-capture glitch that vanished on retry (serial capture failed: device reports readiness to read but returned no data … multiple access on port?). Instead of waving it away, stress-tested the harness itself — looped the hardware-touching tiers with NO retries to measure the real flake rate. Clean-rail: 0 flakes across the first 8 T1 runs (~96 captures). Then flakes appeared after a dscycle iteration disturbed the PPK2 rail, on DIFFERENT random apps each time (rimba-halow-sta, rimba-halow-mesh-ap, even the radio-free rimba-hello) — ~4 flakes across ~168 board2 captures = ~2–3% per capture, ~1 in 4 runs, and NOT app-specific. Root cause: board2 is PPK2-powered, and a brief rail wobble resets the ESP → its USB-serial-JTAG drops and RE-ENUMERATES mid-capture (often renumbered), which pyserial surfaces as readable-but-0-bytes; bus-powered board0/board1 showed 0 flakes. The harness treated this transient as a hard gating FAIL. Fix (tools/regtest/common.py): a shared retry-aware _capture() + _await_port() — on a mid-capture SerialException re-resolve the port by efuse MAC and recapture a fresh window; exhausting the retry re-raises so a genuinely dead board still FAILs; the retry is LOGGED not silent. efuse_mac threaded through t1_smoke.py:159 + t2_onair.py:152/236/345. Verified: unit test covers both the recovery and persistent-fail branches; 10 post-fix runs = 120 captures, 0 fail (no regression). HONEST CAVEAT: a live transient never fired in the post-fix window (even on a dscycle-disturbed rail), so the fix catching a REAL event on-bench is unobserved — only the mock holds. The first buggy edit (a 'bench' name out of scope → 10/12 fail) was caught by the bench, prompting pyflakes in the loop. Incidental: dscycle's pgrep -f ppk2_hold.py | kill -9 is broad enough to kill any process mentioning the holder. Bench left radio-silent; changes uncommitted (weekday window).</div>
 <div class="card-meta">6 min · ✓ fix landed (uncommitted) · harness · serial-capture · bench-flake</div>
 </a>
-
 <a class="card" href="2026-07-18-regression-run-and-apsta-ap-marker.html">
 <div class="card-date">2026-07-18</div>
 <div class="card-title">Full bench run of the renamed suite + the test-apsta-ap up-marker fix</div>
 <div class="card-ex">Ran the whole regression suite on the bench against the restructured/renamed test-* tree — T0, T1, T2, then dscycle + tp. T0 (28 pass / 27 XFAIL / 1 skip) and T1 (12 pass / 2 sleep-skip) came up green. T2 first showed 3 FAILs — exactly the tests whose AP is test-apsta-ap on board0 (ap-sta-ping, twt, multi-twt), all at an identical ~52s with "support role 'ap' did not come up: up-marker 'ap-ready' not seen within 25s". Root-caused to a FALSE-FAIL: direct reproduction showed the AP prints netif up=1 at 3.4s then the console goes dead-silent (no panic, no reset) and ap-ready — the very next statement — never appears; two injected markers just before/after both printed but ap-ready two lines later did not, so it's a time-based stall of the app_main task as the AP netif comes up, not a linear-code bug. Reproduced on all three boards incl. fully-wired board2 (not the wiring), not the rename (byte-identical code path), not the TX cap (removing it didn't help). THE DECISIVE TEST: with the "hung" AP running, a real STA associated (SAE, 3.75s) and got 15/15 ICMP replies — the SoftAP is fully alive; only the app_main task stops printing after netif-up, so the up-marker never reaches the orchestrator. Fix: emit the ap-ready marker BEFORE assign_static_ip (before the netif-up call that stalls the print stream); the IP is pinned µs later, long before any STA associates. One firmware line moved unblocked five AP-gated cases (the 3 T2 tests + tp --ap esp + dscycle's AP). Re-run: T2 15 pass / 0 fail. tp 4 pass (No-PS 62.7mA anchor, Dyn-PS 23.9≤32, WNM 17.1≤24). dscycle INCONCLUSIVE (1/2 wake cycles — C6 D5-wake known-flaky, non-gating). Underlying app_main-stall-after-netif-up is a separate firmware issue to root-cause (surfaced by a clean rebuild against the modified components/halow; main-task stack or an esp_netif/morselib AP-path change). Bench left radio-silent.</div>
 <div class="card-meta">5 min · ✓ suite green · regtest · SoftAP · false-FAIL</div>
 </a>
-
+<a class="card" href="2026-07-18-sdk-forwardport-2.12.3-plan.html">
+<div class="card-date">2026-07-18</div>
+<div class="card-title">SDK forward-port plan — mm-iot-sdk 2.10.4 → 2.12.3</div>
+<div class="card-ex">Planning doc (not yet applied), grounded in a systematic per-file analysis plus direct git verification. Staged 2.10.4 → 2.11.2 → 2.12.3, compile-verified and tagged -esp32-1 at each hop, keeping our vendored layout and 24 merged PRs. THE SCOPE DECISION: hop 1 touches ~4058 upstream files but 1259 are doc/html, 832 freertos-libs, 690 aws, 461 bsps — none of which our ESP build compiles, so the port is scoped to the compiled roots only. Conflict surface from git ground truth: hop1 402 changes → 31 conflicts, hop2 44 → 11. Two corrections to the old memory: ALL hard breaks are in hop 1 (hop 2 is almost entirely additive — relay subsystem, DPP QR), and construct_80211_data_header / frames_allowed_pre_association are RETAINED, not dropped. 17 hop-1 API breaks and 11 hop-2 entries enumerated with verified signatures, 24 per-file plans with strategy + risk, and a 51-file must-survive appendix — because compile-verify proves the tree builds, not that our features survived a 3-way apply.</div>
+<div class="card-meta">plan · 2 hops · 31+11 conflicts · 28 API breaks · 51 must-survive files</div>
+</a>
 <a class="card" href="2026-07-17-firmware-regtest-split.html">
 <div class="card-date">2026-07-17</div>
 <div class="card-title">firmware/ reshape — regtest fixtures vs curated examples</div>
 <div class="card-ex">Split firmware/ into two clean buckets — test-* = the regression suite + every app the harness FUNCTIONALLY flashes as a fixture, and everything else = a small curated set of clean EXAMPLE apps a user copies (join an AP, mesh node, TWT power-save, the gate). A 19-agent analysis workflow (per-app file:line scaffolding + clone lineage + a living-vs-historical-worklog doc-ref split) found only 3 non-regtest apps were ever load-bearing: rimba-hello (IDLE_APP silence), rimba-deepsleep-cycle (dscycle DUT), c6-harness (tp/dscycle D5 trigger) — every other was T0-build + T1-smoke coverage only. Those moved into the namespace: test-idle (clone of hello, hello kept as the hello-world example), test-deepsleep-cycle (verbatim DUT), test-c6-trigger (rename). KEY FINDING: rimba-halow-sta was mislabeled — a C6-triggered PS-ladder measurement rig (already cloned into test-power), NOT a STA example, while the runbook still told users to flash it as "station .2" — so it was rewritten as a clean join-AP + ping STA (from test-apsta-sta minus the TEST| hooks), which also fixed the stale docs. 5 experiment apps removed via git rm (doze-hold, downlink-test, sleep-test, standby-test, halow-mesh-perf; coverage now in the tp/dscycle tiers + test-*). An 11-agent cleanup workflow stripped the surviving 11 examples of scaffolding (close-bench TX caps, TEST| hooks, D5 flash-hold guards, the #define IPERF gate + dead ping/TWT code, RISK-01 raw-frame sniffers, bench counters/soak loops, hardcoded peer MAC/IPs, internal jargon) and wrote a README each. Living docs updated (suite guide .md+.html, tools/regtest/README, bench + PS refs, results note; counts 30→27 apps, 4→2 sleep; retired probes noted, measurements preserved; historical worklogs untouched). The manifest drift tripwire (check_manifest_covers_tree hard-fails T0 on any tree↔APPS mismatch) kept each stage honest. VERIFIED: T0 build of all 13 changed s3 apps = 14 pass / 0 fail / 0 skip; drift green; no AI attribution. A follow-up renamed the app prefix regtest- → test- (dirs + project names + the TEST| console contract; tools/regtest/ dir kept). Uncommitted (lands as one branch+PR off-hours with the already-uncommitted test tree); the deepsleep example's C6→RTC-timer wake change needs a bench re-verify.</div>
 <div class="card-meta">6 min · ✓ shipped (uncommitted) · firmware · regtest · cleanup</div>
 </a>
-
 <a class="card" href="2026-07-17-powersave-test-cases-batch.html">
 <div class="card-date">2026-07-17</div>
 <div class="card-title">Power-saving test cases — a 5-feature batch</div>
 <div class="card-ex">Five of the ranked "add next" power-saving test cases from the verified matrix, built + verified on the bench — each a delta against what the tp tier + T2 twt already covered. #1 FW-blob version-pin (T0, no hardware): asserts mm6108.bin = 480664 B / sha256 ce2702b7 (1.17.8) BEFORE any flash — catches the exact ~2x 1.17.9 STA-PS regression the whole tp tier exists for, at the cheapest choke point (PASS on the pinned blob, FAIL on the thin-LMAC blob). #2 assoc-embedded TWT → INSTALLED (T2 twt-assoc): mmwlan_twt_add_configuration BEFORE connect = TWT in the assoc IEs, the UNIVERSAL path both APs honour (unlike the mid-session action a Linux AP ignores); an earlier audit caveat ("no INSTALLED accessor for the assoc path") was REFUTED on-bench (installed(0)==1 on both the ESP AP and chronite's hostapd); needed a new hostapd-ap linux role in the orchestrator. #10 multi-STA TWT — both INSTALLED (T2 multi-twt): 2 STAs concurrent via a new MULTI-REPORTER harness extension (_record_multi_verdict ANDs the reporters); single-reporter path preserved. #9 deep-sleep reconnect (dscycle): a flapping-port runner — deep-sleep proven by port-gone DURATION (>4s) not wake_cause (re-opening the USB-JTAG resets the just-woken board); implemented + logic-verified (2 reconnects + 2 consistent gaps), but the over-stressed board2 landed honest INCONCLUSIVE 2/3 (the gate correctly never false-PASSed); reliable recovery = a 5s power-off (2.5s leaves it dark) + tight esptool. #8 HOST_LIGHT_SLEEP ladder (tp --light-sleep): a build-arg variant + on-rig LS calibration (~25.8 mA, tight); FINDING — the "~7x stronger gate" advantage is MASKED by the close-bench RX-overload (LS 1.17.8 ~25.8 ≈ reference LS 1.17.9 ~30.8), so it needs v2 (cap the AP TX). All uncommitted; T0 stays green (fw-blob PASS, drift clean).</div>
 <div class="card-meta">8 min · ✓ shipped (uncommitted) · power · regtest · 5 tests</div>
 </a>
-
 <a class="card" href="2026-07-16-ppk2-power-regression-tier.html">
 <div class="card-date">2026-07-16</div>
 <div class="card-title">A PPK2 power-save regression tier (tp)</div>
 <div class="card-ex">A new regression tier that meters board2's power-save ladder off the Nordic PPK2 and gates a GROSS current regression — the kind the fw-1.17.9 ~2× PS regression was — while always recording the raw mA. It is a NEW tier, not a T2 test: a power verdict comes from a host-side PPK2 stream the firmware can't see, so it can never be a firmware REGTEST|RESULT. tp_power.py owns the PPK2 (kill holders → drain → retry → power-cycle → threaded sample, mirroring ~/pwr_test/rf_run.py), brings up an AP (ESP SoftAP regtest-apsta-ap on board0 OR Linux hostapd_s1g on chronite via a new linux_peer.bring_up_ap + hostapd-rimba.conf — one DUT serves both), flashes the new C6-triggered regtest-power ladder, segments the current stream by the firmware's REGTEST|INFO|phase=N markers, and scores Dyn-PS + WNM against per-AP bands (No-PS = validity anchor, TWT recorded). Owner decisions: both AP paths, a wide gross-multiple gate, keep the C6 trigger, calibrate-now-harden-later. FINDING: the bench reads ~1.6–2× the documented reference on every doze tier (both APs) — a close-bench RX-overload offset (the DUT TX-caps to 1 dBm but the AP blasts it from cm away) — but repeatable, so the wide gate calibrates to THIS rig's 1.17.8 numbers (ESP Dyn-PS 21–25 / WNM 13–18; Linux Dyn-PS 22–23 / WNM 14–16; 3 runs/AP). A synthetic sweep through _score CAUGHT A BUG: a tier-separation validity guard (dyn-ps < 0.7×No-PS) masked the very regression it should catch (2× → INCONCLUSIVE not FAIL); fixed to validity = associated + No-PS-in-window. Fresh 1.17.8 run = 4 PASS; synthetic 2× regression = FAIL. v2 (backlog): cap the AP TX for reference-like numbers + a tighter recal.</div>
 <div class="card-meta">7 min · ✓ shipped (uncommitted) · power · PPK2 · regtest</div>
 </a>
-
 <a class="card" href="2026-07-16-regression-suite-and-fork-migration-plan.html">
 <div class="card-date">2026-07-16</div>
 <div class="card-title">Regression suite (T0–T2) + fork-migration plan</div>
 <div class="card-ex">Built the regression suite the backlog has wanted since the start — a three-tier harness (tools/regtest/, make test-t0|t1|t2) that tells whether a firmware/morselib/ESP-IDF bump silently regressed a milestone. Each tier is explicit about what it does NOT prove: T0 build (no hardware — every app × board compiles via make + a real country code asserted at build time, catching the "??" dead-radio trap), T1 smoke (one board — flash + boot + radio up, asserting chip 0x0306 / fw 1.17.8 / real MAC / runtime country as VALUES not line-presence, so a dead radio can't pass), T2 on-air (a rig — one firmware/regtest-* app per milestone claim, self-reporting a machine-readable verdict; expected values reused from the milestones and tagged noisy-vs-stable so RF numbers never gate). T0's first run found a pre-existing break: BOARD=proto1 can't build ANY app (its bcf_mf16858.mbin is absent from the pinned vendor/morse-firmware since the 06-24 vendor-sourcing change) — recorded XFAIL, non-gating. Green baseline: T0 21 PASS / 21 XFAIL / 1 SKIP; T1 radio bring-up 14/14. T2 then grew to a MULTI-ROLE ORCHESTRATOR and now automates ALL 8 on-air feature tests (swccmp, ampdu-cap, ap-sta-ping, ibss, twt, mesh-peering, mesh multi-hop relay on board2, and the mesh-gate with a ttl=63 forward proof) — one unattended `make test-t2` = 8/8 PASS on the 3-board bench, every role app regtest-*, four small mmwlan* accessors added to morselib so reporters self-verify structural facts. Phase 2 (PLAN ONLY, later removed at the owner's request to restart): had recommended forking mm-iot-sdk — 97.9% of our 8452 insertions live inside it, the two touched subtrees git-tree-IDENTICAL to upstream tag 2.10.4 so the history-preserving graft applies with zero conflicts; port-forward risk concentrates in umac_datapath.c against a new AP/STA split + a 1370-line umac/relay/; the archive/fix1-implementation tag is 8 commits OFF main; 2.11.2 silently flips CONFIG_HALOW_PS_MODE against the bench's unwired WAKE/BUSY.</div>
 <div class="card-meta">✓ suite green · T2 8/8 automated · regression suite · fork plan removed</div>
 </a>
-
 <a class="card" href="2026-07-15-mesh-fix1-hw-restart-verify.html">
 <div class="card-date">2026-07-15</div>
 <div class="card-title">FIX-1 (bus-preserving hw_restart) — verified, then removed</div>
 <div class="card-ex">Single-variable A/B on board2 (the only fully-wired ESP) as relay: 6 forced hw_restarts per arm under UDP forward load, only g_mmdrv_soft_hw_restart flipped. FIX-1's MECHANISM WORKS — SPI re-inits 8 (full teardown ran) → 2 (boot only, bus preserved), proving mmdrv_soft_restart keeps SPI2_HOST/bus_lock/GPIO ISR handlers across a chip reset + FW reload, never asserting. But the BASELINE never crashed either (0 crashes in BOTH arms), so there is no benefit to measure. A bigger, FIX-1-independent gap surfaced: a mesh node cannot recover from ANY hw_restart — hw_restart_evt_handler restores scan + STA only and umac_interface_reinstall_vif is called exclusively with UMAC_INTERFACE_STA (umac_connection.c:1660), so no umac_mesh_handle_hw_restarted exists and both arms went permanently deaf (server 0.00 Mbit/s) ~4 s after restart #1; enabling FIX-1 would trade a self-healing crash-reboot for a silent zombie. Also found: under load the PERIODIC health check never runs (skbq.c:333 refreshes last_checked on every successful chip transaction → 38 skips / 3 checks), so a loaded relay reaches a restart only via the 30-comm-failure escalation — weakening the old "relay = restart-frequency amplifier" framing. NOT closed as unnecessary: n=1 restart-under-load per arm (traffic dies after restart #1), and properly-wired board2 crash-loops intermittently per the 07-12 record. Removed from the tree, archived at tag archive/fix1-implementation, backlogged behind the mesh restart handler. Rig gotchas: printf blows the health task's 400-word stack; the client's UDP rate is meaningless (a broken path reports 4.72 of 5 Mbit/s) — read the server's; crash-looping boards re-enumerate.</div>
 <div class="card-meta">6 min · ◼ removed, not shipped · hw_restart · mesh · FIX-1</div>
 </a>
-
 <a class="card" href="2026-07-15-mesh-hwmp-flapping-artifact-verify.html">
 <div class="card-date">2026-07-15</div>
 <div class="card-title">HWMP path-flapping — a forced-topology TEST ARTIFACT, not a bug</div>
 <div class="card-ex">A 3-lens adversarial comparison against the pinned Linux net/mac80211/mesh_hwmp.c settled a long-standing question: there is NO production HWMP flapping bug. The anti-flap logic is a faithful Linux port (mesh_path_update at umac_mesh.c:1984 == hwmp_route_info_get: stale-SN reject + adopt only via same-next-hop OR a 10/9 ~11% metric-hysteresis win, applied independently of the SN test), so two genuine similar-metric paths cannot flap. The ESTAB metric gate already exists too — mesh_last_hop_metric (:2339) returns MESH_METRIC_MAX for a non-peer transmitter, exactly like Linux airtime_link_metric_get, so a route learned via a non-peer loses the compare. The 07-11 oscillation (~319 RA=board0 correct-relay vs ~221 RA=board2) was manufactured by the bench-only peer allowlist (mesh_peer_allowed:517, allows-all when count==0, i.e. off in production), which creates an "in-RF-range + HWMP-heard + not a data peer" state that cannot occur in an auto-peering mesh. The proximate RA-flip is the origin RA=dest fallback (umac_datapath.c:3761), not route-learning. Two real, separate residuals recorded: D1 (small — implemented + bench-verified the same day: drop + discover instead of blasting an unreachable RA=dest; single-hop 0.46 Mbit/s regression-clean, multi-hop ramps to 1.66) and D4 (bigger — no tx-status→fail_avg→LINK_FAIL_THRESH(95)→mesh_plink_broken self-heal, so a silent black-hole never heals; would NOT have cured the 07-11 flapping since allowlist-dropped frames hardware-ACK above the drop).</div>
 <div class="card-meta">5 min · ✓ artifact, no bug · HWMP · mesh · D1 fixed</div>
 </a>
-
 <a class="card" href="2026-07-15-mesh-ampdu-singlehop-throughput-ab.html">
 <div class="card-date">2026-07-15</div>
 <div class="card-title">A-MPDU + real-RC — the on-air throughput A/B</div>
 <div class="card-ex">Proved the aggregation win with ESP-side eligibility/rate counters rather than the monitor (which drops data/BA frames under load — 1087 beacons vs ~13 data frames captured). A-MPDU ON-vs-OFF: single-hop 0.52 vs 0.38 Mbit/s (+37%, 953/984 = 97% of origin frames eligible; peaks 0.65–0.80 ON vs 0.50 max OFF) and relay 0.29 vs 0.21 Mbit/s (+38%, 382/388 = 98.5% of forwards eligible). But the bigger lever turned out to be rate control, not aggregation: real per-peer RC (already committed, 838b23c2) converges mmrc MCS0 → MCS2 (300 → 900 kbps) for 0.48 vs 0.22 Mbit/s = ~2.2×, and the two compound (0.22 → ×2.2 → 0.48 → ×1.37 → 0.52). Caveat kept honest: MCS2 not MCS7 — the close-range bench link is RX-overloaded, so the ceiling here is the RF setup, not the code. Gotchas: iperf's -b takes an integer in Mbit/s (-b 5, not 5M), and the XIAO boards need ~16 s after a serial open before traffic.</div>
 <div class="card-meta">5 min · ✓ +37% / +38% · A-MPDU · real-RC · mesh</div>
 </a>
-
 <a class="card" href="2026-07-15-mesh-20-relay-crypto-discriminator.html">
 <div class="card-date">2026-07-15</div>
 <div class="card-title">#20 resolved — the RELAY's crypto mode is the discriminator</div>
 <div class="card-ex">Settled #20 with a clean single-variable A/B and then proved the mechanism offline. The discriminator for whether a forwarded multi-hop mesh frame is delivered is the FORWARDING RELAY's crypto mode — NOT the receiver's host stack. With a native HW-crypto Linux receiver (chronite, not recompiled) and only the ESP relay's g_mesh_sw_crypto flipped: a SW-CCMP relay's forwards ARE delivered by the Linux kernel (33 frames = 31 ICMP + 2 ARP, 31/31 replies), while a HW-crypto relay yields 0 delivered despite ~30 forwards on air — with a 28/28 positive control in both rows. That refutes BOTH earlier verdicts, which were relay-crypto-confounded: the 07-11 "universal MM6108 FW limitation (Linux also withholds)" AND the 07-14 "ESP-vs-Linux receiver difference" reversal. MECHANISM RESOLVED by an offline CCMP-MIC verify: board2's own MGTK was printed at AMPE install, its forwarded group frames captured byte-exact on chronium's morse0, and MIC-verified offline via a Python port of morselib ccmp.c mesh_ccmp_aad_nonce — the SW-relayed forward MIC-VERIFIES (plaintext = valid ARP, 2/2) while the HW-relayed forward MIC-FAILS (3/3). So the MM6108 HW-crypto path emits a MALFORMED forwarded frame that any canonical receiver rejects; morselib/morse_driver RX are exonerated and the fix is FIRMWARE. Verified for GROUP (MGTK); unicast (MTK) presumed the same. Practical answer unchanged: host SW-CCMP forwarding works end-to-end and stays the shipping default.</div>
 <div class="card-meta">7 min · ✓ resolved · #20 · CCMP · mesh · firmware fault</div>
 </a>
-
 <a class="card" href="2026-07-14-mesh-esp-linux-multihop-stress.html">
 <div class="card-date">2026-07-14</div>
 <div class="card-title">ESP↔Linux 3-hop mesh stress + a #20 counter-example</div>
 <div class="card-ex">A forced 3-hop line board0→board1→board2→chronite (HW-crypto Linux endpoint), stress-tested 30 min one-directional and 20 min bidirectional. Delivery held ~99–100% both ways: chronite→board0 99.82% (8987/9003) over 30 min, board0→chronite 100% (3000/3000) + chronite→board0 99.37% (2998/3017) over 20 min, zero crashes, no heap leak, avg ~48 ms over 3 hops. Encryption verified on all four nodes (chronite key_mgmt=SAE + CCMP; ESPs MMWLAN_SAE + drop-plaintext; ~15k frames flowed both ways so all were CCMP-protected). TWO findings: (1) a clean COUNTER-EXAMPLE to the #20 "universal FW limitation" — a HW-crypto Linux node (no_hwcrypt=N verified) received thousands of multi-hop A4≠TA forwards at the application layer, contradicting "HW-crypto mesh multi-hop is impossible"; likely the 2026-07-11 proof (10 forwards, raw-socket saw 0) was confounded — flagged for reconciliation. (2) An early board0 esp_ping stall at 200ms+200ms (~10/s through board0) was pure TX saturation, not a mesh fault — clean at 400ms (3000/3000). No firmware change; the defrag-before-decrypt fix was untouched. Radio-silent after.</div>
 <div class="card-meta">6 min · ✓ stress PASS · #20 counter-example · mesh · ESP↔Linux</div>
 </a>
-
 <a class="card" href="2026-07-14-mesh-defrag-before-decrypt-PASS.html">
 <div class="card-date">2026-07-14</div>
 <div class="card-title">Mesh SW-CCMP defrag-before-decrypt: bench PASS — the proper large-frame fix</div>
 <div class="card-ex">Large secured (SW-CCMP) 802.11s mesh frames now traverse the mesh — single-hop, multi-hop relay, and both directions — by letting the MM6108 FW fragment them (encrypt→fragment) and having the host REASSEMBLE the raw fragments before decrypt. The opposite order (host fragmentation, fragment→encrypt, halow 9c7daabd) was bench-broken and reverted. Fix in umac_datapath.c: a reorder bypass so a fragment skips the BA reorder buffer (all fragments share one seq#), plus a reassemble-then-decrypt branch in after_reorder (datapath_defrag → sw_ccmp_decrypt on the whole). Two bugs found + fixed: (1) the reassembled CCMP AAD lost the QoS Control (datapath_defrag re-prepends only the 30-byte MAC header, but mesh_ccmp_aad_nonce reads the QoS at hdr[30] = CCMP PN) → save [MAC+QoS] contiguously into aad_hdr, reset MoreFrags+frag#=0, pass as the AAD header; (2) mmdrv_get_rx_metadata asserts (metadata!=NULL, "RX frames only") on the defrag-alloc reassembled buffer, crash-looping the relay + endpoints → set rx_metadata=NULL. Bench (all-ESP, forced FW frag + 1400 B pings): single-hop 131/131 (100%), multi-hop board0→board2(relay)→board1 143/146 (~98%), every fragment reassembled AND decrypted (reasm==decok, ccmp_fail=0) at all four RX points, both directions, zero crashes. Toggle OFF = whole/A-MPDU at high rate (FRAG seen 767→10) with the rare natural fragmentation handled too. On-air (chronium morse0) confirmed the FW fragments host mesh frames into 3 MPDUs (shared seq#, incrementing frag#). MTU-cap / min-MCS floor NOT needed. Temp scaffold stripped, app restored, radio-silent.</div>
 <div class="card-meta">6 min · ✓ bench-VERIFIED PASS · 2 bugs fixed · mesh · SW-CCMP · fragmentation</div>
 </a>
-
 <a class="card" href="2026-07-14-mesh-frag-bench-verify.html">
 <div class="card-date">2026-07-14</div>
 <div class="card-title">Mesh host-fragmentation bench-verify: the committed fix is broken (a firmware wall)</div>
 <div class="card-ex">On-air verification of the committed but untested host 802.11 fragmentation fix for mesh SW-CCMP (fragment→encrypt, halow 9c7daabd). Verdict: NOT verified — broken on this firmware. On the forced all-ESP line board0→board2(relay)→board1, board0 fragments correctly (TXsent=252 = 3 host fragments/ping), but the relay MIC-fails ~64% (158/248), reassembles ZERO MSDUs, forwards nothing — every ping times out. The chronium morse0 capture pins it: fragment 0 is perfect ([MAC hdr | CCMP | cipher]), but every fragment with fragment_number>0 carries a byte-identical DUPLICATE of its own 32-byte MAC header (CCMP header shoved to offset 64), with Retry set and MoreFrags cleared. The host encrypt emits a correct single fragment and the builder is identical per index, so the FW adds the extra header AFTER encryption, only for frag#>0 — corrupting the CCMP AAD → MIC fail → no reassembly. A control run with the fix off (Test B: A-MPDU sends full-size frames WHOLE) delivers 100+ pings end-to-end once the BA session is up, proving the rig is sound and isolating the failure to the fragment path — and showing the fix is ineffective (the residual it targets, cold-start pre-BA frames, is exactly where its fragments are lost). A follow-Linux source cross-check (both trees) confirms it's a hard FW wall, #20-family: Linux never host-fragments on this FW (mac80211 defers via SUPPORTS_TX_FRAG/HW_FRAGMENT + DONTFRAG; fragmentation is FW-owned via a global threshold), and NO per-frame "already-fragmented" flag exists in the host↔FW descriptor in either tree. Recommend: abandon host fragmentation, cap the mesh MTU / floor the min-MCS so a SW-CCMP frame is never fragmented (frag#=0 always); revert or gate 9c7daabd. Left radio-silent.</div>
 <div class="card-meta">7 min · ✗ fix NOT verified — broken on-air · mesh · SW-CCMP · fragmentation</div>
 </a>
-
 <a class="card" href="2026-07-13-mesh-ampdu-s3-rate-attribution-fix.html">
 <div class="card-date">2026-07-13</div>
 <div class="card-title">S3 relay-forward drop root-caused — a TX-rate-attribution bug</div>
 <div class="card-ex">The long-standing "S3 relay forwards ~0 / ~99.6% of forwarded frames MIC-fail" wall was NOT #20 (HW-crypto A4≠TA), NOT a pairwise-MTK desync, and NOT an A-MPDU-of-4addr interaction. It was a wrong TX-rate attribution on the multi-hop ORIGIN leg: the frame was sent at the untrained common_stad's ~MCS0, so a full-size 4-addr frame exceeds the 1 MHz max PPDU → the MM6108 FW fragments it and sets moreFrag in the on-air FC AFTER the host SW-CCMP MIC was already computed over the unfragmented FC (which the AAD covers unmasked) → the next hop MIC-fails ~99.6%. Byte-proof from a dual-side capture: FC 88 43 at encrypt vs 88 47 at decrypt — only bit 10 (moreFrag) differs, with identical key and nonce, which is what rules out a key desync. FIX: init tx_metadata->aid + umac_rc_init_rate_table_data on key_stad (the next hop), not stad — completing the S2 "the frame follows the next hop" pattern (seqno/BA/reorder already key on key_stad) and mirroring net/mac80211 tx->sta = sta_info_get(addr1 = mpath->next_hop). No-op off the multi-hop mesh path. On air (all-ESP line board0→board2(relay)→board1): relay decrypt success 0.4% (9/2073) → 96.5% (1849/1917), the relay forwards, end-to-end verified. Refuted along the way: the 6f1d-vs-7e58 "MTK desync" and the plid-IGNR reads were confound artifacts of an allowlist startup race, disproved by forcing a clean topology.</div>
 <div class="card-meta">6 min · ✓ root-caused + FIXED · A-MPDU S3 · mesh · CCMP</div>
 </a>
-
 <a class="card" href="2026-07-13-mesh-ampdu-s3-mtk-desync-plid-ignr-fix.html">
 <div class="card-date">2026-07-13</div>
 <div class="card-title">The "??" that looked like dead hardware: S3 MTK desync + plid-IGNR fix, and two corrections</div>
 <div class="card-ex">Set out to verify a follow-Linux fix for the S3 relay forward-drop (a pairwise MTK key desync); two things turned out wrong and mattered more than the fix. (1) A whole "MM6108 won't boot / degraded silicon / physical power" thread was a MISDIAGNOSIS: every firmware was built with bare idf.py, which ships CONFIG_HALOW_COUNTRY_CODE="??", and morselib (umac_interface.c:266) REFUSES to bring up the radio on "??" — returning "Channel list not set" before touching the chip, so version reads UNAVAILABLE, the chip id prints as varying uninitialised garbage (0x8200f5e7→0x8200d052→0x0000), and the MAC reads 00:00:00 — indistinguishable from dead hardware. Building via `make BOARD=proto1-fgh100m` (country US) booted every board first try: chip id 0x0306 (MM6108A1), fw 1.17.8, real MAC, rc=0 SPI read. All three boards (incl. board1's swapped module) are healthy — the hardware was fine all along. New rule added: always build via make…BOARD, never bare idf.py. This voids the pristine-baseline, STA, SPI-clock, flash-size, and module-swap tests (all ran on "??" radios). (2) The plid-IGNR fix does NOT fix S3: on a proper build the multi-hop forward still MIC-fails 99.3% (board2 sw_ccmp_fail=2061/2075), keys still desynced (board0 enc 6f1d9d9c…, board2 dec 7e586627…), and the failure is immediate from ESTAB, not after a re-peer — so the plid re-peer guard is the wrong mechanism (kept as hardening). Sharper lead: board0 TX-DBG nh_eq_stad=2930 = forwards encrypted with the wrong per-link key; since single-hop works, the forward path selects the destination (chronite) MTK instead of the next-hop (board2) MTK — the S2 key_stad override, to re-examine on a forced true-multi-hop rig.</div>
 <div class="card-meta">9 min · ⚑ mixed — build bug ruled, S3 reopened · mesh · A-MPDU · build</div>
 </a>
-
 <a class="card" href="2026-07-12-mesh-ampdu-s3-rtc-noinit-fix1-bench-block.html">
 <div class="card-date">2026-07-12</div>
 <div class="card-title">S3: RTC-noinit drop counters + FIX-1 implemented; bench read blocked</div>
 <div class="card-ex">Three goals, three different outcomes. (a) DONE + hardware-validated: RTC-noinit counters that survive the relay's INT-WDT crash-reboot (esp_reset_reason() + a magic word — clear only on a true power-on, otherwise preserve and accumulate), so the ~99% early-host-RX drop could be read after the crash instead of being erased by it. (b) IMPLEMENTED + builds green but bench-unverified, toggle default OFF: FIX-1, the bus-preserving hw_restart that routes the transport through morse_trns_soft_stop/start so SPI2_HOST, spi_handle, bus_lock, spi_irq_semb and both GPIO ISR handlers survive a chip reset + FW reload, dropping the spi_bus_free/esp_intr_alloc that trips the interrupt watchdog. (c) BLOCKED: board2's mesh plink flaps (peers, then drops, never stable) so no traffic flowed through the relay to accumulate the counters — proven to be a bench/board2-stability issue independent of the instrumentation. Nothing committed; bench left radio-silent. Later: the ~99% drop was root-caused on 07-13 as a TX-rate-attribution bug and FIXED, and FIX-1 was A/B'd on 07-15 and REMOVED rather than shipped (mechanism works — SPI re-inits 8→2 — but the baseline never crashed either, and no mesh node can recover from any hw_restart today).</div>
 <div class="card-meta">7 min · ⚠ partial · (a) done · (b) unverified · (c) blocked · A-MPDU S3</div>
 </a>
-
 <a class="card" href="2026-07-12-mesh-s3-swccmp-mic-forward-drop.html">
 <div class="card-date">2026-07-12</div>
 <div class="card-title">S3 relay forward drop root-cause: host SW-CCMP MIC failure</div>
 <div class="card-ex">ROOT CAUSE FOUND: a pairwise MTK key mismatch. The relay drops ~99% of forward-intended mesh frames at the host SW-CCMP decrypt — a CCMP MIC failure, not replay (mesh_seen=2084, mic=2052, replay=0, decrypt_ok=26). The single-hop A/B localizes it: single-hop board0→board2 direct decrypts 99.4%, the multi-hop forward only 1.2%. Host TX chain (header build, symmetric AAD, AMPDU flags) exonerated; the morse0 capture shows the 920 board0 forward frames are on-air valid; and a key_stad run shows board0 SELECTS the correct next-hop stad (98.7% nh_ok). The dual-side CCMP dump then pins it: the AAD matches byte-for-byte (masked-FC + A1=board2 + A2=board0 + A3=chronite + A4=board0 + QoS) but the KEY differs — board0 encrypts under 6f 1d 9d 9c 48 af d6 49, board2 decrypts under 91 bd e3 64 a0 a4 40 5a. The board0↔board2 pairwise MTK is not synchronized, so the MIC never verifies. Crypto recipe + addressing verified to follow mac80211 (ccmp_gcmp_aad wpa.c:318, ieee80211_fill_mesh_addresses mesh.c:851), so it is not the AAD/A3 or the recipe. Open: the mechanism — leading candidate is an asymmetric AMPE MTK rekey/install under peering churn (single-hop = stable peering, synced keys; multi-hop = churn). Fix = symmetric AMPE MTK install.</div>
 <div class="card-meta">10 min · ✓ root cause found · mesh · A-MPDU · SW-CCMP</div>
 </a>
-
 <a class="card" href="2026-07-12-mesh-peering-flap-bisect-no-regression.html">
 <div class="card-date">2026-07-12</div>
 <div class="card-title">Mesh peering-flap bisection: NO regression in the uncommitted A-MPDU layers</div>
 <div class="card-ex">The reported ESP↔Linux plink flap is not a regression in the uncommitted S2/S3/RTC/FIX-1/telemetry. Code + independent adversarial re-audit find the layers idle-peering-neutral (0/5 suspects survive); a same-board2 A/B has current-tree and clean 7fdba0c9 both hold rock-stable (flaps 0/0, connected 686 s+, RTC close=0). The "45/45 known-good" control was confounded; residual is the committed MPM keepalive gap (6 s vs Linux 1800 s), fixed and held under a 2088-frame relay load. The S3 RX-drop read is now answered: 2080/2088 forwarded frames drop in host SW-CCMP decrypt (99.6%), not the allowlist.</div>
 <div class="card-meta">8 min · ✓ resolved — no regression · mesh · A-MPDU · peering</div>
 </a>
-
 <a class="card" href="2026-07-12-mesh-ampdu-s3-relay-fwd-aggregation.html">
 <div class="card-date">2026-07-12</div>
 <div class="card-title">Mesh A-MPDU S3: relay forward-leg aggregation + FIX-2</div>
 <div class="card-ex">The forwarded unicast now rides the per-TID data path (DATA-class alloc + next-hop BA + AMPDU_ENABLED) so the FW A-MPDUs it — the multi-hop-goodput lever (B6). Same seam makes the forward non-blocking (FIX-2), removing the evtloop stall that armed the relay interrupt-WDT. Code done, builds green, 3 review findings fixed; not bench-verified.</div>
 <div class="card-meta">6 min · ✓ code done · builds green · mesh · A-MPDU · S3 · FIX-2</div>
 </a>
-
 <a class="card" href="2026-07-12-mesh-relay-intwdt-rootcause.html">
 <div class="card-date">2026-07-12</div>
 <div class="card-title">ESP mesh-relay Interrupt-WDT crash: code-only root cause</div>
 <div class="card-ex">Software bug, not a hardware wall. The relay's mesh-forward blocks 1000 ms inside the driver-task bus_lock, starving the SPI worker until 30 comm failures escalate to a full hw_restart whose SPI-host teardown (esp_intr_alloc via IPC) trips the interrupt watchdog. Relay = frequency amplifier, not a distinct crash class. Six ranked follow-Linux fixes.</div>
 <div class="card-meta">7 min · ✓ root-caused · software bug · mesh · relay · INT-WDT</div>
 </a>
-
 <a class="card" href="2026-07-12-mesh-esp-linux-ba-interop.html">
 <div class="card-date">2026-07-12</div>
 <div class="card-title">ESP↔Linux mesh Block Ack interop — the mesh-ID unlock</div>
 <div class="card-ex">A one-char mesh-ID mismatch (rimba-mesh vs rimba-smesh) was the whole blocker. Matched, a live Linux mesh peer accepts the ESP's unprotected NDP ADDBA (token 0x69) and CCMP A-MPDU runs at ~1.78 Mbit/s.</div>
 <div class="card-meta">6 min · ✓ interop RESOLVED · mesh · A-MPDU · interop</div>
 </a>
-
 <a class="card" href="2026-07-12-mesh-ampdu-multihop-stable-relay.html">
 <div class="card-date">2026-07-12</div>
 <div class="card-title">Mesh A-MPDU: multi-hop RA-flapping root cause + the throttle ceiling</div>
 <div class="card-ex">A stable Pi-5 relay kills the ~49% RA=dest flapping (100% correct next hop) — proving the ESP relay's load instability was the cause. But the 2-hop origin stays throttle-limited; the real A-MPDU lever is S3.</div>
 <div class="card-meta">6 min · ◑ flapping fixed · throttle-limited · mesh · A-MPDU · HWMP</div>
 </a>
-
 <a class="card" href="2026-07-11-mesh-ampdu-s0-fw-capability-spike.html">
 <div class="card-date">2026-07-11</div>
 <div class="card-title">Mesh A-MPDU S0: firmware go/no-go spike</div>
 <div class="card-ex">The Stage-0 hardware spike that gates the whole 802.11s mesh A-MPDU feature. Two questions: does the MM6108 firmware advertise A-MPDU capability for a mesh vif, and will the chip emit a real on-air A-MPDU for 4-address mesh QoS-data if the host force-marks the frames eligible? Both = GO — the mesh vif reports AMPDU_cap=1 and</div>
 <div class="card-meta">7 min · ✓ S0 GO (both halves) · mesh · A-MPDU · datapath</div>
 </a>
-
 <a class="card" href="2026-07-11-mesh-ampdu-s1-blockack-rx-routing.html">
 <div class="card-date">2026-07-11</div>
 <div class="card-title">Mesh A-MPDU S1: Block Ack RX routing + mesh MFP=no</div>
 <div class="card-ex">Two edits — route BLOCK_ACK action RX to the BA state machine, and set mesh peers MFP=no — complete the Block-Ack handshake, so single-hop secured-mesh A-MPDU lights up on air.</div>
 <div class="card-meta">6 min · ✓ single-hop A-MPDU on-air · mesh · A-MPDU · datapath</div>
 </a>
-
 <a class="card" href="2026-07-11-mesh-ampdu-s2-multihop-nexthop-stad.html">
 <div class="card-date">2026-07-11</div>
 <div class="card-title">Mesh A-MPDU S2: multi-hop next-hop stad Block Ack</div>
 <div class="card-ex">A multi-hop origin now completes its Block Ack with the next hop (ADDBA #428/#436) — proven on air — but sustained aggregation stays blocked by an orthogonal HWMP path-flapping bug, not S2.</div>
 <div class="card-meta">7 min · ◑ handshake proven · aggregation blocked · mesh · A-MPDU · datapath</div>
 </a>
-
 <a class="card" href="2026-07-11-esp32-mesh-swccmp-bulk-aes.html">
 <div class="card-date">2026-07-11</div>
 <div class="card-title">ESP32 mesh SW-CCMP: bulk-DMA AES-CCM</div>
 <div class="card-ex">Root-caused and fixed the host SW-CCMP per-frame crypto cost that shows up as a relay bottleneck under concurrent load. SW-CCMP is the mesh's host-side CCMP: the MM6108 f</div>
 <div class="card-meta">6 min · ✓ fixed &amp; merged · mesh · SW-CCMP · crypto</div>
 </a>
-
 <a class="card" href="2026-07-11-mesh-20-linux-also-withholds-fw-limitation.html">
 <div class="card-date">2026-07-11</div>
 <div class="card-title">#20 RESOLVED: the A4≠TA HW-crypto withhold is a universal MM6108 firmware limitation</div>
 <div class="card-ex">Bench session (full all-ESP + Linux access) that finally resolves backlog item #20 — "in HW-crypto mode the MM6108 firmware withholds from the host a forwarded 4-address </div>
 <div class="card-meta">6 min · ✓ #20 closed · mesh · security · HW-crypto</div>
 </a>
-
 <a class="card" href="2026-07-10-dhcp-de-hardcode-wip.html">
 <div class="card-date">2026-07-10</div>
 <div class="card-title">DHCP de-hardcode of the Mesh-gate (task #5)</div>
 <div class="card-ex">This is task #5 of the mesh-gate PR follow-ups (the interim, keeps-L3 de-hardcode). It is complete and hardware-verified — a cold-boot bench run passed every check, with </div>
 <div class="card-meta">5 min · ✓ verified done · DHCP · mesh-gate · AP</div>
 </a>
-
 <a class="card" href="2026-07-10-esp32-mesh-gate-returnleg-fixed-forward-rootcaused.html">
 <div class="card-date">2026-07-10</div>
 <div class="card-title">All-ESP Mesh-gate END-TO-END WORKS</div>
 <div class="card-ex">Task #17 is COMPLETE — the all-ESP Mesh-gate end-to-end route (STA → AP → ip_forward → mesh → board1 → reply → back) works 10/10, 0% loss, ttl=63, deterministic across tw</div>
 <div class="card-meta">9 min · ✓ task #17 done · mesh-gate · lwIP · datapath</div>
 </a>
-
 <a class="card" href="2026-07-10-mesh-gate-coverage-soak-multista.html">
 <div class="card-date">2026-07-10</div>
 <div class="card-title">Mesh-gate coverage (task #3): soak + multi-STA</div>
 <div class="card-ex">Coverage testing of the all-ESP L3 Mesh-gate — the follow-up #3, after the #5 DHCP work landed. Outcome across the four scenarios: #1 soak PASS, #3 multi-STA PASS (two co</div>
 <div class="card-meta">8 min · ✓ all 4 scenarios green · mesh · gate · DHCP · power-save</div>
 </a>
-
 <a class="card" href="2026-07-10-mesh-gate-stress-permutation-matrix.html">
 <div class="card-date">2026-07-10</div>
 <div class="card-title">Mesh-gate stress test: full source→destination permutation matrix + flood</div>
 <div class="card-ex">A whole-network stress test of the all-ESP L3 Mesh-gate: exercise every source→destination permutation across both subnets (mesh 10.9.9.0/24 ↔ AP 192.168.12.0/24, bridged</div>
 <div class="card-meta">3 min · ✓ every permutation passes · mesh · gate · stress-test</div>
 </a>
-
 <a class="card" href="2026-07-09-esp32-mesh-ap-end-to-end-forward.html">
 <div class="card-date">2026-07-09</div>
 <div class="card-title">All-ESP Mesh-gate end-to-end: forward works, reply return-leg doesn't</div>
 <div class="card-ex">On the all-ESP Mesh-gate (mesh + SoftAP co-channel on one MM6108), an ESP STA under the gateway's AP still cannot complete a ping to a 2nd mesh node — but the failure was</div>
 <div class="card-meta">9 min · partial · reply return-leg open · mesh · AP · gateway</div>
 </a>
-
 <a class="card" href="2026-07-08-1178-ps-baseline-and-deepsleep.html">
 <div class="card-date">2026-07-08</div>
 <div class="card-title">1.17.9 regresses STA power-save</div>
 <div class="card-ex">The headline: HaLow 1.17.9 roughly doubles the ESP32-STA power-save doze current vs 1.17.8, on the same board / rig / AP / TX-cap. That is the "elevated PS numbers" that </div>
 <div class="card-meta">7 min · power-save · STA · TWT · 1.17.9 regression</div>
 </a>
-
 <a class="card" href="2026-07-08-userspace-1179-and-ps-retest.html">
 <div class="card-date">2026-07-08</div>
 <div class="card-title">1.17.9 userspace build + matched-1.17.9 STA power-save retest</div>
 <div class="card-ex">Two pieces of work, both self-contained: (1) built + deployed the 1.17.9 Linux userspace to all four nodes — the bench was NOT actually matched before (userspace was stil</div>
 <div class="card-meta">5 min · ⚠ conclusions retracted · power-save · TWT · bring-up</div>
 </a>
-
 <a class="card" href="2026-07-05-board2-ps-vs-linux-mesh-ap.html">
 <div class="card-date">2026-07-05</div>
 <div class="card-title">board2 STA power-save vs a Linux Mesh+AP gateway</div>
 <div class="card-ex">Measure board2's full PS ladder against a Linux node running mesh + AP concurrently on one MM6108, with the mesh actually peering and board2's traffic routing through the</div>
 <div class="card-meta">6 min · ✓ concurrency works · power-save · mesh · AP</div>
 </a>
-
 <a class="card" href="2026-07-05-esp32-ap-ps-retest-matched-1179.html">
 <div class="card-date">2026-07-05</div>
 <div class="card-title">HaLow STA power-save: ESP32 AP vs Linux AP</div>
 <div class="card-ex">Re-ran the ESP32-AP-vs-Linux-AP STA power-save comparison with matched firmware, after the whole bench was brought to stock 1.17.9 — the earlier comparison had a version </div>
 <div class="card-meta">5 min · power-save · TWT · AP · ✓ measured</div>
 </a>
-
 <a class="card" href="2026-07-05-esp32-ap-wnm-responder-and-ps-beacon.html">
 <div class="card-date">2026-07-05</div>
 <div class="card-title">ESP32 AP WNM-sleep responder + STA power-save beacon fix</div>
 <div class="card-ex">Two goals. (1) Make the morselib ESP32 SoftAP a working WNM-sleep responder so an all-ESP32 STA can enter/exit WNM sleep — previously the STA was trapped, blocked forever</div>
 <div class="card-meta">8 min · ✓ both goals met · power-save · WNM · TWT · AP</div>
 </a>
-
 <a class="card" href="2026-07-05-onair-verify-wnm-twt-vs-linux.html">
 <div class="card-date">2026-07-05</div>
 <div class="card-title">On-air verify: ESP32-AP WNM / TWT frames vs live Linux</div>
 <div class="card-ex">Closing the on-air-verification gap flagged in the WNM/TWT PRs (mm-esp32-halow#20, rimba#29): byte-diff the frames the ESP32 SoftAP transmits against what a live Linux ho</div>
 <div class="card-meta">5 min · partial · gold standard blocked · TWT · WNM · AP · on-air verify</div>
 </a>
-
 <a class="card" href="2026-07-04-halow-sta-powersave-ppk2.html">
 <div class="card-date">2026-07-04</div>
 <div class="card-title">HaLow STA power-save: PPK2-measured</div>
 <div class="card-ex">Actually measured the board-level current of every HaLow STA power-save feature on board2 (the nRF PPK2 node), then pushed further by sleeping the ESP32-S3 host as well (</div>
 <div class="card-meta">5 min · ✓ complete · power-save · TWT · WNM</div>
 </a>
-
 <a class="card" href="2026-07-02-mesh-20-hwcrypto-reverify.html">
 <div class="card-date">2026-07-02</div>
 <div class="card-title">#20 HW-crypto A4≠TA mesh forward</div>
 <div class="card-ex">Re-opened the #20 backlog — "in HW-crypto mode the MM6108 FW withholds a forwarded 4-address frame whose A4 (mesh-SA) ≠ TA" — after the §#25/§#26 verdict in 2026-06-27-me</div>
 <div class="card-meta">5 min · isolated · backlog · mesh · HW-crypto · security</div>
 </a>
-
 <a class="card" href="2026-07-02-mesh-dynamic-path-table.html">
 <div class="card-date">2026-07-02</div>
 <div class="card-title">Mesh dynamic path table</div>
 <div class="card-ex">Replaces morselib's fixed 8-entry linear-scan mesh path table with a 64-entry pool + a dest-MAC hash index (O(1) lookup, int16_t-chained), lifting the hard cap on reachab</div>
 <div class="card-meta">4 min · ✓ host-tested + bench-verified · mesh · HWMP · path-table</div>
 </a>
-
 <a class="card" href="2026-07-02-mesh-hwmp-multipath-dedup-sn.html">
 <div class="card-date">2026-07-02</div>
 <div class="card-title">HWMP multi-path reply-dedup / per-reply-SN fix</div>
 <div class="card-ex">Fixes morselib's HWMP path selection flapping in a multi-path topology, found by the P6c routing-decision test (2026-07-02-mesh-p6c-airtime-metric.md). After this fix the</div>
 <div class="card-meta">4 min · ✓ fixed &amp; verified · mesh · HWMP · routing</div>
 </a>
-
 <a class="card" href="2026-07-02-mesh-multinode-onair-validation.html">
 <div class="card-date">2026-07-02</div>
 <div class="card-title">Mesh at-scale + on-air validation</div>
 <div class="card-ex">Validates the shipped P6c airtime link metric + HWMP multi-path dedup/SN fix (mm-esp32-halow #15, worklogs 2026-07-02-mesh-p6c-airtime-metric.md + 2026-07-02-mesh-hwmp-mu</div>
 <div class="card-meta">3 min · ✓ validated · mesh · HWMP · on-air</div>
 </a>
-
 <a class="card" href="2026-07-02-mesh-p6c-airtime-metric.html">
 <div class="card-date">2026-07-02</div>
 <div class="card-title">P6c: mesh airtime link metric</div>
 <div class="card-ex">Replaces morselib's fixed per-hop HWMP cost (MESH_PATH_LINK_METRIC = 100) with a rate-derived airtime metric ported line-for-line from net/mac80211 airtime_link_metric_ge</div>
 <div class="card-meta">6 min · ✓ hw-verified · mesh · HWMP · airtime metric</div>
 </a>
-
 <a class="card" href="2026-07-02-mesh-peer-table-growth.html">
 <div class="card-date">2026-07-02</div>
 <div class="card-title">Mesh peer-table growth</div>
 <div class="card-ex">Doubles the ESP mesh peer table so a node can hold more than 4 direct neighbours — headroom for denser meshes. A one-value change (Option A); the SAE bodies stay per-peer</div>
 <div class="card-meta">2 min · mesh · memory · ✓ shipped · bench deferred</div>
 </a>
-
 <a class="card" href="2026-07-02-mesh-real-rc-airtime-metric.html">
 <div class="card-date">2026-07-02</div>
 <div class="card-title">Real per-peer rate control feeding the mesh airtime metric</div>
 <div class="card-ex">Replaces P6c's RSSI-seeded rate in mesh_last_hop_metric with mmrc's learned best-throughput rate + the real success probability, removing P6c divergences #1 (RSSI-seed) a</div>
 <div class="card-meta">4 min · ✓ hardware-verified · mesh · HWMP · rate-control</div>
 </a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 </div>
 </section>

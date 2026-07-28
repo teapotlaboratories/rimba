@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SDK forward-port plan — mm-iot-sdk 2.10.4 → 2.12.3 — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+
+.apilist li{margin:.55rem 0;line-height:1.45}
+.apilist code{font-weight:600}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-18</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-18</span>
+    <span class="badge">10 min read</span>
+    <span class="badge warn">◷ plan — NOT yet applied</span>
+    <span class="badge bug">SDK · morselib · forward-port</span>
+  </div>
+
+  <h1>SDK forward-port plan &mdash; mm-iot-sdk 2.10.4 &rarr; 2.12.3<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">grounded in a per-file analysis + direct git verification</small></h1>
+
+  <p class="lead">Bring MorseMicro's upstream SDK <strong>into our repo</strong> &mdash; upgrade
+  <code>components/halow</code> from <strong>morselib 2.10.4 &rarr; 2.12.3</strong>, keeping our
+  self-contained vendored layout and our <strong>24 merged PRs</strong>, tagging each milestone.
+  Planning only at time of writing; not yet applied.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">2 hops</div><div class="lbl">2.10.4 &rarr; 2.11.2 &rarr; 2.12.3</div></div>
+    <div class="stat"><div class="num">24</div><div class="lbl">our merged PRs to preserve</div></div>
+    <div class="stat"><div class="num bug">31</div><div class="lbl">hop-1 conflicts (402 changes)</div></div>
+    <div class="stat"><div class="num warn">11</div><div class="lbl">hop-2 conflicts (44 changes)</div></div>
+    <div class="stat"><div class="num">28</div><div class="lbl">API breaks analysed</div></div>
+    <div class="stat"><div class="num">51</div><div class="lbl">our changed files (must-survive)</div></div>
+  </div>
+
+  <h2 id="decisions">1 &middot; Goal &amp; locked decisions</h2>
+  <ul>
+    <li><strong>Staged</strong> <code>2.10.4 &rarr; 2.11.2 &rarr; 2.12.3</code>, compile-verified and
+      <strong>tagged</strong> at each hop (<code>-esp32-1</code>).</li>
+    <li><strong>Tag style <code>-esp32-N</code></strong> (e.g. <code>2.12.3-esp32-1</code>) &mdash; honest
+      about &ldquo;upstream + our patches&rdquo;.</li>
+    <li><strong>Ongoing tracking</strong> &mdash; keep the <code>mm</code> remote
+      (<code>MorseMicro/mm-iot-sdk</code>) + this repeatable procedure.</li>
+    <li><strong>Mechanics: Option B</strong> &mdash; 3-way diff-apply onto our tree, <code>095b1290</code>
+      (2.10.4) as the near-exact base.</li>
+  </ul>
+  <p>Work branch <code>feat/sdk-forward-port-2.12.3</code> (off submodule <code>main</code> @
+  <code>3c8ded0d</code>). Branch + PR + review before merge; <strong>re-run the full regression
+  suite</strong> after; bench radio-silent after tests.</p>
+
+  <h2 id="scope">2 &middot; Layout &amp; the SCOPE decision (critical)</h2>
+  <p>Our ESP build compiles the SDK <strong>from source</strong> at
+  <code>components/mm-iot-sdk/framework/&hellip;</code> via <em>explicit</em> source lists in each
+  ESP-component <code>CMakeLists.txt</code>:</p>
+  <table>
+    <thead><tr><th>ESP component</th><th>upstream source root it compiles</th></tr></thead>
+    <tbody>
+      <tr><td>morselib</td><td><code>framework/morselib</code></td></tr>
+      <tr><td>hostap</td><td><code>framework/src/hostap</code></td></tr>
+      <tr><td>mmpktmem</td><td><code>framework/src/mmpktmem</code></td></tr>
+      <tr><td>mmutils</td><td><code>framework/src/mmutils</code></td></tr>
+      <tr><td>regdb</td><td><code>framework/src/mmregdb</code></td></tr>
+      <tr><td>(morselib build tooling)</td><td><code>framework/tools/{metadata/protected_syms.txt, buildsystem/librarymangler.py}</code></td></tr>
+      <tr><td>shims</td><td>ESP-local (<code>components/shims/</code>) &mdash; no upstream source</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><p class="ct">⚠ The full upstream diff is mostly irrelevant to us</p>
+  <p>Hop 1 touches <strong>~4058 files</strong>, but 1259 are <code>doc/html</code>, 832
+  <code>freertos-libs</code>, 690 <code>aws</code>, 461 <code>bsps</code>, plus STM32
+  <code>platforms</code>, <code>mbedtls</code>, <code>mmagic</code>, <code>examples</code> &mdash;
+  <strong>none of which our ESP build compiles or can compile-verify</strong>. So the forward-port is
+  <strong>scoped to the compiled roots</strong>; uncompiled vendored dirs stay at 2.10.4 (dead weight,
+  harmless). Consistent with the <code>-esp32-N</code> tag choice. The alternative &mdash; a full 2.12.3
+  mirror of the entire vendored tree &mdash; pulls in thousands of unverifiable changes for zero ESP
+  benefit. <strong>Owner to confirm: compiled-scope (recommended) vs full-tree mirror.</strong></p></div>
+
+  <h2 id="corrections">3 &middot; Two crucial corrections from the analysis</h2>
+  <div class="callout bug"><p class="ct">🐛 Do not trust the old memory verbatim</p>
+  <ol>
+    <li><strong>All hard breaking changes are in HOP 1</strong> (2.10.4&rarr;2.11.2), not spread across
+      hops. Adversarially verified: at 2.11.2 the datapath STA/AP split,
+      <code>umac_interface_add(datapath_ops,&hellip;)</code>, <code>morse_cmd_tx(&hellip;,skip_errlog)</code>
+      and the reshaped <code>umac_datapath_ops</code> struct are <strong>already in place and unchanged at
+      2.12.3</strong>. <strong>Hop 2 is almost entirely additive</strong> (relay subsystem, DPP QR-code).</li>
+    <li><code>construct_80211_data_header</code> and <code>frames_allowed_pre_association</code> are
+      <strong>RETAINED</strong> (memory said dropped).
+      <code>umac_interface_type_is_compatible_with_active</code> <strong>does not exist at either
+      endpoint</strong>.</li>
+  </ol></div>
+
+  <h2 id="conflicts">4 &middot; Conflict surface (git ground-truth, scoped to compiled roots)</h2>
+  <ul>
+    <li><strong>Hop 1:</strong> 402 upstream file changes &rarr; <strong>31 conflicts</strong>
+      (30 <code>morselib</code>, 1 <code>hostap/wpa_supplicant/ap.c</code>).
+      <code>protected_syms.txt</code> is conflict-free (upstream didn't touch it).</li>
+    <li><strong>Hop 2:</strong> 44 upstream file changes &rarr; <strong>11 conflicts</strong>
+      (10 <code>morselib</code>, 1 <code>hostap/hostap_morse_common.h</code>).</li>
+  </ul>
+  <div class="callout warn"><p class="ct">⚠ The main bench risk</p>
+  <p>The <strong>268-file hostap (wpa_supplicant) update in hop 1</strong> applies to us but overlaps our
+  edits on only <code>ap.c</code>. Our mesh SAE/AMPE security integrates with hostap, and
+  <strong>compile-verify cannot vet the semantic interaction</strong> &mdash; the regression suite
+  must.</p></div>
+
+  <h2 id="mechanics">5 &middot; Mechanics (per hop)</h2>
+  <pre><code># one-time: real upstream remote (done)
+git remote add mm git@github.com:MorseMicro/mm-iot-sdk.git ; git fetch mm --tags
+ROOTS="framework/morselib framework/src/hostap framework/src/mmpktmem framework/src/mmutils framework/src/mmregdb framework/tools"
+# hop1 (095b1290-&gt;b61d4548); hop2 (b61d4548-&gt;88606f94):
+git -C components/halow diff &lt;from&gt; &lt;to&gt; -- $ROOTS | git -C components/halow apply --3way --directory=components/mm-iot-sdk
+# then, MANUALLY (git apply won't): sync each ESP component CMakeLists.txt SRCS list for
+#   upstream-ADDED files (umac_datapath_sta.c, umac/relay/*, umac/health_check/*, coredump.c,
+#   firmware_mbin.c, …) and upstream-DELETED files (driver/health/driver_health.c, …).
+# resolve conflicts -&gt; compile-verify -&gt; grep must-survive -&gt; commit -&gt; tag &lt;ver&gt;-esp32-1</code></pre>
+  <div class="callout"><p class="ct">CMakeLists source-list sync is a first-class step</p>
+  <p>New upstream <code>.c</code> files won't build (and their symbols won't link) until added to the
+  right <code>components/*/CMakeLists.txt</code>; deleted ones must be removed. Compile-verify (link
+  stage) is the safety net that catches a missed sync.</p></div>
+
+  <h2 id="verify">6 &middot; Compile-verify &amp; the fw parity footgun</h2>
+  <p>Harness: <code>make build APP=&lt;app&gt; BOARD=proto1-fgh100m</code> (vendored ESP-IDF 5.4.2).
+  Baseline <code>rimba-halow-mesh</code> already builds green on <code>3c8ded0d</code>. Recommended
+  per-hop verify set (link-covers all feature areas): <strong>test-ampdu-cap, test-swccmp, test-ibss,
+  test-twt-sta, rimba-twt-assoc</strong>. Apps needing a submodule feature branch are skipped here and
+  re-verified separately.</p>
+  <div class="callout bug"><p class="ct">🐛 fw parity</p>
+  <p>esp-halow bundles MM6108 fw <strong>1.17.9</strong>; the bench standard is <strong>1.17.8</strong>
+  (1.17.9 regresses STA PS ~2&times;). Before bench, keep ESP + Linux driver on the <strong>same</strong>
+  version. Confirm what morselib 2.12.3 requires and whether the bench needs a matching driver/fw
+  bump.</p></div>
+
+  <h2 id="hop1">7 &middot; API breaks &mdash; HOP 1 (the whole battle)</h2>
+  <p>17 breaks, each verified against the trees:</p>
+  <ul class="apilist">
+    <li><code>umac_interface_add</code> <span class="badge">signature</span><br><span style="color:var(--muted)">CONFIRMED. Old: enum mmwlan_status umac_interface_add(struct umac_data *umacd, enum umac_interface_type type, const uint8_t *mac_addr, uint16_t *vif_id). New: (struct umac_data *umacd, enum umac_interface_type type, const struct umac_datapath_ops *datapath_ops, const uint8_t *mac_addr). Adds a datapath_ops param (3rd) AND removes the uint16_t *vif_id out-param — caller now supplies the vif&#x27;s ops table and no longer receives a …</span></li>
+    <li><code>morse_cmd_tx</code> <span class="badge">signature</span><br><span style="color:var(--muted)">CONFIRMED (+CORRECTED — it is not just &#x27;an argument&#x27;). Old: int morse_cmd_tx(driverd, resp, cmd, uint32_t length, uint32_t timeout). New: enum mmwlan_status morse_cmd_tx(driverd, resp, cmd, uint32_t length, uint32_t timeout, bool skip_errlog). Gains 6th param bool skip_errlog AND return type int-&gt;enum mmwlan_status. Every call site adds a trailing false.</span></li>
+    <li><code>struct umac_datapath_ops.set_stad_sleep_state</code> <span class="badge">removed</span><br><span style="color:var(--muted)">CONFIRMED removed. Old slot: bool (*set_stad_sleep_state)(struct umac_sta_data *stad, bool asleep). Replaced in the same position by update_stad_state_rx (see next).</span></li>
+    <li><code>struct umac_datapath_ops.update_stad_state_rx</code> <span class="badge">struct-field</span><br><span style="color:var(--muted)">CONFIRMED added (replaces set_stad_sleep_state). New: bool (*update_stad_state_rx)(struct umac_sta_data *stad, const struct mmdrv_rx_metadata *metadata, uint16_t frame_control_le). RX now drives STA sleep/state from frame metadata, not a plain bool. STA-mode table binds nullop_update_stad_state_sta.</span></li>
+    <li><code>struct umac_datapath_ops.handle_frame_unknown_sta</code> <span class="badge">struct-field</span><br><span style="color:var(--muted)">CONFIRMED added. void (*handle_frame_unknown_sta)(struct umac_data *umacd, const uint8_t *ta). New ops slot every datapath ops table must populate.</span></li>
+    <li><code>struct umac_datapath_ops.supp_l2_sock_receive</code> <span class="badge">struct-field</span><br><span style="color:var(--muted)">ADDED (not in task list). void (*supp_l2_sock_receive)(struct umac_data *umacd, const uint8_t *payload, size_t payload_len, const uint8_t *src_addr). New ops slot.</span></li>
+    <li><code>struct umac_datapath_ops.type</code> <span class="badge">struct-field</span><br><span style="color:var(--muted)">ADDED (not in task list). const char *type — trailing field naming the ops table (&quot;sta&quot;/&quot;ap&quot;).</span></li>
+    <li><code>struct umac_datapath_ops.construct_80211_data_header</code> <span class="badge">other</span><br><span style="color:var(--muted)">CORRECTION: task said REMOVED — it is NOT. Still present and unchanged in the struct at 2.11.2 (private.h) and still assigned in umac_datapath_ap.c and the new umac_datapath_sta.c.</span></li>
+    <li><code>struct umac_datapath_ops.frames_allowed_pre_association</code> <span class="badge">other</span><br><span style="color:var(--muted)">CORRECTION: task said REMOVED — it is NOT. Still present at 2.11.2 (frames_allowed_pre_association_sta_mode / _ap_mode arrays still bound).</span></li>
+    <li><code>struct umac_8023_hdr</code> <span class="badge">moved</span><br><span style="color:var(--muted)">Definition MOVED out of umac_datapath_private.h into umac_datapath.h (line 168). The MM_STATIC_ASSERTs stay in private.h. Includers that got the type via private.h now depend on umac_datapath.h.</span></li>
+    <li><code>umac_datapath_sta.c / umac_datapath_ops_sta</code> <span class="badge">moved</span><br><span style="color:var(--muted)">CONFIRMED per-vif split. STA-mode ops table (umac_datapath_ops_sta) and its helpers (umac_datapath_construct_80211_data_header_sta, frames_allowed_pre_association_sta_mode, lookup/tx-queue/get-state _sta) were EXTRACTED from umac_datapath.c into the NEW file umac_datapath_sta.c. AP-mode ops stay in the pre-existing umac_datapath_ap.c; shared logic remains in umac_datapath.c. Downstream code that patched the STA ops table insid…</span></li>
+    <li><code>umac_interface_type_is_compatible_with_active</code> <span class="badge">removed</span><br><span style="color:var(--muted)">CONFIRMED removed. Was a file-local helper in umac_interface.c (no public header decl) gating umac_interface_add on active-vif type compatibility; gone in 2.11.2 as the interface layer moves to an explicit multi-vif/datapath-ops model.</span></li>
+    <li><code>umac_interface_reinstall_vif / get_vif_type_mask / set_vif_mac_addr / stop / configure_periodic_health_check</code> <span class="badge">signature</span><br><span style="color:var(--muted)">Additional umac_interface.h breaks: reinstall_vif(umacd, type, uint16_t *vif_id) -&gt; reinstall_vif(umacd, enum mmwlan_vif vif); umac_interface_get_vif_type_mask() RENAMED/REPLACED by umac_interface_get_vif_by_id() (returns enum mmwlan_vif, not uint16_t mask); umac_interface_set_vif_mac_addr() REMOVED, superseded by new umac_interface_get_datapath_ops_by_vif_id()/umac_interface_get_datapath_ops(); umac_interface_stop() and umac_…</span></li>
+    <li><code>mmdrv_* driver-command wrappers</code> <span class="badge">signature</span><br><span style="color:var(--muted)">Broad return-type break: the mmdrv_* command wrappers change int -&gt; enum mmwlan_status (mmdrv_init, mmdrv_get_bcf_metadata, mmdrv_set_duty_cycle, mmdrv_get_duty_cycle, mmdrv_set_txpower, mmdrv_add_if, mmdrv_rm_if, mmdrv_start/stop_beaconing, mmdrv_cfg_scan, mmdrv_cfg_bss, mmdrv_update_sta_state, mmdrv_install_key, mmdrv_disable_key, mmdrv_cfg_qos_queue, mmdrv_set_wake_enabled, mmdrv_set_chip_power_save_enabled, twt reqs, ...).…</span></li>
+    <li><code>mmwlan offload/standby/whitelist/keepalive API</code> <span class="badge">removed</span><br><span style="color:var(--muted)">REMOVED wholesale from the public header (matches deletion of umac/offload/*): mmwlan_enable_arp_response_offload, mmwlan_enable_arp_refresh_offload, mmwlan_enable_dhcp_offload (+ struct mmwlan_dhcp_lease_info, mmwlan_dhcp_lease_update_cb_t), mmwlan_enable_tcp_keepalive_offload/mmwlan_disable_tcp_keepalive_offload (+ enum mmwlan_tcp_keepalive_offload_cfg, struct mmwlan_tcp_keepalive_offload_args), mmwlan_set_whitelist_filter (…</span></li>
+    <li><code>mmwlan relay + fatal-error + vif-channel API</code> <span class="badge">other</span><br><span style="color:var(--muted)">ADDED public API (additive, but new required init macro changed): mmwlan_relay_enable/mmwlan_relay_disable (+ struct mmwlan_relay_args, MMWLAN_RELAY_ARGS_INIT, MMWLAN_RELAY_DEFAULT_FORWARDING_TABLE_SIZE), mmwlan_get_vif_channel_info (+ struct mmwlan_vif_channel_info), mmwlan_register_fatal_error_handler (+ mmwlan_fatal_error_handler_t, struct mmwlan_fatal_error_args). Also MMWLAN_BOOT_ARGS_INIT changed {0}-&gt;{NULL} (struct mmwl…</span></li>
+    <li><code>driver_health.c/.h -&gt; umac/health_check/*</code> <span class="badge">moved</span><br><span style="color:var(--muted)">Periodic health-check RELOCATED: driver/health/driver_health.c+.h DELETED; reimplemented as umac/health_check/umac_health_check.c/.h/_data.h (NEW). umac_interface_configure_periodic_health_check() dropped from the interface header accordingly.</span></li>
+    </ul>
+
+  <h2 id="hop2">8 &middot; API breaks &mdash; HOP 2 (mostly additive / corrections)</h2>
+  <p>11 entries &mdash; note how many are <em>claims not confirmed</em>, i.e. corrections to the
+  original task list:</p>
+  <ul class="apilist">
+    <li><code>umac_interface_add()</code> <span class="badge">other</span><br><span style="color:var(--muted)">CLAIM NOT CONFIRMED (correction). Signature is byte-identical at b61d4548 and 88606f94: enum mmwlan_status umac_interface_add(struct umac_data *umacd, enum umac_interface_type type, const struct umac_datapath_ops *datapath_ops, const uint8_t *mac_addr). The datapath_ops parameter was ALREADY present at 2.11.2 — it was NOT added in this hop. umac_interface.h/.c do not appear in the hop diff (unchanged). The datapath_ops additio…</span></li>
+    <li><code>morse_cmd_tx()</code> <span class="badge">other</span><br><span style="color:var(--muted)">CLAIM NOT CONFIRMED (correction). Prototype identical at both commits: enum mmwlan_status morse_cmd_tx(struct driver_data *driverd, struct morse_cmd_resp *resp, struct morse_cmd_req *cmd, uint32_t length, uint32_t timeout, ...). No argument added. command.h and command.c are NOT in the hop diff (unchanged).</span></li>
+    <li><code>struct umac_datapath_ops</code> <span class="badge">other</span><br><span style="color:var(--muted)">CLAIM NOT CONFIRMED (correction). The struct is defined at umac_datapath_private.h:18 and that header does NOT appear in the hop diff (unchanged). All five named callback fields — set_stad_sleep_state, construct_80211_data_header, frames_allowed_pre_association, update_stad_state_rx, handle_frame_unknown_sta — are present at BOTH b61d4548 and 88606f94 (identical git-grep counts across umac_datapath.c/_ap.c/_sta.c/_private.h). …</span></li>
+    <li><code>umac_interface_type_is_compatible_with_active()</code> <span class="badge">other</span><br><span style="color:var(--muted)">CLAIM NOT CONFIRMED (correction). This symbol does not exist at EITHER endpoint — git grep finds zero occurrences at both b61d4548 and 88606f94 anywhere under framework/. It therefore could not have been removed in this hop; it is absent from this codebase entirely.</span></li>
+    <li><code>umac_datapath_sta.c / umac_datapath_ap.c (per-vif datapath split)</code> <span class="badge">other</span><br><span style="color:var(--muted)">CLAIM NOT CONFIRMED (correction). Both files (plus umac_datapath.h, umac_datapath_private.h, umac_datapath_data.h, datapath_defrag.c) ALREADY exist at b61d4548 and are IDENTICAL at 88606f94 — none appear in the hop diff. The only datapath file changed this hop is umac_datapath.c (+51/-8). The sta/ap split predates 2.11.2.</span></li>
+    <li><code>mmwlan_relay_enable() / mmwlan_relay_disable()</code> <span class="badge">signature</span><br><span style="color:var(--muted)">REAL NEW public API (additive, non-breaking). Added to mmwlan.h: `enum mmwlan_status mmwlan_relay_enable(const struct mmwlan_relay_args *args)` and `enum mmwlan_status mmwlan_relay_disable(void)`. Backed by the new umac/relay/ subsystem (umac_relay.c +648, umac_relay_table.c +334, address_updates.c +160, umac_relay_private.h +92). This relay/forwarding feature is the marquee change of the 2.11.2-&gt;2.12.3 hop.</span></li>
+    <li><code>struct mmwlan_relay_args + MMWLAN_RELAY_ARGS_INIT</code> <span class="badge">struct-field</span><br><span style="color:var(--muted)">REAL NEW public struct (additive). New relay configuration struct with a forwarding_table_size member and a MMWLAN_RELAY_ARGS_INIT initializer + MMWLAN_RELAY_DEFAULT_ table-size macro. Consumed by mmwlan_relay_enable().</span></li>
+    <li><code>mmwlan_dpp_get_uri()</code> <span class="badge">signature</span><br><span style="color:var(--muted)">REAL NEW public API (additive). Added: `enum mmwlan_status mmwlan_dpp_get_uri(char *uri_buf, size_t buf_len)`. Backed internally by new umac_connection_get_dpp_uri() (umac_connection.h) and a new dpp_get_uri command-union member in umac_core.h.</span></li>
+    <li><code>struct mmwlan_dpp_args (DPP QR-code extension)</code> <span class="badge">struct-field</span><br><span style="color:var(--muted)">REAL struct-field change (additive, may require aggregate-initializer updates). The pre-existing public mmwlan_dpp_args struct gains two members: `enum mmwlan_dpp_mode mode` and `struct mmwlan_dpp_qr_args qr`. New supporting types also added to mmwlan.h: enum mmwlan_dpp_mode, struct mmwlan_dpp_qr_args (bootstrap_private_key_len, chirp_iterations), enum mmwlan_dpp_auth_failure_reason and enum mmwlan_dpp_conf_failure_reason (wit…</span></li>
+    <li><code>umac_connection_get_dpp_uri()</code> <span class="badge">signature</span><br><span style="color:var(--muted)">REAL NEW internal prototype (additive) supporting mmwlan_dpp_get_uri: enum mmwlan_status umac_connection_get_dpp_uri(struct umac_data *umacd, char *uri_buf, size_t buf_len). Relevant to the ESP32 port only if it patches umac internals.</span></li>
+    <li><code>mmosal_shim allocation split (STM32 platforms)</code> <span class="badge">moved</span><br><span style="color:var(--muted)">Not a morselib API break, but a source reorganization across all STM32 platforms: allocation code moved OUT of mmosal_shim_freertos.c (-62 each) INTO a new mmosal_shim_alloc.c (+74 each) for all 10 STM32 platform shim dirs. Downstream ESP32 supplies its own mmosal shims, so this is informational — but a same-structure port would need to mirror the split.</span></li>
+    </ul>
+
+  <h2 id="perfile">9 &middot; Per-file forward-port plans (24 analysed conflict candidates)</h2>
+  <p>Strategy and risk per file. <code>manual-reimplement</code> = our edits must be re-applied by hand
+  onto a rewritten region; <code>silent-drop-risk</code> = a clean apply can quietly discard our intent;
+  <code>textual-conflict</code> = mechanical; <code>clean-apply</code> = expected to apply as-is.</p>
+  <table>
+    <thead><tr><th>File</th><th>Strategy</th><th>Risk</th></tr></thead>
+    <tbody>
+      <tr><td><code>umac/datapath/umac_datapath.c</code></td><td>manual-reimplement</td><td><span class="badge bug">high</span></td></tr>
+      <tr><td><code>umac/interface/umac_interface.c</code></td><td>manual-reimplement</td><td><span class="badge bug">high</span></td></tr>
+      <tr><td><code>umac/datapath/umac_datapath_ap.c</code></td><td>manual-reimplement</td><td><span class="badge bug">high</span></td></tr>
+      <tr><td><code>internal/mmdrv.h</code></td><td>silent-drop-risk</td><td><span class="badge bug">high</span></td></tr>
+      <tr><td><code>driver/driver.c</code></td><td>silent-drop-risk</td><td><span class="badge bug">high</span></td></tr>
+      <tr><td><code>umac/umac.c</code></td><td>silent-drop-risk</td><td><span class="badge bug">high</span></td></tr>
+      <tr><td><code>umac/keys/umac_keys.c</code></td><td>textual-conflict</td><td><span class="badge bug">high</span></td></tr>
+      <tr><td><code>umac/supplicant_shim/supplicant_core.c</code></td><td>silent-drop-risk</td><td><span class="badge warn">med</span></td></tr>
+      <tr><td><code>driver/beacon/beacon.c</code></td><td>silent-drop-risk</td><td><span class="badge warn">med</span></td></tr>
+      <tr><td><code>umac/datapath/umac_datapath.h</code></td><td>textual-conflict</td><td><span class="badge warn">med</span></td></tr>
+      <tr><td><code>umac/supplicant_shim/driver_ap.c</code></td><td>clean-apply</td><td><span class="badge warn">med</span></td></tr>
+      <tr><td><code>include/mmwlan.h</code></td><td>silent-drop-risk</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>umac/ap/umac_ap.c</code></td><td>silent-drop-risk</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>umac/twt/umac_twt.c</code></td><td>silent-drop-risk</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>internal/mmwlan_internal.h</code></td><td>textual-conflict</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>umac/umac_mmdrv_shim.c</code></td><td>textual-conflict</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>umac/connection/umac_connection.c</code></td><td>clean-apply</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>driver/morse_driver/skbq.c</code></td><td>clean-apply</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>common/morse_commands.h</code></td><td>clean-apply</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>umac/data/umac_data.c</code></td><td>clean-apply</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>umac/supplicant_shim/umac_supp_shim.h</code></td><td>clean-apply</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>umac/interface/umac_interface.h</code></td><td>clean-apply</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>umac/datapath/umac_datapath_private.h</code></td><td>clean-apply</td><td><span class="badge ">low</span></td></tr>
+      <tr><td><code>driver/morse_driver/morse.h</code></td><td>clean-apply</td><td><span class="badge ">low</span></td></tr>
+      
+    </tbody>
+  </table>
+
+  <h2 id="appendix">10 &middot; Appendix &mdash; our 51 changed files (must-survive intent)</h2>
+  <p>The plan closes with a per-file record of <strong>what our 51 changed files exist to do</strong>,
+  so a forward-port can be checked for intent survival rather than just for compilation. Entries marked
+  <code>[C]</code> are conflict candidates. It spans the full feature set carried across the hops:
+  IBSS (RISK-01), the 802.11s mesh control + data plane, mesh security (SAE/AMPE + host SW-CCMP incl.
+  the bulk-DMA AES-CCM path), A-MPDU + defrag-before-decrypt, mesh+AP concurrency (the gateway),
+  the TWT responder + requester, the 255-STA AP ceiling with PSRAM-backed tables, the monitor/sniffer
+  RX hook, and the <code>protected_syms.txt</code> export of
+  <code>esp_mesh_ccm_selftest</code>.</p>
+  <div class="callout"><p class="ct">Why the appendix matters</p>
+  <p>Compile-verify proves the tree <em>builds</em>. It cannot prove our features <em>survived</em> a
+  3-way apply &mdash; a silently dropped hunk still links. The must-survive list is what the
+  post-apply <code>grep</code> step checks against, and it is why several low-conflict files are still
+  marked <code>silent-drop-risk</code>.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-t">On this page</p>
+  <ul>
+    <li><a href="#decisions">1 &middot; Goal &amp; decisions</a></li>
+    <li><a href="#scope">2 &middot; Layout &amp; SCOPE</a></li>
+    <li><a href="#corrections">3 &middot; Two corrections</a></li>
+    <li><a href="#conflicts">4 &middot; Conflict surface</a></li>
+    <li><a href="#mechanics">5 &middot; Mechanics</a></li>
+    <li><a href="#verify">6 &middot; Compile-verify + fw</a></li>
+    <li><a href="#hop1">7 &middot; Hop 1 API breaks</a></li>
+    <li><a href="#hop2">8 &middot; Hop 2 API breaks</a></li>
+    <li><a href="#perfile">9 &middot; Per-file plans</a></li>
+    <li><a href="#appendix">10 &middot; Must-survive appendix</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-07-18-sdk-forwardport-2.12.3-plan</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
