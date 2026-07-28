@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Full regression: bench drift, a flaky C6, and a silent-failure fix — Rimba Worklog</title>
+<title>Full regression: bench drift, a USB hub fault, and a silent-failure fix — Rimba Worklog</title>
 <style>
 /* Rimba worklog — shared design system. Hand-authored (no generator). */
 :root{
@@ -170,14 +170,13 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
     <span class="badge date">2026-07-26</span>
     <span class="badge">8 min read</span>
     <span class="badge ok">✓ all tiers green</span>
-    <span class="badge bug">regression · bench drift · dscycle</span>
+    <span class="badge bug">regression · USB hub fault · dscycle</span>
   </div>
 
-  <h1>Full regression on the boottime-rig branch<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">bench drift, a flaky C6, and a silent failure that blamed the DUT</small></h1>
+  <h1>Full regression on the boottime-rig branch<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">bench drift, a USB hub fault, and a silent failure that blamed the DUT</small></h1>
 
   <p class="lead">Goal was narrow: land the <code>test-ibss-boottime</code> fixture and prove nothing else
-  broke. What came out of it was <strong>two bench-doc defects</strong>, a <strong>recurring hardware
-  fault</strong>, a new <code>.ai</code> rule, and a harness bug that had been reporting a
+  broke. What came out of it was <strong>two bench-doc findings</strong>, a <strong>USB hub fault</strong>, a new <code>.ai</code> rule, and a harness bug that had been reporting a
   <em>bench</em> failure as a <em>DUT</em> failure.</p>
 
   <div class="stats">
@@ -267,10 +266,8 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
   node rather than by preference — chronosalt reports <code>wlan1 DOWN 10.9.9.3/24</code>.
   <strong>The prose is right</strong>; the diagram also breaks the doc's own stated <code>.2</code>–<code>.4</code> range.</p></div>
 
-  <div class="callout bug"><p class="ct">🐛 Defect 2 — the C6 port is stale</p>
-  <p>Doc <code>:76</code> said <code>/dev/ttyUSB0</code>; it was on <code>ttyUSB1</code>. Three fixed
-  references replaced with resolve-by-serial, including the flash command, which now derives the port
-  from <code>/dev/serial/by-id</code> (verified: resolves to the live port).</p></div>
+  <div class="callout warn"><p class="ct">⚠ Finding 2 — the C6 port is pinned to a number that moves</p>
+  <p>Doc <code>:76</code> said <code>/dev/ttyUSB0</code>; at the time of checking it was on <code>ttyUSB1</code>. Three fixed references replaced with resolve-by-serial, including the flash command, which now derives the port from <code>/dev/serial/by-id</code> (verified: resolves to the live port). <em>Revised (§7): the C6 is back on <code>ttyUSB0</code>, so the documented value was <strong>fragile, not wrong</strong> — the fix stands, the "stale" framing was the overstatement.</em></p></div>
 
   <p><strong>Not defects:</strong> board2 on <code>ttyACM2</code> (doc says <code>ttyACM4</code>) and the
   PPK2 on <code>ttyACM3/4</code> (doc says <code>ttyACM2/3</code>) — the doc explicitly flags these as a
@@ -333,10 +330,7 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 
   <h2 id="next">6 · Open / next</h2>
   <ul>
-    <li><strong>The C6 needs a physical check.</strong> It dropped off USB <strong>twice in one
-      evening</strong> — once moving <code>ttyUSB0</code>&rarr;<code>ttyUSB1</code>, once a hard
-      <code>errno 5</code>. The fix makes the harness <em>report</em> this correctly; it cannot cure a
-      flaky cable, hub, or port.</li>
+    <li><strong>The C6 hardware is NOT implicated</strong> — see §7. What is evidenced is a <em>hub</em> fault. The one real action: move the C6 off the <code>7-1.4</code> hub it shares with the PPK2.</li>
     <li>PRs <code>47</code> (boottime rig) and <code>48</code> (dscycle fix) await
       <code>/review &lt;PR #&gt;</code> before merge.</li>
     <li><strong>The repo-wide docs audit is still outstanding</strong> — the original goal. Efficient
@@ -345,6 +339,70 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
     <li>Bench left warm: <code>ppk2_hold</code> running, board2 powered on <code>test-idle</code>, all
       ESPs radio-silent, chronite/chronosalt <code>wlan1</code> DOWN.</li>
   </ul>
+
+  <h2 id="correction">7 · Correction (2026-07-27) — the C6 hardware was NOT at fault</h2>
+  <div class="callout bug"><p class="ct">🐛 The original diagnosis was wrong</p>
+  <p>&sect;5 and &sect;6 concluded &ldquo;the C6 dropped off USB twice &mdash; a flaky cable, hub, or
+  port&rdquo; and called for a physical check. That was reached <strong>without looking at the kernel
+  log</strong>. Prompted by the owner pushing back, it was re-verified against
+  <code>journalctl -k</code>. Kept here rather than edited away, because the wrong call and how it was
+  reached are the useful part.</p></div>
+
+  <p><strong>What the kernel actually logged — one event, and it is the hub, not the C6</strong>
+  (2026-07-26 23:07:13):</p>
+  <pre><code>usb 7-1.4: clear tt 1 (9082) error -71        &lt;- x19 (EPROTO on the hub's transaction translator)
+usb 7-1.4.2: USB disconnect, device number 16
+cp210x ttyUSB1: cp210x converter now disconnected from ttyUSB1
+usb 7-1.4: new high-speed USB device number 26   &lt;- the HUB itself re-enumerated
+usb 7-1.4.1: PPK2                                &lt;- both children returned
+usb 7-1.4.2: CP2102N -&gt; ttyUSB0</code></pre>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">hub 7-1.4</div><div class="s">VIA VL812</div></div>
+      <div class="node acc"><div class="t">shared TT</div><div class="s">both children full-speed</div></div>
+      <div class="node"><div class="t">7-1.4.1 PPK2</div><div class="s">sources board2's 5 V rail</div></div>
+      <div class="node"><div class="t">7-1.4.2 C6</div><div class="s">the trigger</div></div>
+    </div>
+    <figcaption>The PPK2 and the C6 are both 12M devices behind one high-speed hub, so they share a
+    single Transaction Translator. 19 TT protocol errors reset the hub and took <em>both</em> children
+    down &mdash; a signature a single bad cable cannot produce.</figcaption>
+  </figure>
+
+  <p><strong>Three claims that do not hold:</strong></p>
+  <ol>
+    <li><strong>&ldquo;Dropped off USB twice&rdquo; &mdash; unsupported.</strong> Exactly ONE USB-level
+      event is in the log. The <code>errno 5</code> during the later dscycle has <strong>no
+      corresponding disconnect</strong>, and the journal <em>does</em> cover that window (23:40&ndash;00:15:
+      zero non-board2 USB events).</li>
+    <li><strong>The 19:02 re-enumeration has no kernel evidence either way</strong> &mdash; the journal
+      only retains from 23:07:12. It was inferred purely from the <code>by-id</code> symlink mtime.</li>
+    <li><strong>&ldquo;The C6 port is stale&rdquo; was overstated</strong> &mdash; it is back on
+      <code>ttyUSB0</code>, where the doc said. Fragile, not wrong.</li>
+  </ol>
+
+  <p><strong>Hypotheses tested for the <code>errno 5</code>, all refuted:</strong></p>
+  <table>
+    <thead><tr><th>Hypothesis</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Bus/hub event</td><td>Ruled out — kernel logged nothing on the C6 or its hub in that window</td></tr>
+      <tr><td>Handle contention (two processes, one tty)</td><td><strong>Refuted by experiment</strong> — 6 pulses from a held handle while a second process repeatedly opened/wrote/closed the same tty: <strong>0 failures</strong></td></tr>
+      <tr><td>USB autosuspend</td><td>Ruled out — <code>7-1.4.2/power/control</code> = <code>on</code>, never suspends</td></tr>
+      <tr><td>board2 re-enumeration storm</td><td>Weak — only 8 cycles in the 35-minute window</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok"><p class="ct">✓ Disposition</p><p>The <code>errno 5</code> is <strong>one
+  unexplained, unreproduced transient</strong> — stated as that rather than replaced with a second
+  guess. Not worth more bench time until it recurs, and PR <code>48</code> makes a recurrence
+  self-diagnosing. The earlier worry that <code>48</code> &ldquo;masks a harness bug&rdquo; is also
+  refuted: contention was the candidate bug, and it does not reproduce.</p></div>
+
+  <div class="callout warn"><p class="ct">⚠ Method note worth keeping</p><p>The original diagnosis came
+  from a <code>by-id</code> symlink timestamp and a Python exception string. Neither is bus-level
+  evidence. <code>journalctl -k</code> was available the whole time and would have shown the hub reset on
+  the first pass &mdash; <strong>check the kernel log before attributing a USB symptom to a
+  device.</strong></p></div>
 </main>
 
 <aside class="toc"><div class="toc-inner">
@@ -356,6 +414,7 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
     <li><a href="#benchdoc">4 · Bench vs. the inventory doc</a></li>
     <li><a href="#dscycle">5 · dscycle root cause + harness bug</a></li>
     <li><a href="#next">6 · Open / next</a></li>
+    <li><a href="#correction">7 · Correction — not the C6</a></li>
   </ul>
 </div></aside>
 </div>

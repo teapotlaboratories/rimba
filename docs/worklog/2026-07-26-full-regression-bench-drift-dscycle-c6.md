@@ -1,11 +1,12 @@
-# 2026-07-26 — Full regression on the boottime-rig branch: bench drift, a flaky C6, and a silent-failure fix
+# 2026-07-26 — Full regression on the boottime-rig branch: bench drift, a USB hub fault, and a silent-failure fix
 
 **Goal.** Land the `test-ibss-boottime` fixture (RISK-02 rig) and prove nothing else broke, by running
-every regression tier. What actually came out of it: two bench-doc defects, a recurring hardware fault,
-a new `.ai` rule, and a harness bug that had been misreporting a bench failure as a DUT failure.
+every regression tier. What actually came out of it: two bench-doc findings, a USB **hub** fault (first
+misattributed to the C6 — see §7), a new `.ai` rule, and a harness bug that had been misreporting a
+bench failure as a DUT failure.
 
 **Outcome.** All tiers green. Two PRs open (`47` boottime rig, `48` dscycle fix), three doc-only commits
-on `main`. The C6 trigger needs a physical check — that one is not fixable in software.
+on `main`. The C6 trigger was initially blamed on hardware — **§7 records why that was wrong.**
 
 ---
 
@@ -93,9 +94,11 @@ Prose (`:62`, `:66`, `:73`): chronite `10.9.9.2`, chronosalt **`.3`**, chronogen
 node rather than by preference — chronosalt reports `wlan1 DOWN 10.9.9.3/24`. **The prose is right.**
 The diagram also breaks the doc's own stated `.2`–`.4` range.
 
-**Defect 2 — the C6 port is stale.** Doc `:76` said `/dev/ttyUSB0`; it was on `ttyUSB1`. Three fixed
-references replaced with resolve-by-serial, including the flash command, which now derives the port from
-`/dev/serial/by-id` (verified: resolves to the live port).
+**Finding 2 — the C6 port is pinned to a number that moves.** Doc `:76` said `/dev/ttyUSB0`; at the time
+of checking it was on `ttyUSB1`. Three fixed references replaced with resolve-by-serial, including the
+flash command, which now derives the port from `/dev/serial/by-id` (verified: resolves to the live port).
+*(Revised — §7: the C6 is back on `ttyUSB0`, so the documented value was **fragile, not wrong**. The fix
+stands, since the number demonstrably bounces; calling it "stale" was the overstatement.)*
 
 **Not defects:** board2 on `ttyACM2` (doc says `ttyACM4`) and PPK2 on `ttyACM3/4` (doc says `ttyACM2/3`).
 The doc explicitly flags these as a snapshot that re-enumerates.
@@ -111,8 +114,10 @@ dscycle went INCONCLUSIVE: *"board2 associated (1 reconnect, latencies 4360ms) b
 deep-sleep→wake cycles (0 gaps) — did it deep-sleep and get woken?"*, after many
 `commanding C6 wake pulse (retry)` lines. History: **6/6 PASS** 07-21 → 07-24, so this was a real change.
 
-**Root cause: the C6 re-enumerated mid-run.** Its `by-id` symlink is timestamped 19:02 and pointed at
-`ttyUSB1`; at session start (15:10) it was `ttyUSB0`. dscycle ran 19:00:26→19:04. `_C6` opens the port
+**Root cause (as concluded at the time — see §7 for the revision): the C6 re-enumerated mid-run.** Its
+`by-id` symlink is timestamped 19:02 and pointed at `ttyUSB1`; at session start (15:10) it was
+`ttyUSB0`. dscycle ran 19:00:26→19:04. **⚠ This rests on the symlink mtime alone** — the kernel journal
+only retains from 23:07:12, so there is no bus-level evidence for the 19:02 event either way. `_C6` opens the port
 once and holds it (`dscycle.py:99`), and `cmd()` caught every write exception returning `[]` — so every
 wake pulse after 19:02 went into a **dead file descriptor**. board2 was never woken.
 
@@ -146,9 +151,8 @@ without raising, `reopen()` recovers, pulse works again, trigger restored. The r
 
 ## 6. Open / next
 
-- **The C6 needs a physical check.** It dropped off USB **twice in one evening** — once moving
-  `ttyUSB0`→`ttyUSB1`, once a hard `errno 5`. dscycle was 6/6 PASS 07-21→07-24 and unreliable all night.
-  PR `48` makes the harness *report* this correctly; it cannot cure a flaky cable, hub, or port.
+- **The C6 hardware is NOT implicated** — see §7. What is evidenced is a *hub* fault. Worth doing:
+  move the C6 off the `7-1.4` hub it shares with the PPK2.
 - **PRs `47` and `48` await `/review <PR #>`** before merge (per the rule updated this session).
 - **The repo-wide docs audit is still outstanding** — the original goal of the session. Efficient shape
   is known: batched per-unit verification (~22 agents, not ~570 — this box has 6 cores so workflow
@@ -157,3 +161,65 @@ without raising, `reopen()` recovers, pulse works again, trigger restored. The r
 - **Bench left warm**: `ppk2_hold` running, board2 powered on `test-idle`, all ESPs radio-silent,
   chronite/chronosalt `wlan1` DOWN.
 - `docs/worklog/2026-07-25-docs-audit-findings.md` remains untracked by choice (unverified list).
+
+## 7. Correction (2026-07-27) — the C6 hardware was NOT at fault
+
+§5 and §6 originally concluded "the C6 dropped off USB twice — a flaky cable, hub, or port" and called
+for a physical check. **That was wrong**, and it was reached without looking at the kernel log. Prompted
+by the owner pushing back ("C6 physical is always good, are you sure it's not something else?"), the
+claim was re-verified against `journalctl -k`. Recorded here rather than edited away, because the wrong
+call and the way it was reached are the useful part.
+
+**What the kernel actually logged — one event, and it is the hub, not the C6** (2026-07-26 23:07:13):
+
+```
+usb 7-1.4: clear tt 1 (9082) error -71        <- x19 (EPROTO on the hub's transaction translator)
+usb 7-1.4.2: USB disconnect, device number 16
+cp210x ttyUSB1: cp210x converter now disconnected from ttyUSB1
+usb 7-1.4: new high-speed USB device number 26   <- the HUB itself re-enumerated
+usb 7-1.4.1: PPK2                                <- both children returned
+usb 7-1.4.2: CP2102N -> ttyUSB0
+```
+
+`7-1.4` is a VIA VL812. The **PPK2 (`7-1.4.1`) and the C6 (`7-1.4.2`) are both behind it**, both
+full-speed (12M) devices under a high-speed hub, so they share one Transaction Translator. Nineteen TT
+protocol errors then a hub reset that took both children down. A single device with a bad cable does not
+produce that signature. And the PPK2 on that hub is sourcing board2's 5 V DUT rail, so board2's radio
+current pulls through the same port — this bench already has a documented power-margin problem
+(chronosalt browns out on radio-up, §"At a glance" of the bench doc).
+
+**Three specific claims in §5/§6 that do not hold:**
+
+1. **"Dropped off USB twice" — unsupported.** There is exactly ONE USB-level event in the log. The
+   `errno 5 Input/output error` during the later dscycle has **no corresponding disconnect**, and the
+   journal *does* cover that window (checked 23:40–00:15: zero non-board2 USB events). The device never
+   went away that time.
+2. **The 19:02 re-enumeration has no kernel evidence either way** — the journal only retains from
+   23:07:12. It was inferred purely from the `by-id` symlink mtime.
+3. **"The C6 port is stale" (§4 Defect 2) was overstated.** The C6 is back on `ttyUSB0` — where the doc
+   originally said. The documented value was *fragile*, not *wrong*. The doc fix (resolve by USB serial)
+   still stands on its merits, since the number demonstrably bounces; only the justification was wrong.
+
+**Hypotheses tested for the `errno 5`, all refuted:**
+
+| Hypothesis | Result |
+|---|---|
+| Bus/hub event | Ruled out — kernel logged nothing on the C6 or its hub in that window |
+| Handle contention (two processes on one tty) | **Refuted by experiment** — 6 pulses from a held handle while a second process repeatedly opened/wrote/closed the same tty: 0 write failures |
+| USB autosuspend | Ruled out — `/sys/bus/usb/devices/7-1.4.2/power/control` = `on` (never suspends) |
+| board2 re-enumeration storm | Weak — only 8 disconnect/connect cycles in the 35-minute window |
+
+**Disposition.** The `errno 5` is **one unexplained, unreproduced transient** — stated as that rather
+than replaced with a second guess. Not worth more bench time until it recurs, and PR `48` now makes a
+recurrence self-diagnosing (it names the trigger, logs the exact errno, and marks the result a BENCH
+FAULT rather than blaming the DUT). The earlier worry that `48` "masks a harness bug" is also refuted:
+contention was the candidate bug, and it does not reproduce.
+
+**The one real action:** the C6 and the PPK2 share hub `7-1.4`, and that hub demonstrably reset while
+the PPK2 was driving board2's rail. Moving the C6 to a different hub or a root port costs nothing and
+removes a proven single point of failure. That is a topology change, not a cable swap.
+
+**Method note worth keeping:** the original diagnosis came from a `by-id` symlink timestamp and a
+Python exception string. Neither is bus-level evidence. `journalctl -k` was available the whole time and
+would have shown the hub reset on the first pass — check the kernel log before attributing a USB symptom
+to a device.
