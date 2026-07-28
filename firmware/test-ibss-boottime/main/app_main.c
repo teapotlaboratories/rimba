@@ -134,6 +134,17 @@ void app_main(void)
     char my_ip[16];
     mac_to_ip(mac, my_ip, sizeof(my_ip));
 
+    /* Refuse to measure against ourselves. mac_to_ip can derive ANY host in this /24 (it clamps to
+     * .1/.254), so a DUT whose mac[5] lands on the configured peer would ping its own address: lwIP
+     * answers locally and instantly, and we would print a perfectly plausible BOOTTIME_MS whose
+     * `frame` phase never touched the air. A wrong number that looks right is worse than no number. */
+    if (strcmp(my_ip, TEST_PING_IP) == 0) {
+        ESP_LOGE(TAG, "peer PING_IP=%s is THIS board's own derived IP -- the ping would never leave "
+                      "the host and the boot time would be fiction. Pass the creator's IP via PING_IP=.",
+                 TEST_PING_IP);
+        for (;;) vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+
     struct mmwlan_ibss_args args = { 0 };
     memcpy(args.bssid, LINK_BSSID, sizeof(args.bssid));
     memcpy(args.ssid, LINK_SSID, strlen(LINK_SSID));
