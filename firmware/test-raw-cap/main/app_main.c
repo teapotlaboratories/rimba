@@ -1,15 +1,20 @@
 /*
  * test-raw-cap — does the loaded MM6108 firmware advertise RAW / page slicing? (RAW S0a)
  *
- * S0a of the RAW AP-side feasibility spike, docs/design-specification/rimba-raw-apside-design.md §6.
- * The whole RAW port's viability rests on whether the MM6108 blob enforces Restricted Access Window
- * slots at all, and this is the cheapest signal available: one board, no sniffer, no Linux reference,
- * no beacon hook. If the capability is absent, S0b (the on-air spike) should not be built at all.
+ * S0a of the RAW AP-side feasibility spike (docs/design-specification/rimba-raw-apside-design.md).
+ * The whole RAW port's viability rests on whether the MM6108 blob acts on a Restricted Access Window
+ * schedule at all, and this is the cheapest signal available: one board, no sniffer, no Linux
+ * reference, no beacon hook. If the capability is absent, the on-air spike should not be built at all.
  *
  * WHAT IT PROVES: whether the shipped .mbin claims MORSE_CAPS_RAW / MORSE_CAPS_PAGE_SLICING.
- * WHAT IT DOES NOT PROVE: that AP-direction enforcement exists. The capability word carries no
- * direction, and STA-side RAW is already known to work -- so a set bit is necessary, not sufficient,
- * and the AP-direction question stays on-air (S0b Q3). A CLEAR bit is the decisive outcome.
+ * WHAT IT DOES NOT PROVE: that the chip acts on an AP-AUTHORED schedule. The capability word carries
+ * no direction, and STA-side RAW was already believed working -- so a set bit is necessary, not
+ * sufficient, and that question stays on-air. A CLEAR bit is the decisive outcome.
+ *
+ * Do not read "enforcement" into RAW: 802.11ah has no AP primitive that polices peers -- a STA
+ * restricts ITSELF on parsing the RPS, and the chip's own RAW counters only ever count the local
+ * transmitter deferring its own frames. A test written against AP-policing reports failure for a
+ * feature that works. See README.md.
  *
  * Brings up an AP vif rather than a mesh one. The capabilities are device-global (fetched with
  * MMDRV_VIF_ID_INVALID during the first interface-add), so any vif would do for the read -- but RAW
@@ -21,7 +26,6 @@
  * the GO/BLOCKED interpretation is stated in the output for a human to act on.
  */
 
-#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
