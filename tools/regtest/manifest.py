@@ -369,6 +369,11 @@ APPS: tuple[App, ...] = (
     App("test-ampdu-cap",
         notes="T2 ampdu-cap: single board, mesh vif up, reads "
               "mmwlan_ampdu_capability_advertised(). Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-raw-cap",
+        notes="RAW S0a feasibility probe (NOT a regression test): single board, AP vif up, reads "
+              "mmwlan_{raw,page_slicing}_capability_advertised(). Scored on whether the READ "
+              "succeeded -- a clear RAW bit is a legitimate feasibility answer, not a regression, "
+              "so it must not gate the suite on the value. Needs CONFIG_HALOW_AP_MODE=y."),
     App("test-ibss",
         notes="T2 ibss: symmetric IBSS node (both run it; creator pinned to board0's MAC). "
               "Reporter polls mmwlan_ibss_peer_count()==1. Needs CONFIG_HALOW_AP_MODE=y."),
