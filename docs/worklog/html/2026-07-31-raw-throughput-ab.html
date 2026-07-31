@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAW costs the AP ~22% of its downlink &mdash; Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-31</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-31</span>
+    <span class="badge">6 min read</span>
+    <span class="badge warn">~22% downlink cost</span>
+    <span class="badge err">benefit NOT measurable on this bench</span>
+    <span class="badge bug">RAW &middot; throughput A/B</span>
+  </div>
+
+  <h1>RAW costs the AP ~22% of its downlink<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">with no contention to buy it back</small></h1>
+
+  <p class="lead">RAW is being ported to fix EDCA contention for the mesh-gate. S0b-2 showed the AP's chip
+  defers its <strong>own</strong> downlink to honour the window. Since the gate is already the throughput
+  bottleneck, does RAW cost it more than the contention it saves?</p>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; Outcome &mdash; a floor, not a verdict</p>
+    <p>With one STA and no contention, enabling RAW costs <strong>~22% of downlink throughput</strong>
+    (1.63 &rarr; 1.27 &rarr; 1.61 Mbit/s across an A-B-A control) and drives UDP loss from 0.12% to 7.2% at
+    the same offered rate. The AP deferred <strong>37,897</strong> of its own frames. <strong>This measures
+    cost only &mdash; the bench cannot demonstrate RAW's benefit</strong>, so the honest reading is that RAW
+    starts ~22% down and has to earn that back.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">1.63</div><div class="lbl">Mbit/s baseline (A)</div></div>
+    <div class="stat"><div class="num" style="color:var(--warn)">1.27</div><div class="lbl">Mbit/s with RAW (B)</div></div>
+    <div class="stat"><div class="num acc">1.61</div><div class="lbl">Mbit/s recovered (A&prime;)</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">37 897</div><div class="lbl">AP frames deferred</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">0.12 &rarr; 7.2 %</div><div class="lbl">UDP loss, same offered rate</div></div>
+    <div class="stat"><div class="num">19.7 %</div><div class="lbl">of airtime inside the window</div></div>
+  </div>
+
+  <h2 id="rig">1 &middot; Rig &mdash; and the change that unblocked it</h2>
+
+  <p>The blocker recorded earlier was that neither Pi Zero has <code>iperf3</code>, so there was no
+  rate-controlled generator. <strong>A throughput measurement needs no sniffer</strong>, which frees chronium
+  &mdash; a Pi 5 that <em>does</em> have <code>iperf3</code> &mdash; to be the STA.</p>
+
+  <table>
+    <tbody>
+      <tr><td><strong>chronite</strong></td><td>AP. <code>hostapd_s1g</code> from the tracked config, <code>iperf3 -s</code>. RAW driven directly by <code>morse_cli</code></td></tr>
+      <tr><td><strong>chronium</strong></td><td><strong>STA</strong> (not the sniffer, for once). <code>raw_sta_priority=0</code>. Associated in 4 s, RSSI <strong>&minus;36 dBm</strong></td></tr>
+      <tr><td>chronogen, chronosalt</td><td>unused</td></tr>
+      <tr><td>ESP boards</td><td><strong>none</strong></td></tr>
+    </tbody>
+  </table>
+
+<pre><code>RAW ID: 1 (enabled: 1)
+  start_time_us=0  aid: start=1 end=255
+  slot info: x-slot=0 num=2 duration_us=10100</code></pre>
+
+  <p>The window is therefore <strong>20200 &micro;s inside a 102400 &micro;s beacon interval &mdash; 19.7% of
+  the airtime.</strong></p>
+
+  <h2 id="calibrate">2 &middot; Calibrating the instrument first &mdash; and half of it failed</h2>
+
+  <table>
+    <thead><tr><th>direction</th><th>baseline runs</th><th>verdict</th></tr></thead>
+    <tbody>
+      <tr><td><strong>downlink</strong> (AP&rarr;STA)</td><td>1.68 / 1.52 / 1.68 Mbit/s</td><td>~&plusmn;10% &mdash; <strong>usable</strong></td></tr>
+      <tr><td><strong>uplink</strong> (STA&rarr;AP)</td><td>104 / <strong>0.00</strong> / 156 Kbit/s</td><td><strong>unusable</strong></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout err">
+    <p class="ct">&#10007; One uplink run transferred zero bytes</p>
+    <p>You cannot measure a 20% effect against a baseline that includes zero. UDP at a fixed offered rate
+    confirmed it is the link, not TCP's reaction to it: uplink at 400 Kbit/s offered gave 44% then 24% loss,
+    while downlink at 2 Mbit/s offered gave <strong>0.12%</strong>. A badly asymmetric link &mdash; a bench
+    property, <strong>not</strong> a RAW effect &mdash; and why every number here is downlink.</p>
+  </div>
+
+  <p>Downlink is also the direction that matters more for the driver use case: the mesh-gate's bottleneck is
+  its own forwarding, and S0b-2 already showed the AP deferring its <em>own</em> TX.</p>
+
+  <h2 id="result">3 &middot; The A-B-A result</h2>
+
+  <p>Baseline, RAW on, then RAW off again &mdash; so a time-varying RF change cannot masquerade as the effect.</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">A &middot; RAW off</span><span class="bar-track"><span class="bar-fill fast" style="width:97%"></span></span><span class="val">1.63 Mbit/s</span></div>
+    <div class="bar-row"><span class="lbl">B &middot; RAW on</span><span class="bar-track"><span class="bar-fill slow" style="width:75.6%"></span></span><span class="val">1.27 Mbit/s</span></div>
+    <div class="bar-row"><span class="lbl">A&prime; &middot; RAW off</span><span class="bar-track"><span class="bar-fill fast" style="width:95.8%"></span></span><span class="val">1.61 Mbit/s</span></div>
+  </div>
+
+  <table>
+    <thead><tr><th>arm</th><th>runs (Mbit/s)</th><th class="num">mean</th></tr></thead>
+    <tbody>
+      <tr><td><strong>A</strong> &mdash; RAW off</td><td>1.68 &middot; 1.52 &middot; 1.68</td><td class="num"><strong>1.63</strong></td></tr>
+      <tr><td><strong>B</strong> &mdash; RAW on</td><td>1.36 &middot; 1.31 &middot; 1.15</td><td class="num"><strong>1.27</strong></td></tr>
+      <tr><td><strong>A&prime;</strong> &mdash; RAW off again</td><td>1.62 &middot; 1.68 &middot; 1.52</td><td class="num"><strong>1.61</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Throughput recovers when RAW is disabled</strong>, so the drop is attributable to RAW. The ranges
+  do not overlap: the worst no-RAW run (1.52) still beats the best RAW run (1.36). <strong>&asymp; 22%
+  cost.</strong> UDP tells the same story &mdash; loss 0.12% &rarr; <strong>7.2%</strong> &rarr; 0.96%.</p>
+
+  <table>
+    <thead><tr><th></th><th class="num">AP (chronite)</th><th class="num">STA (chronium)</th></tr></thead>
+    <tbody>
+      <tr><td><code>assignments[0]</code></td><td class="num">1030</td><td class="num">989</td></tr>
+      <tr><td><code>invalid_assignments</code></td><td class="num">0</td><td class="num">0</td></tr>
+      <tr><td><strong><code>aci_frames_delayed</code></strong></td><td class="num"><strong>37 897</strong></td><td class="num">4 502</td></tr>
+      <tr><td><code>frame_crosses_slot</code></td><td class="num">383</td><td class="num">81</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="meaning">4 &middot; What the number means &mdash; and what it does not</h2>
+
+  <div class="callout">
+    <p class="ct">RAW is not hard-gating the AP</p>
+    <p>The window is 19.7% of the beacon interval. If the AP's downlink were <em>strictly confined</em> to it,
+    throughput would fall by ~80%. It fell by <strong>22%</strong>. So the chip imposes a <em>partial</em>
+    cost &mdash; deferring frames that would cross into the restricted region, not refusing to transmit
+    outside the window.</p>
+  </div>
+
+  <div class="callout err">
+    <p class="ct">&#10007; The bench cannot show the benefit, and this does not attempt to</p>
+    <p>RAW's payoff is reduced collision loss when many STAs contend. With <strong>one</strong> STA there is
+    nothing to save, so what is measured here is pure overhead. The bench has two usable Linux radios plus a
+    few ESPs &mdash; it cannot produce the 30-plus contending clients where RAW is supposed to pay for itself.</p>
+    <p>So the correct reading is a <strong>floor, not a verdict</strong>: RAW starts ~22% down on gate
+    downlink, and the contention it saves has to exceed that. Whether it does, at the 16&ndash;32 clients the
+    gate actually targets, is <strong>not answered here and cannot be answered on this bench</strong>.</p>
+  </div>
+
+  <p><strong>For the mesh-gate specifically that is a real caution.</strong> The gate is already the throughput
+  bottleneck; this says RAW takes about a fifth off the top before delivering anything. It does not say RAW is
+  wrong &mdash; it says the case has to be made on contention, and that case remains unmeasured.</p>
+
+  <h2 id="verification">5 &middot; Verification status</h2>
+  <ul>
+    <li><strong>On hardware, on air, two radios.</strong> Figures from <code>iperf3</code> at the endpoints plus
+      firmware counters. No ESP board involved, nothing flashed.</li>
+    <li><strong>A-B-A design</strong>, three TCP runs per arm plus a UDP arm, with the baseline measured
+      <em>before</em> trusting it &mdash; which is what caught the unusable uplink.</li>
+    <li><strong>On-air frame verification: not applicable.</strong> Nothing new was transmitted; chronite
+      emitted stock beacons plus the same RPS validated byte-for-byte in S0b-2. No capture was needed.</li>
+    <li><strong>Bench radio-silent</strong> &mdash; RAW disabled + deleted (debugfs confirms), daemons and
+      <code>iperf3</code> killed, addresses flushed, <code>wlan1</code>/<code>morse0</code> down,
+      <code>type managed</code> restored on all three nodes. Verified with <code>ps -eo comm=</code>.</li>
+  </ul>
+
+  <h2 id="caveats">6 &middot; Caveats</h2>
+  <ul>
+    <li><strong>One STA, one channel, one geometry, one session.</strong> No contention, so cost only.</li>
+    <li><strong>Downlink only.</strong> The uplink instrument failed calibration and no uplink conclusion is drawn.</li>
+    <li><strong>The link is badly asymmetric</strong> on this placement &mdash; 1.6 Mbit/s down vs ~0.1&ndash;0.3
+      up with 24&ndash;44% UDP loss. Unexplained, not chased; it may distort how much of the downlink cost is
+      deferral vs retransmission.</li>
+    <li><strong>One RAW configuration.</strong> The cost is presumably a function of window fraction and slot
+      count; that curve was not measured.</li>
+    <li><strong>TCP is a reactive instrument</strong> &mdash; part of the 22% is TCP responding to added
+      loss/latency, not raw airtime denial. The UDP arm is the cleaner statement of the same effect.</li>
+  </ul>
+
+  <h2 id="next">7 &middot; Next</h2>
+  <p>This does not change the S0b verdict &mdash; the gate passed on <em>mechanism</em>, and this is about
+  <em>value</em>. It adds a question the port should carry: <strong>at what client count does RAW's contention
+  saving exceed its ~22% standing cost?</strong> That needs either many-STA hardware the bench does not have,
+  or a model calibrated against these numbers.</p>
+  <p>The ESP arm (S0b-3/4/5) is unaffected and still the outstanding implementation work.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#rig">1 &middot; Rig</a></li>
+    <li><a href="#calibrate">2 &middot; Calibrating first</a></li>
+    <li><a href="#result">3 &middot; The A-B-A result</a></li>
+    <li><a href="#meaning">4 &middot; What it means</a></li>
+    <li><a href="#verification">5 &middot; Verification status</a></li>
+    <li><a href="#caveats">6 &middot; Caveats</a></li>
+    <li><a href="#next">7 &middot; Next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-07-31-raw-throughput-ab</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

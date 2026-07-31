@@ -168,13 +168,19 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>106</b> worklogs · 2026-06-17 – 2026-07-30</p>
+<p class="stat"><b>107</b> worklogs · 2026-06-17 – 2026-07-31</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">79</span></h2>
+<h2>July 2026 <span class="mcount">80</span></h2>
 <div class="grid">
 
+<a class="card" href="2026-07-31-raw-throughput-ab.html">
+<div class="card-date">2026-07-31</div>
+<div class="card-title">RAW costs the AP ~22% of its downlink, with no contention to buy it back</div>
+<div class="card-ex">RAW is being ported to fix EDCA contention for the mesh-gate, and S0b-2 showed the AP's chip defers its OWN downlink to honour the window — so does RAW cost the gate more than it saves? The blocker had been that neither Pi Zero has iperf3; the unlock was noticing a throughput measurement needs no sniffer, which frees chronium (a Pi 5 that does have it) to be the STA. Calibrating the instrument first turned out to matter: across three baseline runs downlink was tight at 1.68/1.52/1.68 Mbit/s but uplink gave 104/0.00/156 Kbit/s — one run moved zero bytes — and UDP confirmed the link itself is badly asymmetric (24-44% loss uplink at 400 Kbit/s offered, versus 0.12% downlink at 2 Mbit/s). So the uplink arm was dropped as unusable and everything reported is downlink, which is the more decision-relevant direction anyway. The A-B-A result: 1.63 Mbit/s baseline, 1.27 with RAW enabled, 1.61 after disabling it again — throughput recovers, so the drop is attributable to RAW rather than drift, and the ranges do not overlap (worst no-RAW run 1.52 beats best RAW run 1.36). About 22% cost. UDP loss went 0.12% → 7.2% → 0.96% at a fixed offered rate, and the AP's own counters show 37,897 frames deferred due to RAW. Interpretation matters here: the window is 19.7% of the beacon interval, so strict confinement would have cost ~80% — at 22% the chip is imposing a partial cost, not hard-gating the AP. And with one STA there is no contention to save, so this measures cost ONLY; the bench cannot produce the 30-plus contending clients where RAW is meant to pay for itself. The honest reading is a floor rather than a verdict: RAW starts ~22% down on gate downlink and has to earn that back, and whether it does at the 16-32 clients the gate targets is not answerable on this bench.</div>
+<div class="card-meta">~22% downlink cost · A-B-A controlled · 37,897 AP frames deferred · benefit NOT measurable here · radio-silent after</div>
+</a>
 <a class="card" href="2026-07-30-raw-s1g-caps-linux-behaviour.html">
 <div class="card-date">2026-07-30</div>
 <div class="card-title">What Linux does with the S1G-caps RAW bit, and two design-doc errors it exposed</div>
