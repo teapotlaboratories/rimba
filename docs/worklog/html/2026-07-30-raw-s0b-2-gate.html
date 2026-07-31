@@ -419,6 +419,17 @@ BYTE-IDENTICAL              : True</code></pre>
   </ul>
   <p>Before any of that: the spike edits stack on a submodule tree already dirty with the S0a accessors
   &mdash; the patch capture from S0b-0 is the restore path.</p>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; Update, 2026-07-31 &mdash; that last sentence no longer holds</p>
+    <p>The S0a work <strong>landed</strong> later the same evening
+    (<code>teapotlaboratories/mm-esp32-halow#28</code> + rimba <code>#49</code>), so the submodule tree is
+    <strong>clean</strong> and <code>main</code> is the baseline to return to &mdash; <strong><code>git</code>
+    is the restore path</strong>, not the patch files. Those captures lived in a session scratchpad under
+    <code>/tmp</code> and were wiped by the nightly reboot; don't go looking for them.</p>
+    <p>The discipline itself still applies to S0b-3+, whose edits will again be uncommitted: capture each one
+    as a named patch <strong>outside <code>/tmp</code></strong> before flashing.</p>
+  </div>
 </main>
 
 <aside class="toc"><div class="toc-inner">
