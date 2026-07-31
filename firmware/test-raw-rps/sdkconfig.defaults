@@ -1,0 +1,4 @@
+# The spike beacons from an AP vif, so the AP-mode morselib sources must compile in. Without this
+# umac_ap.c is not in SRCS at all (morselib/CMakeLists.txt:107-114) and the RPS splice — which lives in
+# umac_ap_build_beacon() — silently does nothing.
+CONFIG_HALOW_AP_MODE=y

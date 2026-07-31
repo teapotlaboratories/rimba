@@ -430,7 +430,14 @@ beacons, so the element is attributable to the RAW config and not to something t
 **Also observed:** `frame_crosses_slot = 27` on both ends means real frames are **too long for a 10100 µs
 slot** at 1 MHz — pair this with the ≤6-slot cap (§7.1) when sizing any real RAW schedule.
 
-**S0b-3 — ESP caps-bit only. One board, one flash, no STA, no RPS builder.** Flip the `if (false)` at
+**S0b-3 — ESP caps-bit only. ✅ DONE 2026-07-31, FOLDED INTO S0b-4 — see the joint result below.** The
+stage as written below is superseded: the flip is **not** `if (false)` → `if (true)`, because the Linux
+driver treats that bit as **live state** (set only while a RAW schedule is actually running), so an
+unconditional flip advertises RAW on an AP with no schedule. It needs a schedule to exist first, which is
+exactly what S0b-4's splice provides — hence one fixture, one flash, both answers. Original text follows
+for the record.
+
+Flip the `if (false)` at
 `s1g_capabilities.c:276-280` to `if (true)`, restart the AP, capture one beacon, diff octet[6] bit 3
 (`DOT11_MASK_S1G_CAP6_RAW_OPERATION_SUPPORT`). This settles a risk the original §6 did not list:
 Linux **deletes and regenerates** the S1G Capabilities element during conversion (`ie.c:518` +
@@ -452,6 +459,62 @@ include RPS (`ie.c:63`), so a capture that only samples DTIM beacons could repor
 non-DTIM beacons carry nothing. **Take the no-hook baseline capture first** — without it, an EID-208
 element on air cannot be attributed to the host splice, and a *missing* element gives no evidence the
 capture/decode path works at all.
+
+### ✅ S0b-3 + S0b-4 RESULT — 2026-07-31. **Q2 PASS, S0b-3 PASS.** Worklog `docs/worklog/2026-07-31-raw-s0b-4-esp-rps.md`
+
+Rig: board0 as the ESP AP (`rimba-rawrps`, beacon SA `6a:24:99:44:6b:b7`, beacon_int 100 TU, dtim 3, TX
+capped to 1 dBm) **and** chronite as the Linux RAW reference AP (`rimba-ping`, tracked `hostapd-rimba.conf`
++ `morse_cli -i wlan1 raw -s 20200,2 -a 1,255 -t 0 enable 1`) beaconing **simultaneously**, with chronium
+in monitor on `morse0` — so one capture holds both elements under identical radiotap conditions. Bench left
+radio-silent on every node.
+
+| | baseline (no hook) | ESP spike | Linux reference (same capture) |
+|---|---|---|---|
+| beacons decoded / undecodable | 467 / 0 | **519** / 0 | **515** / 0 |
+| EID-208 present | **0** | **519 / 519** | **515 / 515** |
+| RPS bytes | — | **`D0 06 20 40 09 04 E0 1F`** | **`D0 06 20 40 09 04 E0 1F`** |
+| S1G caps octet[6] | `0x00` | **`0x08`** | **`0x08`** |
+| DTIM / non-DTIM | 158 / 309 | **171 / 348** | 515 / 0 |
+| capture completeness | 97.29 % | 98.11 % | 97.35 % |
+
+- **Q2 = PASS.** The blob does **not** rewrite or strip IEs in a host-supplied beacon. The host splice is
+  the cheap path; **the mesh host-built-S1G-beacon fallback is not needed.**
+- **S0b-3 = PASS.** The caps bit reaches the air from the host: `… 00 08 00 02 …` → `… 00 08 **08** 02 …`,
+  **one bit, everything else byte-identical**, matching the Linux A/B signature. **S3 is NOT dead as
+  written.**
+- **RPS lands directly after the TIM on both stacks** — ESP `[0, 5, 208, 48, 127, 244, 213, 217, 232, 214,
+  221]`, Linux `[213, 5, 208, 217, 232, 214, 0, 221]`. ⚠ **The Q2 diff is the eight RPS octets plus the
+  TIM→RPS adjacency, NOT the whole IE-chain vector.** The overall chains differ because on the ESP
+  213/217/232/214 sit inside hostapd's `tail` (`beacon.c:2562-2569`) and land after the TIM — a
+  long-standing ordering difference unrelated to RAW. Diffing the vector reports a false mismatch.
+- **The short-beacon worry is measured, not argued:** `dtim_period=3` put **171 DTIM and 348 non-DTIM**
+  beacons in one capture and **all 519** carry the RPS. (Source agrees: morselib has no short-beacon TX
+  path and `umac_ap_build_beacon()` is the single unconditional builder.)
+
+**How it is armed — §7.4's `IDF_EXTRA_D` claim is half wrong.** `IDF_EXTRA_D` passes CMake **cache
+variables**, which today's apps individually convert to *app-private* defines; that privacy is a property of
+those apps, not of the mechanism. A **build-global** define *does* reach morselib, because IDF applies the
+build-wide `COMPILE_DEFINITIONS` as a directory-scoped `add_compile_definitions()` inside every
+`idf_component_register` (`component.cmake:468,476`) and `components/halow/CMakeLists.txt:29` adds the
+morselib subdirectory *after* registering at `:15-22`. So the spike is armed by **one line in the fixture's
+own top-level CMakeLists** — `idf_build_set_property(COMPILE_DEFINITIONS "RIMBA_RAW_S0B_SPIKE=1" APPEND)`
+— with **zero submodule CMake edits**. Verified from `compile_commands.json`: both guarded files carry
+`-DRIMBA_RAW_S0B_SPIKE=1`, and the other AP apps' build trees do not. **Do not use a CMake cache var via
+`IDF_EXTRA_D`** — cache entries are sticky per build dir and `t0_build.py:242` reuses that dir, so one
+spike build would keep the RPS compiled into T0 until a `fullclean`.
+
+**Deliverables now tracked:** `tools/raw_s1g_beacon_decode.py` (the §7.6 item-1 radiotap-aware pcap decoder,
+**calibrated against both archived S0b captures** — it reproduces the 236-beacon reference and the
+2222-beacon negative control to the frame); `firmware/test-raw-rps/` + its `manifest.py` entry; the two
+guarded morselib edits captured at `docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch`; and the
+S0b-1/S0b-2 pcaps, **rescued from `chronium:/tmp` (tmpfs, 19-day uptime) into
+`docs/worklog/artifacts/raw-s0b/`** before a reboot took them.
+
+**Corrections this stage forced into this document:** §7.4's "20 apps set `CONFIG_HALOW_AP_MODE=y`" is
+stale — it is **27** (only 7 instantiate a SoftAP vif); and §7.5's "the ESP fixtures cap to 1 dBm" was
+**false** for the AP fixture family (`test-raw-cap`, `rimba-halow-ap`, `rimba-halow-ap-perf` never call
+`mmwlan_override_max_tx_power`) — `test-raw-rps` does, and the call must sit between `set_config` and
+`wifi_start` or it returns `MMWLAN_UNAVAILABLE`.
 
 **S0b-5 — Q3b, ESP as the AP.** Repeat S0b-2's measurement with the ESP AP. Read the ESP's own
 counters via `mmwlan_get_morse_stats(1, …)` — already public and already exported by the `mmwlan*`
@@ -502,7 +565,9 @@ a reference.
   this reason. **Consequence: `t2_onair.py`'s automatic `go_radio_silent` does not apply — the
   radio-silent rule becomes a manual checklist item for a multi-hour, four-radio session.**
 - **Gate the spike hook behind a compile-time define.** `umac_ap_build_beacon()` is shared morselib,
-  not fixture code — **20 apps under `firmware/` set `CONFIG_HALOW_AP_MODE=y`**, and while the hook is
+  not fixture code — **27 apps under `firmware/` set `CONFIG_HALOW_AP_MODE=y`** (recounted 2026-07-31;
+  "20" was stale. Only **7** of them actually instantiate a SoftAP vif — the rest need the flag because
+  morselib gates `umac_ap.c` and friends on it and mesh/IBSS link against them), and while the hook is
   in the tree every one of them emits the golden RPS and the flipped caps bit. That contaminates any
   T0 build or T2 run during the spike window and puts a RAW advertisement on air from fixtures nobody
   is watching. Wrap both edits in `#ifdef RIMBA_RAW_S0B_SPIKE`.
@@ -550,14 +615,33 @@ Four distinct radios, never more than three concurrent; fits one session if S0b-
 chronium stays in monitor throughout. **Only chronium has `tcpdump`/`tshark`** (4.99.5 / 4.4.15) — the
 other three nodes have neither, so the sniffer is not relocatable without installing tooling.
 `docs/reference/rimba-linux-halow-monitor.md:71` ("No tcpdump/tshark on the Pis") is stale for chronium
-and should be corrected. **TX-power discipline is a prerequisite, not a nicety:** the ESP fixtures cap
-to 1 dBm but nothing on the Linux side does, and the bench's documented RX-overload at RSSI ≈ −3 dBm
+and should be corrected. **TX-power discipline is a prerequisite, not a nicety**, and the earlier
+claim here that "the ESP fixtures cap to 1 dBm" was **false — corrected 2026-07-31: the AP fixture family
+does not.** `test-raw-cap`, `rimba-halow-ap` and `rimba-halow-ap-perf` never call
+`mmwlan_override_max_tx_power`; `test-raw-rps` does, following the `test-apsta-ap` precedent, and the call
+must sit **between `set_config` and `wifi_start`** because the override returns `MMWLAN_UNAVAILABLE` once
+the WLAN subsystem is active. Nothing on the Linux side caps either, and the bench's documented
+RX-overload at RSSI ≈ −3 dBm
 produces retries **indistinguishable from slot leakage** in a timing capture. Cap both Linux ends and
 record the observed RSSIs alongside every verdict. Also pin beacon interval, `dtim_period` and the
 short-beacon decision **identically** across the Linux-AP and ESP-AP arms — the RAW window is
 referenced to the beacon, so all three enter both the Q2 comparison and the Q3 histogram.
 
-### 7.6 New tooling S0b needs (none of it exists today)
+### 7.6 New tooling S0b needs (item 1 ✅ BUILT 2026-07-31 — `tools/raw_s1g_beacon_decode.py`)
+
+**Items 1 and 2 are done and tracked.** `tools/raw_s1g_beacon_decode.py` is the radiotap-aware pcap
+decoder, and it **computes** the conditional S1G offset from Frame Control rather than searching for it.
+It is **calibrated**: it reproduces both archived S0b captures to the frame — the 236-beacon reference
+(golden constant, byte-identical) and the 2222-beacon negative control (zero EID-208). Item 4's tracked
+`hostapd-rimba-raw.conf` was **not** needed: driving `morse_cli` directly (as S0b-2 did) gives exact
+control of the AID ranges and avoids hostapd's defaults entirely. Item 3's *timing* analysis is still
+net-new — S0b-4 needed none of it, being a byte-diff.
+
+⚠ **The S0b-1/S0b-2 analysis scripts did not survive** — they lived in a dev-box session scratchpad under
+`/tmp` that the nightly reboot wipes. That is exactly why the decoder is now a tracked repo tool. The
+*captures* were rescued from `chronium:/tmp` (tmpfs, 19-day uptime) into `docs/worklog/artifacts/raw-s0b/`.
+
+Original list, for the record:
 
 1. **A radiotap-aware decoder.** All four in-repo capture scripts (`tools/mesh_beacon_cap.py:31-32`,
    `tools/mesh_rann_cap.py:47-48`, `tools/mesh_grab_fwd.py:18`, and the recipe in the monitor doc)
