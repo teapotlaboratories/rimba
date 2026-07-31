@@ -68,8 +68,14 @@ only when mac80211 enters monitor mode — i.e. when a **monitor-type** interfac
    logs are an alternative — they log the frames each side TX/RX.)
 3. **Channel = `freq 5560` for S1G ch27.** morse uses a "5 GHz model": S1G ch27 ↔ 5 GHz ch112
    ↔ `5560`. On air it's 915.5 MHz / 1 MHz BW. Use the `5560` number for `iw … set freq`.
-4. **No `tcpdump`/`tshark` on the Pis.** Read `morse0` with an `AF_PACKET`/`SOCK_RAW` socket
-   (script below). `morse0` carries a radiotap header you must skip.
+4. **`tcpdump`/`tshark` are on chronium ONLY** (`/usr/bin/tcpdump` 4.99.5, `/usr/bin/tshark` 4.4.15 —
+   re-checked 2026-07-30); chronite, chronosalt and chronogen have neither, so **only chronium can
+   record a pcap** and the sniffer is not relocatable without installing tooling. (This gotcha
+   previously read "No `tcpdump`/`tshark` on the Pis" — stale for chronium.) On the other three, read
+   `morse0` with an `AF_PACKET`/`SOCK_RAW` socket (script below). `morse0` carries a radiotap header;
+   the script below **skips** it, but it does carry `radiotap.mactime` (a chip µs counter —
+   `morse_driver/monitor.c:283` sets `rt_tsft` from `rx_timestamp_us`), which is the only timing
+   source available for anything slot-resolution.
 
 ## Reading frames — `halow-mon.py`
 

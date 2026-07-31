@@ -965,15 +965,25 @@ needs attention is the part that is silently rig-specific.*
   morselib has only RAW *types/caps* today (`MORSE_CAPS_RAW`, the S1G cap-6 bit, `raw_sta_priority`) —
   **no AP-side implementation**.
   **✅ Recon/feasibility DONE 2026-07-24 → [`docs/design-specification/rimba-raw-apside-design.md`](../design-specification/rimba-raw-apside-design.md)
-  (verdict: GO-WITH-CAVEATS).** The advertise-half (build + insert the RPS IE, EID 66) is a tractable
+  (verdict: GO-WITH-CAVEATS).** The advertise-half (build + insert the RPS IE, **EID 208**) is a tractable
   host-IE port modeled on the mesh RANN + the existing S1G-TIM builder; the enforce-half hinges on whether
-  the MM6108 FW enforces *AP-direction* RAW slots on-air (STA-side proven — `raw_sta_priority` works with
-  zero host scheduler; AP-side unverified — and the FW *refuses* AP-side TWT schedule installs, a caution
-  flag). **NEXT = the S0 on-air spike** (hand-build a minimal GENERIC-all-AIDs RPS IE into the AP beacon
-  `umac_ap.c:418` + flip the AP RAW cap bit `s1g_capabilities.c:276-280` → capture on chronium's `morse0`,
-  byte-diff vs a live Linux RAW AP, check a STA confines TX to its slot). GO ⇒ stage S1–S4 to the MVP;
-  BLOCKED ⇒ FW/vendor ask, do not ship a RAW advert the AP can't enforce. Own branch + PR; big feature.
-  MVP scope, S0–S6 plan, Linux code-map skeleton + risks in the design doc.
+  the MM6108 FW acts on an *AP-authored* RAW schedule on-air (STA-side believed working — `raw_sta_priority`
+  works with zero host scheduler; AP-side unverified). MVP scope, S0–S6 plan, Linux code-map skeleton +
+  risks in the design doc.
+  **✅ S0a — capability probe DONE 2026-07-30:** `MORSE_CAPS_RAW=1`, `MORSE_CAPS_PAGE_SLICING=1` on
+  fw 1.17.8 ⇒ GO-CANDIDATE. Necessary, **not** sufficient (the capability word carries no direction).
+  Worklog [`2026-07-30-raw-s0a-capability-probe.md`](../worklog/2026-07-30-raw-s0a-capability-probe.md);
+  probe fixture + morselib accessors **landed 2026-07-30** (`teapotlaboratories/mm-esp32-halow#28` +
+  rimba [`#49`](https://github.com/teapotlaboratories/rimba/pull/49)).
+  **◐ NEXT = S0b, scoped 2026-07-30 (design doc §7), not yet run.** Three corrections reshaped it:
+  the RPS EID is **208, not 66** (66 would have byte-diff-failed on octet 0 and read as "the FW stripped
+  our IE" — a false BLOCKED); the **gate needs zero ESP code**, because the MM6108 blob is the same file
+  on the ESP and the Linux bench nodes and RAW reaches the chip only as beacon bytes, so an all-Linux run
+  (chronite AP + chronogen STA + chronium monitor) decides it and a negative stops the port before any
+  firmware is written; and **Q3 was mis-specified** — 802.11ah RAW is STA self-restriction, there is no
+  AP policing primitive, and the FW's own `raw_stats_t` counters only ever count the *local* transmitter
+  deferring. Primary instrument = the FW's tag-4210 counters; timing capture corroborates. GO ⇒ stage
+  S1–S4 to the MVP; BLOCKED ⇒ FW/vendor ask, do not ship a RAW advert the AP can't enforce.
 - ☐ **SP-overlap scheduling** — port Linux's `twt_wi_tree` SP spacing (`twt.c:941`); matters only when
   many leaves share tight wake intervals.
 - ☐ **µA current measurement** of a fully-idle TWT link — blocked by no bench power-enable line / meter
