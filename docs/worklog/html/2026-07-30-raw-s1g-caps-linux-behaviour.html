@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What Linux does with the S1G-caps RAW bit &mdash; Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-30</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-30</span>
+    <span class="badge">6 min read</span>
+    <span class="badge err">S0b-3 as planned was wrong</span>
+    <span class="badge warn">2 design-doc errors corrected</span>
+    <span class="badge bug">RAW &middot; follow-Linux</span>
+  </div>
+
+  <h1>What Linux does with the S1G-caps RAW bit<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">and two design-doc errors it exposed</small></h1>
+
+  <p class="lead">Before flipping the ESP's <code>if (false)</code> stub that would advertise RAW Operation
+  Support, find out what Linux actually does with that bit &mdash; because the porting rule says derive from
+  Linux, and because the next planned step was written as a one-line flip to <code>if (true)</code>.</p>
+
+  <div class="callout err">
+    <p class="ct">&#10007; Outcome &mdash; the planned step was wrong</p>
+    <p>The bit is <strong>live state, not a capability advertisement</strong>: Linux sets it once per vif from
+    the firmware manifest, then re-clears it on every beacon unless RAW is actually running. An unconditional
+    flip would advertise RAW on an AP with <strong>no schedule configured</strong> &mdash; the one thing the
+    design doc explicitly rules out. Two further design-doc errors fell out, one of which had a
+    <strong>comment standing in for code</strong>.</p>
+  </div>
+
+  <p><strong>No radios were used.</strong> Source reading plus two captures already on disk.</p>
+
+  <h2 id="ab">1 &middot; The cheap answer: an A/B already sitting in the scratchpad</h2>
+
+  <p>S0b-1 (RAW disabled) and S0b-2 (RAW enabled) captured the same AP in the same session. Their S1G
+  Capabilities elements (EID 217):</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 150" role="img" aria-label="The two S1G Capabilities elements differ in exactly one bit of one octet">
+        <g font-family="ui-monospace,SF Mono,Menlo,Consolas,monospace" font-size="14">
+          <text x="8" y="20" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11.5" font-weight="700" fill="#8894a6">RAW DISABLED &#8212; 2220 beacons</text>
+          <text x="8" y="44" fill="#5a6577">9E 00 40 F8 80 0C</text>
+          <rect x="176" y="28" width="34" height="22" rx="4" fill="#8894a6" opacity=".22"/>
+          <rect x="176" y="28" width="34" height="22" rx="4" fill="none" stroke="#8894a6" stroke-width="1.3"/>
+          <text x="193" y="44" text-anchor="middle" fill="#5a6577" font-weight="700">00</text>
+          <text x="218" y="44" fill="#5a6577">02 40 00 FD 00 FA 01 00</text>
+
+          <text x="8" y="86" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11.5" font-weight="700" fill="#1a8a4a">RAW ENABLED &#8212; 236 beacons</text>
+          <text x="8" y="110" fill="#5a6577">9E 00 40 F8 80 0C</text>
+          <rect x="176" y="94" width="34" height="22" rx="4" fill="#1a8a4a" opacity=".24"/>
+          <rect x="176" y="94" width="34" height="22" rx="4" fill="none" stroke="#1a8a4a" stroke-width="1.6"/>
+          <text x="193" y="110" text-anchor="middle" fill="#1a8a4a" font-weight="700">08</text>
+          <text x="218" y="110" fill="#5a6577">02 40 00 FD 00 FA 01 00</text>
+
+          <path d="M193 54 L193 90" stroke="#c0392b" stroke-width="1.4" stroke-dasharray="3 3"/>
+          <text x="240" y="134" font-family="-apple-system,sans-serif" font-size="11.5" fill="#c0392b" font-weight="650">octet[6] bit 3 &#8212; the only difference in 15 bytes</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Same AP, same session, everything else byte-identical. Linux advertises what the AP is
+    <em>currently doing</em>, not what the chip can do &mdash; established before reading a line of source.</figcaption>
+  </figure>
+
+  <h2 id="mechanism">2 &middot; The mechanism (chronite, tag 1.17.8)</h2>
+
+<pre><code>mac.c:1228-1229   if (MORSE_CAPAB_SUPPORTED(&amp;mors_vif-&gt;capabilities, RAW))
+                          s1g_capab-&gt;capab_info[6] |= S1G_CAP6_RAW_OPERATION;
+
+mac.c:1392-1393   if (!morse_raw_is_enabled(mors_vif))
+                          s1g_capab-&gt;capab_info[6] &amp;= ~S1G_CAP6_RAW_OPERATION;
+
+raw.c:1630-1632   return mors_vif &amp;&amp; mors_vif-&gt;ap &amp;&amp;
+                         test_bit(RAW_STATE_ENABLED, &amp;mors_vif-&gt;ap-&gt;raw.flags);</code></pre>
+
+  <ul>
+    <li><strong>Set once per vif</strong> from the firmware manifest capability, inside
+      <code>morse_mac_set_s1g_capab()</code> (<code>mac.c:1088</code>), called for <strong>every</strong> vif
+      type at <code>mac.c:3202</code>.</li>
+    <li><strong>Cleared on every long beacon</strong> (<code>beacon.c:197</code>) <strong>and every management
+      frame</strong> (<code>mac.c:1905</code>), unless RAW is live.</li>
+    <li>The predicate needs <strong>both</strong> <code>mors_vif-&gt;ap</code> &mdash; kzalloc'd only for
+      AP-type vifs (<code>mac.c:3236</code>, <code>:3239</code>) &mdash; <strong>and</strong>
+      <code>RAW_STATE_ENABLED</code>, set at exactly one place tree-wide (<code>raw.c:1139</code>). The config
+      entry point rejects non-AP vifs at <code>raw.c:1567</code>.</li>
+    <li>The insert copies into a <strong>fresh allocation</strong> (<code>tx_11n_to_s1g.c:85-88</code>), so the
+      per-frame clear never damages the template.</li>
+  </ul>
+
+  <div class="callout">
+    <p class="ct">Three consequences</p>
+    <ul style="margin:.2em 0">
+      <li><strong>A Linux STA can never advertise the bit</strong> &mdash; so it is an invalid control for an
+        ESP STA, which <em>does</em> set it via <code>raw_sta_priority</code>.</li>
+      <li><strong>The AP's real per-STA RAW input is not this bit</strong> &mdash; it is the <strong>QoS
+        Traffic Capability element, EID 89</strong> (<code>raw.c:897</code>, priority at <code>:907</code>),
+        parsed only once RAW is already enabled (<code>raw.c:890</code>).</li>
+      <li><strong>Short beacons carry no EID 217 at all</strong> &mdash; the insert is in the non-short branch
+        only (<code>tx_11n_to_s1g.c:922</code>).</li>
+    </ul>
+  </div>
+
+  <h2 id="s0b3">3 &middot; What this changes: S0b-3 was wrong as planned</h2>
+
+  <p>The plan said: flip <code>s1g_capabilities.c:276-280</code> from <code>if (false)</code> to
+  <code>if (true)</code>, capture one beacon, diff octet[6] bit 3.</p>
+
+  <div class="callout err">
+    <p class="ct">&#10007; That diverges from Linux</p>
+    <p>An unconditional flip advertises RAW support on an AP with no RAW schedule configured &mdash; precisely
+    the <em>"do not ship a RAW advertisement the AP cannot enforce"</em> outcome the design doc rules out in
+    its own decision table. The correct shape is <code>if (raw_enabled_for_this_ap)</code>, which means
+    <strong>S0b-3 is not a one-line flip in isolation</strong>: it needs whatever carries "RAW is enabled" to
+    exist first, even as a stub. The enable-carrier comes <em>before</em> the advertise bit, not after.</p>
+  </div>
+
+  <p>It also upgrades a guess to a hypothesis. The recon wondered whether the STA firmware keys on this bit;
+  that Linux bothers to gate it <em>per-frame</em> rather than setting it once is weak evidence someone reads
+  it. Still unproven &mdash; see &sect;6.</p>
+
+  <h2 id="selfcorrect">4 &middot; Correcting my own framing from earlier in the session</h2>
+
+  <p>I had presented the risk as <em>"Linux deletes and regenerates the S1G Capabilities element during the
+  S1G conversion, so the ESP firmware plausibly does too."</em></p>
+
+  <p>The machinery is real &mdash; <code>morse_dot11ah_mask_ies()</code> clears the EID
+  (<code>dot11ah/ie.c:502</code> &rarr; <code>:520</code>) and
+  <code>morse_dot11ah_insert_s1g_capability()</code> re-inserts from <code>mors_vif-&gt;s1g_cap_ie</code>
+  (<code>tx_11n_to_s1g.c:78</code>, called at <code>:922</code>). But <strong>Morse's Linux hostapd has no S1G
+  Capabilities builder at all</strong>: no <code>src/ap/ieee802_11_s1g.c</code>, no
+  <code>hostapd_eid_s1g_capab</code>, and <code>WLAN_EID_S1G_CAPABILITIES</code> appears only in its parser.
+  The beacon mac80211 hands down carries no EID 217, so the clear deletes nothing on the AP beacon path.</p>
+
+  <p><strong>The driver <em>generates</em> the element; it does not <em>regenerate</em> it.</strong> My analogy
+  to the ESP was weaker than I presented it.</p>
+
+  <h2 id="docerrors">5 &middot; Two design-doc errors, both source-verified</h2>
+
+  <h3>5a &middot; There is no legacy&rarr;S1G beacon conversion on the ESP AP path</h3>
+
+  <p>The design doc claimed the ESP hands the firmware a <strong>legacy PV0 beacon that the FW converts</strong>,
+  and made that the whole content of Q2. It cited <code>umac_mesh.c:214-218</code>.</p>
+
+  <div class="callout bug">
+    <p class="ct">&#128027; That anchor is a comment</p>
+<pre style="margin:.5em 0"><code>src/hostap/src/ap/beacon.c:2357   ext_head-&gt;frame_control =
+                                      IEEE80211_FC(WLAN_FC_TYPE_EXT, WLAN_FC_STYPE_S1G_BEACON);
+src/hostap/src/ap/beacon.c:2673   params-&gt;head = (u8 *) ext_head;</code></pre>
+    <p>hostapd builds a <strong>finished S1G beacon</strong>. And no conversion layer exists anywhere in the
+    submodule &mdash; <code>grep -rIl -e ies_mask -e mask_ies -e 11n_to_s1g components/halow</code> returns
+    <strong>zero files</strong>.</p>
+  </div>
+
+  <p>So Q2's original framing describes a mechanism that does not exist on the AP path, and <strong>the
+  host-built-S1G fallback is not needed for that reason</strong> &mdash; the AP path already does what the
+  fallback would have provided. The residual risk is narrower and applies to <em>both</em> platforms equally:
+  does the MM6108 blob rewrite IEs inside a host-supplied beacon? Source cannot answer that. Only the capture
+  can.</p>
+
+  <h3>5b &middot; S5 is a setter, not a port</h3>
+
+  <p>The AP-side RAW <em>input</em> path is <strong>already compiled into the ESP build and merely
+  dormant</strong>, under <code>CONFIG_IEEE80211AH</code> and in files that are in SRCS:</p>
+
+  <table>
+    <tbody>
+      <tr><td>RAW-aware AID allocator</td><td><code>hostapd_get_raw_aid()</code> <code>ieee802_11.c:3833</code>, dispatched <code>:3949</code></td></tr>
+      <tr><td>EID-89 parser</td><td><code>process_qos_traffic_cap()</code> <code>ieee802_11.c:4518</code>, called <code>:5049</code></td></tr>
+      <tr><td>storage</td><td><code>conf-&gt;raw_enabled</code>, <code>sta-&gt;raw_priority</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>Both call sites are gated on <code>hapd-&gt;conf-&gt;raw_enabled</code>, which defaults <strong>false</strong>
+  (<code>ap_config.c:190</code>) and whose only setters live in <code>hostapd/config_file.c</code> &mdash;
+  <strong>not compiled for ESP</strong>. So S5 needs a setter reachable from <code>mmwlan_ap_args</code>, not a
+  from-scratch port. <strong>This is a different layer from the genuinely dead
+  <code>hostapd_send_raw_config()</code></strong>, which is <code>#ifdef</code>'d out behind the absent
+  <code>CONFIG_DRIVER_NL80211_MORSE</code> &mdash; the two were being conflated, and only the latter is a dead
+  end. The AID-width mismatch recorded earlier still applies.</p>
+
+  <h2 id="caveats">6 &middot; Caveats</h2>
+  <ul>
+    <li><strong>The blob was not searched.</strong> <code>S1G_CAP6_RAW_OPERATION</code> has exactly three hits
+      across the Linux driver (define <code>s1g_ies.h:64</code>, set, clear), zero in hostap, and morselib's
+      getter has zero callers &mdash; so <strong>no source</strong> reads it. That is not "nothing reads it":
+      the MM6108 firmware is opaque and a third-party STA could. Calling the flip zero-risk would be inference
+      dressed as fact.</li>
+    <li><strong>"A Linux STA can never advertise it" is bounded by the paths searched.</strong>
+      <code>morse_raw_enable()</code> is also reachable from <code>ocs.c:60</code> with no vif-type check. The
+      conclusion holds for the normal configuration path but is not absolute.</li>
+    <li><strong>Whether the ESP firmware rewrites IEs in a host-supplied beacon remains unknown</strong>, and
+      no amount of source reading will settle it. &sect;5a narrows the question; it does not answer it.</li>
+    <li>Source + existing captures only. Nothing was measured on air today beyond re-reading two pcaps.</li>
+  </ul>
+
+  <h2 id="method">7 &middot; Method note &mdash; the verifiers earned their keep</h2>
+
+  <p>Per the porting rule (<em>"verify every cited file:line, never cite from memory; lines drift, and a code
+  map written from memory is reliably wrong"</em>), three source-mapping passes were followed by two
+  adversarial verifiers whose only job was to re-open every anchor. They found:</p>
+
+  <ul>
+    <li><strong>Line numbers cited from chronite's WORKING TREE under a 1.17.8 tag label.</strong> That tree
+      carries an uncommitted +5-line debug hunk in <code>command.c</code>, so every cited line in that file was
+      +5 against the tag. <strong>Exactly the failure mode the rule warns about</strong>, and invisible without
+      the re-check.</li>
+    <li><strong>Two inverted attributions</strong> &mdash; <code>beacon.c:998</code> labelled the beacon builder
+      when it is inside <code>hostapd_probe_resp_fill_elems()</code>; the beacon tail is <code>:2565</code>.</li>
+    <li><strong>A blanket "all cited files are byte-identical between 1.17.8 and 1.17.9"</strong> that was false
+      for <code>dot11ah/main.c</code> &mdash; the one cited file that actually differs.</li>
+    <li><strong>Several "REFUTED" conclusions</strong> that the evidence only <em>narrowed</em>, each
+      contradicted by the same report's own unknowns section.</li>
+  </ul>
+
+  <p>Every load-bearing anchor was re-read by hand before being written into the design doc.</p>
+
+  <h2 id="next">8 &middot; Next</h2>
+  <p>S0b-3 needs re-planning before it runs &mdash; the enable-carrier first, then the conditional advertise
+  bit. Worth doing alongside S0b-4 rather than as a standalone step now that it is no longer a one-liner.</p>
+  <p>The throughput A/B is unaffected and remains the cheapest remaining item that needs no ESP code.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#ab">1 &middot; The on-air A/B</a></li>
+    <li><a href="#mechanism">2 &middot; The mechanism</a></li>
+    <li><a href="#s0b3">3 &middot; S0b-3 was wrong</a></li>
+    <li><a href="#selfcorrect">4 &middot; Correcting my framing</a></li>
+    <li><a href="#docerrors">5 &middot; Two doc errors</a></li>
+    <li><a href="#caveats">6 &middot; Caveats</a></li>
+    <li><a href="#method">7 &middot; Method note</a></li>
+    <li><a href="#next">8 &middot; Next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-07-30-raw-s1g-caps-linux-behaviour</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
