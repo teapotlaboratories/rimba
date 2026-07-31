@@ -33,7 +33,7 @@ Do not read "enforcement" into a captured RPS either. 802.11ah has no AP primiti
 STA restricts *itself* on parsing the element, and the chip's RAW counters only ever count the **local**
 transmitter deferring its own frames.
 
-## THE SPIKE IS COMPILE-GATED — and its edits are not in the tree
+## THE SPIKE IS COMPILE-GATED
 
 This is the single most confusing thing about the fixture. Read it before running anything.
 
@@ -47,7 +47,7 @@ submodule, wrapped in `#ifdef RIMBA_RAW_S0B_SPIKE`:
 
 **Both edits are landed on the submodule's `main`, so a normal checkout builds the armed spike** — they
 are inert everywhere else, because nothing but this app defines `RIMBA_RAW_S0B_SPIKE`. They are also
-captured standalone as `docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch` (32 insertions, 2
+captured standalone as `docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch` (34 insertions, 2
 files), which is what regenerates the **no-hook baseline** without editing anything by hand:
 
 ```sh
@@ -120,9 +120,9 @@ python3 tools/raw_s1g_beacon_decode.py cap.pcap --sa <AP vif SA> --beacon-int-tu
 ```
 
 This is a feasibility probe. **It must not gate a tier on the RPS.** The spike's schedule is eight
-constant bytes that nothing enforces or updates, and it only exists at all while an unlanded patch is
-applied to the submodule — a tier that asserted on it would fail on a clean tree, which is the normal
-state. The manifest entry says the same thing.
+constant bytes that nothing enforces or updates — asserting on them would score a hardcoded advertisement,
+not a working feature, and it would break the moment the real RAW work replaces the constant. Scoring the
+RPS also needs a sniffer, which no tier has. The manifest entry says the same thing.
 
 ## Why `dtim_period=3`
 

@@ -37,7 +37,8 @@ arms from a host-authored beacon and that a STA self-restricts, so **everything 
 ### Carried-forward footguns that apply to this stage
 
 - **Gate the hook behind `#ifdef RIMBA_RAW_S0B_SPIKE`.** `umac_ap_build_beacon()` is shared morselib and
-  **20 apps set `CONFIG_HALOW_AP_MODE=y`** — unguarded, every one of them emits the RPS.
+  the design doc says **20 apps set `CONFIG_HALOW_AP_MODE=y`** — unguarded, every one of them emits the
+  RPS. (Recounted this session: it is **27**, see below.)
 - **`ie_rps_build()`-style two-pass sizing hangs hard.** A pass-1/pass-2 size disagreement is a `while(1)`
   because `MMOSAL_ASSERT` is live in our build.
 - **The 4-byte trailing FCS nearly manufactured a false "RPS stripped"** in S0b-2 — brute-forcing the IE
@@ -212,7 +213,7 @@ link against them. The blast radius of an unguarded define is a third larger tha
 ## The two guarded edits
 
 Both are working-tree changes to the `components/halow` submodule, captured as
-`docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch` (32 insertions, 2 files) **before flashing**,
+`docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch` (34 insertions, 2 files) **before flashing**,
 and verified to `git apply --reverse --check` cleanly. The baseline to return to is `main`.
 
 **1. `morselib/src/umac/ap/umac_ap.c`, inside `umac_ap_build_beacon()`** — between the
@@ -387,3 +388,48 @@ Still open from earlier stages and **not** touched here: the ≤6-slot cap, `fra
 frames are too long for a 10100 µs slot at 1 MHz, and the big one — **RAW costs the AP ~22 % of its downlink
 as a standing cost, and the client count at which the contention saving exceeds it is not answerable on this
 bench.**
+
+---
+
+## 08:41 — landed as two PRs, and what the pre-merge review found
+
+`teapotlaboratories/mm-esp32-halow#29` (the two guarded morselib edits) and
+`teapotlaboratories/rimba#50` (fixture, decoder, captures, docs). Commits and pushes all landed
+**08:41-08:44 PDT**, inside the window. Merges are held for after 17:00.
+
+`/review` on both turned up **no finding that changes any S0b-4 result**, and two that were worth fixing:
+
+**1. The decoder's pcap timestamps were scaled 1000× wrong.** `read_pcap()` mapped the classic
+microsecond magic `d4c3b2a1` to `ts_div = 1_000` and the nanosecond magic to `1_000_000`; both are off by
+a factor of 1000, since the classic variant already stores microseconds. Caught by checking the committed
+capture: the first record is `ts_sec=1785504223 ts_frac=634815` and the sub-second field ranges
+450…999786 across the file — unambiguously microseconds — while the tool printed
+`1785504223000634`, i.e. the sub-second part truncated to millisecond resolution.
+
+> **Why no result moved.** Reconciliation derives its span from **`radiotap.mactime`**, not from the pcap
+> record header, so every completeness figure and every number in this worklog is unaffected; `ts_us` only
+> ever reached the `--show` header. But this is timing-adjacent tooling whose **next consumer is S0b-5**,
+> and a timestamp that is wrong only in its sub-second part looks entirely plausible — the seconds are
+> still right. That is the same shape as the two instrument errors this port has already eaten. Fixed to
+> `ts_div = 1` / `1_000`, and re-verified: the first record now reads `1785504223634815 us`, and both
+> archived controls still reproduce exactly (236 / 2222 beacons, 0 undecodable, byte-identical golden
+> constant, zero EID-208 in the control).
+
+**2. The fixture told the operator to filter on a MAC that matches nothing.** `app_main.c` reported
+`mmwlan_get_mac_addr()` — the chip MAC `68:24:99:44:6b:b7` — and then printed
+`--sa <BSSID above>`. But the AP vif beacons from the **locally-administered** variant
+`6a:24:99:44:6b:b7`. Following the fixture's own printed instruction returns **zero frames**, which
+presents identically to *"the ESP never beaconed"* — precisely the false negative this stage exists to
+avoid, and the same footgun recorded above, except the app was actively steering into it. Now it prints
+**both**, labels which is which, and emits a copy-pasteable decoder command using the beacon SA.
+
+Also fixed: a divide-by-zero on `--beacon-int-tu 0`; EIDs 48/127/244 named in the decoder output (all
+three appear in the ESP's real chain and printed as `?`); and the two morselib comments tightened — the
+caps-bit comment had conflated *compiled* with *reached* (the file compiles unconditionally, but this
+builder's only caller `driver_ap.c` does not, so a pure STA/mesh build never reaches it), and both
+comments referenced superproject specifics that will drift inside a submodule.
+
+**Re-verified after the fixes:** `make test-unit` 53/53, both archived controls still calibrate to the
+frame, the fixture builds clean, and the golden constant is still in the flashed image. The tracked
+`s0b-4-morselib-spike.patch` was regenerated against the submodule's `main` (now **34** insertions, the
+comments having grown) and re-checked to reverse-apply cleanly.

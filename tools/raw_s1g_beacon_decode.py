@@ -44,8 +44,10 @@ FCS_LEN = 4
 
 # morselib dot11/dot11.h:2334-2349 plus the RAW element the port is about.
 EID_NAMES = {
-    0: "SSID", 5: "TIM", 56: "TIE", 60: "ECSA", 76: "MMIC",
-    208: "RPS", 210: "AID_REQUEST", 211: "AID_RESPONSE",
+    0: "SSID", 1: "SUPPORTED_RATES", 5: "TIM", 7: "COUNTRY", 48: "RSN",
+    56: "TIE", 60: "ECSA", 76: "MMIC", 127: "EXT_CAPABILITIES",
+    # 244 is emitted by the ESP AP's hostapd tail; not in morselib's dot11.h enum.
+    208: "RPS", 210: "AID_REQUEST", 211: "AID_RESPONSE", 244: "(244)",
     213: "S1G_BEACON_COMPATIBILITY", 214: "SHORT_BCN_INT", 216: "TWT",
     217: "S1G_CAPABILITIES", 221: "VENDOR_SPECIFIC", 225: "REACHABLE_ADDRESS",
     232: "S1G_OPERATION",
@@ -70,15 +72,19 @@ def read_pcap(path):
         blob = fh.read()
     if len(blob) < 24:
         sys.exit("%s: too short to be a pcap" % path)
+    # ts_div converts the record's sub-second field to MICROSECONDS. The classic magic already
+    # stores microseconds, so it divides by 1 -- dividing by 1000 there silently truncates the
+    # timestamp to millisecond resolution, which looks plausible (the seconds are still right) and
+    # would quietly wreck any timing analysis built on it.
     magic = blob[:4]
-    if magic == b"\xd4\xc3\xb2\xa1":
+    if magic == b"\xd4\xc3\xb2\xa1":        # microsecond, little-endian
+        endian, ts_div = "<", 1
+    elif magic == b"\xa1\xb2\xc3\xd4":      # microsecond, big-endian
+        endian, ts_div = ">", 1
+    elif magic == b"\x4d\x3c\xb2\xa1":      # nanosecond, little-endian
         endian, ts_div = "<", 1_000
-    elif magic == b"\xa1\xb2\xc3\xd4":
+    elif magic == b"\xa1\xb2\x3c\x4d":      # nanosecond, big-endian
         endian, ts_div = ">", 1_000
-    elif magic == b"\x4d\x3c\xb2\xa1":      # nanosecond-resolution variant
-        endian, ts_div = "<", 1_000_000
-    elif magic == b"\xa1\xb2\x3c\x4d":
-        endian, ts_div = ">", 1_000_000
     else:
         sys.exit("%s: not a classic pcap (magic %s) — pcapng is not supported" % (path, magic.hex()))
     linktype = struct.unpack_from(endian + "I", blob, 20)[0]
@@ -298,7 +304,7 @@ def main():
 
     # Frame-count reconciliation (S0b-1 replaced the morse0 drop counter with this: 2.53 % of beacons
     # were genuinely missing while `dropped` moved by 1). ~2.5 % loss is the healthy baseline, not zero.
-    if len(tsfts) >= 2:
+    if len(tsfts) >= 2 and args.beacon_int_tu > 0:
         span_us = max(tsfts) - min(tsfts)
         bi_us = args.beacon_int_tu * 1024
         expected = span_us / bi_us + 1
@@ -308,6 +314,8 @@ def main():
         print("  TBTT slots spanned    : %.1f  (beacon_int %d TU = %d us)" % (expected, args.beacon_int_tu, bi_us))
         print("  capture completeness  : %.2f %% (loss %.2f %%; ~2.5 %% is the healthy bench baseline)"
               % (100.0 * got / expected, 100.0 * (1 - got / expected)))
+    elif args.beacon_int_tu <= 0:
+        print("\nreconciliation: --beacon-int-tu must be positive — skipped")
     else:
         print("\nreconciliation: no radiotap TSFT in this capture — cannot reconcile")
 
