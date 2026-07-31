@@ -128,20 +128,37 @@ void app_main(void)
     mmhalow_wifi_start();
 
     /* Let the vif come up before reporting the MAC: the capture is filtered on it, and a run whose
-     * BSSID the operator guessed is a run that can attribute the wrong beacons to the ESP. */
+     * source address the operator guessed is a run that can attribute the wrong beacons to the ESP.
+     *
+     * ⚠ THE BEACONS DO NOT CARRY THE CHIP MAC. The AP vif transmits from the locally-administered
+     * variant -- bit 1 of octet 0 set -- so a chip MAC of 68:24:99:44:6b:b7 beacons as
+     * 6a:24:99:44:6b:b7 (observed on air 2026-07-31, and mmwlan_get_mac_addr reports the former).
+     * Filtering a capture on the chip MAC returns zero frames, which reads exactly like "the ESP
+     * never beaconed" -- so print BOTH and say plainly which one the decoder wants. */
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     uint8_t mac[6] = { 0 };
     if (mmwlan_get_mac_addr(mac) == MMWLAN_SUCCESS)
     {
-        TEST_INFO("AP BSSID %02x:%02x:%02x:%02x:%02x:%02x ssid=\"%s\" chan=%d beacon_int=%d TU dtim=%d "
-                  "tx_power=%d dBm",
-                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+        uint8_t sa[6];
+        memcpy(sa, mac, sizeof(sa));
+        sa[0] |= 0x02;
+
+        TEST_INFO("chip MAC %02x:%02x:%02x:%02x:%02x:%02x -- NOT what the beacons carry",
+                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        TEST_INFO("beacon SA %02x:%02x:%02x:%02x:%02x:%02x <-- FILTER THE CAPTURE ON THIS",
+                  sa[0], sa[1], sa[2], sa[3], sa[4], sa[5]);
+        TEST_INFO("ssid=\"%s\" chan=%d beacon_int=%d TU dtim=%d tx_power=%d dBm",
                   AP_SSID, AP_S1G_CHAN, AP_BEACON_INT_TUS, AP_DTIM_PERIOD, AP_TX_POWER_DBM);
+        TEST_INFO("next: sudo tcpdump -i morse0 -w cap.pcap on chronium, then "
+                  "python3 tools/raw_s1g_beacon_decode.py cap.pcap "
+                  "--sa %02x:%02x:%02x:%02x:%02x:%02x --beacon-int-tu %d",
+                  sa[0], sa[1], sa[2], sa[3], sa[4], sa[5], AP_BEACON_INT_TUS);
     }
     else
     {
-        TEST_INFO("could not read the AP MAC -- filter the capture on SSID \"%s\" instead", AP_SSID);
+        TEST_INFO("could not read the AP MAC -- run the decoder without --sa and identify the ESP by "
+                  "its IE chain (it carries SSID \"%s\" first, unlike a Linux AP)", AP_SSID);
     }
 
     /* Scored on "is this board beaconing", which is the only precondition the capture has. The verdict
@@ -149,10 +166,6 @@ void app_main(void)
     TEST_STEP("ap-beaconing", true,
               "AP vif up on ch%d; capture on chronium morse0 and decode with "
               "tools/raw_s1g_beacon_decode.py", AP_S1G_CHAN);
-
-    TEST_INFO("next: sudo tcpdump -i morse0 -w cap.pcap on chronium, then "
-              "python3 tools/raw_s1g_beacon_decode.py cap.pcap --sa <BSSID above> --beacon-int-tu %d",
-              AP_BEACON_INT_TUS);
 
     TEST_END(NAME);
     park_forever();
