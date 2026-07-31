@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A standalone examples repo, bench-verified; and why the mesh-gate cannot scale to 255 — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-30</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">◑</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-30</span>
+    <span class="badge">8 min read</span>
+    <span class="badge ok">✓ 5/5 bench-verified · PR 1 merged</span>
+    <span class="badge warn">◐ PR 2 open</span>
+    <span class="badge bug">examples repo · gate scaling</span>
+  </div>
+
+  <h1>A standalone examples repo, bench-verified<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">and why the mesh-gate cannot scale to 255 clients</small></h1>
+
+  <p class="lead">Give the <code>mm-esp32-halow</code> fork examples for the features it adds, since
+  <code>components/halow/examples/</code> carried only Morse Micro's upstream six and none of them touch
+  mesh, IBSS, TWT or the gate.</p>
+
+  <p>Five examples now live in a <strong>new repo, <code>teapotlaboratories/esp-halow-examples</code></strong>
+  (cloned at <code>../esp-halow-examples</code>), all five <strong>verified on the bench — not merely
+  compiled</strong>. PR 1 merged, PR 2 open. One example was <strong>100 % non-functional despite building
+  cleanly</strong>, which is the main argument this worklog makes. Along the way, scaling the mesh-gate's
+  client count turned out to be blocked on RAW, not on tables.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">5 / 5</div><div class="lbl">examples verified on hardware</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">1</div><div class="lbl">built cleanly, 100 % non-functional</div></div>
+    <div class="stat"><div class="num acc">1013 → 182</div><div class="lbl">lines in gate <code>app_main.c</code></div></div>
+    <div class="stat"><div class="num" style="color:var(--warn)">~47 %</div><div class="lbl">duty cycle on ARP upkeep at 255 clients</div></div>
+    <div class="stat"><div class="num acc">98</div><div class="lbl">real address cap, not 253</div></div>
+    <div class="stat"><div class="num ok">16–32</div><div class="lbl">realistic gate target</div></div>
+  </div>
+
+  <h2 id="not-submodule">1 · Why the examples are not in the submodule</h2>
+
+  <p>They were written into <code>components/halow/examples/</code> first and <strong>reverted at the owner's
+  request. Do not put them back.</strong> An upstream Morse example is a bare <code>CMakeLists.txt</code> plus a
+  <code>main/idf_component.yml</code> that resolves <code>morsemicro/halow</code> from the ESP Component Registry
+  at <code>^2.10.4-esp32-2</code> — so <code>idf.py build</code> inside the submodule downloads the
+  <em>published</em> 2.10.4 and ignores the fork it is sitting in.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">example in<br>submodule</div><div class="s">components/halow/examples/</div></div>
+      <div class="node"><div class="t">idf_component.yml</div><div class="s">morsemicro/halow<br>^2.10.4-esp32-2</div></div>
+      <div class="node err"><div class="t">ESP Registry</div><div class="s">downloads published 2.10.4</div></div>
+      <div class="node err"><div class="t">fork ignored</div><div class="s">fails to compile</div></div>
+    </div>
+    <figcaption>The submodule example never sees the fork it lives in. The standalone repo resolves the component
+    locally (<code>EXTRA_COMPONENT_DIRS</code> + <code>morse_firmware_generate_component()</code>) and deletes the
+    registry manifests — which is what makes the examples buildable at all.</figcaption>
+  </figure>
+
+  <p>Every fork feature postdates the pristine import <code>68ddbd8d</code>, so such an example does not merely
+  misbehave, it <strong>fails to compile</strong>:</p>
+
+  <table>
+    <thead><tr><th>Needs</th><th>Added by</th></tr></thead>
+    <tbody>
+      <tr><td><code>umac/mesh/umac_mesh.h</code></td><td><code>c16e9a8a</code></td></tr>
+      <tr><td><code>umac/ibss/umac_ibss.h</code></td><td><code>f4778430</code></td></tr>
+      <tr><td><code>mmwlan_twt_setup_request</code></td><td><code>eeb15af9</code></td></tr>
+      <tr><td><code>mmwlan_{ampdu_capability_advertised,twt_agreement_installed}</code></td><td><code>3c8ded0d</code></td></tr>
+      <tr><td><code>CONFIG_HALOW_AP_MAX_STAS</code></td><td><code>6a698edf</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="repo">2 · What the new repo is</h2>
+
+  <p>Rimba's Makefile system, narrowed: <code>make build/flash/monitor APP=&lt;example&gt; BOARD=&lt;board&gt;</code>,
+  out-of-source <code>build/&lt;APP&gt;/&lt;BOARD&gt;/</code>, a board overlay supplying the SPI pins and country
+  code. Submodules pinned to exactly Rimba's revisions — <code>components/halow c9f3a572</code>,
+  <code>vendor/esp-idf v5.4.2</code> (shallow, 620 M), <code>vendor/morse-firmware 1.17.8</code>.</p>
+
+  <p>Two deliberate differences from Rimba:</p>
+  <ul>
+    <li><strong>The toolchain is repo-local.</strong> <code>IDF_TOOLS_PATH := $(CURDIR)/.espressif</code>
+      (~3.8 GB, gitignored) so the checkout is self-contained and other ESP-IDF projects keep their own
+      <code>~/.espressif</code>. <code>make install-toolchain</code> also pip-installs
+      <code>cmake==3.30.5</code> + ninja into that venv, which ESP-IDF does not bundle on Linux. Fresh clone to
+      built binary is two commands.</li>
+    <li><strong><code>IDF_PATH</code> uses <code>:=</code>, not <code>?=</code>.</strong></li>
+  </ul>
+
+  <div class="callout bug">
+    <p class="ct">🐛 The <code>?=</code> environment hijack — and Rimba still has it</p>
+    <p><code>?=</code> defers to the <em>environment</em>, and ESP-IDF's <code>export.sh</code> exports
+    <code>IDF_PATH</code> — so in any shell where Rimba had been sourced, the examples repo silently built
+    against <strong>Rimba's ESP-IDF instead of its own pinned one</strong>. Verified before and after.
+    <strong>Rimba's own Makefile still has this bug</strong> (<code>Makefile:17</code>).</p>
+  </div>
+
+  <h2 id="bench">3 · The bench run — and the defect only hardware could find</h2>
+
+  <p>All five run on the proto1-fgh100m bench (MM6108 fw 1.17.8) plus chronite for interop:</p>
+
+  <table>
+    <thead><tr><th>Example</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td><code>ibss</code></td><td>cell up 2.3 s, roles self-assigned, bidirectional ping <strong>95/98</strong></td></tr>
+      <tr><td><code>mesh</code></td><td>peers ESTAB ~5 s; <strong>Linux 802.11s interop both ways</strong> — chronite peered with both ESPs, pinged 10/10 and 9/10, ESP reported <code>established_peers=2</code> incl. the Linux MAC</td></tr>
+      <tr><td><code>twt_powersave</code></td><td>associated 6.1 s, AP saw <code>aid=1</code>, <strong>TWT INSTALLED on flow 0</strong>, held 66 s</td></tr>
+      <tr><td><code>ap_scale</code></td><td><code>max_stas=255</code>, per-STA state in PSRAM, real client authorized, heap flat</td></tr>
+      <tr><td><code>mesh_gate</code></td><td>client DHCPs <code>10.9.9.2</code>, reaches a mesh node <strong>13/15 at TTL=64</strong> — judged by our own <code>test-mesh-gate-sta</code> fixture, which reported PASS against the example acting as gate</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout err">
+    <p class="ct">✗ Built and linked perfectly. Associated: never.</p>
+    <p><code>twt_powersave</code> shipped <code>CONFIG_HALOW_PS_MODE=y</code> and the station <strong>never
+    associated</strong> — a 30 s timeout, every time. An A/B on wired vs unwired boards isolated it: on
+    <strong>board2 (BUSY/WAKE wired)</strong> the same binary associates in <strong>5.7 s</strong> with the option
+    on. So <strong>power-save across the SAE handshake is harmless; the missing wiring was the whole cause</strong>,
+    and an initially plausible theory about the handshake was simply wrong. Not a component bug — its Kconfig
+    states the precondition.</p>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">⚠ The latent trap this exposed</p>
+    <p><code>boards/proto1-fgh100m/sdkconfig.defaults</code> declares <code>CONFIG_MM_WAKE=2</code> and
+    <code>CONFIG_MM_BUSY=5</code> for <strong>every</strong> board on that overlay, while <strong>only board2 is
+    physically wired</strong>.</p>
+  </div>
+
+  <h2 id="dead-kconfig">4 · Two dead Kconfig symbols, and a wrong comment in our own code</h2>
+
+  <p>Morse's own examples carry <code>CONFIG_LWIP_NETIF_LINK_CALLBACK</code> (in <code>softap/</code>) and
+  <code>CONFIG_LWIP_ETHARP_TRUST_IP_MAC</code> (in <code>iperf/</code>). Both are silently ignored; the latter was
+  <strong>removed from lwIP</strong> as insecure.</p>
+
+  <p>That matters here because <strong><code>firmware/rimba-halow-mesh-ap</code> credits that dead option</strong>
+  for why its proactive proxy-ARP push works. The real mechanism: each push is addressed <em>to</em> the host being
+  taught, so <code>etharp_input</code> sees <code>for_us</code> and uses <code>ETHARP_FLAG_TRY_HARD</code> (creates
+  an entry) rather than <code>ETHARP_FLAG_FIND_ONLY</code> (update-only) — <code>etharp.c:702</code>. Worth
+  correcting in Rimba.</p>
+
+  <h2 id="split">5 · Splitting the gate (PR 2)</h2>
+
+  <p><code>mesh_gate/main/app_main.c</code> was 1013 lines, ~75 % of it infrastructure identical for any gate.
+  Split into <code>app_main.c</code> (182) / <code>gate_netif.c</code> (252) / <code>gate_bridge.c</code> (342) /
+  <code>gate_arp.c</code> (375) / <code>gate.h</code> (111), re-verified against the same unmodified fixture
+  (<strong>14/15, TTL=64</strong> — the delta from 13/15 is <em>bench variance, not claimed as improvement</em>).</p>
+
+  <p>Three real changes:</p>
+  <ul>
+    <li>the <strong>proxy-ARP table is now locked</strong> (three concurrent accessors, previously unguarded; the
+      push snapshots under the lock and transmits after),</li>
+    <li><strong>introspection</strong> was added (the gate could not report learned state without editing source),</li>
+    <li>a <strong><code>_Static_assert</code></strong> couples <code>EXAMPLE_AP_MAX_STAS</code> to
+      <code>GATE_MAX_CLIENTS</code> — because only the mesh→AP direction consults the client table, a client past
+      its end would associate, take a lease, send into the mesh, and <strong>silently never receive a
+      reply</strong>.</li>
+  </ul>
+
+  <h2 id="scaling">6 · Why the gate cannot match <code>ap_scale</code>'s 255 clients</h2>
+
+  <p>Asked whether the gate's ceiling could match <code>ap_scale</code>. It cannot, and the reason is
+  <strong>not table sizes</strong>.</p>
+
+  <p><code>ap_scale</code> registers <strong>0</strong> rx callbacks, runs <strong>0</strong> DHCP servers and does
+  <strong>0</strong> per-client lookups — the default netif handles frames and the app only counts associations.
+  The gate does <strong>2 / 1 / 4</strong>. Every client is per-frame work.</p>
+
+  <p>Three blockers, <strong>none of which a higher MCS fixes</strong>:</p>
+
+  <h3>1 · The proactive proxy-ARP push is O(n_ap × n_mesh)</h3>
+  <p>One unicast per pair every 3 s. 255 clients × 5 mesh nodes = <strong>2550 frames/period</strong>.
+  <strong>Per-frame overhead dominates, not bit rate</strong> (calculated, not measured) — time to complete one
+  push cycle against the <strong>3 s budget</strong>:</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">1 MHz MCS0</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">7.6 s</span></div>
+    <div class="bar-row"><span class="lbl">1 MHz MCS9</span><span class="bar-track"><span class="bar-fill slow" style="width:42.1%"></span></span><span class="val">3.2 s</span></div>
+    <div class="bar-row"><span class="lbl">8 MHz MCS7</span><span class="bar-track"><span class="bar-fill fast" style="width:18.4%"></span></span><span class="val">1.4 s</span></div>
+    <div class="bar-row"><span class="lbl" style="color:var(--err);font-weight:650">the budget</span><span class="bar-track" style="background:transparent;border-left:2px dashed var(--err);border-radius:0"><span style="display:block;height:100%;width:39.5%;border-right:2px dashed var(--err)"></span></span><span class="val" style="color:var(--err)">3.0 s</span></div>
+  </div>
+
+  <p>1 MHz MCS9 is <em>still</em> over the period. 8 MHz MCS7 fits, but at ~47 % duty cycle on ARP upkeep alone.
+  <strong>A 13× rate rise buys only ~2.4×</strong>, because the 1 MHz preamble is a fixed ~0.6 ms floor. Must be
+  made lazy at any PHY, and <strong>it binds from ~30 clients</strong>.</p>
+
+  <h3>2 · EDCA contention</h3>
+  <p>With many STAs this is a <strong>collision problem, not a bitrate problem</strong>. The 802.11ah answer is
+  <strong>RAW</strong> — unimplemented, and gated on an unstarted on-air S0 spike.</p>
+
+  <h3>3 · Addressing caps at 98, not 253</h3>
+  <p>Mesh nodes self-assign <code>.100 + (mac[5] &amp; 0x3f)</code> so they own <code>.100–.163</code>; DHCP hands
+  out <strong>one contiguous range</strong> from <code>.2</code>, so it stops at <code>.99</code>.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 132" role="img" aria-label="The flat /24 split into a 98-address DHCP range, a 64-address mesh self-assigned block, and a stranded tail DHCP cannot reach">
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="12">
+          <text x="8" y="16" font-size="11.5" font-weight="700" fill="#5a6577">10.9.9.0/24 — one flat subnet</text>
+
+          <rect x="45" y="30" width="245" height="30" rx="4" fill="#2f6feb" opacity=".22"/>
+          <rect x="45" y="30" width="245" height="30" rx="4" fill="none" stroke="#2f6feb" stroke-width="1.2"/>
+          <text x="167" y="49" text-anchor="middle" fill="#5a6577" font-weight="650">DHCP · .2–.99</text>
+
+          <rect x="292" y="30" width="159" height="30" rx="4" fill="#7c3aed" opacity=".22"/>
+          <rect x="292" y="30" width="159" height="30" rx="4" fill="none" stroke="#7c3aed" stroke-width="1.2"/>
+          <text x="371" y="49" text-anchor="middle" fill="#5a6577" font-weight="650">mesh · .100–.163</text>
+
+          <rect x="453" y="30" width="227" height="30" rx="4" fill="#8894a6" opacity=".12"/>
+          <rect x="453" y="30" width="227" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.2" stroke-dasharray="4 3"/>
+          <text x="566" y="49" text-anchor="middle" fill="#8894a6">.164–.254 · stranded</text>
+
+          <line x1="40" y1="66" x2="40" y2="74" stroke="#8894a6" stroke-width="1"/>
+          <line x1="680" y1="66" x2="680" y2="74" stroke="#8894a6" stroke-width="1"/>
+          <text x="40" y="86" text-anchor="middle" fill="#8894a6" font-size="10.5">.1</text>
+          <text x="680" y="86" text-anchor="middle" fill="#8894a6" font-size="10.5">.254</text>
+
+          <path d="M45 104 L290 104" stroke="#2f6feb" stroke-width="1.4"/>
+          <path d="M45 100 L45 108 M290 100 L290 108" stroke="#2f6feb" stroke-width="1.4"/>
+          <text x="167" y="122" text-anchor="middle" fill="#2f6feb" font-weight="700" font-size="12.5">98 clients max</text>
+
+          <text x="470" y="108" fill="#8894a6" font-size="11">DHCP cannot jump the mesh block</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Because DHCP allocates one contiguous range from <code>.2</code> and the mesh block starts at
+    <code>.100</code>, the tail is unreachable. Going beyond 98 needs a /23+ <em>and</em> a new mesh derivation —
+    i.e. abandoning the one-flat-subnet premise.</figcaption>
+  </figure>
+
+  <div class="callout warn">
+    <p class="ct">⚠ MCS is not settable in production anyway</p>
+    <p>The only override is <code>mmwlan_ate_override_rate_control()</code> (ATE = test equipment), and the bench
+    runs <strong>1 MHz</strong> (<code>op_class=68</code>, <code>s1g_prim_chwidth=0</code>) — the
+    longest-range/lowest-rate config. Higher MCS also means <strong>shorter range</strong>, trading away why HaLow
+    was chosen.</p>
+  </div>
+
+  <p><strong>Realistic gate target is 16–32 clients.</strong> <code>ap_scale</code>'s 255 is a <em>structural</em>
+  claim (TIM encoding, table sizing) proven with <strong>one</strong> client — not a capacity claim.</p>
+
+  <h2 id="bench-notes">7 · Bench notes</h2>
+  <ul>
+    <li>The midnight <code>daily-reboot.timer</code> fired mid-session: killed the PPK2 holder, wiped
+      <code>/tmp</code> (tmpfs), and board2 came back as a <strong>different <code>ttyACM</code></strong> — resolve
+      by efuse MAC, always.</li>
+    <li><code>/tmp</code> is a <strong>1.9 GB tmpfs</strong>; a second full submodule clone exhausted it and produced
+      a wall of <code>unable to write file</code> errors that <strong>looked like repo corruption and was
+      not</strong>.</li>
+    <li>Two familiar footguns bit again: a stale <code>dependencies.lock</code> pointing into a deleted build dir
+      breaks the next configure with an opaque manifest error (now handled in the examples repo's Makefile), and
+      <code>CMakeCache</code> made <code>test-mesh-gate-sta</code>'s <code>STA_IP</code>/<code>NO_PING</code> sticky,
+      so it silently came up in responder-only mode.</li>
+    <li>Bench left radio-silent after every run.</li>
+  </ul>
+
+  <h2 id="open">8 · Open</h2>
+  <ul>
+    <li><strong>PR 2</strong> (gate split) awaiting review/merge.</li>
+    <li><strong>Rimba fixes this surfaced:</strong> the <code>IDF_PATH ?=</code> env-hijack
+      (<code>Makefile:17</code>); the dead-Kconfig comment in <code>rimba-halow-mesh-ap</code>;
+      <code>rimba-halow-mesh/README.md:48</code> documents a <code>MESH_GATE_IP</code> knob deleted in
+      <code>f2e835b</code>; <code>firmware/README.md</code> lists six apps that no longer exist;
+      <code>docs/rimba-todo.md:26</code> still records RISK-02 as ≈1.39 s against the ~1.7 s the new rig
+      measured.</li>
+    <li><strong>Untested example configurations:</strong> <code>EXAMPLE_TWT_ACTION_FRAME</code>,
+      <code>EXAMPLE_STA_WNM_SLEEP</code>, <code>EXAMPLE_MESH_LEAF</code>, <code>EXAMPLE_MESH_AMPDU=n</code>. No
+      metered power claim anywhere.</li>
+    <li><strong>Next:</strong> the RAW AP-side S0 spike, which gates both the RAW feature and any many-client gate
+      story.</li>
+  </ul>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#not-submodule">1 · Not in the submodule</a></li>
+    <li><a href="#repo">2 · What the repo is</a></li>
+    <li><a href="#bench">3 · Bench run + the defect</a></li>
+    <li><a href="#dead-kconfig">4 · Two dead Kconfigs</a></li>
+    <li><a href="#split">5 · Splitting the gate</a></li>
+    <li><a href="#scaling">6 · Why not 255 clients</a></li>
+    <li><a href="#bench-notes">7 · Bench notes</a></li>
+    <li><a href="#open">8 · Open</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog · 2026-07-30-halow-examples-repo-and-gate-scaling</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

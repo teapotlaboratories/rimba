@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAW S0b-0: the desk checks pass &mdash; Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-30</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-30</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">&#10003; 3/3 desk checks pass</span>
+    <span class="badge warn">2 findings change the bench plan</span>
+    <span class="badge bug">RAW &middot; S0b-0 &middot; off-bench</span>
+  </div>
+
+  <h1>RAW S0b-0: the desk checks pass<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">and two findings change the bench plan</small></h1>
+
+  <p class="lead">Run the off-bench stage of the RAW S0b spike before booking a multi-radio session: settle
+  the <code>.mbin</code>&harr;<code>.bin</code> segment equivalence the whole reordered plan rests on, settle
+  whether the RPS encoder drifted between the driver version the anchors were read from and the one the bench
+  runs, and make the already-dirty submodule tree restorable.</p>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Outcome</p>
+    <p>All three pass. The version question turned out <strong>not to exist</strong>. But two things came out
+    that <strong>change how the bench session must be configured</strong>, and neither was in the recon:
+    hostapd's RAW defaults do not emit the golden constant, and the driver silently caps
+    <code>num_slots</code> at <strong>6</strong>, not 63.</p>
+  </div>
+
+  <div class="callout">
+    <p style="margin:0"><strong>Nothing was committed.</strong> No radio was brought up; the bench was
+    read-only and passive throughout &mdash; S0b-0 is by design an off-bench stage.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">9 / 9</div><div class="lbl">PROGBITS sections byte-identical</div></div>
+    <div class="stat"><div class="num acc">6 B</div><div class="lbl">total divergence, all outside sections</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">encoder changes 1.17.8 &rarr; 1.17.9</div></div>
+    <div class="stat"><div class="num acc">5 / 134</div><div class="lbl">driver files changed between releases</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">6</div><div class="lbl">max RAW slots, not 63</div></div>
+    <div class="stat"><div class="num ok">8 / 8</div><div class="lbl">golden octets independently re-derived</div></div>
+  </div>
+
+  <h2 id="patches">1 &middot; Patch capture &mdash; do this first, not last</h2>
+
+  <p>The submodule was <strong>already dirty</strong> with the uncommitted S0a accessors, and S0b will stack a
+  beacon hook plus the S1G-caps flip on top of it. Three unrelated uncommitted changes in one submodule with
+  no way to revert one without the others is not a state to start a bench session in.</p>
+
+  <p>Captured to the session scratchpad, each verified with <code>git apply --check --reverse</code>:</p>
+
+  <table>
+    <tbody>
+      <tr><td><code>00-s0a-morselib-accessors.patch</code></td><td>the submodule delta (both accessors)</td></tr>
+      <tr><td><code>01-s0a-manifest-entry.patch</code></td><td>the <code>manifest.py</code> APPS row</td></tr>
+      <tr><td><code>02-s0b-scoping-docs.patch</code></td><td>every doc edit from the scoping pass</td></tr>
+      <tr><td><code>03-s0a-fixture-test-raw-cap.tar.gz</code></td><td>the untracked fixture</td></tr>
+      <tr><td><code>04-s0a-worklog.md</code> + both HTML renders</td><td></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="mbin">2 &middot; Is the ESP's firmware the same image the Linux nodes load?</h2>
+
+  <p><strong>CONFIRMED at the executable-segment level.</strong> This is the load-bearing premise of the
+  reordered plan &mdash; <em>"the RAW engine's behaviour measured on Linux hardware transfers to the ESP
+  chip"</em> &mdash; so it was worth proving rather than asserting.</p>
+
+  <p>The source ELF was already known identical. Three independent confirmations:</p>
+
+<pre><code>md5sum vendor/morse-firmware/firmware/mm6108.bin   &rarr; cfe56db2706458050dcc60baddabc632  (480664 B)
+ssh chronium md5sum /lib/firmware/morse/mm6108.bin &rarr; cfe56db2706458050dcc60baddabc632  (480664 B)
+ssh chronium dmesg | grep morse &rarr; "Loaded firmware from morse/mm6108.bin, size 480664, crc32 0x9edcc720"
+   local zlib.crc32 of the same file &rarr; 0x9edcc720</code></pre>
+
+  <p><strong>The open half was the repack.</strong> The ESP build converts that ELF to Morse's TLV
+  <code>.mbin</code> at build time (<code>cmake/mm-fw-gen/firmware/CMakeLists.txt:37,55,77</code>), and nobody
+  had checked the conversion was lossless. It is.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 210" role="img" aria-label="The same source ELF reaches the ESP via a TLV repack and Linux directly; all nine loadable sections round-trip byte-identically">
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="12.5">
+          <rect x="253" y="12" width="214" height="42" rx="8" fill="#2f6feb" opacity=".16"/>
+          <rect x="253" y="12" width="214" height="42" rx="8" fill="none" stroke="#2f6feb" stroke-width="1.3"/>
+          <text x="360" y="30" text-anchor="middle" fill="#5a6577" font-weight="700">mm6108.bin (ELF)</text>
+          <text x="360" y="46" text-anchor="middle" fill="#8894a6" font-size="11">md5 cfe56db2&#8230; &#183; 480664 B &#183; crc32 0x9edcc720</text>
+
+          <g stroke="#8894a6" stroke-width="1.4" marker-end="url(#a2)" color="#8894a6">
+            <path d="M300 56 L190 86" fill="none"/>
+            <path d="M420 56 L530 86" fill="none"/>
+          </g>
+
+          <rect x="60" y="90" width="260" height="42" rx="8" fill="none" stroke="#8894a6" stroke-width="1.2"/>
+          <text x="190" y="108" text-anchor="middle" fill="#5a6577" font-weight="650">ESP &#183; convert-bin-to-mbin.py</text>
+          <text x="190" y="124" text-anchor="middle" fill="#8894a6" font-size="11">TLV repack, uncompressed (no --compress)</text>
+
+          <rect x="400" y="90" width="260" height="42" rx="8" fill="none" stroke="#8894a6" stroke-width="1.2"/>
+          <text x="530" y="108" text-anchor="middle" fill="#5a6577" font-weight="650">Linux &#183; firmware.c</text>
+          <text x="530" y="124" text-anchor="middle" fill="#8894a6" font-size="11">PT_LOAD walk &#8594; morse_dm_write</text>
+
+          <g stroke="#1a8a4a" stroke-width="1.4" marker-end="url(#a2)" color="#1a8a4a">
+            <path d="M190 134 L190 156" fill="none"/>
+            <path d="M530 134 L530 156" fill="none"/>
+          </g>
+
+          <rect x="150" y="160" width="420" height="40" rx="8" fill="#1a8a4a" opacity=".14"/>
+          <rect x="150" y="160" width="420" height="40" rx="8" fill="none" stroke="#1a8a4a" stroke-width="1.3"/>
+          <text x="360" y="177" text-anchor="middle" fill="#1a8a4a" font-weight="700">9 / 9 loadable sections byte-identical</text>
+          <text x="360" y="192" text-anchor="middle" fill="#8894a6" font-size="11">incl. .mac_imem 154912 B @ 0x120000 &#8212; delta is 6 padding bytes, outside every section</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>A dependency-free ELF32 parser plus an independent TLV walker reconstructed a flat
+    address&rarr;byte image from the container and compared it against the raw section bytes at
+    <code>sh_offset</code>.</figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>Section</th><th>Addr</th><th class="num">Size</th><th></th></tr></thead>
+    <tbody>
+      <tr><td><code>.host_imem</code></td><td><code>0x100000</code></td><td class="num">97726</td><td>byte-identical</td></tr>
+      <tr><td><code>.host_dmem</code></td><td><code>0x80100000</code></td><td class="num">8012</td><td>byte-identical</td></tr>
+      <tr><td><strong><code>.mac_imem</code></strong></td><td><code>0x120000</code></td><td class="num"><strong>154912</strong></td><td><strong>byte-identical</strong> &mdash; the code section a RAW engine would live in</td></tr>
+      <tr><td><code>.mac_rodmem</code></td><td><code>0x150000</code></td><td class="num">4166</td><td>byte-identical</td></tr>
+      <tr><td><code>.mac_dmem</code></td><td><code>0x80200000</code></td><td class="num">21416</td><td>byte-identical</td></tr>
+      <tr><td><code>.uphy_imem</code></td><td><code>0x1f0000</code></td><td class="num">64744</td><td>byte-identical</td></tr>
+      <tr><td><code>.uphy_dmem</code></td><td><code>0x80300000</code></td><td class="num">14648</td><td>byte-identical</td></tr>
+      <tr><td><code>.lphy_imem</code></td><td><code>0x158000</code></td><td class="num">28610</td><td>byte-identical</td></tr>
+      <tr><td><code>.lphy_dmem</code></td><td><code>0x80400000</code></td><td class="num">5344</td><td>byte-identical</td></tr>
+    </tbody>
+  </table>
+
+  <p>Details worth recording so this is not re-litigated:</p>
+  <ul>
+    <li><strong>Our build passes no <code>--compress</code></strong>, so payloads are stored raw &mdash; 16
+      <code>FW_SEGMENT</code> (<code>0x8001</code>) TLVs, zero <code>FW_SEGMENT_DEFLATED</code>
+      (<code>0x8002</code>). The converter's own log agrees: <em>"Wrote 16 uncompressed segments, 0 compressed
+      segments, 103 TLVs."</em> The deflate path in <code>firmware_mbin.c</code> exists but is not exercised here.</li>
+    <li><strong>Nothing executable is dropped.</strong> All nine ALLOC+EXEC PROGBITS sections map 1:1 onto
+      <code>PT_LOAD</code> segments, and no segment address hits the converter's
+      <code>SKIP_ADDRESSES = [0x00400000, 0x00C00000, 0x08000000]</code>
+      (<code>convert-bin-to-mbin.py:41</code>). The <code>Ignoring section .mac_imem</code> lines in the
+      converter log are a <strong>red herring</strong> &mdash; the <em>section</em> loop ignores them and the
+      separate <em>segment</em> loop is what emits them.</li>
+    <li><strong>What is dropped is inert:</strong> <code>*_offchip_stats</code>, <code>.symtab</code>,
+      <code>.strtab</code>, <code>.shstrtab</code> &mdash; all non-ALLOC, and the Linux loader's section loop
+      has an empty body, so it writes nothing from sections at all.</li>
+    <li><code>.fw_info</code> is not lost either &mdash; it is re-encoded losslessly as 85 TLVs,
+      payload-identical and in order.</li>
+  </ul>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; The one divergence, stated rather than glossed</p>
+    <p>The two loaders pad the word-alignment tail differently &mdash; ESP fills <code>0x00</code>
+    (<code>convert-bin-to-mbin.py:135-138</code>), Linux fills <code>0xff</code> (<code>firmware.c</code>,
+    <code>memset(fw_buf + phdr.p_filesz, 0xff, padded_size - phdr.p_filesz)</code>). That is <strong>exactly
+    6 bytes at 3 addresses</strong> (<code>0x117dbe</code>, <code>0x151046</code>, <code>0x15efc2</code>), all
+    strictly outside any section's contents. <strong><code>.mac_imem</code> is unaffected</strong> &mdash; its
+    <code>filesz 0x25d20</code> is already word-aligned, so it receives zero padding.</p>
+  </div>
+
+  <p>Also refuted: the earlier concern that the ESP might flash the SDK-bundled
+  <code>components/halow/&hellip;/morsefirmware/mm6108.mbin</code>. It does not &mdash; that file is referenced
+  only by the PlatformIO builder (<code>utils.py:318</code>) and there is no <code>platformio.ini</code> in the
+  repo. It is also demonstrably a <em>different</em> firmware (md5 <code>67f10d6a&hellip;</code>, 399796 B, vs
+  the built 401076 B).</p>
+
+  <h2 id="encoder">3 &middot; Did the RPS encoder change between 1.17.8 and 1.17.9?</h2>
+
+  <p><strong>No &mdash; and the question dissolves entirely.</strong> The concern was that every anchor in the
+  design doc, and the golden constant, came from chronium's 1.17.9 source while the bench runs 1.17.8, so a Q2
+  byte-diff mismatch could be a version delta rather than an ESP defect.</p>
+
+  <p>The three relevant files have <strong>identical git blob OIDs at both tags</strong>:</p>
+
+<pre><code>raw.c              030b5e3a1672828203323c93014a29d7c1fa3684
+raw.h              5d097b83c8c0aac3d9ecf0a85dce0ecca2f44abf
+dot11ah/dot11ah.h  51d44b711decaccd957c49103a3f1940e447d769</code></pre>
+
+  <p>verified by <code>git ls-tree 1.17.8</code> on chronite and <code>git ls-tree 1.17.9</code> on chronium.
+  Widening the check: <strong>only 5 of 134 tracked files changed</strong> between the releases &mdash;
+  <code>Makefile</code>, <code>dot11ah/Makefile</code>, <code>dot11ah/main.c</code>,
+  <code>page_slicing.c</code>, <code>vendor.c</code> &mdash; and all three C changes are <strong>RX-side
+  input-validation hardening</strong> against malformed <em>received</em> IEs (length guards before an S1G-caps
+  parse, a bound before an OUI <code>memcmp</code>, a TIM-length guard plus a literal-3 &rarr;
+  <code>offsetof()</code> swap that is arithmetically identical). It is a <strong>security-patch release, not a
+  feature release</strong>. <code>beacon.c</code> and <code>dot11ah/ie.c</code> &mdash; the only sites that
+  write EID 208 and the IE ordering table &mdash; are unchanged.</p>
+
+  <p>Belt and braces: <code>raw.o</code> compiled inside each tree has byte-identical <code>.text</code>
+  (<code>sha256 34a898c3&hellip;</code>) and <code>.rodata</code> (<code>5742e551&hellip;</code>); the
+  disassembly differs only in the ELF header banner line.</p>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Consequence</p>
+    <p>Every <code>raw.c</code>/<code>raw.h</code>/<code>dot11ah.h</code> line-number anchor in the design doc
+    is valid <strong>verbatim</strong> for 1.17.8, and <strong>a Q2 mismatch cannot be blamed on driver
+    version</strong>. Do not spend a bench slot aligning versions &mdash; there is nothing to align on the RPS
+    path.</p>
+  </div>
+
+  <p>Incidental, worth knowing: <code>morse_cli</code> tags 1.17.8 and 1.17.9 are the <strong>same
+  commit</strong> (<code>8f06222</code>), and <code>hostap</code> is at tag 1.17.9 on both chronium and
+  chronite. So the bench will run a 1.17.9 hostapd against a 1.17.8 driver &mdash; but since hostapd only
+  shells out <code>morse_cli raw &hellip;</code>, the coupling is a text command line, not an ABI.</p>
+
+  <h2 id="constant">4 &middot; The golden constant, re-derived independently</h2>
+
+  <p>An independent agent, deliberately not told the diff result, re-derived all eight octets from
+  <strong>1.17.8</strong> source alone, transcribed the encoder region verbatim into a compilable C file, and
+  ran it:</p>
+
+<pre><code>{ 0xD0, 0x06, 0x20, 0x40, 0x09, 0x04, 0xE0, 0x1F }   payload_len=6  writer_advanced=6</code></pre>
+
+  <p>Exact match. One point is <strong>stronger than the design doc claimed</strong>: octet
+  <code>[2]=0x20</code> is not merely correct for these parameters, it is <em>unconditional</em> for any generic
+  RAW without start-time/PRAW/channel &mdash; <code>GROUP_IND</code> is set with no guard
+  (<code>raw.c:456</code>) and the PSTA/RAFRAME <code>TYPE_OPTION</code> bits are <strong>dead code</strong> in
+  1.17.8 (defined at <code>raw.c:25-26,29-30</code>, zero use sites), so RAW Control bits 3:2 are always 0.</p>
+
+  <p>Two small corrections to the &sect;7.1 table, no byte changes: octet <code>[1]</code> is written by the
+  <strong>caller</strong> too (<code>dot11ah/ie.c:468</code>, alongside the EID at <code>:467</code>), not by
+  <code>raw.c</code>; and the format threshold is coded as <code>if (cslot &gt; __UINT8_MAX__)</code>
+  (<code>raw.c:318</code>).</p>
+
+  <h2 id="findings">5 &middot; The two findings that change the bench plan</h2>
+  <p>Neither was in the recon, and both would have cost a session.</p>
+
+  <h3>5a &middot; hostapd's RAW defaults do not emit the golden constant</h3>
+
+  <p><code>hostap/src/ap/ap_config.c:191-199</code> defaults every RAW block to:</p>
+
+<pre><code>bss-&gt;raw[ii].start_time_us = 4096;
+bss-&gt;raw[ii].duration_us   = 26900;
+bss-&gt;raw[ii].slots         = 1;
+bss-&gt;raw[ii].cross_slot    = false;</code></pre>
+
+  <p>Compiled against the real encoder, those emit a <strong>nine</strong>-byte element &mdash;
+  <code>D0 07 30 70 07 02 04 E0 1F</code> &mdash; because <code>START_IND</code> BIT(4) raises RAW Control to
+  <code>0x30</code> (<code>raw.c:449</code>) and an extra start-time octet
+  <code>0x02 = US_TO_TWO_TU(4096)</code> appears.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 150" role="img" aria-label="Byte-level comparison: the golden 8-byte element versus the 9-byte element hostapd defaults produce">
+        <g font-family="ui-monospace,SF Mono,Menlo,Consolas,monospace" font-size="15">
+          <text x="8" y="20" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11.5" font-weight="700" fill="#1a8a4a">GOLDEN &#8212; pinned config, 8 bytes</text>
+          <g>
+            <rect x="8" y="30" width="52" height="30" rx="4" fill="#1a8a4a" opacity=".16"/><rect x="8" y="30" width="52" height="30" rx="4" fill="none" stroke="#1a8a4a" stroke-width="1.1"/><text x="34" y="50" text-anchor="middle" fill="#5a6577">D0</text>
+            <rect x="66" y="30" width="52" height="30" rx="4" fill="#1a8a4a" opacity=".16"/><rect x="66" y="30" width="52" height="30" rx="4" fill="none" stroke="#1a8a4a" stroke-width="1.1"/><text x="92" y="50" text-anchor="middle" fill="#5a6577">06</text>
+            <rect x="124" y="30" width="52" height="30" rx="4" fill="#1a8a4a" opacity=".16"/><rect x="124" y="30" width="52" height="30" rx="4" fill="none" stroke="#1a8a4a" stroke-width="1.1"/><text x="150" y="50" text-anchor="middle" fill="#5a6577">20</text>
+            <rect x="182" y="30" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="208" y="50" text-anchor="middle" fill="#5a6577">40</text>
+            <rect x="240" y="30" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="266" y="50" text-anchor="middle" fill="#5a6577">09</text>
+            <rect x="298" y="30" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="324" y="50" text-anchor="middle" fill="#5a6577">04</text>
+            <rect x="356" y="30" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="382" y="50" text-anchor="middle" fill="#5a6577">E0</text>
+            <rect x="414" y="30" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="440" y="50" text-anchor="middle" fill="#5a6577">1F</text>
+          </g>
+          <text x="34" y="74" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="10" fill="#8894a6">EID</text>
+          <text x="92" y="74" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="10" fill="#8894a6">LEN</text>
+          <text x="150" y="74" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="10" fill="#8894a6">CTRL</text>
+
+          <text x="8" y="104" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11.5" font-weight="700" fill="#c0392b">hostapd DEFAULTS &#8212; 9 bytes, reads as a firmware finding</text>
+          <g>
+            <rect x="8" y="112" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="34" y="132" text-anchor="middle" fill="#5a6577">D0</text>
+            <rect x="66" y="112" width="52" height="30" rx="4" fill="#c0392b" opacity=".18"/><rect x="66" y="112" width="52" height="30" rx="4" fill="none" stroke="#c0392b" stroke-width="1.4"/><text x="92" y="132" text-anchor="middle" fill="#c0392b" font-weight="700">07</text>
+            <rect x="124" y="112" width="52" height="30" rx="4" fill="#c0392b" opacity=".18"/><rect x="124" y="112" width="52" height="30" rx="4" fill="none" stroke="#c0392b" stroke-width="1.4"/><text x="150" y="132" text-anchor="middle" fill="#c0392b" font-weight="700">30</text>
+            <rect x="182" y="112" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="208" y="132" text-anchor="middle" fill="#5a6577">70</text>
+            <rect x="240" y="112" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="266" y="132" text-anchor="middle" fill="#5a6577">07</text>
+            <rect x="298" y="112" width="52" height="30" rx="4" fill="#b7791f" opacity=".2"/><rect x="298" y="112" width="52" height="30" rx="4" fill="none" stroke="#b7791f" stroke-width="1.4"/><text x="324" y="132" text-anchor="middle" fill="#b7791f" font-weight="700">02</text>
+            <rect x="356" y="112" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="382" y="132" text-anchor="middle" fill="#5a6577">04</text>
+            <rect x="414" y="112" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="440" y="132" text-anchor="middle" fill="#5a6577">E0</text>
+            <rect x="472" y="112" width="52" height="30" rx="4" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="498" y="132" text-anchor="middle" fill="#5a6577">1F</text>
+          </g>
+          <text x="530" y="126" font-family="-apple-system,sans-serif" font-size="11" fill="#b7791f">&#8592; extra start-time octet</text>
+          <text x="530" y="139" font-family="-apple-system,sans-serif" font-size="11" fill="#8894a6">US_TO_TWO_TU(4096)</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Two octets differ and one is inserted. <code>START_IND</code> BIT(4) raises RAW Control from
+    <code>0x20</code> to <code>0x30</code>, the length grows to <code>0x07</code>, and a start-time octet
+    appears mid-element &mdash; shifting everything after it.</figcaption>
+  </figure>
+
+  <div class="callout err">
+    <p class="ct">&#10007; Left at defaults, the reference capture will not match &mdash; and it will look like a firmware finding</p>
+    <p>The RAW block must explicitly pin <code>start_time_us=0</code>, <code>duration_us=20200</code>,
+    <code>slots=2</code>, <code>cross_slot=0</code>, <code>praw_period=0</code>,
+    <code>nominal_stas_per_beacon=0</code>, <code>priority=0</code>. Added to the confound matrix as row (j):
+    <strong>a captured Length of <code>0x07</code> with RAW Control <code>0x30</code> is hostapd's defaults
+    leaking through, not a firmware result.</strong></p>
+    <p><code>cross_slot=1</code> is a similar trap on its own &mdash; it flips <code>[3]</code> from
+    <code>0x40</code> to <code>0x42</code> (<code>raw.c:306-307</code>), a one-bit diff that looks exactly like
+    an encoder mismatch.</p>
+  </div>
+
+  <h3>5b &middot; RAW gives you at most 6 slots per window on this stack</h3>
+
+  <p><code>raw.c:321,324</code> assign <code>max_slots</code> the <strong>bit-count</strong> constants, not the
+  field maxima:</p>
+
+<pre><code>#define IEEE80211_S1G_RPS_RAW_SLOT_NUM_3BITS  (3)
+#define IEEE80211_S1G_RPS_RAW_SLOT_NUM_6BITS  (6)</code></pre>
+
+  <p>then <code>raw.c:329-333</code> caps with only a <code>WARN</code> &mdash; <strong>and writes the cap back
+  into the caller's persistent config</strong>, silently changing subsequent beacons. Meanwhile
+  <code>morse_cli</code> (<code>raw.c:114</code>) and hostapd (<code>src/utils/morse.h:154</code>) both
+  advertise 1&ndash;63. Requesting 8 slots yields 6 and changes <code>[4]</code> from <code>0x09</code> to
+  <code>0x19</code>.</p>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; This matters beyond the byte-diff</p>
+    <p><strong>RAW is being ported to fix EDCA contention for the mesh-gate</strong>, and a 6-slot ceiling is a
+    real constraint on that story. <code>num_slots=2</code> is unaffected so the golden bytes stand, but
+    <strong>S1+ scaling arithmetic must not assume 63</strong>, and whether the <em>firmware</em> enforces the
+    same 6 is worth confirming on the bench.</p>
+  </div>
+
+  <p><strong>Latent, not biting today:</strong> <code>raw.c:62</code> defines the slot-count mask as
+  <code>GENMASK(16, 10)</code> &mdash; bit 16 is outside the <code>__le16</code> it is OR'd into at
+  <code>raw.c:349-354</code>. Harmless only because of the &le;6 cap; a port that raised the cap to the field's
+  true 63 would silently lose bit 16.</p>
+
+  <p><strong>Three toolchain inconsistencies, version-independent</strong> (<code>morse_cli</code> is the same
+  commit at both tags): the CLI validates slot duration on a <strong>200 &micro;s</strong> granularity to
+  410099 &micro;s (<code>cli raw.c:20</code>) while the driver quantises at <strong>120 &micro;s</strong> and
+  caps at 246140 &micro;s; <code>raw.h:169-171</code>'s "Maximum duration is 246260us" is 120 &micro;s high; and
+  <code>RAW_CMD_MAX_3BIT_SLOTS</code> is dead code, never enforced. <strong>Any ESP-side config API should
+  enforce the driver's caps, not the CLI's.</strong></p>
+
+  <h2 id="verification">6 &middot; Verification status</h2>
+  <ul>
+    <li><strong>Off-bench, reproducible:</strong> ELF/TLV round-trip comparison (script + artifacts in the
+      session scratchpad), <code>git ls-tree</code>/<code>git hash-object</code> blob comparison on both nodes,
+      <code>objdump</code>/<code>objcopy</code> section hashes of <code>raw.o</code>, and a compiled
+      transcription of the 1.17.8 encoder.</li>
+    <li><strong>Bench access was read-only and passive throughout</strong> &mdash; <code>ssh</code> for
+      <code>git</code>/<code>grep</code>/<code>md5sum</code>/<code>modinfo</code>/<code>lsmod</code> and
+      <code>scp</code> to pull files down. <strong>No radio was brought up, no interface configured, no
+      <code>morse_cli</code> write command issued, nothing flashed, nothing transmitted.</strong></li>
+    <li><strong>On-air frame verification: not applicable.</strong> Nothing was transmitted. The golden constant
+      remains a <em>desk</em> derivation &mdash; confirming that a live 1.17.8 reference AP actually emits
+      <code>D0 06 20 40 09 04 E0 1F</code> is S0b-2's job, and it <strong>stays owed</strong>.</li>
+  </ul>
+
+  <h2 id="caveats">7 &middot; Caveats &mdash; what this does not establish</h2>
+  <ul>
+    <li><strong>Nothing about RAW enforcement.</strong> This is all host-side IE construction and firmware-image
+      plumbing. Whether the MM6108 blob <em>acts</em> on a RAW it is handed, in either direction, is completely
+      untouched. That is still S0b-2.</li>
+    <li>The <code>.mbin</code> was compared against the <strong>source ELF</strong>, not against what the chip
+      holds after a load.</li>
+    <li>The <code>raw.o</code> <code>.text</code> comparison is between two locally-built objects, not the
+      shipped <code>.ko</code>. What is proven about the shipped module is narrower: <code>modinfo</code>
+      version + <code>srcversion</code> match on both nodes, and the two installed <code>morse.ko</code> files
+      are byte-identical (md5 <code>b228bfb4&hellip;</code>, 780712 B).</li>
+    <li><strong>chronite's <code>morse_driver</code> working tree carries three uncommitted local edits</strong>
+      &mdash; <code>Makefile</code>, <code>command.c</code> (adds a <code>dev_info</code> command-trace print),
+      <code>mac.c</code> (hardcodes <code>country = "AU"</code>). None touches
+      <code>raw.c</code>/<code>raw.h</code>/<code>dot11ah.h</code>, and the installed <code>.ko</code> is
+      byte-identical to chronium's, so they are <strong>not</strong> in the running module. <strong>But do not
+      rebuild+install on chronite mid-spike</strong> &mdash; the running module would change out from under the
+      capture, and the country hardcode is exactly the class of thing that burns a session.</li>
+    <li>The OCS RAW path (<code>raw.c:1230</code>) and the dynamic-RAW TLV path (<code>raw.c:1463-1473</code>)
+      were not audited. If either is active the RPS would carry additional concatenated assignments and the
+      capture would not be an 8-byte element.</li>
+  </ul>
+
+  <h2 id="next">8 &middot; Next &mdash; S0b-1</h2>
+  <p>Sniffer calibration, on the bench, still with zero ESP code: chronium in monitor, chronite beaconing plain
+  (no RAW, dtim1), &ge;2000 beacons, successive <code>radiotap.mactime</code> deltas against the expected
+  ~102400 &micro;s. <strong>Gate:</strong> robust &sigma; &le; 20 &micro;s and p99&minus;p1 &le; 100 &micro;s.
+  In the same run, validate the counter instrument with <code>morse_cli -i wlan1 stats</code> and RAW
+  <strong>disabled</strong> &mdash; if the RAW section is absent, that instrument is void too. If both fail,
+  S0b is not decidable on this bench as designed and should be <strong>re-scoped rather than run to an
+  ambiguous negative</strong>.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#patches">1 &middot; Patch capture</a></li>
+    <li><a href="#mbin">2 &middot; Same firmware image?</a></li>
+    <li><a href="#encoder">3 &middot; Encoder version drift</a></li>
+    <li><a href="#constant">4 &middot; Constant re-derived</a></li>
+    <li><a href="#findings">5 &middot; Two plan-changing findings</a></li>
+    <li><a href="#verification">6 &middot; Verification status</a></li>
+    <li><a href="#caveats">7 &middot; Caveats</a></li>
+    <li><a href="#next">8 &middot; Next &mdash; S0b-1</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-07-30-raw-s0b-0-desk-checks</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

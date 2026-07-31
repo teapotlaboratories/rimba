@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAW S0b-2: the gate is passed &mdash; Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-30</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-30</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">&#10003; Q3a PASS &middot; Q4 PASS</span>
+    <span class="badge ok">gate passed, zero ESP code</span>
+    <span class="badge warn">timing arm voided</span>
+    <span class="badge bug">RAW &middot; S0b-2</span>
+  </div>
+
+  <h1>RAW S0b-2: the gate is passed<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">the chip's RAW engine arms, and a STA obeys it</small></h1>
+
+  <p class="lead">Answer the one question the entire AP-side RAW port has been gated on since the recon:
+  <strong>does the MM6108 firmware actually act on a RAW schedule authored by the host?</strong> The scoping
+  pass established this is decidable on Linux hardware alone &mdash; the blob is the same file on both
+  platforms and RAW reaches the chip only as beacon bytes &mdash; so a negative here would BLOCK the port
+  with no ESP code written.</p>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Q3a PASS &middot; Q4 PASS</p>
+    <p>The engine <strong>arms</strong> from a host-authored beacon, <strong>gates</strong> the AP's own TX,
+    and a STA parses a <em>received</em> RPS and <strong>self-restricts</strong>. The golden byte constant
+    was validated on air, byte-identical, in every beacon. <strong>The feature is no longer gated on a
+    source-undecidable firmware question</strong> &mdash; what remains is entirely ESP-host-side.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">2179</div><div class="lbl">AP assignments[0] &mdash; was 0</div></div>
+    <div class="stat"><div class="num ok">2083</div><div class="lbl">STA assignments[0] &mdash; was 0</div></div>
+    <div class="stat"><div class="num acc">92 / 239</div><div class="lbl">frames deferred, AP / STA</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">invalid_assignments &mdash; bytes accepted</div></div>
+    <div class="stat"><div class="num ok">236/236</div><div class="lbl">beacons byte-identical to golden</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">66 %</div><div class="lbl">data-frame capture loss &mdash; timing voided</div></div>
+  </div>
+
+  <h2 id="rig">1 &middot; Rig</h2>
+  <table>
+    <tbody>
+      <tr><td><strong>chronite</strong></td><td>AP. <code>hostapd_s1g</code> from the tracked config, then RAW driven <strong>directly by <code>morse_cli</code></strong> &mdash; not hostapd's <code>raw={}</code> block, which would have applied its own defaults</td></tr>
+      <tr><td><strong>chronogen</strong></td><td>STA. <code>wpa_supplicant_s1g</code>, <strong><code>raw_sta_priority=0</code></strong>. Associated in 10 s at <strong>AID 1</strong></td></tr>
+      <tr><td><strong>chronium</strong></td><td>monitor on <code>morse0</code>, S1G ch27</td></tr>
+      <tr><td>chronosalt</td><td>deliberately unused &mdash; documented as browning out on radio-up</td></tr>
+      <tr><td>ESP boards</td><td><strong>none</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>RSSI &minus;53 dBm (STA&rarr;AP) / &minus;57 dBm (AP&rarr;STA). RAW pinned explicitly, per the S0b-0
+  finding that hostapd's defaults emit a different element:</p>
+
+<pre><code>morse_cli -i wlan1 raw -s 20200,2 -a 1,255 -t 0 enable 1
+morse_cli -i wlan1 raw enable 0</code></pre>
+
+  <p>Driver readback (passive debugfs <code>dump_raw_configs</code>) confirmed it landed exactly:</p>
+
+<pre><code>RAW ID: 1 (enabled: 1)
+  start_time_us=0  aid: start=1 end=255
+  slot info: x-slot=0 num=2 duration_us=10100</code></pre>
+
+  <p><code>duration_us=10100</code> is the 20200 total divided by 2 slots &mdash; the double-truncation
+  behaviour S0b-0 predicted from source, landing exactly on the golden parameter. <code>morse_cli raw
+  --help</code> also confirmed <code>-t</code> is <em>"Start time for the RAW window <strong>from the end of
+  the frame</strong>"</em> &mdash; the beacon-end reference the analysis method depends on.</p>
+
+  <h2 id="onair">2 &middot; Negative control, then the element on air</h2>
+
+  <div class="callout">
+    <p class="ct">Negative control &mdash; free, from S0b-1's capture</p>
+    <p>With RAW <strong>disabled</strong>, all 2222 beacons carried <code>{0, 5, 213, 214, 217, 221, 232}</code>
+    and <strong>zero</strong> EID-208 elements. So anything at 208 afterwards is attributable to the RAW
+    config, not to something the firmware emits regardless.</p>
+  </div>
+
+<pre><code>IE chain (1 distinct, x236) : [213, 5, 208, 217, 232, 214, 0, 221]
+EID-208 element (1 distinct): D0 06 20 40 09 04 E0 1F
+golden constant (7.1)       : D0 06 20 40 09 04 E0 1F
+BYTE-IDENTICAL              : True</code></pre>
+
+  <p><strong>The golden constant is validated on air</strong>, closing the last S0b-0 caveat. The RPS sits
+  at <strong>position 3, directly after the TIM</strong>, matching Linux's S1G long-beacon ordering.</p>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; A method note, because I got it wrong first</p>
+    <p>My initial parser brute-forced the IE start offset and required the chain to land on the frame end.
+    It matched only 3 of 242 frames and reported <em>varying</em> offsets &mdash; which looked exactly like
+    the conditional S1G presence bits being in play, the trap the plan flagged. <strong>Both were
+    artefacts:</strong> the frames carry a 4-byte trailing FCS, and once that is accounted for and the walk
+    is anchored on EID 213, all 236 frames parse with a <strong>constant 15-byte offset</strong>. The presence
+    bits were not set. Recorded because a brute-forced offset is exactly how a false "RPS stripped" verdict
+    gets manufactured.</p>
+  </div>
+
+  <h2 id="gate">3 &middot; The gate &mdash; counters, both ends</h2>
+
+  <table>
+    <thead><tr><th></th><th class="num">AP (chronite)</th><th class="num">STA (chronogen)</th><th class="num">baseline</th></tr></thead>
+    <tbody>
+      <tr><td><code>assignments[0]</code></td><td class="num"><strong>2179</strong></td><td class="num"><strong>2083</strong></td><td class="num">0</td></tr>
+      <tr><td><code>assignments_truncated_from_tbtt</code></td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+      <tr><td><code>invalid_assignments</code></td><td class="num"><strong>0</strong></td><td class="num"><strong>0</strong></td><td class="num">0</td></tr>
+      <tr><td><code>already_past_assignment</code></td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+      <tr><td><code>aci_frames_delayed</code></td><td class="num"><strong>92</strong></td><td class="num"><strong>239</strong></td><td class="num">0</td></tr>
+      <tr><td><code>bc_mc_frames_delayed</code></td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+      <tr><td><code>frame_crosses_slot</code></td><td class="num"><strong>27</strong></td><td class="num"><strong>27</strong></td><td class="num">0</td></tr>
+    </tbody>
+  </table>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 200" role="img" aria-label="The RPS travels from the host into the AP's own beacon, is parsed by both the AP chip and the STA chip, and both defer their own frames">
+        <defs>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="12">
+          <rect x="10" y="20" width="150" height="46" rx="8" fill="none" stroke="#8894a6" stroke-width="1.2"/>
+          <text x="85" y="40" text-anchor="middle" fill="#5a6577" font-weight="650">host authors RPS</text>
+          <text x="85" y="56" text-anchor="middle" fill="#8894a6" font-size="11">morse_cli &#8594; raw.c</text>
+
+          <rect x="200" y="20" width="180" height="46" rx="8" fill="#2f6feb" opacity=".16"/>
+          <rect x="200" y="20" width="180" height="46" rx="8" fill="none" stroke="#2f6feb" stroke-width="1.3"/>
+          <text x="290" y="40" text-anchor="middle" fill="#5a6577" font-weight="650">beacon carries EID 208</text>
+          <text x="290" y="56" text-anchor="middle" fill="#2f6feb" font-size="11" font-family="ui-monospace,monospace">D0 06 20 40 09 04 E0 1F</text>
+
+          <path d="M160 43 L194 43" stroke="#8894a6" stroke-width="1.4" marker-end="url(#a3)" color="#8894a6"/>
+
+          <path d="M290 66 L200 108" stroke="#1a8a4a" stroke-width="1.5" marker-end="url(#a3)" color="#1a8a4a" fill="none"/>
+          <path d="M290 66 L500 108" stroke="#1a8a4a" stroke-width="1.5" marker-end="url(#a3)" color="#1a8a4a" fill="none"/>
+
+          <rect x="60" y="112" width="270" height="66" rx="8" fill="#1a8a4a" opacity=".13"/>
+          <rect x="60" y="112" width="270" height="66" rx="8" fill="none" stroke="#1a8a4a" stroke-width="1.3"/>
+          <text x="195" y="131" text-anchor="middle" fill="#1a8a4a" font-weight="700">AP chip &#8212; own outgoing beacon</text>
+          <text x="195" y="149" text-anchor="middle" fill="#5a6577" font-size="11.5">assignments[0] 0 &#8594; 2179 &#183; invalid 0</text>
+          <text x="195" y="166" text-anchor="middle" fill="#5a6577" font-size="11.5">defers 92 of its own frames &#160;<tspan fill="#1a8a4a" font-weight="700">Q3a PASS</tspan></text>
+
+          <rect x="390" y="112" width="270" height="66" rx="8" fill="#1a8a4a" opacity=".13"/>
+          <rect x="390" y="112" width="270" height="66" rx="8" fill="none" stroke="#1a8a4a" stroke-width="1.3"/>
+          <text x="525" y="131" text-anchor="middle" fill="#1a8a4a" font-weight="700">STA chip &#8212; received beacon</text>
+          <text x="525" y="149" text-anchor="middle" fill="#5a6577" font-size="11.5">assignments[0] 0 &#8594; 2083 &#183; AID 1</text>
+          <text x="525" y="166" text-anchor="middle" fill="#5a6577" font-size="11.5">defers 239 of its own frames &#160;<tspan fill="#1a8a4a" font-weight="700">Q4 PASS</tspan></text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>No chip command is involved anywhere. The RPS element in the beacon is the firmware's only
+    RAW input &mdash; and both ends parse it and act on it.</figcaption>
+  </figure>
+
+  <p><strong>Q3a &mdash; PASS.</strong> <code>assignments[0]</code> climbing at roughly one per beacon proves
+  the chip <strong>parses the RPS out of its own outgoing beacon</strong> every TBTT.
+  <code>invalid_assignments = 0</code> is the direct confirmation the bytes are <em>accepted</em> &mdash; the
+  signal that would have caught the EID-66 error had it shipped. And <code>aci_frames_delayed</code> /
+  <code>frame_crosses_slot</code> moving proves the chip <strong>actively gates its own transmissions</strong>,
+  not merely parses.</p>
+
+  <p><strong>Q4 &mdash; PASS.</strong> The STA's <em>own</em> <code>assignments[]</code> climbed to 2083, so it
+  parses a <strong>received</strong> RPS; and its own <code>aci_frames_delayed = 239</code> proves it defers
+  its own uplink. Since neither host stack contains an RPS parser (Linux's <code>raw.c</code> is AP-only),
+  that behaviour is necessarily in the blob &mdash; the same blob the ESP runs.</p>
+
+  <div class="callout">
+    <p class="ct">A useful intermediate read</p>
+    <p>With RAW enabled and beaconing but <strong>before any STA associated</strong>, the AP already showed
+    <code>Valid: 1516, Invalid: 0</code> with all <code>Delayed</code> counters at zero. <strong>The engine
+    arms on the advertisement alone;</strong> the deferral counters only move once there is traffic to defer.
+    A useful diagnostic separation for later stages.</p>
+  </div>
+
+  <h2 id="voided">4 &middot; The timing arm was voided &mdash; and why that matters</h2>
+
+  <p>The phase histogram, computed with the S0b-1 method (relative to the <em>observed</em> beacon, never a
+  fitted grid), put only <strong>9.2 %</strong> of uplink frames inside the advertised
+  <code>[0, 20200] &micro;s</code> window &mdash; against <strong>19.7 %</strong> expected if frames were
+  uniform over the beacon interval. Read naively that says <em>worse than no confinement</em>.</p>
+
+  <div class="callout err">
+    <p class="ct">&#10007; It is not admissible</p>
+    <table style="margin:.4em 0">
+      <tbody>
+        <tr><td>STA netdev TX packets</td><td class="num"><strong>1194</strong></td></tr>
+        <tr><td>STA MAC-level TX frames</td><td class="num"><strong>1681</strong></td></tr>
+        <tr><td>uplink data frames in the capture</td><td class="num"><strong>403</strong></td></tr>
+        <tr><td><strong>capture completeness</strong></td><td class="num"><strong>~34 % &mdash; 66 % loss</strong></td></tr>
+      </tbody>
+    </table>
+    <p>The parse was sound &mdash; tshark independently found exactly 403 frames carrying the STA's TA. The
+    capture is simply missing two-thirds of the traffic. Per confound row (g) the run is <strong>voided, and
+    no confinement conclusion may be drawn in either direction.</strong></p>
+  </div>
+
+  <p><strong>This is the finding.</strong> S0b-1 measured <strong>2.5 %</strong> beacon loss and explicitly
+  flagged, as an untested caveat, that data frames might be lost at a different rate. They are &mdash; at
+  <strong>66 %</strong>, a <strong>26&times; difference</strong>. So <strong>S0b-1's calibration does not
+  transfer to data frames</strong>, and any future timing measurement must reconcile <em>data-frame</em>
+  counts against the transmitter's TX counters <em>before</em> a phase histogram is computed. Beacon-count
+  reconciliation is not sufficient.</p>
+
+  <p>It does not weaken the verdict: the counters were designated the primary instrument precisely because
+  they are immune to capture loss, and they are unambiguous.</p>
+
+  <h2 id="carry">5 &middot; Two things worth carrying forward</h2>
+  <ul>
+    <li><strong><code>frame_crosses_slot = 27</code> on both ends</strong> &mdash; real frames are <strong>too
+      long for a 10100 &micro;s slot</strong> at 1 MHz. Combined with the &le;6-slot cap S0b-0 found, this
+      constrains any real RAW schedule: at most 6 slots, and a slot must be long enough to hold a frame at the
+      operating MCS or the frame is deferred rather than fitted.</li>
+    <li><strong>The AP defers its own downlink too</strong> (<code>aci_frames_delayed = 92</code>). For the
+      mesh-gate use case, where the gate is already the throughput bottleneck, <strong>RAW is not free</strong>.
+      The throughput A/B is now clearly worth doing before committing to the port.</li>
+  </ul>
+
+  <h2 id="verification">6 &middot; Verification status</h2>
+  <ul>
+    <li><strong>On hardware, on air, three radios.</strong> All measurements from live firmware counters and a
+      live capture.</li>
+    <li><strong>On-air frame verification: gold standard reached for the RPS element.</strong> Captured on
+      chronium's <code>morse0</code> from a <strong>live Linux device</strong> and byte-diffed against the
+      derived constant &mdash; 236/236 identical, with a negative control from the RAW-disabled baseline. That
+      is the <em>reference-side</em> frame; the <strong>ESP's</strong> own RPS remains unverified and that
+      obligation is still owed at S0b-4.</li>
+    <li><strong>Bench returned to radio silence</strong> &mdash; RAW disabled + deleted, both daemons killed,
+      addresses flushed, <code>morse0</code> and <code>wlan1</code> down, <code>type managed</code> restored on
+      all three nodes. Verified with <code>ps -eo comm=</code> rather than <code>pgrep -f</code>, which
+      self-matches. No ESP board was involved.</li>
+  </ul>
+
+  <h2 id="caveats">7 &middot; Caveats</h2>
+  <ul>
+    <li><strong>This says nothing about the ESP host path.</strong> Q2 and Q3b are untouched and need ESP code.</li>
+    <li><strong>Confinement is not demonstrated, only deferral.</strong> The counters prove frames <em>were
+      delayed because of RAW</em>; they do not prove the resulting transmissions land inside the window. The
+      measurement that would show that was voided. <strong>The mechanism engages, but its on-air effect is not
+      yet characterised</strong> &mdash; this distinction should not be glossed.</li>
+    <li><strong>One STA, one AID, one assignment, one session.</strong> The A/B-1 two-STA disjoint-slot design
+      &mdash; the internally-controlled experiment the plan calls the discriminating one &mdash; was not run.</li>
+    <li>The AP-side <code>aci_frames_delayed = 92</code> is small relative to the STA's 239; not investigated.</li>
+    <li>Load was a <code>ping</code> flood, not a rate-controlled generator (neither Pi Zero has
+      <code>iperf3</code>), and it saturated the link, so the offered rate is not precisely known.</li>
+  </ul>
+
+  <h2 id="next">8 &middot; Next</h2>
+  <p>The chip-level gate is passed, so the ESP arm is now worth building:</p>
+  <ul>
+    <li><strong>S0b-3</strong> &mdash; flip the S1G-caps RAW bit (<code>s1g_capabilities.c:276-280</code>), one
+      board, one flash, capture one beacon, diff octet[6] bit 3. Cheapest ESP step, and it can kill S3 as
+      written.</li>
+    <li><strong>S0b-4</strong> &mdash; splice the golden constant at <code>umac_ap.c:418/419</code> behind
+      <code>#ifdef RIMBA_RAW_S0B_SPIKE</code> and byte-diff against the reference element now captured.
+      <strong>Take the no-hook baseline capture first.</strong></li>
+    <li><strong>S0b-5</strong> &mdash; Q3b: read the ESP's own tag-4210 counters via
+      <code>mmwlan_get_morse_stats(1, &hellip;)</code> and check <code>assignments[]</code> moves the way
+      chronite's did.</li>
+  </ul>
+  <p>Before any of that: the spike edits stack on a submodule tree already dirty with the S0a accessors
+  &mdash; the patch capture from S0b-0 is the restore path.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#rig">1 &middot; Rig</a></li>
+    <li><a href="#onair">2 &middot; The element on air</a></li>
+    <li><a href="#gate">3 &middot; The gate &mdash; counters</a></li>
+    <li><a href="#voided">4 &middot; Timing arm voided</a></li>
+    <li><a href="#carry">5 &middot; Carry forward</a></li>
+    <li><a href="#verification">6 &middot; Verification status</a></li>
+    <li><a href="#caveats">7 &middot; Caveats</a></li>
+    <li><a href="#next">8 &middot; Next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-07-30-raw-s0b-2-gate</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
