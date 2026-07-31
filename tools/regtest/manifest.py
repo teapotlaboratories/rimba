@@ -374,6 +374,13 @@ APPS: tuple[App, ...] = (
               "mmwlan_{raw,page_slicing}_capability_advertised(). Scored on whether the READ "
               "succeeded -- a clear RAW bit is a legitimate feasibility answer, not a regression, "
               "so it must not gate the suite on the value. Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-raw-rps",
+        notes="RAW S0b-3/S0b-4 on-air spike (NOT a regression test): one board beaconing as an AP so a "
+              "sniffer can byte-diff the host-spliced RPS element (EID 208) and the S1G-caps RAW bit "
+              "against a live Linux RAW AP. The verdict is off-air -- decode the capture with "
+              "tools/raw_s1g_beacon_decode.py; the TEST| output only asserts the board is beaconing. "
+              "Its CMakeLists sets RIMBA_RAW_S0B_SPIKE build-globally, which arms the guarded morselib "
+              "edits for THIS app only. Needs CONFIG_HALOW_AP_MODE=y."),
     App("test-ibss",
         notes="T2 ibss: symmetric IBSS node (both run it; creator pinned to board0's MAC). "
               "Reporter polls mmwlan_ibss_peer_count()==1. Needs CONFIG_HALOW_AP_MODE=y."),

@@ -168,13 +168,19 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>107</b> worklogs · 2026-06-17 – 2026-07-31</p>
+<p class="stat"><b>108</b> worklogs · 2026-06-17 – 2026-07-31</p>
 </section>
 
 <section class="month">
-<h2>July 2026 <span class="mcount">80</span></h2>
+<h2>July 2026 <span class="mcount">81</span></h2>
 <div class="grid">
 
+<a class="card" href="2026-07-31-raw-s0b-4-esp-rps.html">
+<div class="card-date">2026-07-31</div>
+<div class="card-title">RAW S0b-4: the ESP puts an RPS on the air, byte-identical to Linux</div>
+<div class="card-ex">Q2 of the AP-side RAW port: when the ESP host splices a hand-built RPS into its S1G beacon, does that element reach the air unmodified, or does the MM6108 blob rewrite/strip IEs in a host-supplied beacon? Result: Q2 PASS and S0b-3 PASS, at the gold standard rather than the source-layout floor. Rig was board0 as the ESP AP and chronite as a Linux RAW reference AP beaconing simultaneously with chronium in monitor, so one capture holds both elements under identical radiotap conditions. Baseline (no hook) decoded 467 beacons with ZERO EID-208 and caps octet[6] = 0x00; the spike decoded 519 with the RPS on 519/519, bytes D0 06 20 40 09 04 E0 1F, byte-identical to the 515/515 the live Linux AP transmitted in the same capture, and caps octet[6] = 0x08. The S1G Capabilities element differs in exactly one bit across fifteen — the same signature the Linux A/B showed — so the "S3 is dead as written" branch does not fire and the mesh host-built-S1G-beacon fallback is not needed. The short-beacon worry was measured rather than argued: dtim_period=3 put 171 DTIM and 348 non-DTIM beacons in the capture and all 519 carry the RPS. Getting there needed three things first. The S0b-1/S0b-2 pcaps were still alive on chronium's tmpfs after 19 days of uptime and are now in the repo — one reboot would have destroyed the only ground truth this port has. The decoder is now a tracked tool, tools/raw_s1g_beacon_decode.py, which computes the IE offset from Frame Control instead of searching for it and strips the 4-byte FCS — the exact failure that nearly manufactured a false "RPS stripped" in S0b-2 — and it reproduces both published S0b results to the frame (236 and 2222 beacons, 0 undecodable, offset 15 everywhere), including a reconciliation that lands at 68 − 10 = 58 exactly. And S0b-3's answer fell out of those archived captures for free: the caps bit is 0x08 on 236/236 with RAW on and 0x00 on 2222/2222 with it off, confirming on air that the bit is live state, not a static advertisement. The spike arms from ONE superproject line — idf_build_set_property(COMPILE_DEFINITIONS "RIMBA_RAW_S0B_SPIKE=1" APPEND) — which corrects the design doc's claim that IDF_EXTRA_D can never reach the submodule; verified from compile_commands.json that both guarded files carry the define and that test-raw-cap, rimba-halow-ap and test-mesh-gate-ap do not. The blast radius of an unguarded define is 27 apps, not the 20 the doc claims, of which only 7 instantiate a SoftAP vif. Two design-doc claims corrected, and the fixture caps TX power to 1 dBm (the AP fixture family never did, contrary to §7.5). What it does NOT prove: the chip acting on the ESP's schedule — that is Q3b, read from tag-4210 counters, and it is S0b-5.</div>
+<div class="card-meta">Q2 PASS · S0b-3 PASS · 519/519 beacons carry the RPS · byte-identical to Linux in the same capture · 1 build line to arm · radio-silent after</div>
+</a>
 <a class="card" href="2026-07-31-raw-throughput-ab.html">
 <div class="card-date">2026-07-31</div>
 <div class="card-title">RAW costs the AP ~22% of its downlink, with no contention to buy it back</div>

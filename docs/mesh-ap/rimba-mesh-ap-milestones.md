@@ -975,15 +975,31 @@ needs attention is the part that is silently rig-specific.*
   Worklog [`2026-07-30-raw-s0a-capability-probe.md`](../worklog/2026-07-30-raw-s0a-capability-probe.md);
   probe fixture + morselib accessors **landed 2026-07-30** (`teapotlaboratories/mm-esp32-halow#28` +
   rimba [`#49`](https://github.com/teapotlaboratories/rimba/pull/49)).
-  **◐ NEXT = S0b, scoped 2026-07-30 (design doc §7), not yet run.** Three corrections reshaped it:
-  the RPS EID is **208, not 66** (66 would have byte-diff-failed on octet 0 and read as "the FW stripped
-  our IE" — a false BLOCKED); the **gate needs zero ESP code**, because the MM6108 blob is the same file
-  on the ESP and the Linux bench nodes and RAW reaches the chip only as beacon bytes, so an all-Linux run
-  (chronite AP + chronogen STA + chronium monitor) decides it and a negative stops the port before any
-  firmware is written; and **Q3 was mis-specified** — 802.11ah RAW is STA self-restriction, there is no
-  AP policing primitive, and the FW's own `raw_stats_t` counters only ever count the *local* transmitter
-  deferring. Primary instrument = the FW's tag-4210 counters; timing capture corroborates. GO ⇒ stage
-  S1–S4 to the MVP; BLOCKED ⇒ FW/vendor ask, do not ship a RAW advert the AP can't enforce.
+  Three corrections reshaped S0b when it was scoped: the RPS EID is **208, not 66** (66 would have
+  byte-diff-failed on octet 0 and read as "the FW stripped our IE" — a false BLOCKED); the **gate needs
+  zero ESP code**, because the MM6108 blob is the same file on the ESP and the Linux bench nodes and RAW
+  reaches the chip only as beacon bytes, so an all-Linux run decides it; and **Q3 was mis-specified** —
+  802.11ah RAW is STA self-restriction, there is no AP policing primitive, and the FW's own `raw_stats_t`
+  counters only ever count the *local* transmitter deferring.
+  **✅ S0b-0/1/2 — THE GATE IS PASSED, 2026-07-30, zero ESP code.** The MM6108's RAW engine arms from a
+  host-authored beacon (`assignments[0]` 0→**2179**, `invalid_assignments`=0) and actively gates its own
+  TX (`aci_frames_delayed` **92** AP / **239** STA); a STA parses a **received** RPS and self-restricts.
+  Golden constant `D0 06 20 40 09 04 E0 1F` validated on air, 236/236 beacons, against a negative control.
+  **✅ S0b-3 + S0b-4 — the ESP advertise arm, DONE 2026-07-31. Q2 PASS, S0b-3 PASS.** S0b-3 folded into
+  S0b-4 (the caps bit is *live state*, so it needs a schedule to exist before it can honestly be set).
+  **The blob does NOT rewrite or strip IEs in a host-supplied beacon:** **519/519** ESP beacons carried the
+  golden constant **byte-identical to a live Linux RAW AP transmitting in the same capture** (515/515),
+  RPS directly after the TIM on both; caps octet[6] `0x00`→`0x08`, one bit, rest identical; the no-hook
+  baseline had zero EID-208. ⇒ **the host splice is the cheap path, the host-built-S1G-beacon fallback is
+  not needed, and S3 is not dead as written.** Worklog
+  [`2026-07-31-raw-s0b-4-esp-rps.md`](../worklog/2026-07-31-raw-s0b-4-esp-rps.md).
+  **◐ NEXT = S0b-5 (Q3b)** — does the engine arm with the **ESP** as AP. A counter read, not a capture:
+  `mmwlan_get_morse_stats(1, …)` is already exported, so no submodule change; plus tags 4171-4180 for
+  host-beacon lateness, without which "the ESP can't serve beacons punctually enough" is
+  indistinguishable from "no AP-direction engine". Then stage S1–S4 to the MVP.
+  ⚠ **Carry into S1+:** RAW costs the AP **~22 % of its downlink** as a standing cost (measured
+  2026-07-31, one STA), `num_slots` is silently capped at **6**, and `frame_crosses_slot` says real frames
+  are too long for a 10100 µs slot at 1 MHz.
 - ☐ **SP-overlap scheduling** — port Linux's `twt_wi_tree` SP spacing (`twt.c:941`); matters only when
   many leaves share tight wake intervals.
 - ☐ **µA current measurement** of a fully-idle TWT link — blocked by no bench power-enable line / meter

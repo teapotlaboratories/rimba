@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAW S0b-4 — the ESP puts an RPS on the air — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-31</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-31</span>
+    <span class="badge">10 min read</span>
+    <span class="badge ok">&#10003; Q2 PASS</span>
+    <span class="badge ok">&#10003; S0b-3 PASS</span>
+    <span class="badge bug">RAW &middot; ESP beacon splice</span>
+  </div>
+
+  <h1>RAW S0b-4 &mdash; the ESP puts an RPS on the air<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">byte-identical to a live Linux AP, in the same capture</small></h1>
+
+  <p class="lead">Stage <strong>S0b-4</strong> of the AP-side RAW port (design doc
+  <code>rimba-raw-apside-design.md</code> &sect;7.2). <strong>Q2:</strong> when the ESP host splices a
+  hand-built RPS element into its S1G beacon, does that element reach the air <strong>unmodified</strong>, or
+  does the MM6108 blob rewrite/strip IEs in a host-supplied beacon?</p>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Q2 = PASS and S0b-3 = PASS &mdash; the gold standard, not the source-layout floor</p>
+    <p>The blob does <strong>not</strong> rewrite or strip IEs in a host-supplied beacon. The eight octets the
+    host wrote arrive on the air unchanged on <strong>519 of 519</strong> beacons, byte-identical
+    (<code>D0 06 20 40 09 04 E0 1F</code>) to what a live Linux device transmitted in the <em>same</em>
+    capture. The S1G Capabilities RAW Operation Support bit reaches the air from the host too
+    (<code>0x00</code> &rarr; <code>0x08</code> at octet [6]). &sect;7.7's <em>&ldquo;no EID-208 element on
+    air&rdquo;</em> branch does not fire, so the mesh host-built-S1G-beacon fallback is <strong>not</strong>
+    needed.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">519 / 519</div><div class="lbl">spike beacons carrying the RPS</div></div>
+    <div class="stat"><div class="num">0 / 467</div><div class="lbl">baseline beacons (no hook)</div></div>
+    <div class="stat"><div class="num ok">8 / 8</div><div class="lbl">octets identical to the Linux AP</div></div>
+    <div class="stat"><div class="num acc">0x00 &rarr; 0x08</div><div class="lbl">S1G caps octet [6]</div></div>
+    <div class="stat"><div class="num">171 / 348</div><div class="lbl">DTIM / non-DTIM, all carry it</div></div>
+    <div class="stat"><div class="num acc">1 line</div><div class="lbl">to arm &mdash; zero submodule CMake edits</div></div>
+  </div>
+
+  <h2 id="rules">1 &middot; The pre-registered rules, and the method they forced</h2>
+
+  <p>S0b-0 (desk checks), S0b-1 (sniffer calibration), S0b-2 (<strong>the gate &mdash; PASSED</strong>,
+  all-Linux, zero ESP code) and the 2026-07-31 throughput A/B are all done. S0b-2 established that the MM6108
+  RAW engine arms from a host-authored beacon and that a STA self-restricts, so
+  <strong>everything that remains is ESP-host-side</strong>. The verdicts for this stage were written down in
+  the design doc &sect;7.7 <em>before</em> the capture:</p>
+
+  <table>
+    <thead><tr><th>Observation</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>No EID-208 element on air</td><td><strong>Q3 not evaluable</strong> &mdash; implement the mesh host-built-S1G-beacon fallback and re-capture. <strong>Not a BLOCKED verdict.</strong></td></tr>
+      <tr><td>Element present, byte-matches the Linux reference</td><td><strong>Q2 PASS</strong> &mdash; the host splice is the cheap path</td></tr>
+    </tbody>
+  </table>
+
+  <p>That mapping is what dictated the session's shape. A <em>missing</em> element buys hours of fallback
+  work, so every way of accidentally producing one had to be closed first:</p>
+
+  <ul>
+    <li><strong>Bench check + radio-silence audit</strong> before anything else (below), then
+      <strong>recon</strong> &mdash; the exact splice point in <code>umac_ap.c</code>, how
+      <code>RIMBA_RAW_S0B_SPIKE</code> reaches the submodule compile, the capture/decode tooling that must be
+      written, and which AP fixture to use.</li>
+    <li><strong>No-hook baseline capture FIRST.</strong> Without it an EID-208 element on air cannot be
+      attributed to the host splice, and a missing element gives no evidence the capture/decode path works at
+      all.</li>
+    <li><strong>The spike edit behind <code>#ifdef RIMBA_RAW_S0B_SPIKE</code></strong>, captured as a named
+      patch file <strong>outside <code>/tmp</code></strong> before flashing (the nightly reboot wipes
+      <code>/tmp</code>). Baseline to revert to is <code>main</code>.</li>
+    <li><strong>A full DTIM cycle, classified per frame.</strong> Linux's short-beacon allowlist <em>does</em>
+      include RPS (<code>ie.c:63</code>), so a capture that only samples DTIM beacons could report Q2=PASS
+      while non-DTIM beacons carry nothing.</li>
+    <li><strong>Byte-diff</strong> against S0b-2's captured reference <code>D0 06 20 40 09 04 E0 1F</code>.</li>
+    <li><strong>Radio-silent afterwards</strong> &mdash; manual; the harness safety net does not cover a
+      hand-run spike.</li>
+  </ul>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; Carried-forward footguns that apply to this stage</p>
+    <ul style="margin:.2em 0">
+      <li><strong>Gate the hook behind <code>#ifdef RIMBA_RAW_S0B_SPIKE</code>.</strong>
+        <code>umac_ap_build_beacon()</code> is shared morselib and many apps set
+        <code>CONFIG_HALOW_AP_MODE=y</code> &mdash; unguarded, every one of them emits the RPS.</li>
+      <li><strong><code>ie_rps_build()</code>-style two-pass sizing hangs hard.</strong> A pass-1/pass-2 size
+        disagreement is a <code>while(1)</code> because <code>MMOSAL_ASSERT</code> is live in our build.</li>
+      <li><strong>The 4-byte trailing FCS nearly manufactured a false &ldquo;RPS stripped&rdquo;</strong> in
+        S0b-2 &mdash; brute-forcing the IE start offset matched 3/242 frames with <em>varying</em> offsets
+        that looked exactly like the conditional S1G presence bits. Anchor on EID 213 with the FCS
+        excluded.</li>
+      <li><strong>Frame-count reconciliation, not the <code>morse0</code> drop counter.</strong> S0b-1
+        measured 2.53&thinsp;% beacon loss while <code>dropped</code> moved by 1. ~2.5&thinsp;% is the
+        healthy baseline, not zero.</li>
+      <li><strong>Build only via <code>make &hellip; APP=&hellip; BOARD=proto1-fgh100m</code></strong> &mdash;
+        a bare <code>idf.py</code> yields country <code>"??"</code> and the radio never boots, which
+        masquerades as dead hardware.</li>
+    </ul>
+  </div>
+
+  <h2 id="rig">2 &middot; Rig &mdash; two APs beaconing into one capture</h2>
+
+  <p>board0 (<code>68:24:99:44:6b:b7</code>, AP vif SA <code>6a:24:99:44:6b:b7</code>) is the ESP AP on
+  <code>rimba-rawrps</code>; chronite is the Linux RAW reference AP on <code>rimba-ping</code> (tracked
+  <code>hostapd-rimba.conf</code> plus <code>morse_cli -i wlan1 raw -s 20200,2 -a 1,255 -t 0 enable 1</code>,
+  both commands <code>rc=0</code>); chronium sits in monitor on <code>morse0</code>, S1G ch27
+  (<code>type monitor</code>, <code>channel 112 (5560 MHz)</code>,
+  <code>Operating Frequency: 915500 kHz</code>). <strong>Both APs beacon simultaneously</strong>, so a single
+  capture holds both elements under identical radiotap conditions &mdash; which is what &sect;7.2 asks for, and
+  what makes this a live-device diff rather than a spec diff.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 260" role="img" aria-label="board0 as the ESP AP and chronite as the Linux RAW reference AP both beacon at the same time; chronium in monitor mode captures both into a single pcap">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="12">
+          <rect x="12" y="16" width="288" height="92" rx="9" fill="#2f6feb" opacity=".13"/>
+          <rect x="12" y="16" width="288" height="92" rx="9" fill="none" stroke="#2f6feb" stroke-width="1.3"/>
+          <text x="156" y="37" text-anchor="middle" fill="#2f6feb" font-weight="700">board0 &#8212; ESP AP (the spike)</text>
+          <text x="156" y="55" text-anchor="middle" fill="#8894a6" font-size="11.5">SSID rimba-rawrps &#183; dtim_period=3</text>
+          <text x="156" y="72" text-anchor="middle" fill="#8894a6" font-size="11.5">SA 6a:24:99:44:6b:b7 &#183; RSSI &#8722;52 dBm</text>
+          <text x="156" y="93" text-anchor="middle" fill="#2f6feb" font-size="11.5" font-family="ui-monospace,monospace">D0 06 20 40 09 04 E0 1F</text>
+
+          <rect x="420" y="16" width="288" height="92" rx="9" fill="#7c3aed" opacity=".13"/>
+          <rect x="420" y="16" width="288" height="92" rx="9" fill="none" stroke="#7c3aed" stroke-width="1.3"/>
+          <text x="564" y="37" text-anchor="middle" fill="#7c3aed" font-weight="700">chronite &#8212; Linux RAW AP</text>
+          <text x="564" y="55" text-anchor="middle" fill="#8894a6" font-size="11.5">SSID rimba-ping &#183; hostapd_s1g + morse_cli</text>
+          <text x="564" y="72" text-anchor="middle" fill="#8894a6" font-size="11.5">raw -s 20200,2 -a 1,255 -t 0 enable 1</text>
+          <text x="564" y="93" text-anchor="middle" fill="#7c3aed" font-size="11.5" font-family="ui-monospace,monospace">D0 06 20 40 09 04 E0 1F</text>
+
+          <text x="360" y="66" text-anchor="middle" fill="#8894a6" font-size="11">beaconing<tspan x="360" dy="14">simultaneously</tspan></text>
+
+          <path d="M156 108 L300 176" stroke="#1a8a4a" stroke-width="1.5" fill="none" marker-end="url(#ar)" color="#1a8a4a"/>
+          <path d="M564 108 L420 176" stroke="#1a8a4a" stroke-width="1.5" fill="none" marker-end="url(#ar)" color="#1a8a4a"/>
+
+          <rect x="200" y="182" width="320" height="62" rx="9" fill="#1a8a4a" opacity=".13"/>
+          <rect x="200" y="182" width="320" height="62" rx="9" fill="none" stroke="#1a8a4a" stroke-width="1.3"/>
+          <text x="360" y="203" text-anchor="middle" fill="#1a8a4a" font-weight="700">chronium &#8212; monitor on morse0</text>
+          <text x="360" y="221" text-anchor="middle" fill="#8894a6" font-size="11.5">ch27 &#183; channel 112 (5560 MHz) &#183; 915500 kHz</text>
+          <text x="360" y="238" text-anchor="middle" fill="#8894a6" font-size="11.5">one pcap, both APs &#8212; 1043 pkts, RSSI ref &#8722;35 dBm</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Both elements land in <code>s0b-4-esp-spike-dualap.pcap</code> under identical radiotap
+    conditions &mdash; a live-device byte-diff, not a spec diff.</figcaption>
+  </figure>
+
+  <h4>Bench state at session start &mdash; verified 2026-07-31 05:55 PDT</h4>
+  <p><code>make test-bench</code> (with <code>bench.env.sh</code> sourced) against
+  <code>docs/reference/rimba-bench-devices.md</code>:</p>
+
+  <table>
+    <thead><tr><th>Node</th><th>State</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>board0 <code>E0:72:A1:F8:EF:A4</code></td><td>present, <code>/dev/ttyACM0</code></td><td>WAKE+BUSY unwired &mdash; fine, this stage is beacon-only</td></tr>
+      <tr><td>board1 <code>E0:72:A1:F8:F9:40</code></td><td>present, <code>/dev/ttyACM1</code></td><td>ditto</td></tr>
+      <tr><td>board2 <code>E0:72:A1:F8:F0:08</code></td><td><strong>not enumerated</strong></td><td>expected &mdash; PPK2-rail gated; <strong>not needed</strong> for S0b-4 (&sect;7.5: &ldquo;beacon-only load &rArr; board0/board1 suffice&rdquo;)</td></tr>
+      <tr><td>chronium</td><td><code>wlan1</code> <strong>DOWN</strong></td><td>the sniffer</td></tr>
+      <tr><td>chronite</td><td><code>wlan1</code> <strong>DOWN</strong></td><td>Linux reference AP</td></tr>
+      <tr><td>chronogen</td><td><code>wlan1</code> <strong>DOWN</strong></td><td>not needed this stage</td></tr>
+    </tbody>
+  </table>
+
+  <p>All three Linux radios down, no <code>hostapd_s1g</code> / <code>wpa_supplicant_s1g</code> /
+  <code>tcpdump</code> running &mdash; the bench was left radio-silent by the throughput A/B, as recorded.
+  2/3 ESP nodes present is the expected steady state, not drift. Bench pinned at Morse fw
+  <strong>1.17.8</strong>, chip <code>0x0306</code>, S1G ch27 (<code>iw freq 5560</code>).</p>
+
+  <h2 id="ab">3 &middot; The A/B, on the same fixture</h2>
+
+  <table>
+    <thead><tr><th></th><th>baseline (no hook)</th><th>spike</th><th>Linux reference<br>(same capture as spike)</th></tr></thead>
+    <tbody>
+      <tr><td>beacons decoded</td><td><strong>467</strong></td><td><strong>519</strong></td><td><strong>515</strong></td></tr>
+      <tr><td>undecodable</td><td>0</td><td>0</td><td>0</td></tr>
+      <tr><td>EID-208 present</td><td><strong>0</strong></td><td><strong>519 / 519</strong></td><td><strong>515 / 515</strong></td></tr>
+      <tr><td>RPS bytes</td><td>&mdash;</td><td><strong><code>D0 06 20 40 09 04 E0 1F</code></strong></td><td><strong><code>D0 06 20 40 09 04 E0 1F</code></strong></td></tr>
+      <tr><td>byte-identical to &sect;7.1 golden</td><td>&mdash;</td><td><strong>True</strong></td><td><strong>True</strong></td></tr>
+      <tr><td>S1G caps octet [6]</td><td><strong><code>0x00</code></strong> &times;467</td><td><strong><code>0x08</code></strong> &times;519</td><td><strong><code>0x08</code></strong> &times;515</td></tr>
+      <tr><td>DTIM / non-DTIM</td><td>158 / 309</td><td><strong>171 / 348</strong></td><td>515 / 0</td></tr>
+      <tr><td>IE offset</td><td>15 (all)</td><td>15 (all)</td><td>15 (all)</td></tr>
+      <tr><td>FC</td><td><code>0x401c</code></td><td><code>0x401c</code></td><td><code>0x081c</code></td></tr>
+      <tr><td>RSSI median</td><td>&minus;52 dBm</td><td>&minus;52 dBm</td><td>&minus;35 dBm</td></tr>
+      <tr><td>capture completeness</td><td>97.29&thinsp;%</td><td>98.11&thinsp;%</td><td>97.35&thinsp;%</td></tr>
+    </tbody>
+  </table>
+
+  <p>Share of decoded beacons carrying an EID-208 element, to scale:</p>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">ESP &middot; baseline</span><span class="bar-track"><span class="bar-fill slow" style="width:0%"></span></span><span class="val">0 / 467</span></div>
+    <div class="bar-row"><span class="lbl">ESP &middot; spike</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">519 / 519</span></div>
+    <div class="bar-row"><span class="lbl">Linux reference</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">515 / 515</span></div>
+  </div>
+
+  <p><strong>Q2 = PASS.</strong> The eight octets the host wrote arrive on the air unchanged, on every single
+  beacon, and are byte-identical to what a live Linux device transmitted in the <em>same</em> capture &mdash;
+  the gold standard the on-air rule asks for, not merely the source-layout floor.</p>
+
+  <p><strong>S0b-3 = PASS.</strong> The S1G Capabilities RAW Operation Support bit reaches the air from the
+  host too. The full element goes:</p>
+
+<pre><code>1e 00 40 00 00 08 <span class="cm">00</span> 02 60 00 fd 00 fa 01 00     <span class="cm">&#8592; hook off</span>
+1e 00 40 00 00 08 <span class="nm">08</span> 02 60 00 fd 00 fa 01 00     <span class="cm">&#8592; hook on</span></code></pre>
+
+  <p><strong>One bit, everything else byte-identical</strong> &mdash; the same signature the Linux A/B showed.
+  So &sect;7.7's &ldquo;S3 is dead as written&rdquo; branch does not fire, and the
+  host-built-S1G-beacon fallback is <strong>not</strong> needed.</p>
+
+  <h2 id="chains">4 &middot; The RPS lands in the right place</h2>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 214" role="img" aria-label="The ESP IE chain and the Linux IE chain side by side; on both, element 208 (RPS) sits immediately after element 5 (TIM)">
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="12">
+          <text x="12" y="76" fill="#8894a6" font-weight="700" font-size="12.5">ESP</text>
+          <text x="12" y="156" fill="#8894a6" font-weight="700" font-size="12.5">Linux</text>
+
+          <!-- ESP chain: 0, 5, 208, 48, 127, 244, 213, 217, 232, 214, 221 -->
+          <g>
+            <rect x="76"  y="56" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="99"  y="76" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">0</text>
+            <rect x="127" y="56" width="46" height="30" rx="6" fill="#2f6feb" opacity=".16"/><rect x="127" y="56" width="46" height="30" rx="6" fill="none" stroke="#2f6feb" stroke-width="1.4"/><text x="150" y="76" text-anchor="middle" fill="#2f6feb" font-weight="700" font-family="ui-monospace,monospace">5</text>
+            <rect x="178" y="56" width="46" height="30" rx="6" fill="#1a8a4a" opacity=".18"/><rect x="178" y="56" width="46" height="30" rx="6" fill="none" stroke="#1a8a4a" stroke-width="1.5"/><text x="201" y="76" text-anchor="middle" fill="#1a8a4a" font-weight="700" font-family="ui-monospace,monospace">208</text>
+            <rect x="229" y="56" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="252" y="76" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">48</text>
+            <rect x="280" y="56" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="303" y="76" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">127</text>
+            <rect x="331" y="56" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="354" y="76" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">244</text>
+            <rect x="382" y="56" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="405" y="76" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">213</text>
+            <rect x="433" y="56" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="456" y="76" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">217</text>
+            <rect x="484" y="56" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="507" y="76" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">232</text>
+            <rect x="535" y="56" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="558" y="76" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">214</text>
+            <rect x="586" y="56" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="609" y="76" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">221</text>
+          </g>
+          <path d="M382 48 L382 42 L581 42 L581 48" fill="none" stroke="#8894a6" stroke-width="1.1"/>
+          <text x="481" y="34" text-anchor="middle" fill="#8894a6" font-size="10.5">inside hostapd&#8217;s tail blob (beacon.c:2562-2569)</text>
+          <path d="M127 92 L127 98 L224 98 L224 92" fill="none" stroke="#1a8a4a" stroke-width="1.2"/>
+          <text x="175" y="112" text-anchor="middle" fill="#1a8a4a" font-size="11" font-weight="650">RPS directly after TIM</text>
+
+          <!-- Linux chain: 213, 5, 208, 217, 232, 214, 0, 221 -->
+          <g>
+            <rect x="76"  y="136" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="99"  y="156" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">213</text>
+            <rect x="127" y="136" width="46" height="30" rx="6" fill="#2f6feb" opacity=".16"/><rect x="127" y="136" width="46" height="30" rx="6" fill="none" stroke="#2f6feb" stroke-width="1.4"/><text x="150" y="156" text-anchor="middle" fill="#2f6feb" font-weight="700" font-family="ui-monospace,monospace">5</text>
+            <rect x="178" y="136" width="46" height="30" rx="6" fill="#1a8a4a" opacity=".18"/><rect x="178" y="136" width="46" height="30" rx="6" fill="none" stroke="#1a8a4a" stroke-width="1.5"/><text x="201" y="156" text-anchor="middle" fill="#1a8a4a" font-weight="700" font-family="ui-monospace,monospace">208</text>
+            <rect x="229" y="136" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="252" y="156" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">217</text>
+            <rect x="280" y="136" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="303" y="156" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">232</text>
+            <rect x="331" y="136" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="354" y="156" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">214</text>
+            <rect x="382" y="136" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="405" y="156" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">0</text>
+            <rect x="433" y="136" width="46" height="30" rx="6" fill="none" stroke="#8894a6" stroke-width="1.1"/><text x="456" y="156" text-anchor="middle" fill="#5a6577" font-family="ui-monospace,monospace">221</text>
+          </g>
+          <path d="M127 172 L127 178 L224 178 L224 172" fill="none" stroke="#1a8a4a" stroke-width="1.2"/>
+          <text x="175" y="192" text-anchor="middle" fill="#1a8a4a" font-size="11" font-weight="650">RPS directly after TIM</text>
+          <text x="700" y="206" text-anchor="end" fill="#8894a6" font-size="10.5">5 = TIM &#183; 208 = RPS</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Element IDs in transmission order. The chains as a whole differ; the adjacency that matters is
+    identical on both stacks.</figcaption>
+  </figure>
+
+  <p>The <strong>overall</strong> chains differ, and that is expected and unrelated to RAW: on the ESP,
+  213/217/232/214 live inside hostapd's <code>tail</code> blob (<code>beacon.c:2562-2569</code>) and therefore
+  land <em>after</em> the TIM, whereas the Linux driver's S1G converter emits 213 first.</p>
+
+  <div class="callout">
+    <p class="ct">The verdict is the eight octets plus the adjacency &mdash; not the chain vector</p>
+    <p>Diffing the whole vector would report a false mismatch on a long-standing ordering difference that
+    predates this work. Both stacks are correct on the thing that matters: <strong>RPS immediately follows TIM
+    on both.</strong></p>
+  </div>
+
+  <h2 id="edits">5 &middot; The two guarded edits</h2>
+
+  <p>Both are working-tree changes to the <code>components/halow</code> submodule, captured as
+  <code>docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch</code> (<strong>32 insertions, 2
+  files</strong>) <strong>before flashing</strong>, and verified to <code>git apply --reverse --check</code>
+  cleanly. The baseline to return to is <code>main</code>.</p>
+
+  <h3>Edit 1 &mdash; the beacon splice</h3>
+
+  <p><code>morselib/src/umac/ap/umac_ap.c</code>, inside <code>umac_ap_build_beacon()</code>: between the
+  <code>ie_s1g_tim_build(...)</code> call and the <code>consbuf_append(buf, data-&gt;config.tail, &hellip;)</code>
+  that follows it &mdash; i.e. the <code>:418/419</code> the design doc predicted, unchanged in the current
+  tree. The whole builder is three concatenations, so splicing there puts the RPS <strong>directly after the
+  TIM</strong>, which is the Linux adjacency.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">hostapd <code>head</code></div><div class="s">opaque blob</div></div>
+      <div class="node"><div class="t">S1G TIM</div><div class="s"><code>ie_s1g_tim_build()</code></div></div>
+      <div class="node ok"><div class="t">SPLICED RPS</div><div class="s">8 B, <code>#ifdef</code>-guarded</div></div>
+      <div class="node"><div class="t">hostapd <code>tail</code></div><div class="s">opaque blob</div></div>
+    </div>
+    <figcaption><code>umac_ap_build_beacon()</code> is three concatenations; the hook is one more, at
+    <code>:418/419</code>.</figcaption>
+  </figure>
+
+<pre><code><span class="kw">static const</span> uint8_t k_rps_golden[<span class="nm">8</span>] = { <span class="nm">0xD0</span>, <span class="nm">0x06</span>, <span class="nm">0x20</span>, <span class="nm">0x40</span>, <span class="nm">0x09</span>, <span class="nm">0x04</span>, <span class="nm">0xE0</span>, <span class="nm">0x1F</span> };
+<span class="fn">consbuf_append</span>(buf, k_rps_golden, <span class="kw">sizeof</span>(k_rps_golden));</code></pre>
+
+  <h4>Why this cannot hang</h4>
+
+  <p><code>build_frame_with_class()</code> runs the builder <strong>twice</strong> &mdash; pass 1 with
+  <code>buf-&gt;buf == NULL</code> to size, pass 2 into the real buffer &mdash; and a pass-1/pass-2 size
+  disagreement is a hard <code>while(1)</code> on the <code>MMOSAL_ASSERT</code> in
+  <code>consbuf_append</code> (<code>consbuf.c:30</code>), which is live in our build (unlike
+  <code>MMOSAL_DEV_ASSERT</code>, which compiles to <code>((void)(x))</code>).</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node"><div class="t">pass 1</div><div class="s"><code>buf-&gt;buf == NULL</code> &middot; sizes only</div></div>
+      <div class="node"><div class="t">pass 2</div><div class="s">writes into the real buffer</div></div>
+      <div class="node ok"><div class="t">sizes agree</div><div class="s">fixed-size append, by construction</div></div>
+    </div>
+    <figcaption>An unconditional fixed-size append agrees across both passes by construction &mdash; the
+    disagreement that would <code>while(1)</code> cannot arise.</figcaption>
+  </figure>
+
+  <p>Headroom is not close either: the TIM builder over-reserves 256 bytes in pass 1
+  (<code>sizeof(struct dot11_ie_tim)</code> 5 + <code>MAX_PVB_LEN</code> 251) and writes at most 45 in pass 2,
+  leaving <strong>~219 bytes of slack</strong> after the 8-byte element.</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">reserved, pass 1</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="val">256 B</span></div>
+    <div class="bar-row"><span class="lbl">written, pass 2</span><span class="bar-track"><span class="bar-fill slow" style="width:17.6%"></span></span><span class="val">&le; 45 B</span></div>
+    <div class="bar-row"><span class="lbl">spliced RPS</span><span class="bar-track"><span class="bar-fill" style="width:3.1%"></span></span><span class="val">8 B</span></div>
+    <div class="bar-row"><span class="lbl">slack left</span><span class="bar-track"><span class="bar-fill fast" style="width:85.5%"></span></span><span class="val">~219 B</span></div>
+  </div>
+
+  <h3>Edit 2 &mdash; the S1G caps bit</h3>
+
+  <p><code>morselib/src/umac/ies/s1g_capabilities.c</code>, in <code>ie_s1g_capabilities_build_ap()</code>:
+  the <code>if (false)</code> gate at <code>:276-280</code> on
+  <code>DOT11_MASK_S1G_CAP6_RAW_OPERATION_SUPPORT</code>. The <code>#else</code> branch keeps the original
+  <code>if (false)</code> verbatim, so the diff against upstream is additive only. Two things make the guard
+  here load-bearing rather than hygiene:</p>
+
+  <ul>
+    <li><strong>This file is in the UNCONDITIONAL <code>SRCS</code> list</strong>
+      (<code>morselib/CMakeLists.txt:52</code>) &mdash; unlike <code>umac_ap.c</code>, which is only compiled
+      under <code>CONFIG_HALOW_AP_MODE</code>. It builds into every STA and mesh image.</li>
+    <li><strong>The bit is live state, not a capability advert.</strong> Flipping it on unconditionally would
+      advertise RAW on an AP with no schedule &mdash; the &ldquo;don't ship an advert you can't enforce&rdquo;
+      case. It is honest <em>only</em> under this same <code>#ifdef</code>, which is exactly when edit 1 puts a
+      schedule into every beacon. <strong>That is why S0b-3 was folded into S0b-4</strong> rather than run as
+      the one-line flip originally planned.</li>
+  </ul>
+
+  <h2 id="arming">6 &middot; How the spike is armed &mdash; one build-system line, zero submodule CMake edits</h2>
+
+  <p>The design doc (&sect;7.4) said <em>&ldquo;<code>IDF_EXTRA_D</code> can only pass <code>-D</code> defines
+  into the app build, never patch the submodule&rdquo;</em>. <strong>Half of that is wrong, and the half that
+  is wrong is the useful half.</strong> <code>IDF_EXTRA_D</code> passes CMake <strong>cache variables</strong>
+  (<code>Makefile:49-62</code> &rarr; <code>idf.py -D</code> &rarr; <code>cmake -D</code>), which today's
+  fixtures individually convert into <em>app-private</em> compile defines with
+  <code>target_compile_definitions(${COMPONENT_LIB} PRIVATE &hellip;)</code>. That privacy is a property of how
+  those apps were written, not of the mechanism.</p>
+
+  <p>A <strong>build-global</strong> define does reach morselib. IDF applies the build-wide
+  <code>COMPILE_DEFINITIONS</code> property as a directory-scoped <code>add_compile_definitions()</code>
+  inside every <code>idf_component_register</code>
+  (<code>vendor/esp-idf/tools/cmake/component.cmake:468,476</code>), and
+  <code>components/halow/CMakeLists.txt</code> registers at <code>:15-22</code> and only <em>then</em> does
+  <code>add_subdirectory(components)</code> at <code>:29</code> &mdash; so <code>libmorse</code>
+  (<code>morselib/CMakeLists.txt:116</code>) inherits it. It is the same route by which
+  <code>ESP_PLATFORM</code> and <code>IDF_VER</code> already land on <code>umac_ap.c</code>'s compile
+  line:</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t"><code>idf_build_set_property</code></div><div class="s"><code>test-raw-rps/CMakeLists.txt:21</code></div></div>
+      <div class="node"><div class="t">build-wide<br><code>COMPILE_DEFINITIONS</code></div><div class="s"><code>add_compile_definitions()</code>, directory-scoped</div></div>
+      <div class="node"><div class="t"><code>idf_component_register</code></div><div class="s"><code>component.cmake:468,476</code></div></div>
+      <div class="node"><div class="t"><code>components/halow</code></div><div class="s">registers <code>:15-22</code>, then <code>add_subdirectory</code> <code>:29</code></div></div>
+      <div class="node ok"><div class="t"><code>libmorse</code></div><div class="s"><code>morselib/CMakeLists.txt:116</code> &mdash; inherits it</div></div>
+    </div>
+    <figcaption>The define is set once by the fixture and inherited by morselib because
+    <code>components/halow</code> registers <em>before</em> it adds the subdirectory.</figcaption>
+  </figure>
+
+  <p>So the arming is <strong>one line in the fixture's own top-level CMakeLists</strong>
+  (<code>firmware/test-raw-rps/CMakeLists.txt:21</code>):</p>
+
+<pre><code><span class="fn">idf_build_set_property</span>(COMPILE_DEFINITIONS <span class="st">"RIMBA_RAW_S0B_SPIKE=1"</span> APPEND)</code></pre>
+
+  <p><strong>Verified empirically, not by inference</strong> &mdash; from
+  <code>build/test-raw-rps/proto1-fgh100m/compile_commands.json</code>, both guarded files carry
+  <code>-DRIMBA_RAW_S0B_SPIKE=1</code>:</p>
+
+  <table>
+    <thead><tr><th>file</th><th>spike define on its compile line</th></tr></thead>
+    <tbody>
+      <tr><td><code>morselib/src/umac/ap/umac_ap.c</code></td><td><strong>yes</strong></td></tr>
+      <tr><td><code>morselib/src/umac/ies/s1g_capabilities.c</code></td><td><strong>yes</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>and, checking the other AP apps' existing build trees, <strong>isolation holds</strong>:</p>
+
+  <table>
+    <thead><tr><th>app</th><th><code>umac_ap.c</code> compiled</th><th>spike define</th></tr></thead>
+    <tbody>
+      <tr><td><code>test-raw-cap</code></td><td>yes</td><td><strong>no</strong></td></tr>
+      <tr><td><code>rimba-halow-ap</code></td><td>yes</td><td><strong>no</strong></td></tr>
+      <tr><td><code>test-mesh-gate-ap</code></td><td>yes</td><td><strong>no</strong></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; That check is not ceremony</p>
+    <p>If the define had failed to reach <code>umac_ap.c</code>, the <code>#ifdef</code> body would have
+    compiled to nothing, the capture would have shown no EID-208, and &sect;7.7 maps <em>&ldquo;no EID-208
+    element on air&rdquo;</em> to <em>&ldquo;implement the mesh host-built-S1G-beacon fallback and
+    re-capture&rdquo;</em> &mdash; hours of work chasing a build-system mistake dressed up as a firmware
+    finding.</p>
+  </div>
+
+  <h4>Rejected alternatives, with reasons</h4>
+  <ul>
+    <li><strong>A CMake cache var via <code>IDF_EXTRA_D</code></strong> &mdash; a live footgun. Cache entries
+      are <strong>sticky per build dir</strong>, and <code>tools/regtest/t0_build.py:242</code> rebuilds each
+      app into that same <code>build/&lt;APP&gt;/&lt;BOARD&gt;</code> with no vars. One spike build would
+      silently keep the RPS compiled into T0 until a <code>fullclean</code>. (This is the known
+      &ldquo;<code>idf.py</code> CMakeCache makes build flags sticky&rdquo; trap.)</li>
+    <li><strong>A Kconfig option</strong> &mdash; would have worked. (<code>CONFIG_*</code> symbols <em>are</em>
+      visible inside <code>umac_ap.c</code>: <code>common/common.h</code> &rarr; <code>mmwlan.h:44-46</code>
+      <code>#ifdef ESP_PLATFORM #include "sdkconfig.h"</code>, and <code>ninja -t deps</code> lists the
+      generated <code>sdkconfig.h</code> as a real dependency.) Rejected only because it costs a submodule
+      Kconfig edit plus an <code>sdkconfig.defaults</code> line for no gain over one superproject line. It
+      <strong>is</strong> the right mechanism for S1+, when this stops being a spike.</li>
+    <li><strong><code>target_compile_definitions(libmorse PUBLIC &hellip;)</code></strong> &mdash; rejected:
+      that arms every app that links morselib, which is the contamination the guard exists to prevent.</li>
+    <li><strong>A bare <code>#define</code> at the top of <code>umac_ap.c</code></strong> &mdash; rejected:
+      arms all 27 AP-path apps with no off switch.</li>
+  </ul>
+
+  <h4>Count correction &mdash; the blast radius is a third larger than the doc claims</h4>
+  <p>The design doc &sect;7.4 says &ldquo;20 apps under <code>firmware/</code> set
+  <code>CONFIG_HALOW_AP_MODE=y</code>&rdquo;. The real number is <strong>27</strong> (26 before this stage's
+  fixture). Only <strong>7</strong> of them actually instantiate a SoftAP vif; the other 20 need the flag
+  because morselib gates <code>umac_ap.c</code> and friends on it and mesh/IBSS link against them.</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">doc &sect;7.4 claim</span><span class="bar-track"><span class="bar-fill slow" style="width:74.1%"></span></span><span class="val">20 apps</span></div>
+    <div class="bar-row"><span class="lbl">actual</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="val">27 apps</span></div>
+    <div class="bar-row"><span class="lbl">&hellip; with a SoftAP vif</span><span class="bar-track"><span class="bar-fill fast" style="width:25.9%"></span></span><span class="val">7 apps</span></div>
+  </div>
+
+  <h2 id="decoder">7 &middot; The decoder is tracked now &mdash; and calibrated against both controls</h2>
+
+  <h3>06:05 &mdash; the S0b-1/S0b-2 pcaps were still alive on chronium</h3>
+
+  <p>Recon turned up something better than expected: <strong>the actual capture files from S0b-1 and S0b-2
+  were still on <code>chronium:/tmp</code></strong> &mdash; which is <strong>tmpfs on a node with 19 days of
+  uptime</strong>. One reboot and the only ground-truth captures this port has would have been gone. Copied
+  into the repo:</p>
+
+  <table>
+    <thead><tr><th>file</th><th>was</th><th>contents</th></tr></thead>
+    <tbody>
+      <tr><td><code>&hellip;/raw-s0b/s0b-2-reference-rawenabled.pcap</code></td><td><code>chronium:/tmp/raw.pcap</code><br>md5 <code>7c3bc203ded4a3b288d547ff097325de</code></td><td>242 pkts &mdash; the S0b-2 <strong>reference</strong>, RAW enabled</td></tr>
+      <tr><td><code>&hellip;/raw-s0b/s0b-1-cal-rawdisabled.pcap</code></td><td><code>chronium:/tmp/cal.pcap</code><br>md5 <code>85588227355d2940f6e150a6dd98a698</code></td><td>2294 pkts &mdash; the S0b-1 <strong>negative control</strong>, RAW disabled</td></tr>
+    </tbody>
+  </table>
+
+  <p><code>chronium:/tmp/q4.pcap</code> is the voided 66&thinsp;%-loss timing run &mdash; deliberately
+  <strong>not</strong> preserved as a reference; it must not be reused. <code>smoke.pcap</code>/
+  <code>cal.tsv</code> likewise left behind. The S0b-1/S0b-2 <em>analysis scripts</em> did <strong>not</strong>
+  survive: they lived in a dev-box session scratchpad under <code>/tmp</code> that the nightly
+  <code>daily-reboot.timer</code> wiped, exactly as the S0b-0 patch captures did. Only the algorithm survived,
+  in prose, in the S0b-2 worklog.</p>
+
+  <h3>06:10 &mdash; a tracked decoder that refuses the S0b-2 failure mode</h3>
+
+  <p>Rather than rewrite a throwaway parser for the third time, the decoder is now a tracked repo tool:
+  <strong><code>tools/raw_s1g_beacon_decode.py</code></strong> &mdash; the radiotap-aware pcap decoder design
+  doc &sect;7.6 item 1 called for and which no in-repo script provides (all four existing capture scripts read
+  a live <code>AF_PACKET</code> socket and <em>skip</em> the radiotap header:
+  <code>mesh_beacon_cap.py:31-32</code>, <code>mesh_rann_cap.py:47-48</code>,
+  <code>mesh_grab_fwd.py:18</code>). It handles the two decode traps explicitly:</p>
+
+  <ul>
+    <li><strong>The IE offset is COMPUTED from Frame Control, never searched.</strong> Base 15 bytes (FC 2 +
+      Duration 2 + SA 6 + Timestamp 4 + Change Seq 1), plus the three conditional fixed fields &mdash; Next
+      TBTT <code>+3</code> (FC bit <code>0x0100</code>), Compressed SSID <code>+4</code>
+      (<code>0x0200</code>), ANO <code>+1</code> (<code>0x0400</code>). Verified against the driver:
+      <code>morse_dot11_find_s1g_beacon_ies()</code> at
+      <code>chronium:~/halow/morse_driver/dot11ah/ie.c:442-457</code>, sizes at
+      <code>dot11ah/dot11ah.h:16-18,24-26</code>. The observed FC is reported with every capture as
+      evidence.</li>
+    <li><strong>The 4-byte trailing FCS is stripped</strong>, and an IE walk that does not land <em>exactly</em>
+      on the end is reported as an undecodable frame &mdash; never retried at another offset.</li>
+  </ul>
+
+  <h4>Calibration &mdash; both controls reproduce the published S0b results to the frame</h4>
+
+  <table>
+    <thead><tr><th></th><th>reference pcap (RAW on)</th><th>control pcap (RAW off)</th></tr></thead>
+    <tbody>
+      <tr><td>S1G beacons decoded</td><td><strong>236</strong> (worklog: 236)</td><td><strong>2222</strong> (worklog: 2222)</td></tr>
+      <tr><td>undecodable</td><td><strong>0</strong></td><td><strong>0</strong></td></tr>
+      <tr><td>distinct IE chains</td><td><strong>1</strong> &mdash; <code>[213, 5, 208, 217, 232, 214, 0, 221]</code></td><td><strong>1</strong> &mdash; <code>[213, 5, 217, 232, 214, 0, 221]</code></td></tr>
+      <tr><td>IE offset</td><td><strong>15 on every frame</strong></td><td><strong>15 on every frame</strong></td></tr>
+      <tr><td>FC observed</td><td><code>0x081c</code> &mdash; all three presence bits clear</td><td><code>0x081c</code> &mdash; same</td></tr>
+      <tr><td>EID-208</td><td><strong>1 distinct, <code>D0 06 20 40 09 04 E0 1F</code>, byte-identical to the golden constant</strong></td><td><strong>ZERO across 2222 beacons</strong></td></tr>
+      <tr><td>RSSI median</td><td>&minus;36 dBm</td><td>&minus;36 dBm</td></tr>
+    </tbody>
+  </table>
+
+  <p>The reconciliation arithmetic also lands: the control capture spans <strong>2290</strong> TBTT slots and
+  holds 2222 beacons &mdash; <strong>68 missing</strong>. S0b-1 reported 58 genuinely absent <em>plus</em> 72
+  undecoded 33-byte frames of which <strong>10 coincidentally landed in empty slots</strong>.
+  <strong>68 &minus; 10 = 58</strong>, exactly. Two independent methods agree.</p>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Why this matters more than it looks</p>
+    <p>S0b-1's and the throughput A/B's shared lesson was <em>calibrate the instrument before trusting it</em>.
+    Here the instrument is the decoder, and an uncalibrated one is the single most dangerous component in this
+    stage: if it were wrong, an ESP beacon that genuinely carried the RPS would decode as <em>no element on
+    air</em>, and &sect;7.7 maps that observation to &ldquo;implement the mesh fallback, re-capture&rdquo;
+    &mdash; hours of work chasing a bug in the parser. It is now pinned to two known-good captures with
+    opposite expected answers.</p>
+  </div>
+
+  <h2 id="s0b3">8 &middot; S0b-3's answer falls out of the archived captures for free</h2>
+
+  <p>The decoder also reads S1G Capabilities octet [6]
+  (<code>DOT11_MASK_S1G_CAP6_RAW_OPERATION_SUPPORT</code> = bit 3):</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">0x08</div><div class="lbl">reference, RAW enabled &mdash; 236 of 236 beacons, bit SET</div></div>
+    <div class="stat"><div class="num">0x00</div><div class="lbl">control, RAW disabled &mdash; 2222 of 2222 beacons, bit CLEAR</div></div>
+  </div>
+
+  <p>That is the live-Linux on-air A/B for the caps bit, i.e. <strong>exactly the byte-diff target S0b-3 was
+  going to book bench time for</strong>, already captured. It independently confirms the source reading
+  recorded on 2026-07-30 that the bit is <em>live state</em> (set only while RAW is actually running), not a
+  static capability advertisement &mdash; and it is the reference the ESP arm must reproduce, which
+  <a href="#ab">&sect;3 above</a> shows it does.</p>
+
+  <h2 id="shortbeacon">9 &middot; The short-beacon worry is measured, not argued</h2>
+
+  <p>&sect;7.2 flagged that Linux's short-beacon IE allowlist <em>does</em> include RPS, so a capture sampling
+  only DTIM beacons could report Q2=PASS while non-DTIM beacons carried nothing. The fixture runs
+  <code>dtim_period=3</code> (a deliberate divergence from the reference AP's 1, recorded in
+  <code>app_main.c</code>) precisely so both classes appear: <strong>171 DTIM and 348 non-DTIM beacons, and
+  all 519 carry the RPS.</strong></p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">DTIM</span><span class="bar-track"><span class="bar-fill fast" style="width:49.1%"></span></span><span class="val">171 / 171 carry it</span></div>
+    <div class="bar-row"><span class="lbl">non-DTIM</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">348 / 348 carry it</span></div>
+  </div>
+
+  <p>Source agrees &mdash; morselib has no short-beacon TX path at all and <code>umac_ap_build_beacon()</code>
+  is the single unconditional builder for every beacon &mdash; but this is the measurement rather than the
+  argument.</p>
+
+  <h2 id="integrity">10 &middot; Integrity of the runs</h2>
+
+  <p>Every capture reconciles against TBTT slots spanned from <code>radiotap.mactime</code>:
+  <strong>97.29&thinsp;% / 98.11&thinsp;% / 97.35&thinsp;%</strong> complete, against the ~2.5&thinsp;%
+  healthy bench baseline S0b-1 established. No run is anywhere near the material-loss threshold that would
+  void it. The <code>morse0</code> drop counter moved by <strong>1</strong> across the baseline capture and
+  <strong>4</strong> across the spike capture &mdash; consistent with S0b-1's finding that it is a weak
+  secondary signal only (it accounted for 1 of 58 genuinely missing beacons there), which is why the
+  frame-count reconciliation is the gate.</p>
+
+  <p>RSSI &minus;52 dBm on the ESP arm, nowhere near the &asymp;&minus;3 dBm RX-overload signature.</p>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; A design-doc claim about TX power was false</p>
+    <p><code>mmwlan_override_max_tx_power(1)</code> was accepted (no refusal logged). The design doc &sect;7.5
+    claims &ldquo;the ESP fixtures cap to 1 dBm&rdquo; &mdash; <strong>that was false</strong> for the AP
+    fixture family (<code>test-raw-cap</code>, <code>rimba-halow-ap</code> and <code>rimba-halow-ap-perf</code>
+    never call it). This fixture does, following the <code>test-apsta-ap</code> precedent, and the call
+    <strong>must sit between <code>set_config</code> and <code>wifi_start</code></strong> because the override
+    returns <code>MMWLAN_UNAVAILABLE</code> once the WLAN subsystem is active.</p>
+  </div>
+
+  <h2 id="footguns">11 &middot; Bench footguns hit this session</h2>
+
+  <div class="callout bug">
+    <p class="ct">&#128027; <code>sudo pkill -9 -f wpa_supplicant_s1g</code> over ssh killed its own session</p>
+    <p>The <code>-f</code> pattern matches the <em>full command line</em>, and the remote shell's command line
+    contains the pattern because the script is passed as an argument to <code>bash</code> &mdash; so
+    <code>pkill</code> matched and killed its own parent. The whole block died silently: no output, and the
+    monitor was never brought up (<code>wlan1</code> still read <code>type managed</code>, which is what
+    exposed it). This is the known <code>pgrep -f</code> self-match trap in <code>pkill</code> form, and over
+    ssh it is worse because the failure looks like the commands simply not running. Nothing needed killing
+    anyway &mdash; the bench had been left radio-silent &mdash; so the fix was to drop the line.</p>
+  </div>
+
+  <ul>
+    <li><strong>No <code>/sys/kernel/debug/morse/</code> on chronite</strong>, so the passive
+      <code>dump_raw_configs</code> readback used in S0b-2 was unavailable here. Not a problem:
+      <code>morse_cli &hellip; raw &hellip; enable 1</code> returned <code>rc=0</code> and the <em>on-air
+      element</em> is a strictly better readback &mdash; the captured
+      <code>D0 06 20 40 09 04 E0 1F</code> proves the config landed exactly.</li>
+    <li><strong><code>morse_cli -i wlan1 raw</code> with no sub-command</strong> prints a usage error rather
+      than dumping current state; it is a setter, not a getter.</li>
+    <li><strong>The AP vif's SA is not the chip MAC.</strong> The board reports
+      <code>68:24:99:44:6b:b7</code> but beacons as <code>6a:24:99:44:6b:b7</code> (locally-administered bit
+      set). Filtering a capture on the console-reported MAC finds nothing &mdash; which would look exactly
+      like &ldquo;the ESP never beaconed&rdquo;.</li>
+  </ul>
+
+  <h2 id="artifacts">12 &middot; Bench state left behind, and artifacts</h2>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Radio-silent, verified</p>
+    <ul style="margin:.2em 0">
+      <li><strong>board0</strong> reflashed to <code>rimba-hello</code>; console shows the banner and
+        heartbeats with <strong>zero</strong> <code>mmwlan</code>/HaLow lines.</li>
+      <li><strong>chronite</strong>: RAW id 1 disabled + deleted, <code>hostapd_s1g</code> killed (0
+        processes), addresses flushed, <code>wlan1</code> DOWN.</li>
+      <li><strong>chronium</strong>: <code>morse0</code> DOWN, <code>wlan1</code> DOWN and restored to
+        <code>type managed</code>.</li>
+      <li>board1 untouched; board2 never powered (PPK2-gated, not needed).</li>
+    </ul>
+  </div>
+
+  <table>
+    <thead><tr><th>file</th><th>what</th></tr></thead>
+    <tbody>
+      <tr><td><code>docs/worklog/artifacts/raw-s0b/s0b-4-esp-baseline-nohook.pcap</code></td><td>480 pkts &mdash; ESP AP, no hook. Zero EID-208, caps <code>0x00</code></td></tr>
+      <tr><td><code>docs/worklog/artifacts/raw-s0b/s0b-4-esp-spike-dualap.pcap</code></td><td>1043 pkts &mdash; <strong>both APs</strong>, the byte-diff capture</td></tr>
+      <tr><td><code>docs/worklog/artifacts/raw-s0b/s0b-2-reference-rawenabled.pcap</code></td><td>rescued S0b-2 reference</td></tr>
+      <tr><td><code>docs/worklog/artifacts/raw-s0b/s0b-1-cal-rawdisabled.pcap</code></td><td>rescued S0b-1 negative control</td></tr>
+      <tr><td><code>docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch</code></td><td>the two guarded submodule edits</td></tr>
+      <tr><td><code>tools/raw_s1g_beacon_decode.py</code></td><td>the tracked decoder</td></tr>
+      <tr><td><code>firmware/test-raw-rps/</code></td><td>the spike fixture (+ <code>tools/regtest/manifest.py</code> entry)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="next">13 &middot; What this does NOT prove, and what is next</h2>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; Q2 is an <em>advertise</em>-plane result</p>
+    <p><strong>It does not prove the chip acts on the ESP's schedule.</strong> The bytes reach the air. Whether
+    the MM6108's RAW engine arms from an <strong>ESP-authored</strong> beacon &mdash; Q3b &mdash; is read from
+    the chip's own tag-4210 <code>raw_stats_t</code> counters, not from a capture.</p>
+  </div>
+
+  <p>That is <strong>S0b-5</strong>:</p>
+  <ul>
+    <li>Read the ESP's counters via <code>mmwlan_get_morse_stats(1, &hellip;)</code> &mdash; already public and
+      already exported by the <code>mmwlan*</code> glob, so <strong>no submodule change</strong>; the work is
+      app-side (TLV walk, tag 4210, 15&times;LE-u32, <code>TEST|</code> reporting). Expect
+      <code>assignments[]</code> to climb &asymp; once per beacon and <code>invalid_assignments</code> to stay
+      0, as the Linux arm did (<strong>2179 / 0</strong>).</li>
+    <li>Read tags <strong>4171-4180</strong> too (<em>beacons late from host</em>, <em>beacons TX late</em>,
+      <em>beacons missing from host</em>). The RAW window is referenced to the <strong>end of the beacon
+      carrying the RPS</strong>, so a late host-served beacon corrupts the time reference even with perfect
+      enforcement. Without that control, <em>&ldquo;the ESP cannot serve beacons punctually enough for
+      RAW&rdquo;</em> is indistinguishable from <em>&ldquo;the FW has no AP-direction engine&rdquo;</em>
+      &mdash; and only the first is fixable.</li>
+    <li>The fixture is already the right shape for it: <code>test-raw-rps</code> parks forever and already
+      carries the <code>TEST|</code> contract.</li>
+  </ul>
+
+  <p>Still open from earlier stages and <strong>not</strong> touched here: the &le;6-slot cap,
+  <code>frame_crosses_slot</code> showing real frames are too long for a 10100&thinsp;&micro;s slot at 1 MHz,
+  and the big one &mdash; <strong>RAW costs the AP ~22&thinsp;% of its downlink as a standing cost, and the
+  client count at which the contention saving exceeds it is not answerable on this bench.</strong></p>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#rules">1 &middot; Pre-registered rules</a></li>
+    <li><a href="#rig">2 &middot; Rig &mdash; two APs, one capture</a></li>
+    <li><a href="#ab">3 &middot; The A/B</a></li>
+    <li><a href="#chains">4 &middot; Where the RPS lands</a></li>
+    <li><a href="#edits">5 &middot; The two guarded edits</a></li>
+    <li><a href="#arming">6 &middot; Arming the spike</a></li>
+    <li><a href="#decoder">7 &middot; The tracked decoder</a></li>
+    <li><a href="#s0b3">8 &middot; S0b-3 for free</a></li>
+    <li><a href="#shortbeacon">9 &middot; Short beacons</a></li>
+    <li><a href="#integrity">10 &middot; Integrity of the runs</a></li>
+    <li><a href="#footguns">11 &middot; Bench footguns</a></li>
+    <li><a href="#artifacts">12 &middot; Bench state + artifacts</a></li>
+    <li><a href="#next">13 &middot; What's next</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-07-31-raw-s0b-4-esp-rps</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
