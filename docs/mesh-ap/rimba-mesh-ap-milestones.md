@@ -993,10 +993,18 @@ needs attention is the part that is silently rig-specific.*
   baseline had zero EID-208. ⇒ **the host splice is the cheap path, the host-built-S1G-beacon fallback is
   not needed, and S3 is not dead as written.** Worklog
   [`2026-07-31-raw-s0b-4-esp-rps.md`](../worklog/2026-07-31-raw-s0b-4-esp-rps.md).
-  **◐ NEXT = S0b-5 (Q3b)** — does the engine arm with the **ESP** as AP. A counter read, not a capture:
-  `mmwlan_get_morse_stats(1, …)` is already exported, so no submodule change; plus tags 4171-4180 for
-  host-beacon lateness, without which "the ESP can't serve beacons punctually enough" is
-  indistinguishable from "no AP-direction engine". Then stage S1–S4 to the MVP.
+  **✅ S0b-5 — Q3b, DONE 2026-07-31. HARD GO. The S0b spike is complete.** Both halves reproduce the Linux
+  behaviour with the ESP as AP: **arming** — `assignments[0]`/Beacons TX = **exactly 1.000 across 2344
+  beacons**, `invalid_assignments = 0`; **gating** — with a Linux STA and a ping flood,
+  `aci_frames_delayed` 0→**139** and `frame_crosses_slot` 0→**37** (Linux: 92 / 27). Beacon punctuality
+  clean (late/missing from host all **0**), excluding the beacon-punctuality branch outright. Worklog
+  [`2026-07-31-raw-s0b-5-esp-counters.md`](../worklog/2026-07-31-raw-s0b-5-esp-counters.md).
+  **◐ NEXT is a DESIGN question, not a firmware one.** Every firmware unknown the port hung on is now
+  answered, but RAW costs the AP **~22 % of its downlink** as a standing cost, measured with one STA where
+  there is no contention to buy it back. **At what client count does the saving exceed it?** The bench
+  cannot produce 30+ contending clients, so this needs a model calibrated on the numbers in hand (22 %
+  cost, ≤6 slots, frames too long for a 10100 µs slot at 1 MHz). Settle that before staging S1–S4 — a GO
+  later reversed on throughput is worse than a slower decision.
   ⚠ **Carry into S1+:** RAW costs the AP **~22 % of its downlink** as a standing cost (measured
   2026-07-31, one STA), `num_slots` is silently capped at **6**, and `frame_crosses_slot` says real frames
   are too long for a 10100 µs slot at 1 MHz.

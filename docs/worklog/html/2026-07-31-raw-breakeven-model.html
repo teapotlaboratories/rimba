@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAW break-even — the model cannot be built, and the plan changes — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-31</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-31</span>
+    <span class="badge">8 min read</span>
+    <span class="badge err">&#10007; negative result &mdash; model refused</span>
+    <span class="badge warn">plan changed &mdash; do NOT stage S1&rarr;S4</span>
+    <span class="badge bug">RAW &middot; break-even</span>
+  </div>
+
+  <h1>RAW break-even &mdash; the model cannot be built<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">four gaps, any one fatal &middot; and RAW is not the binding constraint anyway</small></h1>
+
+  <p class="lead">The RAW S0b spike is complete and <strong>GO on every firmware question</strong>
+  (<a href="2026-07-31-raw-s0b-5-esp-counters.html"><code>s0b-5</code></a>). What it left open is economic: RAW
+  costs the AP <strong>~22&#8202;% of its downlink</strong> as a standing cost, measured with <strong>one
+  STA, where there is no contention to save</strong>. The mesh-gate targets <strong>16&ndash;32 clients</strong>.
+  At what client count does the contention saving exceed the cost? This session set out to model that. <strong>It
+  does not produce a model.</strong> It produces the finding that the model is not computable from anything that
+  exists, plus a change of plan that matters more than the curve would have.</p>
+
+  <div class="callout err">
+    <p class="ct">&#10007; The deliverable is a refusal, and that was pre-registered as a valid outcome</p>
+    <p>Four independent gaps, <strong>any one</strong> of which sinks the calculation &mdash; and
+    <strong>two of them cannot be closed by analysis at all, only by hardware</strong>. Building a curve on top
+    of them would have produced a plausible-looking number that justified or killed a feature on constants
+    nobody measured. The attempt to settle the decisive parameter <em>by measurement</em> also failed, and it
+    failed in the way that is easiest to miss: it returned a clean-looking number from a run carrying
+    <strong>~1&#8202;% of link capacity</strong>.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num" style="color:var(--err)">4</div><div class="lbl">independent gaps, each fatal on its own</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">2</div><div class="lbl">closable only by hardware, not analysis</div></div>
+    <div class="stat"><div class="num acc">3&times;</div><div class="lbl">spread in the cost figure itself (22&#8202;% TCP vs ~7&#8202;% UDP)</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">0</div><div class="lbl">times RAW has ever been observed <em>helping</em></div></div>
+    <div class="stat"><div class="num" style="color:var(--warn)">8</div><div class="lbl">clients &mdash; the gate's ceiling today</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">~1&#8202;%</div><div class="lbl">of link capacity offered by the run meant to settle it</div></div>
+  </div>
+
+  <h2 id="question">1 &middot; The question, and why it was to be modelled</h2>
+
+  <p><strong>The bench physically cannot produce 30+ contending clients.</strong> There are three ESP boards and
+  four Linux nodes, one of which must be the sniffer. Buying many-STA hardware to answer the question is a real
+  cost &mdash; so the point of the model was to decide whether that purchase is worth making, and to say what
+  the answer plausibly is if it is not.</p>
+
+  <div class="callout">
+    <p class="ct">The standard this had to meet, pre-registered before any curve was drawn</p>
+    <p>A model is easy to make <em>look</em> authoritative and hard to make <em>true</em>. The specific failure
+    mode is a plausible-looking curve built on unsourced constants. This project has already eaten two
+    instrument errors that looked plausible &mdash; the S0b-1 grid-phase gate and the S0b-2 66&#8202;%-loss
+    capture &mdash; so the discipline is the one that caught those:</p>
+    <ol style="margin:.4em 0">
+      <li>Every parameter labelled <code>MEASURED</code> / <code>SOURCE-DERIVED</code> / <code>ASSUMED</code>.
+        <strong>No bare numbers.</strong></li>
+      <li>The model must <strong>reproduce the measurements already in hand</strong> before it is allowed to
+        extrapolate &mdash; specifically the ~22&#8202;% single-STA cost, which is a point we know.</li>
+      <li>The output is a <strong>range with a sensitivity analysis, not a number</strong>. If the break-even
+        moves from 8 to 40 clients under a plausible parameter swing, <em>that</em> is the finding, and it means
+        &ldquo;go measure it&rdquo;.</li>
+      <li><strong>A refusal is a valid outcome.</strong> If the assumptions that decide the answer cannot be
+        grounded, the honest deliverable is &ldquo;not decidable without many-STA hardware, and here is exactly
+        which parameter decides it&rdquo;.</li>
+    </ol>
+    <p>Rule 4 is the one that fired.</p>
+  </div>
+
+  <h2 id="prior">2 &middot; Two things in the existing A/B data that broke the model before it was built</h2>
+
+  <p>Re-reading <a href="2026-07-31-raw-throughput-ab.html">the throughput A/B</a> with the model in mind turns
+  up two issues, and both push the same way: <strong>the headline &ldquo;22&#8202;%&rdquo; is probably not the
+  number that belongs in a break-even calculation.</strong></p>
+
+  <h3>2.1 &mdash; The 22&#8202;% is a TCP figure, and TCP amplifies</h3>
+
+  <p>The two arms disagree, and the disagreement is informative:</p>
+
+  <table>
+    <thead><tr><th>instrument</th><th class="num">baseline</th><th class="num">RAW on</th><th class="num">delta</th></tr></thead>
+    <tbody>
+      <tr><td>TCP downlink</td><td class="num">1.63 Mbit/s</td><td class="num">1.27 Mbit/s</td><td class="num"><strong>&minus;22&#8202;%</strong></td></tr>
+      <tr><td>UDP downlink loss @ 2 Mbit/s offered</td><td class="num">0.12&#8202;%</td><td class="num">7.2&#8202;%</td><td class="num"><strong>&minus;7.1&nbsp;pp of offered</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>If RAW denied 22&#8202;% of downlink airtime, a <em>fixed</em> 2 Mbit/s offered load should have lost
+  &asymp;22&#8202;%, not 7.2&#8202;%. TCP is a <strong>reactive</strong> instrument: it responds to added loss
+  and latency by backing off, so a ~7&#8202;% airtime denial plausibly produces a ~22&#8202;% TCP throughput
+  drop. The A/B worklog already flags this in its own caveats &mdash; <em>&ldquo;part of the 22&#8202;% is TCP
+  responding to added loss/latency, not raw airtime denial. The UDP arm &hellip; is the cleaner statement of the
+  same effect&rdquo;</em> &mdash; but the <strong>~7&#8202;%</strong> figure is the one that never got promoted
+  into the headline, and it is the one a model of <em>airtime</em> should use.</p>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; The standing cost may be ~7&#8202;% of airtime, not ~22&#8202;%</p>
+    <p>That is a <strong>3&times; difference in the very quantity the break-even is measured against</strong>,
+    and it moves the answer a long way. Both numbers would have had to be carried through as a range rather than
+    picking one.</p>
+  </div>
+
+  <h3>2.2 &mdash; Two mechanisms fit the measurement equally well, and they imply opposite models</h3>
+
+  <p>The A/B worklog reads the result as <em>&ldquo;RAW is not hard-gating the AP &hellip; if the AP's downlink
+  were strictly confined to [the window], throughput would fall by ~80&#8202;%. It fell by 22&#8202;%. So the
+  chip is imposing a partial cost.&rdquo;</em> That assumes the AP is <strong>confined to</strong> the RAW
+  window. There is a second reading that fits the arithmetic at least as well:</p>
+
+  <table>
+    <thead><tr><th>reading</th><th>what the AP does</th><th class="num">predicted cost</th><th class="num">measured</th></tr></thead>
+    <tbody>
+      <tr><td><strong>A &mdash; confined <em>to</em> the window</strong></td><td>AP may transmit only inside the 19.7&#8202;% window</td><td class="num"><strong>&minus;80.3&#8202;%</strong></td><td class="num">&minus;22&#8202;% (TCP)<br>&minus;7.1&nbsp;pp (UDP)</td></tr>
+      <tr><td><strong>B &mdash; excluded <em>from</em> the window</strong></td><td>window is reserved for assigned STAs' uplink; AP defers its own downlink during it</td><td class="num"><strong>&minus;19.7&#8202;%</strong></td><td class="num">&minus;22&#8202;% (TCP)<br>&minus;7.1&nbsp;pp (UDP)</td></tr>
+    </tbody>
+  </table>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 250" role="img" aria-label="A one-dimensional cost axis from 0 to minus 85 percent of downlink. Reading A predicts minus 80.3 percent, far to the right of everything measured. Reading B predicts minus 19.7 percent, which lands inside the measured band spanned by UDP minus 7.1 percentage points and TCP minus 22 percent.">
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="11.5">
+          <!-- measured band -->
+          <rect x="137.6" y="118" width="99.9" height="46" rx="6" fill="#2f6feb" opacity=".13"/>
+          <rect x="137.6" y="118" width="99.9" height="46" rx="6" fill="none" stroke="#2f6feb" stroke-width="1.2"/>
+
+          <!-- reading A guide -->
+          <line x1="628.5" y1="46" x2="628.5" y2="200" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="6 4"/>
+          <text x="624" y="34" text-anchor="end" fill="#c0392b" font-weight="650">A predicts &minus;80.3&#8202;% &mdash; nowhere near</text>
+
+          <!-- reading B guide -->
+          <line x1="222.1" y1="76" x2="222.1" y2="200" stroke="#1a8a4a" stroke-width="1.5" stroke-dasharray="6 4"/>
+          <text x="228" y="66" fill="#1a8a4a" font-weight="650">B predicts &minus;19.7&#8202;%</text>
+          <text x="228" y="80" fill="#8894a6" font-size="10.5">lands inside the measured band</text>
+
+          <!-- measured markers -->
+          <circle cx="137.6" cy="141" r="6" fill="#7c3aed"/>
+          <circle cx="237.5" cy="141" r="6" fill="#2f6feb"/>
+          <text x="137.6" y="112" text-anchor="middle" fill="#7c3aed" font-size="11" font-weight="650">UDP &minus;7.1&nbsp;pp</text>
+          <text x="243" y="187" fill="#2f6feb" font-size="11" font-weight="650">TCP &minus;22&#8202;%</text>
+          <line x1="237.5" y1="150" x2="237.5" y2="178" stroke="#2f6feb" stroke-width="1"/>
+          <text x="188" y="103" text-anchor="middle" fill="#5a6577" font-size="10.5">what was actually measured</text>
+
+          <!-- axis -->
+          <line x1="90" y1="200" x2="682" y2="200" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="90" y1="200" x2="90" y2="207" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="224.1" y1="200" x2="224.1" y2="207" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="358.2" y1="200" x2="358.2" y2="207" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="492.4" y1="200" x2="492.4" y2="207" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="626.5" y1="200" x2="626.5" y2="207" stroke="#8894a6" stroke-width="1.2"/>
+          <text x="90" y="221" text-anchor="middle" fill="#8894a6">0&#8202;%</text>
+          <text x="224.1" y="221" text-anchor="middle" fill="#8894a6">&minus;20&#8202;%</text>
+          <text x="358.2" y="221" text-anchor="middle" fill="#8894a6">&minus;40&#8202;%</text>
+          <text x="492.4" y="221" text-anchor="middle" fill="#8894a6">&minus;60&#8202;%</text>
+          <text x="626.5" y="221" text-anchor="middle" fill="#8894a6">&minus;80&#8202;%</text>
+          <text x="386" y="242" text-anchor="middle" fill="#5a6577" font-weight="650">cost to AP downlink</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The same measurement, one axis. Reading B's prediction sits inside the measured band; reading A's
+    is not close. But &ldquo;fits better&rdquo; is not &ldquo;confirmed&rdquo; &mdash; and the two readings imply
+    opposite break-even models.</figcaption>
+  </figure>
+
+  <p>B is also the more natural 802.11ah semantic: a RAW slot is reserved for the STA assigned to it, so the AP
+  withholds its own downlink &mdash; which is precisely what <code>aci_frames_delayed</code> counts (the
+  <em>local</em> transmitter deferring its <em>own</em> frames; it counted <strong>37,897</strong> in that run).</p>
+
+  <div class="callout bug">
+    <p class="ct">&#128027; Why this is not a detail</p>
+    <p>Under reading B, RAW is not &ldquo;wasting&rdquo; 20&#8202;% of airtime &mdash; it is
+    <strong>time-division-multiplexing the medium between AP downlink and STA uplink</strong>. The cost is
+    airtime <em>reallocated to uplink</em>, not airtime destroyed. A break-even model that treats it as pure
+    waste would <strong>understate RAW badly on an uplink-heavy workload</strong>, and the mesh-gate's traffic
+    mix is not known to be downlink-dominated.</p>
+    <p><strong>Neither reading is confirmed.</strong> This is the parameter that most decides the answer.</p>
+  </div>
+
+  <h2 id="void">3 &middot; The measurement that would have settled it &mdash; and why it is void</h2>
+
+  <p>The mechanism question turns out to be <em>measurable</em> rather than arguable, because the firmware's
+  descriptor table (extracted for S0b-5) carries a denominator: <strong>tag 4133 &ldquo;TX Total&rdquo;</strong>.
+  <code>aci_frames_delayed / TX&nbsp;Total</code> discriminates the readings directly &mdash;
+  <strong>&asymp;80&#8202;% for (A), &asymp;20&#8202;% for (B)</strong>. Added that plus a set of contention
+  observables to the fixture and ran it.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">4133</div><div class="s">TX Total<br><em>the denominator</em></div></div>
+      <div class="node"><div class="t">4159</div><div class="s">TX average<br>backoff slots</div></div>
+      <div class="node"><div class="t">4105</div><div class="s">DCF medium<br>busy before TX</div></div>
+      <div class="node"><div class="t">4143 / 4144</div><div class="s">ACK valid /<br>ACK timeout</div></div>
+    </div>
+    <figcaption>Counters added to the fixture for this run: ESP AP, Linux STA associated, 150&#8202;s ping flood.</figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>read</th><th class="num"><code>aci_frames_delayed</code></th><th class="num">TX Total</th><th class="num">ratio</th></tr></thead>
+    <tbody>
+      <tr><td>t+60&#8202;s</td><td class="num">40</td><td class="num">860</td><td class="num"><strong>4.65&#8202;%</strong></td></tr>
+      <tr><td>t+120&#8202;s</td><td class="num">91</td><td class="num">1744</td><td class="num"><strong>5.21&#8202;%</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Neither &asymp;80&#8202;% nor &asymp;20&#8202;%.</strong> ~5&#8202;%, twice, stable &mdash; which
+  would be a striking third answer. It is not an answer at all, and the reason is worth recording.</p>
+
+  <div class="callout err">
+    <p class="ct">&#10007; The load was ~1&#8202;% of link capacity, so the ratio measured the load, not the mechanism</p>
+    <p><code>ping -i 0.002</code> requests <strong>500 pps</strong> but achieved <strong>~4 pps</strong> (604
+    replies in 150&#8202;s), i.e. <strong>~17 kbit/s against a link that does ~1.68 Mbit/s</strong>. TX Total
+    ran at 14.5 frames/s. At that offered load the AP is idle almost all the time, so <em>of course</em> few
+    frames collide with the RAW window.</p>
+  </div>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 240" role="img" aria-label="Two to-scale bars. The first shows link capacity of about 1.68 megabits per second as a full-width bar with a barely visible one percent sliver filled, representing the 17 kilobits per second actually achieved. The second shows 500 packets per second requested as a full-width bar with a sliver representing the 4 packets per second achieved.">
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="11.5">
+          <!-- capacity bar -->
+          <text x="60" y="42" fill="#5a6577" font-weight="650">link capacity &mdash; what the run could have used</text>
+          <rect x="60" y="52" width="600" height="46" rx="7" fill="#8894a6" opacity=".12"/>
+          <rect x="60" y="52" width="600" height="46" rx="7" fill="none" stroke="#8894a6" stroke-width="1.2"/>
+          <rect x="60" y="52" width="6" height="46" rx="2" fill="#c0392b"/>
+          <text x="650" y="80" text-anchor="end" fill="#8894a6" font-size="11.5">~1.68&nbsp;Mbit/s = 100&#8202;%</text>
+          <path d="M63 104 L63 128 L128 128" stroke="#c0392b" stroke-width="1.3" fill="none"/>
+          <text x="134" y="132" fill="#c0392b" font-size="11.5" font-weight="650">achieved ~17&nbsp;kbit/s &asymp; 1&#8202;% &mdash; the red sliver, to scale</text>
+
+          <!-- pps bar -->
+          <text x="60" y="172" fill="#5a6577" font-weight="650"><tspan font-family="ui-monospace,monospace">ping -i 0.002</tspan> &mdash; what was asked for</text>
+          <rect x="60" y="182" width="600" height="34" rx="7" fill="#8894a6" opacity=".12"/>
+          <rect x="60" y="182" width="600" height="34" rx="7" fill="none" stroke="#8894a6" stroke-width="1.2"/>
+          <rect x="60" y="182" width="4.8" height="34" rx="2" fill="#c0392b"/>
+          <text x="650" y="204" text-anchor="end" fill="#8894a6" font-size="11.5">500 pps requested</text>
+          <text x="76" y="204" fill="#c0392b" font-size="11.5" font-weight="650">&larr; ~4 pps achieved (604 replies in 150&#8202;s)</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Both bars to scale. A ratio taken at ~1&#8202;% of capacity cannot discriminate between a
+    mechanism that gates 80&#8202;% of airtime and one that gates 20&#8202;% of it &mdash; there is almost
+    nothing to gate.</figcaption>
+  </figure>
+
+  <p><strong>And the bench cannot fix this.</strong> A saturating downlink against the ESP AP needs an iperf
+  server on the ESP, which exists only in <code>rimba-halow-ap-perf</code> (console REPL + <code>iperf-cmd</code>
+  component) and not in this fixture, and cannot be added to it without also pulling in the REPL.
+  <code>ping</code> is the only generator available and it delivers ~4 pps. <strong>So the mechanism question is
+  not answerable with the ESP AP on this bench</strong>, and the ~5&#8202;% figure is recorded as <em>what a
+  1&#8202;%-load run produced</em>, not as a result.</p>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; A second defect that would survive even at saturation &mdash; unit ambiguity</p>
+    <p>A-MPDU is enabled, so <code>TX Total</code> may count <strong>aggregates</strong> while
+    <code>aci_frames_delayed</code> counts <strong>MPDUs</strong> (or vice versa). At 4 pps offered and 14.5
+    TX/s the two are the same order, so they are probably both MPDU-ish here &mdash; but that is inference, and
+    at saturation with real aggregation the ratio could be off by the aggregation factor. <strong>A ratio
+    between two counters whose units are unconfirmed is not a measurement.</strong></p>
+  </div>
+
+  <h2 id="gaps">4 &middot; The four gaps &mdash; any one of them sinks the calculation</h2>
+
+  <p>Per the standard pre-registered at the top (&ldquo;a refusal is a valid outcome&rdquo;), this is the honest
+  deliverable. The break-even is <strong>not computable</strong> from what exists, and building the model anyway
+  would have been the mistake.</p>
+
+  <table>
+    <thead><tr><th>#</th><th>gap</th><th>why it is fatal to the model</th><th>closable by?</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="num"><strong>1</strong></td>
+        <td><strong>The 22&#8202;% is a <em>Linux-AP</em> number</strong></td>
+        <td>The throughput A/B was chronite (Linux AP) &rarr; chronium (Linux STA). <strong>Zero ESP boards were
+          involved.</strong> No ESP throughput A/B exists anywhere. Transferring 22&#8202;% to an ESP32 gate
+          assumes the cost is a chip-level property &mdash; plausible (same blob; same-order counters,
+          <code>aci</code> 92 vs 139 and <code>frame_crosses_slot</code> 27 vs 37) but <strong>unproven</strong>.</td>
+        <td><span class="badge err">hardware only</span></td>
+      </tr>
+      <tr>
+        <td class="num"><strong>2</strong></td>
+        <td><strong>The cost figure is transport-dependent and unresolved</strong></td>
+        <td>TCP says &minus;22&#8202;%, UDP at fixed offered rate says &minus;7.1&nbsp;pp. TCP is reactive, so
+          the <em>airtime</em> cost is likely nearer 7&#8202;% than 22&#8202;%. A <strong>3&times; spread</strong>
+          in the quantity the break-even is measured against.</td>
+        <td><span class="badge warn">unresolved 3&times; spread</span></td>
+      </tr>
+      <tr>
+        <td class="num"><strong>3</strong></td>
+        <td><strong>One RAW configuration was ever measured</strong></td>
+        <td>2 slots &times; 10100&#8202;&micro;s, 19.7&#8202;% window, <code>cross_slot=0</code>, all AIDs. Cost
+          <em>and</em> benefit both scale with window fraction and slot count, and <strong>that curve was never
+          measured</strong>. The measured config is not even a good one &mdash; see below.</td>
+        <td><span class="badge warn">curve never measured</span></td>
+      </tr>
+      <tr>
+        <td class="num"><strong>4</strong></td>
+        <td><strong>The benefit side has never been observed at all</strong></td>
+        <td>RAW's payoff is reduced collisions among many contenders. The bench maxes out at <strong>~3
+          contending nodes</strong>. <strong>Nothing in this project has ever measured RAW helping.</strong></td>
+        <td><span class="badge err">hardware only</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout err">
+    <p class="ct">&#10007; Gaps 1 and 4 cannot be closed by analysis &mdash; only by hardware</p>
+    <p>No amount of care with the arithmetic reaches an ESP-AP cost figure that was never measured, or a benefit
+    that was never observed.</p>
+  </div>
+
+  <h2 id="gap5">4b &middot; Gap 5, found last and decisive on its own &mdash; the contention model has no clock</h2>
+
+  <p>A DCF/EDCA contention model is parameterised almost entirely by <strong><code>aSlotTime</code></strong>
+  and <strong>SIFS</strong> &mdash; every backoff, DIFS and collision cost is expressed in them. A search of
+  all four trees (<code>components/halow/**</code> incl. the vendored hostapd,
+  <code>morse_driver/**</code>, <code>hostap/**</code>) finds <strong>neither constant as a microsecond
+  value anywhere</strong>. The only hits are <code>SHORT_SLOT_TIME</code> <em>capability bits</em>
+  (<code>dot11.h:116-117,210-221</code>), a reported BSS flag (<code>morse_driver/wiphy.c:1033</code>) and,
+  tellingly, an admitted placeholder in hostapd&rsquo;s TSPEC path:
+  <code>hostap/src/ap/wmm.c:253</code>, <code>50 /* FIX: proper SIFS + ACK duration */</code>.</p>
+
+  <div class="callout bug">
+    <p class="ct">&#9888; The timing constants a contention model runs on are not knowable from this codebase</p>
+    <p>They live in the MM6108 blob. Any model would have to <em>assume</em> S1G slot/SIFS values, and those
+    assumptions would then silently determine the break-even &mdash; the &ldquo;unsourced constant decides the
+    answer&rdquo; failure in its purest form. This alone is sufficient grounds not to publish a curve.</p>
+  </div>
+
+  <h2 id="sides">4c &middot; The sharpest finding &mdash; cost and benefit fall on OPPOSITE SIDES of the link</h2>
+
+  <p>The EDCA parameters are asymmetric, deliberately. From <code>hostap/src/ap/ap_config.c</code> (the bench
+  conf sets no <code>wmm_ac_*</code> keys, so compiled defaults apply verbatim):</p>
+
+  <table>
+    <thead><tr><th>best-effort (AC_BE)</th><th>AIFSN</th><th>CWmin</th><th>CWmax</th><th>TXOP</th></tr></thead>
+    <tbody>
+      <tr><td>what the AP <strong>advertises to STAs</strong> (<code>:211-222</code>)</td><td>3</td><td>15</td><td><strong>1023</strong></td><td>0</td></tr>
+      <tr><td>what the Linux AP <strong>uses for itself</strong> (<code>:223-231</code>)</td><td>3</td><td>15</td><td><strong>63</strong></td><td>0</td></tr>
+    </tbody>
+  </table>
+
+  <p>The STAs&rsquo; contention window can grow <strong>16&times; further</strong> than the AP&rsquo;s own.
+  Under n-STA collision load the STAs back off into a much larger window while the AP does not, so
+  <strong>the AP retains a growing share of medium wins as n rises</strong>. Uncontrolled EDCA contention
+  therefore degrades <strong>STA uplink</strong>, not the AP downlink.</p>
+
+  <div class="callout bug">
+    <p class="ct">&#9888; This breaks the break-even question as posed</p>
+    <p>The measured ~22&#8202;% cost is <strong>AP downlink</strong>. RAW&rsquo;s benefit is <strong>reduced
+    uplink collisions among STAs</strong>. Those are different sides of the link, so &ldquo;at what client
+    count does the saving exceed the cost&rdquo; compares two different quantities unless the traffic mix is
+    known. It also means the AP is <em>already partly self-protecting</em> against the very problem RAW is
+    being ported to solve &mdash; an alternative that was never on the ledger.</p>
+  </div>
+
+  <p><strong>A second-order consequence for gap 1.</strong> The ESP AP is not merely <em>different</em>
+  hardware from the Linux AP the 22&#8202;% was measured on &mdash; it is <strong>configured to contend
+  differently</strong>. morselib&rsquo;s defaults (<code>umac_config.c:13-51</code>) give the ESP AC_BE
+  <strong>CWmax 1023 and TXOP 15008&nbsp;&micro;s</strong>, against the Linux AP&rsquo;s <strong>63 and
+  0&nbsp;&micro;s</strong>. The ESP AP is markedly <em>less</em> aggressive and <em>does</em> burst, where the
+  Linux AP is more aggressive and sends exactly one PPDU per win. Transferring the Linux number to the ESP
+  crosses a real configuration difference in exactly the parameters that govern the effect being measured.</p>
+
+  <h2 id="without">5 &middot; What can be said without a model &mdash; and it is more useful than a curve</h2>
+
+  <h3>5.1 &mdash; The measured configuration was chosen for byte-diffability, not for benefit</h3>
+
+  <p>The golden constant uses <strong>2 slots of a possible 6</strong> and a <strong>19.7&#8202;% window</strong>.
+  A deployment config would use ~6 slots over a much larger window &mdash; dividing contenders by <strong>~6
+  instead of ~2</strong>, over <strong>~5&times; more of the airtime</strong>.</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">measured</span><span class="bar-track"><span class="bar-fill slow" style="width:33.3%"></span></span><span class="val">2 slots</span></div>
+    <div class="bar-row"><span class="lbl">available</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="val">6 slots &mdash; the possible maximum</span></div>
+  </div>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; So the 22&#8202;% is not &ldquo;the cost of RAW&rdquo;</p>
+    <p>It is <strong>the cost of the one schedule that happened to be convenient for a byte-diff</strong>.
+    Reading it as the standing cost of the feature <strong>overstates the cost and understates the benefit
+    simultaneously</strong>.</p>
+  </div>
+
+  <h3>5.2 &mdash; <code>cross_slot = 0</code> in every run, and it is the obvious cost lever that was never pulled</h3>
+
+  <p><code>frame_crosses_slot_delayed</code> is the vendor's own <em>&ldquo;frames that could've been sent in the
+  RAW but were too long for slot&rdquo;</em> &mdash; and it <strong>moved on both stacks</strong> (Linux 27, ESP
+  37). Setting <code>cross_slot = 1</code> lets a frame span a slot boundary, which is precisely the deferral
+  that counter measures. <strong>Untried.</strong></p>
+
+  <h3 id="binding">5.3 &mdash; RAW is not currently the binding constraint on the thing it is being ported for</h3>
+
+  <p>This is the finding that should change the plan. The mesh-gate's scaling analysis names <strong>three</strong>
+  blockers to 16&ndash;32 clients, and <strong>RAW addresses only one</strong>:</p>
+
+  <table>
+    <thead><tr><th>blocker</th><th>status</th><th class="num">fixed by RAW?</th></tr></thead>
+    <tbody>
+      <tr><td><code>GATE_MAX_CLIENTS = 8</code> and friends (<code>HALOW_AP_MAX_STAS</code>,
+        <code>ARP_TABLE_MAX</code>, DHCP pool)</td>
+        <td><strong>binding today</strong> &mdash; the gate cannot reach 16 clients at all</td>
+        <td class="num"><strong style="color:var(--err)">&#10007;</strong> config work, listed as the
+          &ldquo;easy + medium tiers&rdquo;</td></tr>
+      <tr><td>Proxy-ARP proactive push is <strong>O(n<sub>ap</sub> &times; n<sub>mesh</sub>)</strong>, one unicast
+        per pair every 3&#8202;s</td>
+        <td>binds from ~30 clients</td>
+        <td class="num"><strong style="color:var(--err)">&#10007;</strong></td></tr>
+      <tr><td>EDCA contention</td>
+        <td>the reason RAW exists</td>
+        <td class="num"><strong style="color:var(--ok)">&#10003;</strong></td></tr>
+    </tbody>
+  </table>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 250" role="img" aria-label="A client-count number line from 0 to 40. A green band from 0 to 8 marks what the gate can host today. Everything from 8 upward is greyed out and unreachable. The mesh-gate target band of 16 to 32 clients, where RAW's benefit is supposed to appear, sits entirely inside the unreachable region. A separate marker at about 30 clients shows where the proxy-ARP proactive push, which is order n-ap times n-mesh, binds.">
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="11.5">
+          <!-- reachable / unreachable strip -->
+          <rect x="80" y="52" width="116" height="40" rx="6" fill="#1a8a4a" opacity=".18"/>
+          <rect x="80" y="52" width="116" height="40" rx="6" fill="none" stroke="#1a8a4a" stroke-width="1.4"/>
+          <text x="138" y="77" text-anchor="middle" fill="#1a8a4a" font-size="11.5" font-weight="700">reachable</text>
+
+          <rect x="196" y="52" width="464" height="40" rx="6" fill="#8894a6" opacity=".12"/>
+          <rect x="196" y="52" width="464" height="40" rx="6" fill="none" stroke="#8894a6" stroke-width="1.2" stroke-dasharray="5 4"/>
+          <text x="428" y="77" text-anchor="middle" fill="#8894a6" font-size="11.5" font-weight="650">cannot be entered today &mdash; <tspan font-family="ui-monospace,monospace">GATE_MAX_CLIENTS = 8</tspan></text>
+
+          <!-- ceiling marker -->
+          <line x1="196" y1="44" x2="196" y2="196" stroke="#b7791f" stroke-width="1.6"/>
+          <text x="190" y="38" text-anchor="end" fill="#b7791f" font-size="11.5" font-weight="700">ceiling = 8 clients</text>
+
+          <!-- target band -->
+          <rect x="312" y="110" width="232" height="42" rx="6" fill="#2f6feb" opacity=".14"/>
+          <rect x="312" y="110" width="232" height="42" rx="6" fill="none" stroke="#2f6feb" stroke-width="1.4"/>
+          <text x="428" y="128" text-anchor="middle" fill="#2f6feb" font-size="11.5" font-weight="700">mesh-gate target 16&ndash;32</text>
+          <text x="428" y="144" text-anchor="middle" fill="#5a6577" font-size="10.5">the regime where RAW's benefit is supposed to appear</text>
+
+          <!-- proxy-arp marker -->
+          <line x1="515" y1="152" x2="515" y2="184" stroke="#c0392b" stroke-width="1.4" stroke-dasharray="5 3"/>
+          <circle cx="515" cy="184" r="4.5" fill="#c0392b"/>
+          <text x="521" y="176" fill="#c0392b" font-size="11" font-weight="650">proxy-ARP push O(n<tspan font-size="8.5" dy="2">ap</tspan><tspan dy="-2"> &times; n</tspan><tspan font-size="8.5" dy="2">mesh</tspan><tspan dy="-2">) binds ~30</tspan></text>
+
+          <!-- axis -->
+          <line x1="80" y1="196" x2="672" y2="196" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="80" y1="196" x2="80" y2="203" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="196" y1="196" x2="196" y2="203" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="312" y1="196" x2="312" y2="203" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="428" y1="196" x2="428" y2="203" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="544" y1="196" x2="544" y2="203" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="660" y1="196" x2="660" y2="203" stroke="#8894a6" stroke-width="1.2"/>
+          <text x="80" y="217" text-anchor="middle" fill="#8894a6">0</text>
+          <text x="196" y="217" text-anchor="middle" fill="#b7791f" font-weight="700">8</text>
+          <text x="312" y="217" text-anchor="middle" fill="#8894a6">16</text>
+          <text x="428" y="217" text-anchor="middle" fill="#8894a6">24</text>
+          <text x="544" y="217" text-anchor="middle" fill="#8894a6">32</text>
+          <text x="660" y="217" text-anchor="middle" fill="#8894a6">40</text>
+          <text x="376" y="240" text-anchor="middle" fill="#5a6577" font-weight="650">associated clients on the gate</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The gate's ceiling is 8 clients. The band RAW is being ported to serve lies entirely inside the
+    region the gate cannot currently enter &mdash; for reasons that have nothing to do with RAW.</figcaption>
+  </figure>
+
+  <div class="callout err">
+    <p class="ct">&#10007; Building S1&rarr;S4 now optimises a constraint that is not yet reachable</p>
+    <p><strong>The gate's ceiling is 8 clients today.</strong> RAW is a fix for contention at 16&ndash;32 &mdash;
+    a regime the gate cannot currently enter. It would also be <em>measured</em> on a gate that still cannot host
+    the client count where the benefit appears.</p>
+  </div>
+
+  <h2 id="recommendation">6 &middot; Recommendation &mdash; the plan change</h2>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; Do not stage S1&rarr;S4 yet</p>
+    <p><strong>Not because RAW looks bad.</strong> The firmware answer is a clean GO and the cost is probably
+    nearer 7&#8202;% than 22&#8202;% on a schedule nobody has tuned. It is because <strong>the payoff cannot be
+    demonstrated, and the cheaper blocker is upstream of it.</strong></p>
+  </div>
+
+  <h3>Order of work that actually moves the ceiling</h3>
+
+  <figure>
+    <div class="flow vert">
+      <div class="node acc"><div class="t">1 &middot; Raise the gate ceiling to 16&ndash;32</div><div class="s">the tracked &ldquo;easy + medium tiers&rdquo;: <code>HALOW_AP_MAX_STAS</code>, PSRAM, Kconfig range,<br><code>ARP_TABLE_MAX</code>, replace the gate's client table with <code>mmwlan_ap_get_sta_status()</code></div></div>
+      <div class="node ok"><div class="t">2 &middot; The minimal experiment that settles the break-even</div><div class="s">the missing <strong>ESP-AP</strong> throughput A/B, RAW off vs on, <strong>at saturation</strong><br>swept over <strong>window fraction</strong> and <strong>slot count</strong>, including <code>cross_slot = 1</code><br>at <strong>increasing client counts</strong> up to the new ceiling</div></div>
+      <div class="node"><div class="t">3 &middot; Keep the S0b spike fixture and tooling as-is</div><div class="s">they are exactly what step 2 needs &mdash; <code>test-raw-rps</code> already reads every counter that experiment wants</div></div>
+    </div>
+    <figcaption>Step 2 is cheap <em>once the ceiling is raised</em> and impossible before it. Until step 1 lands,
+    no RAW benefit is observable <strong>in principle</strong>.</figcaption>
+  </figure>
+
+  <p>Step 2 is the direct answer to the four gaps: an <strong>ESP-AP</strong> A/B closes gap 1, running it
+  <strong>at saturation</strong> with a fixed offered load closes gap 2, the <strong>sweep</strong> closes gap 3,
+  and <strong>increasing client counts</strong> is the only way the benefit term of gap 4 ever becomes visible.</p>
+
+  <h2 id="wouldchange">7 &middot; What would change this recommendation</h2>
+
+  <p><strong>A workload argument that the gate is uplink-heavy.</strong> RAW's cost is borne by
+  <em>downlink</em>; if gate traffic is predominantly uplink (sensors reporting), the cost side of the ledger is
+  <strong>much smaller</strong> than these downlink-only measurements suggest. Nothing in the project
+  characterises the expected traffic mix, and it is a <strong>cheaper question to answer than any of the
+  above</strong>.</p>
+
+  <div class="callout">
+    <p style="margin:0">Note how this connects back to &sect;2.2: under reading B the cost is airtime
+    <em>reallocated to uplink</em> rather than destroyed &mdash; so the mechanism question and the traffic-mix
+    question are the same question wearing two hats, and the traffic-mix half needs no hardware at all.</p>
+  </div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#question">1 &middot; The question</a></li>
+    <li><a href="#prior">2 &middot; Two things that broke it first</a></li>
+    <li><a href="#void">3 &middot; The void measurement</a></li>
+    <li><a href="#gaps">4 &middot; The four gaps</a></li>
+    <li><a href="#gap5">4b &middot; Gap 5 &mdash; no clock</a></li>
+    <li><a href="#sides">4c &middot; Opposite sides of the link</a></li>
+    <li><a href="#without">5 &middot; What can be said anyway</a></li>
+    <li><a href="#binding">5.3 &middot; RAW is not the binding constraint</a></li>
+    <li><a href="#recommendation">6 &middot; The plan change</a></li>
+    <li><a href="#wouldchange">7 &middot; What would change it</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-07-31-raw-breakeven-model</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

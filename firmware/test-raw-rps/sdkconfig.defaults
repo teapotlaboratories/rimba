@@ -2,3 +2,8 @@
 # umac_ap.c is not in SRCS at all (morselib/CMakeLists.txt:107-114) and the RPS splice — which lives in
 # umac_ap_build_beacon() — silently does nothing.
 CONFIG_HALOW_AP_MODE=y
+
+# Own partition table: the default SINGLE_APP_LARGE app partition (0x177000) is within a few KB of
+# full with the RAW encoder and the tag-4210 counter reader compiled in.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

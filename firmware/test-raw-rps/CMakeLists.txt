@@ -18,6 +18,6 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # Why not a CMake cache var via the Makefile's IDF_EXTRA_D: cache entries are STICKY per build dir, and
 # tools/regtest/t0_build.py rebuilds each app into that same dir with no vars — so one spike build would
 # silently keep the RPS compiled into T0 until a fullclean.
-idf_build_set_property(COMPILE_DEFINITIONS "RIMBA_RAW_S0B_SPIKE=1" APPEND)
+idf_build_set_property(COMPILE_DEFINITIONS "RIMBA_RAW_SELFTEST=1" APPEND)
 
 project(test_raw_rps)
