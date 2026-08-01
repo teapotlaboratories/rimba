@@ -110,6 +110,17 @@ morselib's `SRCS` at all. This fixture also carries its own **2 MB `partitions.c
 `SINGLE_APP_LARGE` app partition was within a few KB of full once the encoder and the counter reader were
 compiled in.
 
+⚠ **`sdkconfig` is cached per build directory, so editing `sdkconfig.defaults` alone silently does
+nothing.** A partition-table or Kconfig change needs the build tree removed first:
+
+```sh
+rm -rf build/test-raw-rps/proto1-fgh100m
+make build APP=test-raw-rps BOARD=proto1-fgh100m
+```
+
+Without that the build happily reports the *old* partition size and you conclude the override did not
+work. Same family as the sticky CMake cache noted above.
+
 ## How it is scored — the preconditions, never the verdict
 
 The `TEST|` output emits three gates. Two assert **preconditions**; only the first is an actual result,

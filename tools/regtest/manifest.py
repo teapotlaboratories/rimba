@@ -375,12 +375,16 @@ APPS: tuple[App, ...] = (
               "succeeded -- a clear RAW bit is a legitimate feasibility answer, not a regression, "
               "so it must not gate the suite on the value. Needs CONFIG_HALOW_AP_MODE=y."),
     App("test-raw-rps",
-        notes="RAW S0b-3/S0b-4 on-air spike (NOT a regression test): one board beaconing as an AP so a "
-              "sniffer can byte-diff the host-spliced RPS element (EID 208) and the S1G-caps RAW bit "
-              "against a live Linux RAW AP. The verdict is off-air -- decode the capture with "
-              "tools/raw_s1g_beacon_decode.py; the TEST| output only asserts the board is beaconing. "
-              "Its CMakeLists sets RIMBA_RAW_S0B_SPIKE build-globally, which arms the guarded morselib "
-              "edits for THIS app only. Needs CONFIG_HALOW_AP_MODE=y."),
+        notes="RAW on-air + counter fixture (NOT a regression test), covering S0b-3/S0b-4 (does the "
+              "RPS element and the S1G-caps RAW bit reach the air unmodified), S0b-5 (does the chip's "
+              "RAW engine arm and gate) and S1/S3 (the ported encoder and the config surface). Three "
+              "TEST| gates, none of which is the RAW verdict: rps-encoder-golden checks the encoder "
+              "against reference bytes with no radio at all, ap-beaconing and stats-read assert "
+              "preconditions. The on-air verdict is off-air -- decode the capture with "
+              "tools/raw_s1g_beacon_decode.py. RAW is enabled through mmwlan_ap_args (default off), "
+              "NOT a compile-time gate; the app's CMakeLists sets only RIMBA_RAW_SELFTEST, which "
+              "gates the encoder self-test export and nothing about RAW behaviour. Needs "
+              "CONFIG_HALOW_AP_MODE=y and carries its own 2 MB partitions.csv."),
     App("test-ibss",
         notes="T2 ibss: symmetric IBSS node (both run it; creator pinned to board0's MAC). "
               "Reporter polls mmwlan_ibss_peer_count()==1. Needs CONFIG_HALOW_AP_MODE=y."),

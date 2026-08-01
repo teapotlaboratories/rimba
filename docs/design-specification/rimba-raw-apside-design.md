@@ -621,6 +621,13 @@ a reference.
   in the tree every one of them emits the golden RPS and the flipped caps bit. That contaminates any
   T0 build or T2 run during the spike window and puts a RAW advertisement on air from fixtures nobody
   is watching. Wrap both edits in `#ifdef RIMBA_RAW_S0B_SPIKE`.
+  ✅ **SUPERSEDED BY S3 (2026-07-31) — the `#ifdef` is gone.** Containment is now that RAW is a field
+  on `mmwlan_ap_args` which `MMWLAN_AP_ARGS_INIT` zeroes, so an application that never asks for RAW
+  never advertises it. That is per-deployment rather than per-build, which the feature needs. Verified
+  with a config-only A/B on one board: an app that never sets `cfg.ap.raw` emitted **0 EID-208 across
+  351 beacons** with the caps bit clear, while the fixture emitted **387/387** with it set. The only
+  remaining define is `RIMBA_RAW_SELFTEST`, which gates the encoder self-test export and nothing about
+  RAW behaviour.
 - **Any S0b fixture needs a `tools/regtest/manifest.py` entry** — a `firmware/` dir without one is a
   hard T0 failure — and it will be built by the T0 matrix, so it must compile clean even if never scored.
 - **Q2 is a cost question, not a gate.** §3-S0 said "RPS stripped by re-conversion ⇒ BLOCKED", but §5
