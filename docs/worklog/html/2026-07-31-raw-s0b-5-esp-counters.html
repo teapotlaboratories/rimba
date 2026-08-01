@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAW S0b-5 — the engine arms with the ESP as AP — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-07-31</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-07-31</span>
+    <span class="badge">9 min read</span>
+    <span class="badge ok">&#10003; Q3b PASS</span>
+    <span class="badge ok">&#10003; HARD GO &mdash; stage S1&rarr;S4</span>
+    <span class="badge bug">RAW &middot; firmware counters</span>
+  </div>
+
+  <h1>RAW S0b-5 &mdash; the engine arms with the ESP as AP<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">exactly one assignment per beacon, on all 2344 of them</small></h1>
+
+  <p class="lead">The last stage of the RAW S0b spike (design doc
+  <code>rimba-raw-apside-design.md</code> &sect;7.2). <strong>Q3b:</strong> the MM6108's RAW engine
+  demonstrably arms from a <strong>host-authored beacon on Linux</strong> (S0b-2), and the ESP demonstrably
+  puts a <strong>byte-identical RPS on the air</strong> (S0b-4, merged this morning). Does the engine arm when
+  the <strong>ESP</strong> is the AP?</p>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Q3b = PASS, both halves &mdash; arming and gating</p>
+    <p><strong>The MM6108's RAW engine arms from an ESP-authored beacon.</strong> Not &ldquo;approximately once
+    per beacon&rdquo; &mdash; <strong>exactly one assignment registered per beacon transmitted</strong>, ratio
+    <strong>1.000</strong> at every read, with <code>invalid_assignments = 0</code> proving the ESP's eight
+    octets are <em>accepted</em>, not rejected. And with a STA and a ping flood attached, the chip
+    <strong>actively gates its own TX to the window</strong>: <code>aci_frames_delayed</code> 0 &rarr; 77 &rarr;
+    139, <code>frame_crosses_slot</code> 0 &rarr; 19 &rarr; 37 &mdash; the same order of magnitude as the Linux
+    arm's 92 / 27 on the same firmware. &sect;7.7's HARD GO row is satisfied in full.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">1.000</div><div class="lbl"><code>assignments[0]</code> / Beacons TX, every read</div></div>
+    <div class="stat"><div class="num ok">2344 / 2344</div><div class="lbl">beacons, each with its own assignment</div></div>
+    <div class="stat"><div class="num">0</div><div class="lbl"><code>invalid_assignments</code>, throughout</div></div>
+    <div class="stat"><div class="num acc">0 &rarr; 139</div><div class="lbl"><code>aci_frames_delayed</code> across the flood (Linux: 92)</div></div>
+    <div class="stat"><div class="num acc">0 &rarr; 37</div><div class="lbl"><code>frame_crosses_slot</code> (Linux: 27)</div></div>
+    <div class="stat"><div class="num ok">164 / 164</div><div class="lbl">TLVs emitted vs descriptor records</div></div>
+  </div>
+
+  <p><strong>The instrument is the chip's own firmware counters, not a packet capture.</strong> A capture can
+  only ever show what was <em>advertised</em>; whether the engine parsed and acted on it is in the firmware's
+  tag-4210 <code>raw_stats_t</code>. Read on Linux via <code>morse_cli -i wlan1 stats</code>, and on the ESP via
+  <code>mmwlan_get_morse_stats(1, &hellip;)</code> &mdash; already public and exported by the
+  <code>mmwlan*</code> glob, so <strong>no submodule change is needed</strong>; the work is app-side.</p>
+
+  <h2 id="instrument">1 &middot; The instrument, verified from the firmware rather than from the doc</h2>
+
+  <p>Four facts had to be right before a single number could be trusted, and each was verified first-hand:</p>
+
+  <ul>
+    <li><strong><code>mmwlan_get_morse_stats(uint32_t core_num, bool reset)</code></strong>
+      (<code>mmwlan.h:2951</code>) returns a malloc'd
+      <code>struct mmwlan_morse_stats {uint8_t *buf; uint32_t len;}</code> which must be freed with
+      <code>mmwlan_free_morse_stats()</code>. The caller supplies <strong>no</strong> buffer &mdash; the
+      implementation allocates <code>MORSE_STATS_BUF_LEN</code> itself
+      (<code>umac.c:1776-1813</code>).</li>
+    <li><strong><code>core_num</code> is NOT a vif id.</strong> The design doc's
+      <code>mmwlan_get_morse_stats(1, &hellip;)</code> is right, but for a different reason than assumed: the
+      driver dispatches it as <strong>0 = HOST, 1 = MAC, 2 = UPHY</strong> (<code>driver.c:1510-1548</code>,
+      <code>MORSE_CMD_ID_{HOST,MAC,UPHY}_STATS_LOG</code>). RAW is a MAC statistic &rArr; core 1. The call also
+      needs <code>driver_data.started</code>, which mirrors the Linux side where <code>morse_cli stats</code>
+      fails with the link down.</li>
+    <li><strong>TLV layout: u16 LE tag, u16 LE length, then value</strong> &mdash; the same 4-byte convention
+      morselib's own <code>umac_stats.c:76-96 append_tlv()</code> uses, and what <code>morse_cli</code> walks
+      (<code>stats.c:281-329</code>, <code>offchip_statistics.h:14-16</code>).</li>
+    <li><strong><code>raw_stats_t</code> = 15 &times; <code>__le32</code> = 60 bytes</strong> &mdash;
+      <code>assignments[8]</code>, then <code>assignments_truncated_from_tbtt</code>,
+      <code>invalid_assignments</code>, <code>already_past_assignment</code>, <code>aci_frames_delayed</code>,
+      <code>bc_mc_frames_delayed</code>, <code>abs_frames_delayed</code>,
+      <code>frame_crosses_slot_delayed</code>
+      (<code>chronium:~/halow/morse_cli/stats_format.h:83-100</code>).</li>
+  </ul>
+
+  <h2 id="tag4210">2 &middot; Tag 4210 was confirmed from the firmware's own descriptor table</h2>
+
+  <p><strong><code>morse_cli</code> never hardcodes a tag.</strong> It resolves tag &rarr; name through
+  <code>get_stats_offchip()</code>, a lookup into a descriptor table compiled into the firmware image:
+  <code>struct statistics_offchip_data { char type_str[50]; char name[50]; char key[100]; u32 format;
+  u16 tag; }</code> (<code>offchip_statistics.h:46-53</code>). So the authoritative source for &ldquo;which tag
+  is RAW&rdquo; is the blob itself.</p>
+
+  <p>Extracted it directly from <code>vendor/morse-firmware/firmware/mm6108.bin</code>, section
+  <strong><code>.mac_offchip_stats</code></strong> (offset <code>0x6ca34</code>, <code>0x83f8</code> = 33784
+  bytes). 206-byte records, <strong>164 of them, dividing exactly</strong> &mdash; which is itself a check that
+  the struct layout is right:</p>
+
+<pre><code>tag=<span class="nm">4210</span>   type=raw_stats_t   name=raw           key=<span class="st">RAW</span>
+tag=<span class="nm">4126</span>   type=uint32_t      name=n_cross_raw   key=<span class="st">AGG crosses RAW slot</span></code></pre>
+
+  <p>Tag range in that section is 4097..4260. Types are <strong>not</strong> uniformly <code>uint32_t</code>
+  &mdash; <code>uint16_t</code>, <code>uint64_t</code>, <code>int32_t</code> and several structs appear &mdash;
+  so a generic walker must read by the TLV's length and never assume four bytes.</p>
+
+  <h3>The dig turned up a better control than the plan had</h3>
+
+  <p>The plan called for tags 4171-4180. The table shows the whole family, and <strong>tag 4170 &ldquo;Beacons
+  TX&rdquo;</strong> is the one that matters most:</p>
+
+<pre><code><span class="nm">4170</span>  Beacons TX                                    <span class="cm">&#8592; the DENOMINATOR</span>
+<span class="nm">4171</span>  Beacons missing from host
+<span class="nm">4172</span>  Beacons late from host delay (average usec)
+<span class="nm">4173</span>  Beacons late from host max delay (usec)
+<span class="nm">4174</span>  Beacons late from host count (packets)
+<span class="nm">4175</span>  Beacons expired before queuing
+<span class="nm">4176</span>  Beacons TX queued late
+<span class="nm">4177</span>  Beacons TX attempts delayed
+<span class="nm">4178</span>  Beacons TX late
+<span class="nm">4179</span>  Beacons TX failed count
+<span class="nm">4180</span>  Beacons TX lifetime expired</code></pre>
+
+  <p>S0b-2 called the Linux <code>assignments[0] = 2179</code> &ldquo;&asymp; once per beacon&rdquo;, but that
+  was <strong>inferred</strong> from elapsed time. With 4170 the ratio is <strong>measured against the chip's
+  own beacon count</strong>. That turns a soft &ldquo;approximately&rdquo; into an exact test, for free.</p>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; The walker refuses to guess</p>
+    <p>If the tag or the field offsets were wrong, the reader would return zeros from the wrong place &mdash;
+    and &ldquo;all counters zero&rdquo; is precisely the reading that means <em>the RAW engine never armed</em>.
+    That is a <strong>false BLOCKED on the one question this stage exists to answer.</strong> So the
+    implementation treats a missing tag 4210, or one whose length is not 60, as an <strong>error</strong> &mdash;
+    it dumps the full tag inventory and reports the instrument as broken, never as a zero measurement. The first
+    read also dumps the whole inventory unconditionally, so the read path proves itself before any verdict is
+    drawn.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t"><code>get_morse_stats(1)</code></div><div class="s">core 1 = MAC</div></div>
+      <div class="node"><div class="t">TLV walk</div><div class="s">u16 tag &middot; u16 len &middot; value</div></div>
+      <div class="node"><div class="t">tag 4210</div><div class="s">len must be 60</div></div>
+      <div class="node ok"><div class="t"><code>raw_stats_t</code></div><div class="s">15 &times; LE u32</div></div>
+      <div class="node err"><div class="t">missing / len &ne; 60</div><div class="s">ERROR, never &ldquo;zero&rdquo;</div></div>
+    </div>
+    <figcaption>The read path is designed so that a broken instrument cannot masquerade as a negative result.</figcaption>
+  </figure>
+
+  <h2 id="rules">3 &middot; Pre-registered rules, reference values, and the staging split</h2>
+
+  <p>Reference values from the equivalent all-Linux run (S0b-2, AP side):</p>
+
+  <table>
+    <thead><tr><th>counter</th><th class="num">Linux AP</th><th>meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>assignments[0]</code></td><td class="num"><strong>2179</strong></td><td>engine parsed the RPS out of its own outgoing beacon, &asymp;1/beacon</td></tr>
+      <tr><td><code>invalid_assignments</code></td><td class="num"><strong>0</strong></td><td>the bytes were accepted, not rejected</td></tr>
+      <tr><td><code>aci_frames_delayed</code></td><td class="num">92</td><td>chip gated its own TX to the window</td></tr>
+      <tr><td><code>frame_crosses_slot</code></td><td class="num">27</td><td>real frames too long for a 10100&thinsp;&micro;s slot at 1 MHz</td></tr>
+    </tbody>
+  </table>
+
+  <p>Pre-registered decision rules (&sect;7.7), unchanged:</p>
+
+  <table>
+    <thead><tr><th>Observation</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>ESP counters move like the Linux arm's</td><td><strong>HARD GO</strong> &mdash; stage S1&rarr;S4</td></tr>
+      <tr><td>ESP counters flat, element provably on air, beacon-lateness small</td><td><strong>Host-format mismatch</strong> &mdash; port the mesh beacon builder to the AP vif. <strong>Still not BLOCKED</strong></td></tr>
+      <tr><td>ESP counters flat, beacon-lateness &asymp; slot duration</td><td><strong>&ldquo;the ESP can't serve beacons punctually enough for RAW&rdquo;</strong> &mdash; a different, more fixable problem. <strong>Do not report as BLOCKED</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>That third row is why tags <strong>4171-4180</strong> (<em>beacons late from host max delay</em>,
+  <em>beacons TX late</em>, <em>beacons missing from host</em>) are read alongside 4210 and are
+  <strong>not</strong> optional: the RAW window is referenced to the <strong>end of the beacon carrying the
+  RPS</strong>, so a late or jittered host-served beacon corrupts the time reference even with a perfect engine.
+  Without that control the two failure modes are indistinguishable, and only one of them is fixable.</p>
+
+  <h3>Staging &mdash; the cheap arm first</h3>
+
+  <p>S0b-2 recorded a separation worth exploiting: <strong>with RAW enabled and beaconing but before any STA
+  associated, the Linux AP already showed <code>Valid: 1516, Invalid: 0</code> with every <code>Delayed</code>
+  counter at zero.</strong> The engine arms on the <strong>advertisement alone</strong>; the deferral counters
+  only move once there is traffic to defer. So Q3b splits:</p>
+
+  <ul>
+    <li><strong>S0b-5a &mdash; one board, no STA, no sniffer.</strong> Does <code>assignments[]</code> climb
+      &asymp;1/beacon with <code>invalid_assignments = 0</code>? That alone answers <em>&ldquo;does the engine
+      arm from an ESP-authored beacon&rdquo;</em>.</li>
+    <li><strong>S0b-5b &mdash; add a STA and uplink load.</strong> Do <code>aci_frames_delayed</code> /
+      <code>bc_mc_frames_delayed</code> move? That is the <em>gating</em> half, and it is what the throughput
+      cost is made of.</li>
+  </ul>
+
+  <p>5a is decisive for the headline question and costs one board.</p>
+
+  <h2 id="bench">4 &middot; Bench state at session start &mdash; verified 2026-07-31 ~10:20 PDT</h2>
+
+  <table>
+    <thead><tr><th>Node</th><th>State</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>board0 <code>E0:72:A1:F8:EF:A4</code></td><td>present, <code>/dev/ttyACM0</code></td><td>the AP</td></tr>
+      <tr><td>board1 <code>E0:72:A1:F8:F9:40</code></td><td>present, <code>/dev/ttyACM1</code></td><td>candidate STA for 5b</td></tr>
+      <tr><td>board2 <code>E0:72:A1:F8:F0:08</code></td><td><strong>not enumerated</strong></td><td>expected &mdash; PPK2-rail gated</td></tr>
+      <tr><td>chronium</td><td><code>wlan1</code> <strong>DOWN</strong></td><td>sniffer if needed</td></tr>
+      <tr><td>chronite</td><td><code>wlan1</code> <strong>DOWN</strong></td><td>must <strong>stop beaconing</strong> for this stage (&sect;7.5)</td></tr>
+      <tr><td>chronogen</td><td><code>wlan1</code> <strong>DOWN</strong></td><td>&#9888; carries a <strong>stale <code>wpa_supplicant_s1g</code> process</strong> with the radio down</td></tr>
+    </tbody>
+  </table>
+
+  <p>Bench pinned at Morse fw <strong>1.17.8</strong>, chip <code>0x0306</code>, S1G ch27. The
+  <code>wpa_supplicant</code> seen on all three nodes is NetworkManager's for <code>wlan0</code> &mdash;
+  <strong>never kill it, it drops the ssh management link.</strong> Only the <code>_s1g</code> variants are
+  ours.</p>
+
+  <h2 id="s0b5a">5 &middot; 10:24 &mdash; S0b-5a: Q3b PASS. One board, no STA, no traffic</h2>
+
+  <p>board0 running <code>test-raw-rps</code> (spike armed) alone on the air. chronite and chronogen down
+  throughout. Counters read with <code>reset=true</code> to open the window, then four cumulative 60&thinsp;s
+  windows.</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 300" role="img" aria-label="Scatter of assignments[0] against Beacons TX at five reads; all five points fall exactly on the y equals x identity line, at 28, 586, 1172, 1758 and 2344">
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="11.5">
+          <!-- axes -->
+          <line x1="90" y1="250" x2="668" y2="250" stroke="#8894a6" stroke-width="1.2"/>
+          <line x1="90" y1="250" x2="90" y2="32" stroke="#8894a6" stroke-width="1.2"/>
+
+          <!-- gridlines -->
+          <line x1="232.5" y1="250" x2="232.5" y2="36" stroke="#8894a6" stroke-width=".5" opacity=".35"/>
+          <line x1="375" y1="250" x2="375" y2="36" stroke="#8894a6" stroke-width=".5" opacity=".35"/>
+          <line x1="517.5" y1="250" x2="517.5" y2="36" stroke="#8894a6" stroke-width=".5" opacity=".35"/>
+          <line x1="660" y1="250" x2="660" y2="36" stroke="#8894a6" stroke-width=".5" opacity=".35"/>
+          <line x1="90" y1="197.5" x2="668" y2="197.5" stroke="#8894a6" stroke-width=".5" opacity=".35"/>
+          <line x1="90" y1="145" x2="668" y2="145" stroke="#8894a6" stroke-width=".5" opacity=".35"/>
+          <line x1="90" y1="92.5" x2="668" y2="92.5" stroke="#8894a6" stroke-width=".5" opacity=".35"/>
+          <line x1="90" y1="40" x2="668" y2="40" stroke="#8894a6" stroke-width=".5" opacity=".35"/>
+
+          <!-- axis ticks -->
+          <text x="90" y="268" text-anchor="middle" fill="#8894a6">0</text>
+          <text x="232.5" y="268" text-anchor="middle" fill="#8894a6">600</text>
+          <text x="375" y="268" text-anchor="middle" fill="#8894a6">1200</text>
+          <text x="517.5" y="268" text-anchor="middle" fill="#8894a6">1800</text>
+          <text x="660" y="268" text-anchor="middle" fill="#8894a6">2400</text>
+          <text x="82" y="254" text-anchor="end" fill="#8894a6">0</text>
+          <text x="82" y="201" text-anchor="end" fill="#8894a6">600</text>
+          <text x="82" y="149" text-anchor="end" fill="#8894a6">1200</text>
+          <text x="82" y="96" text-anchor="end" fill="#8894a6">1800</text>
+          <text x="82" y="44" text-anchor="end" fill="#8894a6">2400</text>
+
+          <text x="379" y="288" text-anchor="middle" fill="#5a6577" font-weight="650">Beacons TX (tag 4170)</text>
+          <text x="-140" y="20" transform="rotate(-90)" text-anchor="middle" fill="#5a6577" font-weight="650">assignments[0]</text>
+
+          <!-- identity line y = x -->
+          <line x1="90" y1="250" x2="660" y2="40" stroke="#1a8a4a" stroke-width="1.6" stroke-dasharray="6 4"/>
+          <text x="596" y="86" fill="#1a8a4a" font-size="11.5" font-weight="650">ratio = 1.000</text>
+
+          <!-- points -->
+          <circle cx="96.7"  cy="247.6" r="5" fill="#2f6feb"/>
+          <circle cx="229.2" cy="198.7" r="5" fill="#2f6feb"/>
+          <circle cx="368.4" cy="147.4" r="5" fill="#2f6feb"/>
+          <circle cx="507.5" cy="96.2"  r="5" fill="#2f6feb"/>
+          <circle cx="646.7" cy="44.9"  r="6" fill="#1a8a4a"/>
+
+          <text x="108" y="243" fill="#5a6577" font-size="10.5">reset &middot; 28/28</text>
+          <text x="240" y="194" fill="#5a6577" font-size="10.5">t+60&thinsp;s &middot; 586/586</text>
+          <text x="379" y="143" fill="#5a6577" font-size="10.5">t+120&thinsp;s &middot; 1172/1172</text>
+          <text x="452" y="80" fill="#5a6577" font-size="10.5">t+180&thinsp;s &middot; 1758/1758</text>
+          <text x="640" y="32" text-anchor="end" fill="#1a8a4a" font-size="11" font-weight="700">t+240&thinsp;s &middot; 2344/2344</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Five cumulative reads over four minutes. Every point lands on <code>y = x</code>: the chip
+    registers one RAW assignment per beacon it transmits, with no drift and no rejects.</figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>read</th><th class="num"><code>assignments[0]</code></th><th class="num">Beacons TX</th><th class="num">ratio</th><th class="num"><code>invalid_assignments</code></th></tr></thead>
+    <tbody>
+      <tr><td>reset</td><td class="num">28</td><td class="num">28</td><td class="num"><strong>1.000</strong></td><td class="num">0</td></tr>
+      <tr><td>t+60&thinsp;s</td><td class="num">586</td><td class="num">586</td><td class="num"><strong>1.000</strong></td><td class="num">0</td></tr>
+      <tr><td>t+120&thinsp;s</td><td class="num">1172</td><td class="num">1172</td><td class="num"><strong>1.000</strong></td><td class="num">0</td></tr>
+      <tr><td>t+180&thinsp;s</td><td class="num">1758</td><td class="num">1758</td><td class="num"><strong>1.000</strong></td><td class="num">0</td></tr>
+      <tr><td>t+240&thinsp;s</td><td class="num"><strong>2344</strong></td><td class="num"><strong>2344</strong></td><td class="num"><strong>1.000</strong></td><td class="num"><strong>0</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>The MM6108's RAW engine arms from an ESP-authored beacon.</strong> Not &ldquo;approximately once
+  per beacon&rdquo; &mdash; <strong>exactly one assignment registered per beacon transmitted, on all 2344
+  beacons</strong>, with <code>invalid_assignments = 0</code> proving the ESP's eight octets are
+  <em>accepted</em>, not rejected. 586 per 60&thinsp;s is 9.77/s, exactly the beacon rate at
+  <code>beacon_interval_tus = 100</code> (102400&thinsp;&micro;s). For comparison the Linux arm read 2179
+  assignments over ~3.7 min.</p>
+
+  <p>Every other RAW counter is zero: <code>truncated_from_tbtt</code>, <code>already_past</code>,
+  <code>aci_frames_delayed</code>, <code>bc_mc_frames_delayed</code>, <code>abs_frames_delayed</code>,
+  <code>frame_crosses_slot</code>. <strong>That is the expected reading with no STA and no traffic</strong>
+  &mdash; there is nothing to defer &mdash; and it reproduces the separation S0b-2 recorded on Linux, where the
+  AP showed <code>Valid: 1516, Invalid: 0</code> with every <code>Delayed</code> counter still at zero before
+  any STA associated. The engine arms on the <strong>advertisement alone</strong>.</p>
+
+  <h2 id="punctuality">6 &middot; Beacon punctuality &mdash; the control that decides which failure mode you are looking at</h2>
+
+  <table>
+    <thead><tr><th>counter</th><th class="num">after reset, over 2344 beacons</th></tr></thead>
+    <tbody>
+      <tr><td>Beacons missing from host</td><td class="num"><strong>0</strong></td></tr>
+      <tr><td>Beacons late from host count (packets)</td><td class="num"><strong>0</strong></td></tr>
+      <tr><td>Beacons late from host max delay (usec)</td><td class="num"><strong>0</strong></td></tr>
+      <tr><td>Beacons expired before queuing</td><td class="num"><strong>0</strong></td></tr>
+      <tr><td>Beacons TX failed / lifetime expired</td><td class="num"><strong>0 / 0</strong></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; The host serves beacons punctually &mdash; a whole decision branch excluded outright</p>
+    <p>&sect;7.7's <em>&ldquo;ESP counters flat, beacon-lateness &asymp; slot duration&rdquo;</em> branch &mdash;
+    the one that would have meant &ldquo;the ESP can't serve beacons punctually enough for RAW&rdquo; &mdash; is
+    excluded outright rather than argued away. (The pre-reset read showed a single <em>late from host max
+    delay</em> = <code>1207750</code>&thinsp;&micro;s with <code>count = 1</code>: one 1.2&thinsp;s-late beacon
+    during bring-up, before the AP settled. It does not recur once running.)</p>
+  </div>
+
+  <p>Two chip-side counters do move and are worth carrying forward, because they are <strong>not</strong> host
+  lateness:</p>
+
+  <table>
+    <thead><tr><th></th><th class="num">t+60</th><th class="num">t+120</th><th class="num">t+180</th><th class="num">t+240</th></tr></thead>
+    <tbody>
+      <tr><td>Beacons TX attempts delayed</td><td class="num">1192</td><td class="num">1293</td><td class="num">1379</td><td class="num">1491</td></tr>
+      <tr><td>Beacons TX late</td><td class="num">225</td><td class="num">247</td><td class="num">271</td><td class="num">295</td></tr>
+    </tbody>
+  </table>
+
+  <p>Per-window increments, to scale &mdash; the first window is anomalous, then the rate collapses:</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">window 1 (t+60)</span><span class="bar-track"><span class="bar-fill slow" style="width:100%"></span></span><span class="val">+1192 delayed / +225 late</span></div>
+    <div class="bar-row"><span class="lbl">window 2 (t+120)</span><span class="bar-track"><span class="bar-fill" style="width:8.5%"></span></span><span class="val">+101 delayed / +22 late</span></div>
+    <div class="bar-row"><span class="lbl">window 3 (t+180)</span><span class="bar-track"><span class="bar-fill" style="width:7.2%"></span></span><span class="val">+86 delayed / +24 late</span></div>
+    <div class="bar-row"><span class="lbl">window 4 (t+240)</span><span class="bar-track"><span class="bar-fill" style="width:9.4%"></span></span><span class="val">+112 delayed / +24 late</span></div>
+  </div>
+
+  <p>1192 delayed attempts in 586 beacons is more than one each; thereafter it settles to ~100 delayed attempts
+  and ~22 late beacons per minute, i.e. <strong>~3.8&thinsp;% of beacons TX-late in steady state</strong>. That
+  is the chip deferring its own beacon TX on a busy medium, <strong>not</strong> the host being late &mdash;
+  <em>late from host count</em> stays at 0 throughout. Worth watching in S1+, since the RAW window is anchored
+  to the beacon.</p>
+
+  <h2 id="confound">7 &middot; Confound (d) excluded by a concurrent capture</h2>
+
+  <p>A capture was taken on chronium's <code>morse0</code> <strong>during</strong> the counter run, so a flat
+  counter could never be blamed on the element not reaching the air. It did not need to be:</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">571 / 571</div><div class="lbl">beacons carrying <code>D0 06 20 40 09 04 E0 1F</code></div></div>
+    <div class="stat"><div class="num acc">0x08</div><div class="lbl">caps octet [6], all of them</div></div>
+    <div class="stat"><div class="num">190 / 381</div><div class="lbl">DTIM / non-DTIM</div></div>
+    <div class="stat"><div class="num ok">0</div><div class="lbl">undecodable frames</div></div>
+    <div class="stat"><div class="num">98.45&thinsp;%</div><div class="lbl">capture completeness</div></div>
+    <div class="stat"><div class="num acc">1</div><div class="lbl">source MAC on air &mdash; <code>6a:24:99:44:6b:b7</code></div></div>
+  </div>
+
+  <p>Byte-identical on every frame, single IE chain
+  <code>[0, 5, 208, 48, 127, 244, 213, 217, 232, 214, 221]</code>. Artifact:
+  Capture not committed (see <code>docs/worklog/artifacts/README.md</code>) &mdash; it is regenerable: flash <code>test-raw-rps</code>, then on chronium <code>sudo tcpdump -i morse0 -w cap.pcap</code>, decode with <code>python3 tools/raw_s1g_beacon_decode.py cap.pcap --sa &lt;beacon SA&gt;</code>.</p>
+
+  <p><strong>Per &sect;7.7 this is the HARD GO row for the arming half.</strong> What it does <em>not</em> cover
+  is the <strong>gating</strong> half &mdash; <code>aci_frames_delayed</code> /
+  <code>bc_mc_frames_delayed</code> need traffic to defer, which needs a STA. That is S0b-5b.</p>
+
+  <h2 id="s0b5b">8 &middot; 10:40 &mdash; S0b-5b: the gating half passes too</h2>
+
+  <div class="callout bug">
+    <p class="ct">&#128027; A blocker had to be fixed first, and it would have produced a silent null result</p>
+    <p><code>aci_frames_delayed</code> counts the <em>local</em> transmitter withholding <strong>its own</strong>
+    frames. <code>test-raw-rps</code> assigned <strong>no IP at all</strong>, so a ping flood at it produces STA
+    uplink and <strong>nothing back</strong> &mdash; every AP-side deferral counter would have stayed at zero and
+    the run would have measured nothing while looking like a clean negative. Fixed by pinning a static IP
+    (<code>192.168.12.1</code>) on the AP, modelled on <code>rimba-halow-ap</code>: mmhalow's netif is a DHCP
+    client and in AP mode mmhalow never fires a link-up event, so the netif must be brought up by hand with
+    <code>esp_netif_action_connected()</code> or lwIP silently never answers ICMP.</p>
+  </div>
+
+  <figure>
+    <div class="flow">
+      <div class="node acc"><div class="t">board0 &mdash; ESP AP</div><div class="s"><code>test-raw-rps</code>, spike armed<br>static <code>192.168.12.1</code></div></div>
+      <div class="node"><div class="t">S1G ch27</div><div class="s">BSSID <code>6a:24:99:44:6b:b7</code></div></div>
+      <div class="node"><div class="t">chronite &mdash; Linux STA</div><div class="s"><code>wpa_supplicant_s1g</code>, <code>COMPLETED</code><br><code>192.168.12.2/24</code></div></div>
+      <div class="node ok"><div class="t">120&thinsp;s flood</div><div class="s"><code>ping -i 0.002 -s 512</code></div></div>
+    </div>
+    <figcaption>512-byte payloads chosen deliberately: <code>frame_crosses_slot_delayed</code> counts frames too
+    long for the 10100&thinsp;&micro;s slot at 1 MHz, so bigger frames exercise it directly. Baseline
+    reachability first: 3/3 replies, RTT 13/87/220&thinsp;ms.</figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th></th><th class="num">t+240&thinsp;s (pre-flood)</th><th class="num">t+300&thinsp;s (flood)</th><th class="num">t+360&thinsp;s</th></tr></thead>
+    <tbody>
+      <tr><td><code>assignments[0]</code> / Beacons TX</td><td class="num">2245 / 2245 = <strong>1.000</strong></td><td class="num">2826 / 2826 = <strong>1.000</strong></td><td class="num">3412 / 3412 = <strong>1.000</strong></td></tr>
+      <tr><td><code>invalid_assignments</code></td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+      <tr><td><strong><code>aci_frames_delayed</code></strong></td><td class="num"><strong>0</strong></td><td class="num"><strong>77</strong></td><td class="num"><strong>139</strong></td></tr>
+      <tr><td><code>bc_mc_frames_delayed</code></td><td class="num">6</td><td class="num">6</td><td class="num">8</td></tr>
+      <tr><td><strong><code>frame_crosses_slot</code></strong></td><td class="num"><strong>0</strong></td><td class="num"><strong>19</strong></td><td class="num"><strong>37</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>The two gating counters against the Linux reference arm, to scale:</p>
+
+  <h4><code>aci_frames_delayed</code></h4>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">ESP &middot; pre-flood</span><span class="bar-track"><span class="bar-fill" style="width:0%"></span></span><span class="val">0</span></div>
+    <div class="bar-row"><span class="lbl">ESP &middot; t+300</span><span class="bar-track"><span class="bar-fill fast" style="width:55.4%"></span></span><span class="val">77</span></div>
+    <div class="bar-row"><span class="lbl">ESP &middot; t+360</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">139</span></div>
+    <div class="bar-row"><span class="lbl">Linux arm</span><span class="bar-track"><span class="bar-fill" style="width:66.2%"></span></span><span class="val">92</span></div>
+  </div>
+
+  <h4><code>frame_crosses_slot</code></h4>
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">ESP &middot; pre-flood</span><span class="bar-track"><span class="bar-fill" style="width:0%"></span></span><span class="val">0</span></div>
+    <div class="bar-row"><span class="lbl">ESP &middot; t+300</span><span class="bar-track"><span class="bar-fill fast" style="width:51.4%"></span></span><span class="val">19</span></div>
+    <div class="bar-row"><span class="lbl">ESP &middot; t+360</span><span class="bar-track"><span class="bar-fill fast" style="width:100%"></span></span><span class="val">37</span></div>
+    <div class="bar-row"><span class="lbl">Linux arm</span><span class="bar-track"><span class="bar-fill" style="width:73.0%"></span></span><span class="val">27</span></div>
+  </div>
+
+  <p><strong>The chip actively gates its own TX to the window when the ESP is the AP.</strong>
+  <code>aci_frames_delayed</code> goes 0 &rarr; 77 &rarr; 139 exactly across the flood,
+  <code>frame_crosses_slot</code> 0 &rarr; 19 &rarr; 37, and the 1:1 assignments-per-beacon ratio is untouched
+  by the load. The Linux arm read <code>aci = 92</code> and <code>frame_crosses_slot = 27</code> &mdash;
+  <strong>the same order of magnitude on the same firmware</strong>, which is the like-for-like comparison
+  &sect;7.7 asks for.</p>
+
+  <p><code>frame_crosses_slot</code> moving confirms on the ESP what S0b-2 found on Linux: <strong>real frames
+  are too long for a 10100&thinsp;&micro;s slot at 1 MHz.</strong> Pair that with the &le;6-slot cap when sizing
+  any real schedule.</p>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; &sect;7.7's HARD GO row is satisfied in full</p>
+    <p><em>&ldquo;S0b-5: ESP counters move like the Linux arm's &rarr; HARD GO &mdash; stage S1&rarr;S4.&rdquo;</em>
+    Both halves &mdash; arming and gating &mdash; reproduce the Linux behaviour with the ESP as AP.</p>
+  </div>
+
+  <h2 id="overread">9 &middot; 10:52 &mdash; a real parser bug, caught by the adversarial recon</h2>
+
+  <p><strong><code>stats-&gt;len</code> overstates the TLV payload by exactly 4 bytes.</strong>
+  <code>mmdrv_get_stats()</code> sets <code>*buf = resp-&gt;data</code> &mdash; already past the 4-byte
+  <code>resp-&gt;status</code> &mdash; but <code>*len = le16toh(resp-&gt;hdr.len)</code>, and
+  <code>hdr.len</code> counts <em>everything</em> after the 12-byte command header, status included. Pinned
+  three ways:</p>
+
+  <ul>
+    <li><code>struct morse_cmd_resp { hdr; uint32_t status; uint8_t data[]; }</code>
+      (<code>morse_commands.h:146-151</code>);</li>
+    <li><code>command.c:182</code> computes the total as
+      <code>hdr.len + sizeof(struct morse_cmd_header)</code>;</li>
+    <li>and decisively, <code>driver.c:1704</code> synthesises an empty response as
+      <code>resp-&gt;hdr.len = htole16(sizeof(resp-&gt;status))</code> = 4.</li>
+  </ul>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 720 250" role="img" aria-label="Response buffer layout: a 12-byte command header, a 4-byte status field, then the TLV payload. hdr.len counts status plus payload (1477) but the buffer pointer starts after status, so the payload is only 1473 bytes and the walker reads 4 bytes past the end.">
+        <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="11.5">
+          <!-- buffer strip -->
+          <rect x="40" y="70" width="90" height="42" rx="6" fill="none" stroke="#8894a6" stroke-width="1.2"/>
+          <text x="85" y="90" text-anchor="middle" fill="#5a6577" font-size="11">command hdr</text>
+          <text x="85" y="105" text-anchor="middle" fill="#8894a6" font-size="10.5">12 B</text>
+
+          <rect x="130" y="70" width="72" height="42" rx="6" fill="#b7791f" opacity=".18"/>
+          <rect x="130" y="70" width="72" height="42" rx="6" fill="none" stroke="#b7791f" stroke-width="1.4"/>
+          <text x="166" y="90" text-anchor="middle" fill="#b7791f" font-size="11" font-weight="650">status</text>
+          <text x="166" y="105" text-anchor="middle" fill="#b7791f" font-size="10.5">4 B</text>
+
+          <rect x="202" y="70" width="418" height="42" rx="6" fill="#2f6feb" opacity=".14"/>
+          <rect x="202" y="70" width="418" height="42" rx="6" fill="none" stroke="#2f6feb" stroke-width="1.4"/>
+          <text x="411" y="90" text-anchor="middle" fill="#2f6feb" font-size="11.5" font-weight="650">TLV payload &mdash; 1473 B, 164 TLVs</text>
+          <text x="411" y="105" text-anchor="middle" fill="#8894a6" font-size="10.5">u16 tag &middot; u16 len &middot; value &hellip;</text>
+
+          <rect x="620" y="70" width="52" height="42" rx="6" fill="#c0392b" opacity=".16"/>
+          <rect x="620" y="70" width="52" height="42" rx="6" fill="none" stroke="#c0392b" stroke-width="1.4" stroke-dasharray="5 3"/>
+          <text x="646" y="96" text-anchor="middle" fill="#c0392b" font-size="10.5" font-weight="650">+4 B</text>
+
+          <!-- buf pointer -->
+          <path d="M202 62 L202 40" stroke="#1a8a4a" stroke-width="1.4" fill="none"/>
+          <text x="206" y="34" fill="#1a8a4a" font-size="11" font-weight="650" font-family="ui-monospace,monospace">*buf = resp-&gt;data</text>
+          <text x="206" y="20" fill="#8894a6" font-size="10.5">already past status</text>
+
+          <!-- hdr.len bracket -->
+          <path d="M130 122 L130 138 L620 138 L620 122" fill="none" stroke="#b7791f" stroke-width="1.3"/>
+          <text x="375" y="154" text-anchor="middle" fill="#b7791f" font-size="11" font-weight="650">*len = hdr.len = 1477 &mdash; counts status + payload</text>
+
+          <!-- over-read call-out -->
+          <path d="M646 122 L646 176" stroke="#c0392b" stroke-width="1.3" fill="none"/>
+          <text x="672" y="192" text-anchor="end" fill="#c0392b" font-size="11" font-weight="650">phantom 165th TLV header</text>
+          <text x="672" y="207" text-anchor="end" fill="#8894a6" font-size="10.5">read 4 B past the end of the payload</text>
+
+          <!-- fix -->
+          <rect x="40" y="210" width="632" height="30" rx="7" fill="#1a8a4a" opacity=".13"/>
+          <rect x="40" y="210" width="632" height="30" rx="7" fill="none" stroke="#1a8a4a" stroke-width="1.3"/>
+          <text x="356" y="230" text-anchor="middle" fill="#1a8a4a" font-size="11.5" font-weight="650" font-family="ui-monospace,monospace">fix: tlv_len = stats-&gt;len - sizeof(uint32_t)  &#8594;  1473, with an underflow guard</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The pointer skips the status word but the length does not, so the walker ran four bytes off the
+    end and parsed whatever followed as a TLV header.</figcaption>
+  </figure>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Did it corrupt the S0b-5a/5b results? No &mdash; and that is demonstrable, not asserted</p>
+    <p>Every expected tag was found and every value was internally consistent, most sharply the exact 1.000
+    assignments-per-beacon ratio at all nine reads. The over-read could only ever affect the tail, after all real
+    TLVs were consumed.</p>
+  </div>
+
+  <p><strong>The fixed build was re-run on hardware, and the correction validates against the firmware
+  itself:</strong></p>
+
+<pre><code>[reset] MAC stats blob: <span class="nm">1477</span> bytes reported, <span class="nm">1473</span> bytes of TLV payload
+  tag=<span class="nm">4170</span>  len=<span class="nm">4</span>
+  tag=<span class="nm">4210</span>  len=<span class="nm">60</span>
+  (<span class="nm">164</span> TLVs in <span class="nm">1473</span> bytes)
+[reset] ==&gt; assignments[0]/Beacons TX = 28/28
+[t+60s] ==&gt; assignments[0]/Beacons TX = 586/586</code></pre>
+
+  <p><strong>164 TLVs &mdash; exactly the 164 records in <code>.mac_offchip_stats</code>.</strong> The chip emits
+  precisely one TLV per descriptor record, and the corrected length makes the count come out whole.
+  <code>tag=4210 len=60</code> matches <code>sizeof(raw_stats_t)</code> exactly, <code>tag=4170 len=4</code>
+  matches its <code>uint32_t</code>, and the counters reproduce the earlier run (28/28, 586/586). With the old
+  length the walk would have run into a phantom 165th entry.</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node ok"><div class="t">164</div><div class="s"><code>.mac_offchip_stats</code> records<br>33784 B / 206 B</div></div>
+      <div class="node ok"><div class="t">164</div><div class="s">TLVs emitted in 1473 B</div></div>
+      <div class="node ok"><div class="t">60 &middot; 4</div><div class="s">tag 4210 / tag 4170 lengths<br>match their C types</div></div>
+    </div>
+    <figcaption>Three independent things agreeing &mdash; the firmware's descriptor table, the emitted TLV count,
+    and the per-element lengths &mdash; which is a much better check than &ldquo;it printed a plausible
+    number&rdquo;.</figcaption>
+  </figure>
+
+  <h2 id="bench-after">10 &middot; Bench state left behind &mdash; radio-silent, verified</h2>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Radio-silent, verified</p>
+    <ul style="margin:.2em 0">
+      <li><strong>board0</strong> reflashed to <code>rimba-hello</code>: banner present, <strong>zero</strong>
+        <code>mmwlan</code>/HaLow lines.</li>
+      <li><strong>chronite</strong>: <code>wpa_supplicant_s1g</code> killed (0 procs), addresses flushed,
+        <code>wlan1</code> DOWN.</li>
+      <li><strong>chronium</strong>: <code>wlan1</code> DOWN, <code>morse0</code> DOWN, back to
+        <code>type managed</code>.</li>
+      <li><strong>chronogen</strong>: a <strong>stale <code>wpa_supplicant_s1g</code> from 13&thinsp;h
+        47&thinsp;m earlier</strong> was found and killed &mdash; it predates this session and had
+        <code>wlan1</code> down, so it was not on the air, but it was a live process holding S1G state. Now 0
+        procs, <code>wlan1</code> DOWN.</li>
+      <li>board1 untouched; board2 never powered.</li>
+    </ul>
+  </div>
+
+  <h2 id="footguns">11 &middot; Footguns hit this session</h2>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; Never pipe a live console capture through <code>tail</code></p>
+    <p>The first attempt did, and <code>tail</code> withheld everything until the pipeline exited, so the log
+    read as empty for five minutes while the run was perfectly healthy. Use <code>python3 -u</code> writing
+    straight to a file.</p>
+  </div>
+
+  <ul>
+    <li><strong><code>ttyACM0</code> re-enumerated mid-run at 10:35</strong> and killed the serial listener with
+      <em>&ldquo;device reports readiness to read but returned no data (device disconnected or multiple access
+      on port?)&rdquo;</em>. Same class as the documented board2 capture flake, on board0. Recovered by
+      reattaching <strong>without</strong> a reset &mdash; the counters are cumulative, so the run did not have
+      to be restarted.</li>
+    <li><strong>The AP vif's beacon SA is the locally-administered variant again</strong> &mdash; the STA
+      associated to <code>6a:24:99:44:6b:b7</code>, not the chip MAC <code>68:&hellip;</code>. Same footgun as
+      S0b-4, now confirmed from the STA side.</li>
+  </ul>
+
+  <h2 id="alsolanded">12 &middot; Also landed here</h2>
+
+  <p><code>docs/reference/captures/wpa-sta-raw.conf</code> &mdash; the Linux infra-STA config the design doc's
+  &sect;7.6 item 4 asked for and which had <strong>never been tracked</strong>: it existed only as
+  <code>/tmp/wpa-sta*.conf</code> on chronium and chronogen, i.e. on tmpfs, one reboot from gone &mdash; the
+  same way the S0b-1/S0b-2 analysis scripts were lost. Two fields in it are load-bearing and silently fatal
+  if dropped: <code>sae_pwe=2</code> (Hash-to-Element, and a <strong>global</strong> field in this fork, not
+  per-network &mdash; the ESP AP advertises <code>[SAE-H2E]</code> and rejects a hunt-and-peck commit, which
+  presents as a wrong passphrase), and <code>ieee80211w=2</code> to match the AP's
+  <code>MMWLAN_PMF_REQUIRED</code>.</p>
+
+  <h2 id="notsettled">13 &middot; What this does NOT settle &mdash; and it is what now decides the port</h2>
+
+  <div class="callout ok">
+    <p class="ct">Every firmware question the RAW port hung on is answered</p>
+    <p>The engine exists, it arms from a host-authored beacon, a STA self-restricts, the ESP can author the
+    advertisement byte-identically, and the engine arms <em>and gates</em> with the ESP as the AP.
+    &sect;7.7's HARD GO row is satisfied in full.</p>
+  </div>
+
+  <div class="callout bug">
+    <p class="ct">&#9888; None of that says RAW is worth enabling</p>
+    <p>The 2026-07-31 throughput A/B measured RAW costing the AP <strong>~22&#8202;% of its downlink</strong>
+    (1.63 &rarr; 1.27 &rarr; 1.61&nbsp;Mbit/s, A-B-A, ranges non-overlapping) &mdash; and that was with
+    <strong>one STA, where there is no contention to save</strong>. It is a cost-only floor, not a verdict.</p>
+  </div>
+
+  <p>So the open question is <strong>economic, not technical</strong>:</p>
+
+  <div class="flow">
+    <div class="node warn"><div class="t">?</div><div class="s">At what client count does the<br>contention saving exceed the<br>~22&#8202;% standing cost</div></div>
+  </div>
+
+  <p>It is <strong>not answerable on this bench</strong> &mdash; the bench cannot produce the 30+ contending
+  clients where RAW is supposed to pay for itself, and the mesh-gate's realistic target is 16&ndash;32. It
+  needs either many-STA hardware or a model calibrated on the numbers now in hand:</p>
+
+  <table>
+    <thead><tr><th>input</th><th>value</th><th>source</th></tr></thead>
+    <tbody>
+      <tr><td>standing downlink cost</td><td><strong>~22&#8202;%</strong></td><td>throughput A/B, 2026-07-31</td></tr>
+      <tr><td>max slots per window</td><td><strong>6</strong>, not the field's 63</td><td>driver caps silently at <code>raw.c:329-333</code></td></tr>
+      <tr><td>slot sizing reality</td><td>real frames <strong>exceed</strong> a 10100&nbsp;&micro;s slot at 1&nbsp;MHz</td><td><code>frame_crosses_slot</code> moved on Linux (27) <em>and</em> the ESP (37)</td></tr>
+      <tr><td>AP defers its own downlink</td><td>yes &mdash; <code>aci_frames_delayed</code> AP-side</td><td>S0b-2 (92) and S0b-5b (139)</td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Settle that before staging S1&rarr;S4.</strong> The gate is already the throughput bottleneck, so
+  a GO later reversed on throughput is worse than a slower decision now &mdash; which is the same reasoning
+  that put the cheap all-Linux gate ahead of the ESP work in the first place, and it was right then.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#instrument">1 &middot; The instrument</a></li>
+    <li><a href="#tag4210">2 &middot; Tag 4210 from the blob</a></li>
+    <li><a href="#rules">3 &middot; Rules + staging split</a></li>
+    <li><a href="#bench">4 &middot; Bench at session start</a></li>
+    <li><a href="#s0b5a">5 &middot; S0b-5a &mdash; arming</a></li>
+    <li><a href="#punctuality">6 &middot; Beacon punctuality</a></li>
+    <li><a href="#confound">7 &middot; Confound (d) excluded</a></li>
+    <li><a href="#s0b5b">8 &middot; S0b-5b &mdash; gating</a></li>
+    <li><a href="#overread">9 &middot; The 4-byte over-read</a></li>
+    <li><a href="#bench-after">10 &middot; Bench left behind</a></li>
+    <li><a href="#footguns">11 &middot; Footguns</a></li>
+    <li><a href="#alsolanded">12 &middot; Also landed here</a></li>
+    <li><a href="#notsettled">13 &middot; What this does NOT settle</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-07-31-raw-s0b-5-esp-counters</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

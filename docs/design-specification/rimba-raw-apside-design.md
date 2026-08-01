@@ -171,7 +171,8 @@ Per the repo's porting rule (the code-map porting rule (`.ai/AGENTS.md` → Port
 - **[MED] ~~STA-side UL self-restriction is UNMEASURED~~ — ✅ RETIRED by S0b-2, 2026-07-30.** It is now measured: a STA at AID 1 parsed a **received** RPS (its own `assignments[0]` = **2083**) and self-restricted (`aci_frames_delayed` = **239**). Since neither host stack has an RPS parser (Linux's `raw.c` is AP-only — `raw.c:1567`, `:1705`), that behaviour is necessarily in the blob, which is the same blob the ESP runs.
 - **[MED] A Linux STA cannot advertise RAW Operation Support, so it is not a clean control.** `mac.c:1392-1393` unconditionally clears the bit on a STA vif (`morse_raw_is_enabled` needs `mors_vif->ap`, NULL on a STA) and `morse_raw_process_cmd` hard-rejects non-AP vifs (`raw.c:1564-1573`); its only opt-in, `raw_sta_priority`, sets a *different* field (QoS Traffic Capability UP). The **ESP** STA does the opposite (`s1g_capabilities.c:134-139`). If the blob's engine keys on that bit, an all-Linux STA arm is already negative for a reason unrelated to AP direction. **Run both a Linux and an ESP STA in the same capture** (§7.3).
 - **[LOW] Byte-fidelity footguns (mechanical, replicate exactly):** the *Linux* builder returns payload only — add EID **208** + Length yourself (Map 1 §1a/§5); replicate the literal num_slots cap 6/3 not the field's 63/7 (Map 1 §1d/§7, `raw.c:312,321,324`); never emit the Channel Indication 2 bytes (Map 1 §1e-3, `raw.c:472-474`); duration is `500 + cslot·120`, start-time in 2-TU units and referenced to the **end of the beacon that carried the RPS**, not the TBTT (`raw.c:103,122`); `GROUP_IND` (bit 5 of RAW Control) is set **unconditionally** (`raw.c:456`), not only when a group is present; the slot-count cap **writes back** into the caller's config (`raw.c:332`), silently changing subsequent beacons.
-- **[MED] `ie_rps_build()` must copy `s1g_tim.c`'s two-pass size discipline, not RANN's.** `build_frame_with_class` (`frame_constructor.c:13-36`) runs every beacon builder **twice** — a NULL-buffer sizing pass, then a fill pass — and `consbuf_append`/`consbuf_reserve` each `MMOSAL_ASSERT(len <= buf_size - offset)` (`consbuf.c:30,54`). `MMOSAL_ASSERT` is **live** in the ESP-IDF build (`MMOSAL_NOASSERT` undefined) and expands to `while(1){}` (`mmosal.h:1006-1017`), so a pass-1/pass-2 size disagreement is a **hard hang**, not a truncated beacon. RANN (`umac_mesh.c:2336-2348`) is fixed-length and ignores the split; an AID-derived RPS cannot. Detect the sizing pass with `consbuf_reserve(buf, 0) == NULL` and over-reserve the worst case, exactly as `s1g_tim.c:420-425` does.
+- **[MED] ✅ HANDLED IN S1 — `ie_rps_build()` copies `s1g_tim.c`'s two-pass size discipline, not RANN's.** `build_frame_with_class` (`frame_constructor.c:13-36`) runs every beacon builder **twice** — a NULL-buffer sizing pass, then a fill pass — and `consbuf_append`/`consbuf_reserve` each `MMOSAL_ASSERT(len <= buf_size - offset)` (`consbuf.c:30,54`). `MMOSAL_ASSERT` is **live** in the ESP-IDF build (`MMOSAL_NOASSERT` undefined) and expands to `while(1){}` (`mmosal.h:1006-1017`).
+  ⚠ **WORDING CORRECTED 2026-07-31 — this bullet used to say "a pass-1/pass-2 size disagreement is a hard hang", and that is imprecise enough to cause a bug.** The contract is an **UPPER BOUND, not an equality**: the frame's final length is taken from **pass TWO** (`mmpkt_append(view, cbuf.offset)`, `frame_constructor.c:32`); pass one only sizes the *allocation*. `ie_s1g_tim_build` proves it — reserves **256** bytes, writes at most **45**. Only **under**-reserving hangs. **Reading the old wording literally and padding the element out to the reserved length is a BUG**: the bytes after the element are hostapd's `tail`, so padding desynchronises every subsequent IE in the chain — a beacon that still transmits and still carries a byte-perfect RPS, while everything after it parses at the wrong offset. Written that way first in S1 and caught before flashing; see `docs/worklog/2026-07-31-raw-s1-rps-encoder.md`. RANN (`umac_mesh.c:2336-2348`) is fixed-length and ignores the split; an AID-derived RPS cannot. Detect the sizing pass with `consbuf_reserve(buf, 0) == NULL` and over-reserve the worst case, exactly as `s1g_tim.c:420-425` does.
 - **[MED] IE ordering.** Linux *reorders* the RPS into S1G-beacon position (after TIM/FMS, before the S1G Capabilities/SSID tail) via `dot11ah/ie.c:29-58` (long) and `:60-69` (short); the planned ESP hook appends at the tail. If Q2 passes but the STA ignores the element, **retry at the Linux-equivalent ordered position before concluding BLOCKED**.
 - **[LOW] Config surface is net-new API.** `mmwlan_ap_args` has no RAW field and there's no AP RPS function today (Map 1 §7, Map 2 Q3); adding them is additive but touches the public header — needs CMake `target_compile_definitions` discipline for any test overrides (the CMake `target_compile_definitions` pattern).
 
@@ -515,6 +516,55 @@ stale — it is **27** (only 7 instantiate a SoftAP vif); and §7.5's "the ESP f
 **false** for the AP fixture family (`test-raw-cap`, `rimba-halow-ap`, `rimba-halow-ap-perf` never call
 `mmwlan_override_max_tx_power`) — `test-raw-rps` does, and the call must sit between `set_config` and
 `wifi_start` or it returns `MMWLAN_UNAVAILABLE`.
+
+### ✅ S0b-5 RESULT — 2026-07-31. **Q3b PASS — HARD GO.** Worklog `docs/worklog/2026-07-31-raw-s0b-5-esp-counters.md`
+
+Both halves reproduce the Linux behaviour with the **ESP** as AP, so §7.7's *"ESP counters move like the
+Linux arm's → **HARD GO** — stage S1→S4"* row is satisfied in full.
+
+**S0b-5a — arming. One board, no STA, no traffic, no sniffer needed.**
+
+| read | `assignments[0]` | Beacons TX (tag 4170) | ratio | `invalid_assignments` |
+|---|---|---|---|---|
+| t+60 s | 586 | 586 | **1.000** | 0 |
+| t+240 s | **2344** | **2344** | **1.000** | **0** |
+
+**Exactly one assignment per beacon transmitted, across 2344 beacons.** Not "≈1 per beacon" — tag **4170
+"Beacons TX"** supplies the chip's own denominator, which turns S0b-2's *inferred* ratio into a measured
+one. Beacon punctuality is clean: `missing from host = 0`, `late from host count = 0`, `max delay = 0`,
+so §7.7's *"beacon-lateness ≈ slot duration"* branch is excluded outright. A concurrent capture excluded
+confound (d): **571/571 beacons carried the golden RPS**, only the ESP on air.
+
+**S0b-5b — gating. ESP AP + Linux STA (chronite) + a 120 s `ping -i 0.002 -s 512` flood.**
+
+| | pre-flood | flood | after |
+|---|---|---|---|
+| `aci_frames_delayed` | 0 | **77** | **139** |
+| `frame_crosses_slot` | 0 | **19** | **37** |
+| assignments/Beacons TX | 1.000 | 1.000 | 1.000 |
+
+Linux read `aci = 92`, `frame_crosses_slot = 27` — same order, same firmware. ⚠ **A blocker had to be fixed
+first: `test-raw-rps` assigned no IP, so a ping flood produced pure uplink and every AP-side deferral
+counter would have stayed at zero — a silent null result that looks like a clean negative.** The AP now
+pins `192.168.12.1` and brings the netif up explicitly (mmhalow never fires a link-up event in AP mode).
+
+**Instrument notes, all verified against the firmware rather than this document:**
+- `mmwlan_get_morse_stats(uint32_t core_num, bool reset)` — **`core_num` is NOT a vif id**; the driver maps
+  **0 = HOST, 1 = MAC, 2 = UPHY** (`driver.c:1510-1548`). RAW is a MAC stat ⇒ core 1. Needs the radio up.
+- TLV = **u16 LE tag, u16 LE len, value**; `raw_stats_t` = 15 × le32 = 60 B.
+- **Tag 4210 was confirmed from the firmware's own descriptor table**, section `.mac_offchip_stats` in
+  `vendor/morse-firmware/firmware/mm6108.bin` — 164 records of
+  `{char type_str[50]; char name[50]; char key[100]; u32 format; u16 tag;}`, giving
+  `tag=4210 type=raw_stats_t key=RAW`. `morse_cli` never hardcodes tags; it resolves them through this
+  table, so it is the authority.
+- ⚠ **`stats->len` overstates the TLV payload by 4 bytes** — `mmdrv_get_stats` sets `buf = resp->data`
+  (past `resp->status`) but `len = hdr.len`, which *includes* the status
+  (`driver.c:1704` synthesises an empty response as `hdr.len = sizeof(resp->status)`). Walk
+  `stats->len - 4`. With the correction the blob parses as **exactly 164 TLVs in 1473 bytes — matching the
+  164 descriptor records**, which is a three-way cross-check (table, TLV count, per-element lengths).
+
+**Also now tracked:** `docs/reference/captures/wpa-sta-raw.conf` — the Linux infra-STA config §7.6 item 4
+called for, which had only ever existed in `/tmp` on the Pis.
 
 **S0b-5 — Q3b, ESP as the AP.** Repeat S0b-2's measurement with the ESP AP. Read the ESP's own
 counters via `mmwlan_get_morse_stats(1, …)` — already public and already exported by the `mmwlan*`

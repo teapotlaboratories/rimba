@@ -1,10 +1,18 @@
-# test-raw-rps — the ESP puts an RPS element on the air (RAW S0b-3 / S0b-4)
+# test-raw-rps — the ESP advertises a RAW schedule, and the chip acts on it
 
 **Status: hardware-verified, NOT wired into a scored tier** (2026-07-31, board0, fw 1.17.8).
-**Q2 = PASS and S0b-3 = PASS.** This is a **feasibility probe**, not a regression test — see "How it is
-scored" below before adding it to a tier.
+**Q2 = PASS, S0b-3 = PASS, Q3b = PASS (HARD GO).** This is a **feasibility probe**, not a regression
+test — see "How it is scored" below before adding it to a tier.
 
-The board is a beacon source and nothing else: no STA, no traffic, no peer. All the evidence is off-air.
+It covers several stages with **three different instruments**, and they must not be confused:
+
+| stage | question | instrument | rig |
+|---|---|---|---|
+| **S1** | does the ported encoder produce the same bytes as Linux? | an **on-device self-test** against reference bytes | **no radio at all** |
+| **S0b-3 / S0b-4** | do the RPS element and the S1G-caps RAW bit reach the air unmodified? | an **off-air capture**, decoded with `tools/raw_s1g_beacon_decode.py` | one board beaconing; a sniffer |
+| **S0b-5a** | does the chip's RAW engine **arm** on an ESP-authored beacon? | the chip's **own counters** on this console (tag 4210) | **one board, nothing else** |
+| **S0b-5b** | does the chip **gate its own TX** to the window? | same counters, under load | + a STA and a ping flood |
+| **S3** | is RAW genuinely off unless configured on? | a **config-only A/B** off air | two builds, one sniffer |
 
 ## Rig
 
@@ -12,10 +20,18 @@ The board is a beacon source and nothing else: no STA, no traffic, no peer. All 
 |---|---|---|
 | dut | one board (board0 in the verified run) | `test-raw-rps`, AP vif on `rimba-rawrps`, S1G ch27 |
 | monitor | chronium `morse0` | `tcpdump -i morse0 -w cap.pcap`, S1G ch27 (`iw freq 5560`) |
-| Linux reference AP *(optional)* | chronite `wlan1` | `hostapd_s1g` + `morse_cli -i wlan1 raw …` |
+| Linux reference AP *(S0b-4, optional)* | chronite `wlan1` | `hostapd_s1g` + `morse_cli -i wlan1 raw …` |
+| Linux STA *(S0b-5b only)* | chronite `wlan1` | `wpa_supplicant_s1g -c docs/reference/captures/wpa-sta-raw.conf`, `192.168.12.2/24`, then `ping -i 0.002 -s 512 192.168.12.1` |
 
-The Linux arm is optional but it is what makes this a **live-device** diff rather than a spec diff: run
-both APs simultaneously and one capture holds both elements under identical radiotap conditions.
+For S0b-4 the Linux **AP** arm is optional, but it is what makes the byte-diff a **live-device** diff
+rather than a spec diff: run both APs simultaneously and one capture holds both elements under identical
+radiotap conditions. For S0b-5b the Linux **STA** arm is required — see the note on the AP's static IP.
+
+⚠ **S0b-5b needs the AP to TRANSMIT, not just beacon.** `aci_frames_delayed` counts the local transmitter
+withholding its *own* frames, so a ping flood at an AP with no IP produces pure uplink and leaves every
+AP-side deferral counter at zero — a null result that reads exactly like a clean negative. That is why
+this fixture pins `192.168.12.1` and brings the netif up explicitly (in AP mode mmhalow never fires a
+link-up event, so lwIP otherwise never answers ICMP).
 
 ## What it proves / does not prove
 
@@ -24,92 +40,109 @@ both APs simultaneously and one capture holds both elements under identical radi
   whether the MM6108 blob rewrites or strips IEs in a host-supplied beacon. Same question for the S1G
   Capabilities RAW Operation Support bit (octet[6] bit 3), which Linux emits only while RAW is actually
   running.
-- **Does NOT prove the chip acts on the ESP's schedule.** That is Q3b / **S0b-5**, and it is read from
-  the chip's own **tag-4210 RAW counters** via `mmwlan_get_morse_stats()`, not from a capture. A capture
-  can only ever show what was advertised. This fixture is already the right shape for S0b-5 — it parks
-  forever and carries the `TEST|` contract — but that work is not here.
+- **Proves the ENFORCE plane too, as of S0b-5.** Whether the chip's RAW engine actually *arms and gates*
+  on an ESP-authored schedule. A capture can only ever show what was advertised, so that answer comes
+  from the chip's own firmware counters — `mmwlan_get_morse_stats(core 1 = MAC)`, TLV tag 4210
+  (`raw_stats_t`) — reported on this fixture's console. **Q3b = PASS:** `assignments[0]` / `Beacons TX`
+  = **exactly 1.000 across 2344 beacons** with `invalid_assignments = 0`, and under a STA ping flood
+  `aci_frames_delayed` 0→**139** / `frame_crosses_slot` 0→**37** (the Linux reference arm read 92 / 27).
+- **Does NOT prove RAW is worth enabling.** It costs the AP **~22 % of its downlink** as a standing cost,
+  measured with one STA where there is no contention to buy it back. That is a design question, not a
+  firmware one, and this fixture cannot answer it — the bench cannot produce the 30+ contending clients
+  where RAW is supposed to pay for itself.
 
 Do not read "enforcement" into a captured RPS either. 802.11ah has no AP primitive that polices peers: a
 STA restricts *itself* on parsing the element, and the chip's RAW counters only ever count the **local**
 transmitter deferring its own frames.
 
-## THE SPIKE IS COMPILE-GATED
+## RAW is ordinary configuration now — no compile-time gate
 
-This is the single most confusing thing about the fixture. Read it before running anything.
+**As of S3 there is no `#ifdef`.** RAW is a field on the public `mmwlan_ap_args`, and
+`MMWLAN_AP_ARGS_INIT` zeroes it, so an application that never mentions RAW never advertises it:
 
-The two source edits the spike depends on live in **shared morselib**, inside the `components/halow`
-submodule, wrapped in `#ifdef RIMBA_RAW_S0B_SPIKE`:
-
-| file (inside `components/halow`) | edit |
-|---|---|
-| `…/morselib/src/umac/ap/umac_ap.c` | in `umac_ap_build_beacon()`, appends the 8-byte golden RPS directly after the TIM |
-| `…/morselib/src/umac/ies/s1g_capabilities.c` | in `ie_s1g_capabilities_build_ap()`, asserts `DOT11_MASK_S1G_CAP6_RAW_OPERATION_SUPPORT` |
-
-**Both edits are landed on the submodule's `main`, so a normal checkout builds the armed spike** — they
-are inert everywhere else, because nothing but this app defines `RIMBA_RAW_S0B_SPIKE`. They are also
-captured standalone as `docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch` (34 insertions, 2
-files), which is what regenerates the **no-hook baseline** without editing anything by hand:
-
-```sh
-# disarm — reproduce the no-hook baseline build (from the superproject root)
-git -C components/halow apply --reverse ../../docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch
-
-# re-arm
-git -C components/halow apply ../../docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch
+```c
+cfg.ap.raw.enabled          = true;
+cfg.ap.raw.start_aid        = 1;
+cfg.ap.raw.end_aid          = 255;
+cfg.ap.raw.num_slots        = 2;
+cfg.ap.raw.slot_duration_us = 10100;
 ```
 
-**Taking that baseline is not optional — capture it FIRST.** You get a binary identical in every other
-respect (same SSID, same BSSID, same beacon interval, same DTIM period) emitting plain AP beacons. Without
-that control an EID-208 element on air cannot be attributed to the host splice at all, and a *missing*
-element gives no evidence the capture/decode path even works.
+That replaced the earlier `#ifdef RIMBA_RAW_S0B_SPIKE`, which existed only to keep RAW out of the other
+26 AP-capable apps while the spike was in the tree. Default-off is the honest version of the same
+containment, and it is per-deployment rather than per-build — which the feature needs, because whether
+RAW pays depends on the traffic mix and only the integrator knows that.
 
-⚠ **The console line reports the DEFINE, not the edits.** The first `TEST|INFO` says `built WITH …` vs
-`built WITHOUT RIMBA_RAW_S0B_SPIKE -- plain AP beacons, this is the no-hook baseline` — but with the
-define armed and the patch *reversed* it still says `WITH`, while the beacons are baseline. **The capture
-is the authority, never the banner.**
+**The containment was measured, not assumed** (2026-07-31, same board, same morselib, config-only
+difference):
 
-### How the define is armed
+| | RAW off — `rimba-halow-ap`, never sets `cfg.ap.raw` | RAW on — this fixture |
+|---|---|---|
+| EID-208 on air | **0 / 351 beacons** | **387 / 387** |
+| S1G caps octet[6] bit 3 | **set in 0 / 351** | **set in 387 / 387** |
 
-One line, in this app's own top-level `CMakeLists.txt`:
+⚠ **There is deliberately NO RUNTIME enable/disable.** The S1G Capabilities element is built once at AP
+start and memcpy'd into the supplicant's cached `hw_mode->s1g_capab` (`driver_ap.c:130-139`); Linux
+re-clears the bit on every beacon (`mac.c:1392-1393`) but the ESP has no per-beacon capabilities rebuild
+to hook. Toggling RAW after `mmwlan_ap_enable()` would leave the advertisement lying, which is worse than
+not offering the knob. Restart the AP to change it.
+
+### The one define that remains
+
+`RIMBA_RAW_SELFTEST`, set build-globally by this app's own `CMakeLists.txt`:
 
 ```cmake
-idf_build_set_property(COMPILE_DEFINITIONS "RIMBA_RAW_S0B_SPIKE=1" APPEND)
+idf_build_set_property(COMPILE_DEFINITIONS "RIMBA_RAW_SELFTEST=1" APPEND)
 ```
 
-Deliberately **build-global**, not app-private. The guarded edits are in the submodule, not under
-`main/`, so the `target_compile_definitions(${COMPONENT_LIB} PRIVATE …)` idiom the other fixtures use
-would never reach them; IDF applies the build-wide `COMPILE_DEFINITIONS` property with directory scope
-inside every `idf_component_register`, which is the same route by which `ESP_PLATFORM` and `IDF_VER`
-already land on `umac_ap.c`'s compile line.
+It gates **only** the encoder self-test export (`mmwlan_rps_build_reference()` in morselib's
+`ies/ie_rps.c`) — nothing about RAW behaviour. It is build-global rather than app-private because the
+symbol lives in the submodule, not under `main/`, so the `target_compile_definitions(${COMPONENT_LIB}
+PRIVATE …)` idiom the other fixtures use would never reach it. Scoped to this app regardless, because
+every app builds into its own tree.
 
-Build-global is still **scoped to this app**, because every app gets its own build tree
-(`build/<APP>/<BOARD>`). The other 26 apps that set `CONFIG_HALOW_AP_MODE=y` never see the define and
-never emit an RPS — verified from `compile_commands.json` on both sides, not inferred.
+A CMake cache var via the Makefile's `IDF_EXTRA_D` was rejected: cache entries are **sticky per build
+dir**, and the T0 builder rebuilds each app into that same dir with no vars, so one build would keep the
+define set until a `fullclean`.
 
-A CMake cache var via the Makefile's `IDF_EXTRA_D` was rejected for exactly this: cache entries are
-**sticky per build dir**, and the T0 builder rebuilds each app into that same dir with no vars, so one
-spike build would silently keep the RPS compiled into T0 until a `fullclean`.
+`CONFIG_HALOW_AP_MODE=y` is still required (`sdkconfig.defaults`) — without it `umac_ap.c` is not in
+morselib's `SRCS` at all. This fixture also carries its own **2 MB `partitions.csv`**: the default
+`SINGLE_APP_LARGE` app partition was within a few KB of full once the encoder and the counter reader were
+compiled in.
 
-`CONFIG_HALOW_AP_MODE=y` is required (`sdkconfig.defaults`) — without it `umac_ap.c` is not in morselib's
-`SRCS` at all and the splice compiles to nothing.
+## How it is scored — the preconditions, never the verdict
 
-## How it is scored — the beacon, not the RPS
-
-The `TEST|` output emits exactly one gate:
+The `TEST|` output emits three gates. Two assert **preconditions**; only the first is an actual result,
+and even that one is about the encoder, never about what the chip did with it:
 
 ```
+TEST|STEP|rps-encoder-golden|PASS|ie_rps_build() output is byte-identical to the RPS a live Linux AP transmits
 TEST|STEP|ap-beaconing|PASS|AP vif up on ch27; capture on chronium morse0 and decode with tools/raw_s1g_beacon_decode.py
+TEST|STEP|stats-read|PASS|mmwlan_get_morse_stats(core 1) returned a parseable blob containing tag 4210
 ```
 
-It asserts **only that the board is beaconing**, which is the sole precondition the capture has. There is
-no `TEST|RESULT` on the success path and deliberately no `TEST|` gate on the RPS. The only failing verdict
-the app can produce is `TEST|RESULT|INCONCLUSIVE` when `mmhalow_set_config(AP)` fails — no beacons, so
-nothing to capture.
+`rps-encoder-golden` runs **before any radio work** — it needs no hardware, and if the encoder is wrong
+there is no point spending a bench slot capturing its output. Its expected bytes live in this app rather
+than beside the encoder: were they next to the encoder, the test would compare it against itself and pass
+for any self-consistent-but-wrong encoding.
+
+They assert only that the board is **beaconing** (the sole precondition the capture has) and that the
+**instrument works** — that the stats read succeeded and the RAW counter set is present. `TEST|RESULT|
+INCONCLUSIVE` is emitted when `mmhalow_set_config(AP)` fails (no beacons, nothing to capture) or when the
+counter read fails / tag 4210 is absent (the instrument is broken, so Q3b is not evaluable).
+
+**That last distinction is the point.** A missing tag 4210, or one whose length is not 60, is reported as
+an ERROR with the full TLV inventory dumped — **never as zeros**. Zeros in the wrong place read exactly
+like "the RAW engine never armed", which would be a false BLOCKED on the question the stage exists to
+answer.
 
 **The verdict is off-air.** Capture on chronium and decode with the tracked
 `tools/raw_s1g_beacon_decode.py`, which computes the IE offset from Frame Control (never searches for it),
 strips the 4-byte trailing FCS, and reports an IE walk that does not land exactly on the end as
 undecodable rather than retrying at another offset. It is calibrated against the two archived S0b controls.
+
+S0b-5's verdict, by contrast, is **on this console** — the counters are immune to capture loss, which is
+exactly why they were designated the primary instrument.
 
 ```sh
 # on chronium
@@ -216,7 +249,7 @@ signal only, which is why frame-count reconciliation is the gate.
 ## Firmware
 
 `firmware/test-raw-rps/` — single board; brings up an AP vif on S1G ch27 with SAE + PMF-required and parks
-forever. Everything interesting happens in the submodule, behind `RIMBA_RAW_S0B_SPIKE`.
+forever. Everything interesting happens in the submodule's RPS encoder and the beacon builder.
 
 - Spike patch: `docs/worklog/artifacts/raw-s0b/s0b-4-morselib-spike.patch`
 - Decoder: `tools/raw_s1g_beacon_decode.py`
