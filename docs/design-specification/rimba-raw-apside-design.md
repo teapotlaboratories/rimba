@@ -117,6 +117,34 @@ Add a RAW field to `mmwlan_ap_args` (absent today — Map 1 §7, `mmwlan.h:2012-
 **S4 — AID-list + single-group mapping.**
 Build the ordered connected-AID list from the ESP dense-AID allocator/bitmap (`umac_ap_alloc_sta umac_ap.c:663-688`, `data->bitmap` `umac_ap_data.h:30`, `aid_is_valid traffic_bitmap.h:27`) — the ESP analog of `morse_generate_aid_list` (Map 1 §2, `raw.c:247-272`). Map config `start_aid/end_aid` to the live range; refresh on STA join/leave (analog of `morse_raw_refresh_aids raw.c:841-871`). Compile-verify. **This is the MVP finish line** — on-air re-verify the full path.
 
+> ⚠ **S4 AS WRITTEN ABOVE IS MISCONCEIVED — established from the reference 2026-08-02, before any code.**
+> This stage assumed the connected-AID list narrows the advertised RAW group. **It does not.** In
+> `morse_driver` the AID list has exactly one consumer: **beacon spreading**, which is S6. Every use of
+> `raw->aid_list` and of `start_aid_idx`/`end_aid_idx` sits inside
+> `if (config->beacon_spreading.nominal_sta_per_beacon …)` — `raw.c:519` in
+> `morse_raw_generate_assignment()`, and `raw.c:862` in `morse_raw_refresh_aids()`, which refreshes
+> indices *only* for spreading configs. The non-spreading path is explicit, with the reference's own
+> comment at `raw.c:595-599`:
+>
+> ```c
+> /* If not using beacon spreading or no connected STAs use the full AID range. */
+> } else {
+>     current_beacon_start_aid = config->start_aid;
+>     current_beacon_end_aid   = config->end_aid;
+> ```
+>
+> So for a plain GENERIC RAW the advertised group **is** the configured range — which is exactly what S1
+> already emits. Building `morse_generate_aid_list` and the join/leave refresh now would be **dead
+> scaffolding**: no on-air change, nothing to verify against, and its only consumer arriving two stages
+> later.
+>
+> **This is also the right reading of the feature.** The RAW group expresses *which AIDs are subject to
+> RAW* — a policy the integrator sets — not *which AIDs happen to be associated*. Narrowing it to the
+> connected set would conflate the two and would churn the beacon on every join and leave.
+>
+> **Consequence: S3 is the MVP finish line, not S4.** The AID-list work moves into S6, where beacon
+> spreading actually consumes it. See `docs/worklog/2026-08-02-raw-s4-is-scaffolding.md`.
+
 **S5 — Per-priority AID grouping (full-feature).**
 QoS-UP→AID bits[10:8] packing (Map 1 §2, `raw.h:20-27`), learn priority from the QoS Traffic Cap IE in (Re)Assoc Req (`raw.c:906-907`); reuse the compiled-in-but-inert `hostapd_get_raw_aid` grouping (Map 2 Q1c/Q3, `ieee802_11.c:3833`). Multiple assignments in one RPS IE. Compile-verify + on-air multi-STA.
 

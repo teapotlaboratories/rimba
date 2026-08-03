@@ -154,7 +154,7 @@ stop being a spike `#ifdef` and become the honest *"is RAW enabled for this AP"*
 the thing S0b-3 could not do on its own. The static config at `umac_ap.c:433` is the placeholder S3
 replaces.
 
-Then **S4** (AID-list from the live `umac_ap` bitmap) is the MVP finish line.
+Then **S4** (AID-list from the live `umac_ap` bitmap) was expected to be the MVP finish line. **S4 was dropped on 2026-08-02 as misconceived** — the connected-AID list is beacon-spreading infrastructure, not group narrowing, so **S3 turned out to be the finish line**. See [`2026-08-02-raw-s4-is-scaffolding.md`](2026-08-02-raw-s4-is-scaffolding.md).
 
 **Still open and unchanged:** the break-even question. Every firmware unknown is answered, but nothing in
 this stage moves the economics — see [the break-even worklog](2026-07-31-raw-breakeven-model.md).
@@ -256,7 +256,11 @@ and in code is a bad tool for the job. An anchored edit on a unique string would
 
 **S4** — build the AID list from the live `umac_ap` bitmap instead of the configured 1–255, and refresh it
 on STA join/leave (Linux: `morse_generate_aid_list` `raw.c:247-272`, `morse_raw_refresh_aids`
-`raw.c:841-871`). That is the MVP finish line and the first stage with a lifecycle: the element length
-becomes genuinely variable, so the two-pass sizing gets its first real exercise.
+`raw.c:841-871`).
+
+⚠ **Superseded — S4 was dropped on 2026-08-02 without code.** The AID list turned out to have exactly one
+consumer in the reference, **beacon spreading**, and the non-spreading path uses the configured range
+verbatim (`raw.c:595-599`). Narrowing the advertised group was never what it did. **S3 was the finish
+line.** **S4 was dropped on 2026-08-02 as misconceived** — the connected-AID list is beacon-spreading infrastructure, not group narrowing, so **S3 turned out to be the finish line**. See [`2026-08-02-raw-s4-is-scaffolding.md`](2026-08-02-raw-s4-is-scaffolding.md).
 
 **Unchanged:** the break-even question. S3 makes RAW configurable; it does not make it worth enabling.

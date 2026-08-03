@@ -50,13 +50,22 @@ anchor here is valid verbatim for either release.
 | AP S1G-caps RAW advertise bit | set `mac.c:1228-1229`, re-cleared unless live `mac.c:1392-1393` | `ies/s1g_capabilities.c:294` — now gated on the predicate, see divergence 10 |
 | Schedule → element | `morse_raw_generate_rps_ie` config list | built from `data->args.raw` at `umac_ap.c:467-488` |
 
-## S4–S6 — not yet ported
+## S4 — dropped: the AID list is beacon-spreading infrastructure, not group narrowing
+
+Established from the reference on 2026-08-02, before writing any code. S4 assumed the connected-AID list
+narrows the advertised RAW group; it does not. Every consumer of `raw->aid_list` and of
+`start_aid_idx`/`end_aid_idx` is gated on beacon spreading (`raw.c:519`, `raw.c:862`), and the
+non-spreading path uses the configured range verbatim — the reference says so in its own comment at
+`raw.c:595-599`. So the work moved to S6, where spreading consumes it, and **S3 became the MVP finish
+line**.
+
+## S5–S6 — not yet ported
 
 | Concern | Linux | New code |
 |---|---|---|
 | Config command parse (netlink) | `morse_raw_process_cmd` `raw.c:1559-1583`; `morse_raw_cmd_to_config` `raw.c:1062-1131` | **not ported** — see divergence 11 |
-| AID list build | `morse_generate_aid_list` `raw.c:247-272` | *(S4)* — reuse `umac_ap` dense AID + `data->bitmap` |
-| AID refresh on join/leave | `morse_raw_refresh_aids` `raw.c:841-871` | *(S4)* |
+| AID list build | `morse_generate_aid_list` `raw.c:247-272` | *(S6 — **not S4**, see below)* |
+| AID refresh on join/leave | `morse_raw_refresh_aids` `raw.c:841-871` | *(S6 — **not S4**, see below)* |
 | QoS-UP → priority learn | `morse_raw_process_rx_mgmt` `raw.c:873-915` | *(S5)* |
 | Priority → AID group | AID bits[10:8] `raw.h:20-27` | *(S5)* |
 | Beacon-sent cadence hook | `morse_raw_beacon_sent` `raw.c:1585-1597` | *(S6)* |

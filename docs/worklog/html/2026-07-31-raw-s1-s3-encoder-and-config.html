@@ -623,7 +623,8 @@ TEST|STEP|rps-encoder-golden|<span class="fn">PASS</span>|ie_rps_build() output 
     and restored to <code>type managed</code>; chronite and chronogen untouched and down.</p>
   </div>
 
-  <h3>Next &mdash; S4, the MVP finish line</h3>
+  <h3>Next &mdash; S4 (superseded: dropped 2026-08-02)</h3>
+  <div class="callout warn"><p class="ct">&#9888; S4 was dropped without code</p><p>The connected-AID list turned out to be <strong>beacon-spreading infrastructure</strong>, not group narrowing &mdash; its only consumers in the reference are gated on spreading, and the non-spreading path uses the configured range verbatim (<code>raw.c:595-599</code>). <strong>S3 was the finish line.</strong> See the 2026-08-02 worklog.</p></div>
 
   <p>Build the AID list from the <strong>live <code>umac_ap</code> bitmap</strong> instead of the configured
   1-255, and refresh it on STA join/leave (Linux: <code>morse_generate_aid_list</code>
