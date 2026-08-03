@@ -58,6 +58,11 @@
 #define LINK_PSK        "rimbahalow"
 #define LINK_S1G_CHAN   27
 #define LINK_OP_CLASS   68
+/* Left at 4 while the L2-bridge gate (rimba-halow-mesh-ap / test-mesh-gate-ap) moved to 16. This is
+ * the SUPERSEDED L3-routing gate: a separate 192.168.12.0/24 behind the AP with lwIP ip_forward, no
+ * proxy-ARP push and no client table, kept because two T2 tests still exercise the concurrency path
+ * through it -- both with a single STA. Raising it here would buy nothing and would cost the ~900 B of
+ * umac_sta_data per slot on an app that is not the shipped gate. */
 #define LINK_MAX_STAS   4
 
 #define AP_SUBNET_IP    "192.168.12.1"

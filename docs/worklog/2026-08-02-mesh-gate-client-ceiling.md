@@ -54,6 +54,28 @@ At 32 clients on the old period the gate would spend **more than half its airtim
 period moves 3 s → **15 s** (entries live `GW_ARP_TTL_MS` = 5 min, so each mapping still refreshes 20×
 per lifetime) and the ceiling stops at 16.
 
+### The period is upkeep; the moment that matters is the first one
+
+Stretching 3 s → 15 s trades airtime for propagation latency, and the T2 tier says exactly where that
+trade is unacceptable. `mesh-gate-b2` runs a **silent static** AP client (`STA_IP=10.9.9.50 NO_PING`) so a
+mesh node must resolve it *cold* across the bridge — the direction that was 0-reply flaky before
+proxy-ARP existed. A silent client is learned **exactly once**, when it answers the node's bridged ARP.
+Making it wait out a 15 s period after that would put every resolution in the gap back on the lossy B2
+broadcast: precisely the failure the push was written to remove.
+
+So the period is now upkeep only, and the push is **event-driven on top of it**:
+
+- `gw_arp_learn()` calls `gw_arp_wake_announce()` when it inserts a **genuinely new** mapping (not on a
+  refresh of one already held), which `xTaskNotifyGive`s the announce task.
+- The task waits with `ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(15000))` instead of `vTaskDelay`. Notifications
+  **collapse** — `pdTRUE` clears the count — so a burst of newly-learned hosts produces one announce, not one
+  per host. A new mapping propagates in milliseconds; steady state still costs 5.2 % at 16 clients.
+
+**One ordering detail is load-bearing.** `gw_arp_learn()` runs from RX context and wakes the task *by
+handle*; a mapping learned while that handle is still `NULL` **drops its wake silently** and waits out the
+whole period. The task was originally created *after* `mmwlan_register_rx_pkt_ext_cb()`, leaving exactly
+that window open — cheap at 3 s, a 15 s stall now. Task creation moved above the RX registrations.
+
 **A harder ceiling that would have bitten silently:** `GW_ARP_MAX = 24` holds **both** sides — AP clients
 *and* learned mesh hosts. With 5 mesh nodes that saturates at ~19 clients, after which the LRU thrashes
 and proxy-ARP quietly stops resolving rather than failing. Raised to **48**.
@@ -137,8 +159,24 @@ Recorded in the code next to `LINK_MAX_STAS` so the next person raising it sees 
 | DHCP from the raised pool | **PASS** — leased `10.9.9.2`, 7200 s |
 | Traffic across the bridge | **PASS** — 4/4 ping, 7.1 / 22.5 / 67.1 ms |
 
-Bench left radio-silent: board0 on `rimba-hello` with zero HaLow lines, chronite's supplicant killed and
-`wlan1` down.
+### T2 `mesh-gate-b2` on the full 3-board rig
+
+The regression this most risked breaking, run end-to-end (gate = board2 on the PPK2 rail, silent static
+client = board0, pinging mesh node = board1):
+
+| run | result | first reply |
+|---|---|---|
+| with the event-driven push, task created **after** RX registration | PASS 29/30 | **seq=2** |
+| with task creation moved **above** RX registration | **PASS 30/30** | **seq=1** |
+| historical baseline (8 runs, 2026-07-23 → 07-26) | PASS, 7 × 30/30 + 1 × 29/30 | seq=1 every run |
+
+The second run is back on the historical baseline. **I am not claiming the ordering fix caused the
+difference** — it is one run against one run, the lost packet in the first was seq=1 itself (the cold ARP
+riding the lossy broadcast), and that broadcast is a coin flip independent of the push. What is
+established is that the window was real, that it is closed, and that the tier is not regressed.
+
+Bench left radio-silent: all three boards returned to `test-idle` by the harness, the PPK2 hold released
+and board2 powered down (no longer enumerating).
 
 > ⚠ **CAPACITY AT 16 IS NOT PROVEN, and cannot be on this bench.** Three ESP boards and a few Linux nodes
 > cannot make 16 clients. What is verified is that the constants are consistent, the RAM fits (~14.6 KB

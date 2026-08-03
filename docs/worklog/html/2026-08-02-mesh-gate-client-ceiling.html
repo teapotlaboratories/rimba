@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh-gate client ceiling: 4 &rarr; 16 &mdash; Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-08-02</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-08-02</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">ceiling 4 &rarr; 16</span>
+    <span class="badge warn">capacity NOT proven at 16</span>
+    <span class="badge bug">mesh-gate &middot; scaling</span>
+  </div>
+
+  <h1>Mesh-gate client ceiling: 4 &rarr; 16<br><small style="font-weight:600;color:var(--muted);font-size:1.1rem">and the four things that had to move with it</small></h1>
+
+  <p class="lead">The tracked item said &ldquo;raise the gate&rsquo;s client ceiling to ~16&ndash;32&rdquo;.
+  It lands at <strong>16</strong>, with the arithmetic that decides it &mdash; and three apps had to be moved
+  off the default partition table before anything could be added to them at all.</p>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; Two corrections before any work started</p>
+    <p><strong>1. The binding ceiling was 4, not 8.</strong> I had &ldquo;8 clients&rdquo; in the backlog and
+    repeated it several times. In <em>this</em> repo the gate admits <strong>4</strong>
+    (<code>LINK_MAX_STAS 4</code>, enforced in morselib at <code>umac_ap.c:742-747</code>, which refuses any
+    AID &ge; <code>max_stas</code>). The 8 was <code>GATE_MAX_CLIENTS</code>, the bridge table &mdash; already
+    2&times; the admission limit, so it never bound. The 8 in my head came from the <em>examples</em> repo.</p>
+    <p><strong>2. Two apps were within 5 KB of not fitting</strong>, found by building before editing:
+    <code>rimba-halow-mesh-ap</code> had <strong>4,640 B</strong> free and <code>test-mesh-gate-ap</code>
+    <strong>5,744 B</strong> &mdash; 0%. <strong>Nothing could be added to the shipped gate at all.</strong>
+    That is a repo-wide tripwire, not something specific to this task. All three now carry a 2 MB
+    <code>partitions.csv</code> (16 MB flash), taking them to 27&ndash;28% free.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">16</div><div class="lbl">clients admitted (was 4)</div></div>
+    <div class="stat"><div class="num acc">48</div><div class="lbl">ARP table entries (was 24)</div></div>
+    <div class="stat"><div class="num" style="color:var(--warn)">5.2 %</div><div class="lbl">airtime on ARP upkeep at 16</div></div>
+    <div class="stat"><div class="num" style="color:var(--err)">25.8 %</div><div class="lbl">it would have been, at 3 s</div></div>
+    <div class="stat"><div class="num acc">27&ndash;28 %</div><div class="lbl">partition free (was 0&ndash;1%)</div></div>
+    <div class="stat"><div class="num ok">30/30</div><div class="lbl">T2 mesh-gate-b2 replies</div></div>
+  </div>
+
+  <h2 id="why16">1 &middot; Why 16 and not 32</h2>
+
+  <p>The gate runs a <strong>proactive proxy-ARP push</strong>: for every (AP client, mesh host) pair it
+  sends one reliable unicast. It is O(n_ap &times; n_mesh) in <strong>both</strong> directions. At ~4.85 ms
+  per push at 1 MHz MCS0 with 5 mesh nodes:</p>
+
+  <table>
+    <thead><tr><th>clients</th><th>pushes / period</th><th>at 3 s</th><th>at 15 s</th></tr></thead>
+    <tbody>
+      <tr><td>8</td><td>80</td><td>12.9 %</td><td>2.6 %</td></tr>
+      <tr><td><strong>16</strong></td><td><strong>160</strong></td><td>25.8 %</td><td><strong>5.2 %</strong></td></tr>
+      <tr><td>32</td><td>320</td><td><strong>51.7 %</strong></td><td>10.3 %</td></tr>
+    </tbody>
+  </table>
+
+  <p>At 32 clients on the old period the gate would spend <strong>more than half its airtime teaching
+  ARP</strong>. So the period moves 3 s &rarr; <strong>15 s</strong> and the ceiling stops at 16.</p>
+
+  <div class="callout bug">
+    <p class="ct">A harder ceiling that would have bitten silently</p>
+    <p><code>GW_ARP_MAX = 24</code> holds <strong>both</strong> sides &mdash; AP clients <em>and</em> learned
+    mesh hosts. With 5 mesh nodes that saturates at ~19 clients, after which the LRU thrashes and proxy-ARP
+    <strong>quietly stops resolving rather than failing</strong>. Raised to 48.</p>
+  </div>
+
+  <h2 id="period">2 &middot; The period is upkeep; the moment that matters is the first one</h2>
+
+  <p>Stretching 3 s &rarr; 15 s trades airtime for propagation latency, and the T2 tier says exactly where
+  that trade is unacceptable. <code>mesh-gate-b2</code> runs a <strong>silent static</strong> AP client
+  (<code>STA_IP=10.9.9.50 NO_PING</code>) so a mesh node must resolve it <em>cold</em> across the bridge
+  &mdash; the direction that was 0-reply flaky before proxy-ARP existed. A silent client is learned
+  <strong>exactly once</strong>, when it answers the node&rsquo;s bridged ARP. Making it wait out a 15 s
+  period after that would put every resolution in the gap back on the lossy B2 broadcast &mdash; precisely
+  the failure the push was written to remove.</p>
+
+  <p>So the period is now upkeep only, and the push is <strong>event-driven on top of it</strong>:</p>
+
+  <ul>
+    <li><code>gw_arp_learn()</code> calls <code>gw_arp_wake_announce()</code> when it inserts a
+    <strong>genuinely new</strong> mapping (not on a refresh), which <code>xTaskNotifyGive</code>s the
+    announce task.</li>
+    <li>The task waits with <code>ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(15000))</code> instead of
+    <code>vTaskDelay</code>. Notifications <strong>collapse</strong> &mdash; <code>pdTRUE</code> clears the
+    count &mdash; so a burst of newly-learned hosts produces one announce, not one per host.</li>
+  </ul>
+
+  <div class="callout err">
+    <p class="ct">&#10007; One ordering detail is load-bearing</p>
+    <p><code>gw_arp_learn()</code> runs from RX context and wakes the task <em>by handle</em>; a mapping
+    learned while that handle is still <code>NULL</code> <strong>drops its wake silently</strong> and waits
+    out the whole period. The task was originally created <em>after</em>
+    <code>mmwlan_register_rx_pkt_ext_cb()</code>, leaving exactly that window open &mdash; cheap at 3 s, a
+    15 s stall now. Task creation moved above the RX registrations.</p>
+  </div>
+
+  <h2 id="changes">3 &middot; The changes</h2>
+
+  <table>
+    <thead><tr><th>what</th><th>from</th><th>to</th><th>why</th></tr></thead>
+    <tbody>
+      <tr><td><code>LINK_MAX_STAS</code></td><td>4</td><td><strong>16</strong></td><td>the admission cap; the thing that actually bound</td></tr>
+      <tr><td><code>GATE_MAX_CLIENTS</code></td><td>8</td><td><code>LINK_MAX_STAS</code></td><td>derived, not independent</td></tr>
+      <tr><td><code>GW_ARP_MAX</code></td><td>24</td><td>48</td><td>holds both sides; was saturating at ~19 clients</td></tr>
+      <tr><td>ARP push period</td><td>3 s</td><td>15 s + event-driven</td><td>25.8 % &rarr; 5.2 % airtime at the new ceiling</td></tr>
+      <tr><td><code>CONFIG_HALOW_AP_MAX_STAS</code></td><td>20</td><td>16</td><td>morselib&rsquo;s own cap</td></tr>
+      <tr><td><code>CONFIG_LWIP_DHCPS_MAX_STATION_NUM</code></td><td>8</td><td>16</td><td>would have addressed only the first 8</td></tr>
+    </tbody>
+  </table>
+
+  <p>Applied to <code>rimba-halow-mesh-ap</code> (the shipped gate) and <code>test-mesh-gate-ap</code> (its
+  T2 mirror), which are line-for-line twins &mdash; leaving them divergent would mean the regression tier
+  stopped exercising the shipped configuration.</p>
+
+  <div class="callout ok">
+    <p class="ct">&#10003; Two silent-failure classes closed</p>
+    <p><strong><code>GATE_MAX_CLIENTS</code> is now derived.</strong> It was 8 while the cap was 4. Had
+    anyone raised the cap without noticing the table, a client past its end would associate, get a lease,
+    transmit into the mesh &mdash; and <strong>silently never receive a mesh reply</strong>, because
+    <code>gate_is_ap_client()</code> would not recognise it.</p>
+    <p><strong>The DHCP pool would have silently under-served.</strong>
+    <code>CONFIG_LWIP_DHCPS_MAX_STATION_NUM</code> defaults to 8 and was never overridden, so a gate
+    admitting 16 would have addressed 8 and left the rest associated-but-unaddressed.</p>
+  </div>
+
+  <h2 id="wrongcomment">4 &middot; A comment that was actively wrong</h2>
+
+  <p>The gate&rsquo;s netif setup claimed the dhcps pool &ldquo;spans
+  <code>CONFIG_LWIP_DHCPS_MAX_STATION_NUM</code> leases (default 8 &rarr; .2-.9), so it stays clear of the
+  mesh nodes&rsquo; 10.9.9.100-163 static range&rdquo;.</p>
+
+  <p><strong><code>MAX_STATION_NUM</code> caps the lease-record list, not the address range.</strong> The
+  range is derived independently: start = server + 1 = <code>.2</code>, end = start +
+  <code>DHCPS_MAX_LEASE</code>, which is 100. So the pool is <strong><code>.2</code>&ndash;<code>.101</code>
+  regardless of that Kconfig</strong>, and its top two addresses <strong>do</strong> overlap the mesh
+  nodes&rsquo; static range. The wrong model was doubly misleading: it made raising the ceiling look
+  dangerous when it isn&rsquo;t, and made the real overlap look impossible.</p>
+
+  <p><strong>Recorded, not fixed.</strong> Reaching <code>.100</code> needs on the order of a hundred
+  concurrent clients. Pinning the range means calling <code>esp_netif_dhcps_option()</code> before the
+  netif&rsquo;s AUTOUP auto-starts dhcps, and getting that ordering wrong <strong>boot-loops the
+  gate</strong> &mdash; a real risk taken for an unreachable bug, on a change that could not be
+  bench-verified at ~100 clients anyway.</p>
+
+  <h2 id="leftalone">5 &middot; Ceilings deliberately left alone</h2>
+
+  <p>Recorded in the code next to <code>LINK_MAX_STAS</code> so the next person raising it sees them:</p>
+
+  <ul>
+    <li><strong><code>MESH_MPP_MAX = 32</code></strong> maps off-mesh host &rarr; proxying mesh node and
+    lives on <strong>every</strong> mesh node. Each AP client behind each gate consumes an entry on every
+    peer, so 16 clients on one gate already fills half of it mesh-wide. <strong>This is the ceiling that
+    really caps a multi-gate mesh</strong> &mdash; at 32 a second gate would evict, and a lost
+    <code>mpp</code> entry silently breaks the mesh&rarr;client return leg. It independently confirms 16.</li>
+    <li><strong><code>MMPKTMEM_TX_POOL_N_BLOCKS = 32</code></strong> caps in-flight TX, and the gate
+    <strong>drops silently</strong> on allocation failure.</li>
+    <li>The flat <code>/24</code> tops out near 98 usable addresses.</li>
+  </ul>
+
+  <h2 id="verification">6 &middot; Verification</h2>
+
+  <table>
+    <thead><tr><th>check</th><th>result</th></tr></thead>
+    <tbody>
+      <tr><td>All three apps build</td><td><strong>clean</strong>, 27&ndash;28 % partition free (was 0&ndash;1 %)</td></tr>
+      <tr><td>Gate boots with raised ceilings</td><td><strong>clean</strong> &mdash; mesh vif, RANN, AP vif concurrent, DHCP, L2 bridge ready, no asserts</td></tr>
+      <tr><td>Client associates</td><td><strong>PASS</strong> &mdash; <code>wpa_state=COMPLETED</code></td></tr>
+      <tr><td>DHCP from the raised pool</td><td><strong>PASS</strong> &mdash; leased <code>10.9.9.2</code></td></tr>
+      <tr><td>Traffic across the bridge</td><td><strong>PASS</strong> &mdash; 4/4 ping</td></tr>
+    </tbody>
+  </table>
+
+  <h3>T2 <code>mesh-gate-b2</code> on the full 3-board rig</h3>
+
+  <p>The regression this most risked breaking, run end-to-end (gate = board2 on the PPK2 rail, silent
+  static client = board0, pinging mesh node = board1):</p>
+
+  <table>
+    <thead><tr><th>run</th><th>result</th><th>first reply</th></tr></thead>
+    <tbody>
+      <tr><td>event-driven push, task created <strong>after</strong> RX registration</td><td>PASS 29/30</td><td><strong>seq=2</strong></td></tr>
+      <tr><td>task creation moved <strong>above</strong> RX registration</td><td><strong>PASS 30/30</strong></td><td><strong>seq=1</strong></td></tr>
+      <tr><td>historical baseline (8 runs, 07-23 &rarr; 07-26)</td><td>7 &times; 30/30 + 1 &times; 29/30</td><td>seq=1 every run</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <p class="ct">&#9888; What that table does and does not say</p>
+    <p>The second run is back on the historical baseline. <strong>I am not claiming the ordering fix caused
+    the difference</strong> &mdash; it is one run against one run, the lost packet in the first was seq=1
+    itself (the cold ARP riding the lossy broadcast), and that broadcast is a coin flip independent of the
+    push. What is established is that the window was real, that it is closed, and that the tier is not
+    regressed.</p>
+  </div>
+
+  <div class="callout err">
+    <p class="ct">&#10007; Capacity at 16 is NOT proven, and cannot be on this bench</p>
+    <p>Three ESP boards and a few Linux nodes cannot make 16 clients. What is verified is that the constants
+    are consistent, the RAM fits (~14.6 KB of <code>umac_sta_data</code> at 16), the apps build with room,
+    and the gate does not regress at the client count available. <strong>This is a structural claim</strong>
+    &mdash; exactly the kind this project criticised <code>ap_scale</code>&rsquo;s &ldquo;255&rdquo; for
+    being, and it should not be quoted as measured capacity. The code says so where the ceiling is
+    defined.</p>
+  </div>
+
+  <h2 id="diagnosis">7 &middot; A diagnosis worth recording</h2>
+
+  <p>The first bridge test reported no address and 100 % ping loss, which reads as a regression. It was not:
+  <strong><code>dhclient</code> is not installed on chronite</strong> (<code>dhcpcd</code> is), so the DHCP
+  step never ran and the ping came from an interface with no address. Same shape as the documented
+  &ldquo;a source with no IP fails ping with an empty mpath &mdash; looks like a forwarding bug&rdquo; trap.
+  Checking which tools exist before believing the failure took one command.</p>
+
+  <h2 id="next">8 &middot; What this does and does not unblock</h2>
+
+  <p>It makes the gate usable beyond 4 clients, which is worth having on its own.</p>
+
+  <p>It does <strong>not</strong> unblock the RAW break-even measurement, and I should correct my own earlier
+  framing: I wrote that raising the ceiling was step 1 toward observing RAW&rsquo;s benefit.
+  <strong>Raising a ceiling does not create clients</strong> &mdash; that measurement still needs many-STA
+  hardware the bench does not have. Necessary, nowhere near sufficient.</p>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#why16">1 &middot; Why 16, not 32</a></li>
+    <li><a href="#period">2 &middot; Period vs. first push</a></li>
+    <li><a href="#changes">3 &middot; The changes</a></li>
+    <li><a href="#wrongcomment">4 &middot; A wrong comment</a></li>
+    <li><a href="#leftalone">5 &middot; Ceilings left alone</a></li>
+    <li><a href="#verification">6 &middot; Verification</a></li>
+    <li><a href="#diagnosis">7 &middot; A diagnosis</a></li>
+    <li><a href="#next">8 &middot; What it unblocks</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-08-02-mesh-gate-client-ceiling</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

@@ -111,6 +111,9 @@ static esp_netif_driver_base_t g_ap_driver_base;
  * it - a failure with no error anywhere. Tying them removes that class of bug entirely. */
 #define GATE_MAX_CLIENTS LINK_MAX_STAS
 static uint8_t g_ap_clients[GATE_MAX_CLIENTS][6];
+/* Tautological as long as the #define above derives one from the other -- deliberately so. It is a
+ * tripwire for the edit that breaks the derivation: someone pinning GATE_MAX_CLIENTS to a literal to
+ * save RAM gets a compile error instead of the silent never-bridged client described above. */
 _Static_assert(GATE_MAX_CLIENTS >= LINK_MAX_STAS,
                "the gate client table must cover every station the AP will admit");
 static volatile int g_ap_client_n;
@@ -263,6 +266,21 @@ static struct gw_arp_entry g_gw_arp[GW_ARP_MAX];
 
 static uint32_t gw_now_ms(void) { return (uint32_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
 
+/* The announce task, woken the moment a NEW cross-bridge mapping is learned rather than only on its
+ * period. This is what keeps the 15 s steady-state period from costing propagation latency: the periodic
+ * sweep is UPKEEP, but the moment that actually matters is the first time the gate learns a host, and a
+ * silent static AP client is learned exactly once -- when it answers the mesh node's bridged ARP. Waiting
+ * up to a full period to push that mapping would leave resolution on the lossy B2 broadcast in between,
+ * which is the flakiness the proactive push exists to remove (T2 mesh-gate-b2).
+ *
+ * Notifications collapse: ulTaskNotifyTake(pdTRUE, ...) clears the count, so a burst of newly-learned
+ * hosts produces ONE announce, not one per host. */
+static TaskHandle_t g_gw_arp_task;
+static void gw_arp_wake_announce(void)
+{
+    if (g_gw_arp_task != NULL) xTaskNotifyGive(g_gw_arp_task);
+}
+
 static void gw_arp_learn(uint32_t ip, const uint8_t *mac, uint8_t side)
 {
     if (ip == 0 || (mac[0] & 0x01)) return; /* skip 0.0.0.0 + broadcast/multicast MACs */
@@ -281,6 +299,7 @@ static void gw_arp_learn(uint32_t ip, const uint8_t *mac, uint8_t side)
     g_gw_arp[slot].ip = ip; memcpy(g_gw_arp[slot].mac, mac, 6);
     g_gw_arp[slot].side = side; g_gw_arp[slot].last_ms = now;
     g_gw_arp[slot].used = true; /* publish last, after the fields are populated */
+    gw_arp_wake_announce();     /* a NEW mapping: push it now, do not wait for the period */
 }
 static void gw_arp_forget_mac(const uint8_t *mac)
 {
@@ -423,7 +442,9 @@ static void gw_arp_announce_task(void *arg)
         /* 15 s, not 3 s: the push is O(n_ap x n_mesh) both ways, so at the raised client ceiling a 3 s
          * period would spend ~26 % of airtime on ARP upkeep alone (see the table by LINK_MAX_STAS).
          * Entries live GW_ARP_TTL_MS (5 min), so 15 s still refreshes each mapping 20x per lifetime. */
-        vTaskDelay(pdMS_TO_TICKS(15000));
+        /* Wake early when gw_arp_learn() finds a new host; otherwise fall through on the period. The
+         * period is UPKEEP only -- see the airtime table by LINK_MAX_STAS for why it is 15 s and not 3. */
+        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(15000));
         gw_arp_announce_once();
     }
 }
@@ -749,6 +770,14 @@ void app_main(void)
 
     /* --- 3) L2 bridge wiring: 2nd netif + per-vif RX demux + TX tagging --- */
     gw_setup_ap_netif();
+    /* Proxy-ARP proactive push: keep both sides' ARP caches populated over reliable unicast so a mesh node
+     * ↔ AP client never depends on a lossy broadcast ARP crossing the bridge.
+     *
+     * STRICTLY BEFORE the RX callbacks below, and that ordering is load-bearing. gw_arp_learn() runs from
+     * RX context and wakes this task by handle; a mapping learned while the handle is still NULL drops its
+     * wake and waits out the full period instead. Registering RX first leaves exactly that window open. */
+    xTaskCreate(gw_arp_announce_task, "gw_arp", 4096, NULL, 4, &g_gw_arp_task);
+
     /* Override mmhalow's single plain RX cb with per-vif ext cbs (gateway RX demux delivers mesh
      * as VIF_STA, AP clients as VIF_AP). */
     ESP_ERROR_CHECK(mmwlan_register_rx_pkt_ext_cb(MMWLAN_VIF_STA, gw_mesh_rx_cb, g_mesh_netif) !=
@@ -762,9 +791,6 @@ void app_main(void)
     mmwlan_mesh_register_ae_rx_cb(gate_ae_rx_cb, NULL);
 
     xTaskCreate(mesh_net_task, "mesh_net", 4096, NULL, 5, NULL);
-    /* Proxy-ARP proactive push: keep both sides' ARP caches populated over reliable unicast so a mesh node
-     * ↔ AP client never depends on a lossy broadcast ARP crossing the bridge. */
-    xTaskCreate(gw_arp_announce_task, "gw_arp", 4096, NULL, 4, NULL);
 
     ESP_LOGI(TAG, "on-air identities: MESH SA=" MACSTR, MAC2STR(g_mesh_mac));
 }
