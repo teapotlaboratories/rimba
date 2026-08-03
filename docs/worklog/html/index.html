@@ -168,13 +168,19 @@ figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size
 <section class="hero">
 <h1>Engineering Worklogs</h1>
 <p class="lede">HaLow / 802.11s mesh bring-up, power-save, and security — the bench record.</p>
-<p class="stat"><b>112</b> worklogs · 2026-06-17 – 2026-08-02</p>
+<p class="stat"><b>113</b> worklogs · 2026-06-17 – 2026-08-02</p>
 </section>
 
 <section class="month">
-<h2>August 2026 <span class="mcount">1</span></h2>
+<h2>August 2026 <span class="mcount">2</span></h2>
 <div class="grid">
 
+<a class="card" href="2026-08-02-mesh-gate-client-ceiling.html">
+<div class="card-date">2026-08-02</div>
+<div class="card-title">Mesh-gate client ceiling: 4 to 16, and the four things that had to move with it</div>
+<div class="card-ex">The tracked "raise the gate's client ceiling to ~16-32" item, landed at 16 with the arithmetic that decides it. Two corrections came first. The binding ceiling was 4, not the 8 I had been repeating: LINK_MAX_STAS is 4 and morselib refuses any AID at or above it, while the 8 was GATE_MAX_CLIENTS, the bridge table, already double the admission limit and therefore never binding. And building before editing found rimba-halow-mesh-ap with 4,640 bytes free and test-mesh-gate-ap with 5,744 — 0% — so nothing could be added to the shipped gate at all; that is a repo-wide tripwire, and all three gate apps now carry a 2 MB partitions.csv taking them to 27-28% free. Why 16 and not 32: the proactive proxy-ARP push is O(n_ap x n_mesh) in both directions at ~4.85 ms per push, so with 5 mesh nodes a 3 s period costs 25.8% of airtime at 16 clients and 51.7% at 32 — more than half the gate's airtime spent teaching ARP. The period moves to 15 s (5.2% at 16, still 20 refreshes per 5-minute entry lifetime). A harder ceiling that would have bitten silently: GW_ARP_MAX = 24 holds BOTH sides, saturating near 19 clients after which the LRU thrashes and proxy-ARP quietly stops resolving rather than failing; raised to 48. Stretching the period could not be done alone, because T2 mesh-gate-b2 deliberately uses a SILENT static client that is learned exactly once — when it answers the node's bridged ARP — so the push is now event-driven on top of the period: gw_arp_learn wakes the announce task via a task notification on a genuinely new mapping, and notifications collapse so a burst of hosts yields one announce. One ordering detail is load-bearing: the wake is by handle, so a mapping learned before the task exists drops its wake silently, and the task is now created above the RX-callback registrations rather than after them. Two silent-failure classes closed on the way: GATE_MAX_CLIENTS is now derived from LINK_MAX_STAS with a static assert (a client past the table's end would have associated, leased, transmitted, and then never received a mesh reply), and CONFIG_LWIP_DHCPS_MAX_STATION_NUM was still at its default 8 so a gate admitting 16 would have addressed half of them. A comment claiming that Kconfig bounds the DHCP address range was actively wrong — it bounds the lease-record list; the range is .2-.101 regardless and does overlap the mesh nodes' static .100-.163 — recorded rather than fixed, because pinning it risks a boot loop for a bug unreachable below ~100 clients. mesh-gate-b2 passed 30/30 on the full 3-board rig, matching the 8-run historical baseline. Capacity at 16 is NOT proven and cannot be on this bench: three ESP boards cannot make 16 clients, so this is a structural claim of the exact kind this project criticised ap_scale's 255 for being, and the code says so where the ceiling is defined.</div>
+<div class="card-meta">ceiling 4 to 16 · 5.2% ARP airtime (was 25.8%) · GW_ARP_MAX 24 to 48 · 3 apps off the default partition · T2 mesh-gate-b2 30/30 · capacity NOT proven at 16</div>
+</a>
 <a class="card" href="2026-08-02-raw-s4-is-scaffolding.html">
 <div class="card-date">2026-08-02</div>
 <div class="card-title">RAW S4 is misconceived: the AID list has one consumer, and S3 was the finish line</div>
