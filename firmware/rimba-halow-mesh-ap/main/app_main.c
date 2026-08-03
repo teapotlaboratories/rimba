@@ -59,7 +59,39 @@
 #define LINK_PSK        "rimbahalow"
 #define LINK_S1G_CHAN   27
 #define LINK_OP_CLASS   68
-#define LINK_MAX_STAS   4
+/* Gate client ceiling. Raised from 4 to 16 on 2026-08-02.
+ *
+ * 16 rather than the 32 the scaling analysis floated, and the reason is the proactive proxy-ARP push
+ * below, which is O(n_ap x n_mesh) in BOTH directions. Per-push airtime at 1 MHz MCS0 is ~4.85 ms, so
+ * with 5 mesh nodes the upkeep cost is:
+ *
+ *     clients   pushes/period   at 3 s      at 15 s
+ *         8          80          12.9 %      2.6 %
+ *        16         160          25.8 %      5.2 %
+ *        32         320          51.7 %     10.3 %
+ *
+ * At 32 clients on the old 3 s period the gate would spend over half its airtime teaching ARP, and the
+ * table below would thrash. 16 on a 15 s period costs ~5 %, which is a defensible upkeep budget.
+ *
+ * ⚠ CAPACITY AT 16 IS NOT PROVEN. The bench cannot produce 16 clients; what is verified is that the
+ * constants are consistent, the RAM fits, and the gate still works with the clients available. This is a
+ * structural claim, exactly the kind the project criticised ap_scale's "255" for being. Do not quote it
+ * as a measured capacity.
+ *
+ * Beyond 16 the push must become lazy or reactive first - raising these numbers alone would degrade
+ * SILENTLY, which is worse than refusing to associate.
+ *
+ * CEILINGS DELIBERATELY NOT RAISED, and why 16 is the honest number:
+ *   MESH_MPP_MAX = 32   (halow submodule, umac_mesh.c:2096) maps off-mesh host -> proxying mesh node and
+ *                       lives on EVERY mesh node. Each AP client behind each gate consumes one entry on
+ *                       every peer, so 16 clients on one gate already fills half of it mesh-wide; a
+ *                       second gate at 32 would evict, and a lost mpp entry silently breaks the
+ *                       mesh->client return leg. This is the ceiling that really caps a MULTI-gate mesh.
+ *   MMPKTMEM_TX_POOL_N_BLOCKS = 32 caps in-flight TX, and the gate DROPS SILENTLY when allocation fails
+ *                       (gw_tx_ap_frame returns on a NULL pkt). More clients means more concurrent bursts.
+ *   The flat /24 tops out near 98 usable addresses -- see the DHCP note in gate_netif setup.
+ */
+#define LINK_MAX_STAS   16
 
 #define AP_SUBNET_IP    "10.9.9.1"       /* the gate's AP-side host on the FLAT mesh subnet */
 #define AP_SUBNET_MASK  "255.255.255.0"
@@ -74,8 +106,13 @@ static esp_netif_driver_base_t g_ap_driver_base;
 
 /* S5b — the gate's associated AP clients. A proxied mesh AE frame whose eaddr1 (final DA) matches one of
  * these is delivered onto the AP vif (the mesh->AP leg of the L2 bridge, gate_ae_rx_cb below). */
-#define GATE_MAX_CLIENTS 8
+/* Sized FROM the admission cap, not independently. If this were smaller than LINK_MAX_STAS a client
+ * could associate and then silently never be bridged mesh->AP, because gate_is_ap_client would not know
+ * it - a failure with no error anywhere. Tying them removes that class of bug entirely. */
+#define GATE_MAX_CLIENTS LINK_MAX_STAS
 static uint8_t g_ap_clients[GATE_MAX_CLIENTS][6];
+_Static_assert(GATE_MAX_CLIENTS >= LINK_MAX_STAS,
+               "the gate client table must cover every station the AP will admit");
 static volatile int g_ap_client_n;
 /* g_ap_clients[]/g_ap_client_n are written by ap_sta_status_cb (AP status task) and read by
  * gate_is_ap_client from the mesh-RX task; a short portMUX critical section keeps a reader from seeing a
@@ -215,7 +252,10 @@ static void gw_rx_deliver(struct mmpkt *mmpkt, esp_netif_t *esp_netif)
  * unicast on the mesh via mmwlan_mesh_tx_proxied). Answering with the real MAC (not the gate's) keeps
  * the L2-bridge datapath (S5b/S5c) carrying the actual traffic — the requester still addresses the true
  * peer, the gate just short-circuits the lossy resolution. */
-#define GW_ARP_MAX 24
+/* Holds BOTH sides - AP clients AND learned mesh hosts - so it must exceed their SUM, not either one.
+ * At 24 with 5 mesh nodes it saturated at ~19 clients and then thrashed its LRU, silently ceasing to
+ * teach ARP rather than failing. 48 covers 16 clients plus a large mesh with margin. ~20 B per entry. */
+#define GW_ARP_MAX 48
 enum { GW_SIDE_AP = 0, GW_SIDE_MESH = 1 };
 struct gw_arp_entry { uint32_t ip; uint8_t mac[6]; uint8_t side; bool used; uint32_t last_ms; };
 static struct gw_arp_entry g_gw_arp[GW_ARP_MAX];
@@ -380,7 +420,10 @@ static void gw_arp_announce_task(void *arg)
 {
     (void)arg;
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        /* 15 s, not 3 s: the push is O(n_ap x n_mesh) both ways, so at the raised client ceiling a 3 s
+         * period would spend ~26 % of airtime on ARP upkeep alone (see the table by LINK_MAX_STAS).
+         * Entries live GW_ARP_TTL_MS (5 min), so 15 s still refreshes each mapping 20x per lifetime. */
+        vTaskDelay(pdMS_TO_TICKS(15000));
         gw_arp_announce_once();
     }
 }
@@ -553,11 +596,27 @@ static void gw_setup_ap_netif(void)
      * The IP goes in the INHERENT config (like stock WIFI_AP) so the netif is BORN with 10.9.9.1 and
      * AUTOUP's auto-start of dhcps sees a valid server IP. (A 0.0.0.0 IP makes dhcps fail — dhcpserver.c:
      * ip4_addr_isany -> "could not obtain pcb" — and a later set_ip_info would then abort with
-     * DHCP_NOT_STOPPED, boot-looping the gate.) So we do NOT call set_ip_info here. The dhcps pool starts at
-     * 10.9.9.2 and spans CONFIG_LWIP_DHCPS_MAX_STATION_NUM leases (default 8 -> .2-.9), so at the default it
-     * stays clear of the mesh nodes' 10.9.9.100-163 static range; if that Kconfig is raised toward ~100, pin
-     * the range explicitly (esp_netif_dhcps_option) to keep the pool below .100. Reuse the WIFI_STA netstack
-     * (generic ethernet L2 glue); dhcps is L3/UDP. */
+     * DHCP_NOT_STOPPED, boot-looping the gate.) So we do NOT call set_ip_info here.
+     *
+     * ⚠ CORRECTED 2026-08-02 -- this comment used to claim the pool "spans
+     * CONFIG_LWIP_DHCPS_MAX_STATION_NUM leases (default 8 -> .2-.9)" and therefore stays clear of the
+     * mesh range. THAT IS WRONG, and the wrong model would have made a raised client ceiling look
+     * dangerous when it is not (and, worse, made the real overlap look impossible).
+     *
+     * MAX_STATION_NUM caps the LEASE-RECORD LIST, not the address range (dhcpserver.c:1512 evicts the
+     * oldest lease when the list is full). The RANGE is derived independently: start = server + 1 = .2,
+     * end = start + DHCPS_MAX_LEASE, and DHCPS_MAX_LEASE is 0x64 = 100 (dhcpserver.h:66). So the pool is
+     * .2-.101 regardless of this Kconfig, and its top two addresses DO overlap the mesh nodes' self
+     * assigned 10.9.9.{100 + (mac[5] & 0x3f)} = .100-.163 range.
+     *
+     * Not reachable in practice at this client ceiling: addresses are handed out from .2 upward and the
+     * lease list holds at most CONFIG_LWIP_DHCPS_MAX_STATION_NUM (16) at a time, so .100 needs on the
+     * order of a hundred concurrent clients. It is recorded rather than fixed because pinning the range
+     * means calling esp_netif_dhcps_option() before the netif's AUTOUP auto-starts dhcps, and getting
+     * that ordering wrong boot-loops the gate (see the DHCP_NOT_STOPPED note above) -- a real risk taken
+     * for an unreachable bug, on a change that cannot be bench-verified at ~100 clients anyway.
+     *
+     * Reuse the WIFI_STA netstack (generic ethernet L2 glue); dhcps is L3/UDP. */
     static esp_netif_ip_info_t ap_ip;              /* runtime-init: esp_ip4addr_aton is not const */
     ap_ip.ip.addr      = esp_ip4addr_aton(AP_SUBNET_IP);
     ap_ip.gw.addr      = 0; /* no router option: a pure L2 bridge doesn't route off-subnet, so don't hand

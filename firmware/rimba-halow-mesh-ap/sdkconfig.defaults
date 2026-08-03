@@ -5,3 +5,15 @@ CONFIG_HALOW_AP_MODE=y
 
 # The all-ESP Mesh-gate is a pure L2 bridge on ONE flat 10.9.9.0/24 subnet (AP clients + mesh
 # nodes share it; the gate bridges at L2 + serves DHCP). No inter-subnet IP forwarding is needed.
+
+# Own partition table: the default SINGLE_APP_LARGE app partition (0x177000) was within a few KB of
+# full, so any further growth failed the build outright.
+# ⚠ sdkconfig is CACHED per build dir — a change here needs `rm -rf build/<app>/<board>` to take.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Gate client ceiling raised 4 -> 16 (2026-08-02). Both of these bound it independently of the app's own
+# LINK_MAX_STAS, and the DHCP pool is the one that is easy to miss: IDF defaults it to 8, so a gate
+# admitting 16 stations would hand addresses to the first 8 and silently leave the rest unaddressed.
+CONFIG_HALOW_AP_MAX_STAS=16
+CONFIG_LWIP_DHCPS_MAX_STATION_NUM=16
