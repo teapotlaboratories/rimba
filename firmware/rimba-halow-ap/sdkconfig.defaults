@@ -10,3 +10,9 @@ CONFIG_HALOW_AP_MAX_STAS=255
 # not internal SRAM — at 255 STAs that is ~230 KB that must not come from the
 # small internal-SRAM pool.
 CONFIG_HALOW_STA_DATA_IN_PSRAM=y
+
+# Own partition table: the default SINGLE_APP_LARGE app partition (0x177000) was within a few KB of
+# full, so any further growth failed the build outright.
+# ⚠ sdkconfig is CACHED per build dir — a change here needs `rm -rf build/<app>/<board>` to take.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
