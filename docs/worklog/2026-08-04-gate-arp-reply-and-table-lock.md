@@ -124,10 +124,44 @@ uninitialised stack and would very likely have varied frame to frame.
 
 - **`matches source layout` — REACHED.** Every field sits where RFC 826 and `net/ipv4/arp.c` put it,
   verified byte-by-byte off air rather than by reading the source.
-- **`matches live Linux device` — NOT RUN.** It would need a Linux STA associated to an open S1G AP;
-  chronite is configured as a mesh node, not an AP client, and converting it was more than this fix
-  warranted. **Recorded as owed, not quietly skipped.** The gap is narrow — ARP is not HaLow-specific
-  and the receiver pinning these values is lwIP — but it is a gap.
+- **`matches live Linux device` — REACHED, in a second capture.** chronite was associated to the open
+  gate AP as a Linux STA at 10.9.9.50 (`docs/reference/captures/wpa-sta-open.conf`, now tracked) and made
+  to transmit real ARP replies with `arping -A` / `-U`. **Both stacks' replies are in the same capture,
+  on the same channel, within seconds of each other:**
+
+  | field | off | ESP (gate proxy reply) | Linux (chronite) | |
+  |---|---|---|---|---|
+  | htype | 0 | `00 01` | `00 01` | identical |
+  | ptype | 2 | `08 00` | `08 00` | identical |
+  | hlen / plen | 4 | `06 04` | `06 04` | identical |
+  | oper | 6 | `00 02` | `00 02` | identical |
+  | sha | 8 | `e2 72 a1 f8 f9 40` | `3c 22 7f 37 51 38` | *names a different host — correct* |
+  | spa | 14 | `0a 09 09 64` | `0a 09 09 32` | *names a different host — correct* |
+  | **tha** | **18** | **`3c 22 7f 37 51 38`** | **`3c 22 7f 37 51 38`** | **identical** |
+  | tpa | 24 | `0a 09 09 32` | `0a 09 09 32` | identical |
+
+  All eight structural bytes byte-identical; every address field at the same offset and width. The only
+  two that differ are `sha`/`spa`, and they differ *because they name different hosts* — the gate
+  announces the mesh node, chronite announces itself. **That is the gold standard met.**
+
+  Independent corroboration from the same run: chronite's own neighbour table showed
+  `10.9.9.100 lladdr e2:72:a1:f8:f9:40 REACHABLE`, i.e. a real Linux stack accepted the gate's reply
+  and installed it.
+
+### Getting a Linux ARP reply on air was the hard part
+
+Two dead ends worth recording. **The proactive push defeats the natural path** — the mesh node is taught
+about the client before it ever needs to broadcast, so the client is never asked and never replies. The
+feature under test suppresses the very frame the reference needed. And **chronosalt has no HaLow netdev**
+(`morse`/`dot11ah` loaded, no `wlan1`), so a second Linux client was not available. `arping -A`/`-U` from
+the associated node solves it directly: those transmit genuine `oper=2` replies on demand.
+
+### One fixture bug found on the way
+
+`MMWLAN_OPEN` alone was not enough. The fixture sets `passphrase`/`passphrase_len` before the security
+branch, and with those non-empty **the AP still advertises the Privacy capability bit** — a scanning
+Linux STA sees `[WEP][ESS]` and refuses to associate with `key_mgmt=NONE`, which reads exactly like a
+wrong-passphrase failure. The open branch now clears both.
 
 Capture archived at `docs/worklog/artifacts/gate-arp/2026-08-04-proxy-arp-postfix.pcap`.
 Bench left radio-silent: all three boards on `rimba-hello`, chronium's `wlan1`/`morse0` down, PPK2
