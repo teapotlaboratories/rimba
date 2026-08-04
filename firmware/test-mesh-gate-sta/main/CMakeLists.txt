@@ -11,3 +11,8 @@ endif()
 if(DEFINED TEST_NO_PING)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_NO_PING=1")
 endif()
+
+# AP_OPEN=1 joins an unsecured AP. Pairs with the gate fixture's TEST_AP_OPEN capture build.
+if(DEFINED TEST_AP_OPEN)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_AP_OPEN=1")
+endif()

@@ -89,3 +89,46 @@ fifteen minutes of bench to disprove.
 approved there. Its table is smaller and its testing is 15 pings, so the cost would likely have been
 invisible — a latent version of a defect already measured elsewhere. Converted there too rather than
 left in the code people copy.
+
+
+---
+
+## On-air verification (the `.ai` requirement)
+
+The fix corrects a **frame format**, and the field it corrects is one no receiver reads — so delivery
+evidence cannot confirm it. That is precisely the case the on-air rule exists for, and it is the same
+argument I had just written into the example's README hours earlier. So it was captured.
+
+**Rig.** Gate = board2 (`test-mesh-gate-ap`), silent static client = board0 at 10.9.9.50, mesh node =
+board1 at 10.9.9.100, sniffer = chronium `morse0` on S1G ch27 (5560 MHz). 3,491 frames, 120 s.
+
+⚠ **The AP was run OPEN for this capture** (`AP_OPEN=1`, a new compile-gated fixture mode). The shipped
+AP is SAE/PMF, so its data frames are CCMP-encrypted and a monitor capture cannot decode the payload.
+The ARP under test lives in the SNAP payload and is **not** affected by the link cipher, so dropping
+encryption exposes the bytes without changing them. This is a capture-only build and says so on the
+console at boot.
+
+**Result — 9 proxy-ARP replies from the gate's AP BSSID `be:2a:33:96:b2:33`:**
+
+| field | on air | expected |
+|---|---|---|
+| oper | 2 (REPLY) | ✓ |
+| sha / spa | `e2:72:a1:f8:f9:40` / 10.9.9.100 | the announced mesh node ✓ |
+| **tha** | **`68:24:99:44:6b:b7`** | **the requester's full MAC, at payload offset 18** ✓ |
+| tpa | 10.9.9.50 | the requester's IP ✓ |
+
+**All nine are byte-identical**, which is itself corroboration: under the defect `out[32..33]` were
+uninitialised stack and would very likely have varied frame to frame.
+
+### Tier reached, stated per the rule
+
+- **`matches source layout` — REACHED.** Every field sits where RFC 826 and `net/ipv4/arp.c` put it,
+  verified byte-by-byte off air rather than by reading the source.
+- **`matches live Linux device` — NOT RUN.** It would need a Linux STA associated to an open S1G AP;
+  chronite is configured as a mesh node, not an AP client, and converting it was more than this fix
+  warranted. **Recorded as owed, not quietly skipped.** The gap is narrow — ARP is not HaLow-specific
+  and the receiver pinning these values is lwIP — but it is a gap.
+
+Capture archived at `docs/worklog/artifacts/gate-arp/2026-08-04-proxy-arp-postfix.pcap`.
+Bench left radio-silent: all three boards on `rimba-hello`, chronium's `wlan1`/`morse0` down, PPK2
+hold released and board2 dark.

@@ -805,8 +805,15 @@ void app_main(void)
     ap_args.ssid_len = strlen(LINK_SSID);
     memcpy(ap_args.passphrase, LINK_PSK, strlen(LINK_PSK));
     ap_args.passphrase_len = strlen(LINK_PSK);
+#ifdef TEST_AP_OPEN
+    /* Capture mode only -- see CMakeLists.txt. CCMP would hide the payload from the monitor. */
+    ap_args.security_type = MMWLAN_OPEN;
+    ap_args.pmf_mode = MMWLAN_PMF_DISABLED;
+    ESP_LOGW(TAG, "AP is OPEN (TEST_AP_OPEN) -- capture build, NOT the shipped configuration");
+#else
     ap_args.security_type = MMWLAN_SAE;
     ap_args.pmf_mode = MMWLAN_PMF_REQUIRED;
+#endif
     ap_args.s1g_chan_num = LINK_S1G_CHAN;
     ap_args.op_class = LINK_OP_CLASS;
     ap_args.max_stas = LINK_MAX_STAS;
