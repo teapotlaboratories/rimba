@@ -809,6 +809,11 @@ void app_main(void)
     /* Capture mode only -- see CMakeLists.txt. CCMP would hide the payload from the monitor. */
     ap_args.security_type = MMWLAN_OPEN;
     ap_args.pmf_mode = MMWLAN_PMF_DISABLED;
+    /* Clear the passphrase set above: with it non-empty the AP still advertises the Privacy
+     * capability bit, so a scanning Linux STA sees [WEP] and refuses to associate with
+     * key_mgmt=NONE. Observed on chronite before this line existed. */
+    memset(ap_args.passphrase, 0, sizeof(ap_args.passphrase));
+    ap_args.passphrase_len = 0;
     ESP_LOGW(TAG, "AP is OPEN (TEST_AP_OPEN) -- capture build, NOT the shipped configuration");
 #else
     ap_args.security_type = MMWLAN_SAE;
