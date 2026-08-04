@@ -27,6 +27,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -267,6 +268,23 @@ static struct gw_arp_entry g_gw_arp[GW_ARP_MAX];
 
 static uint32_t gw_now_ms(void) { return (uint32_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
 
+/* The table has THREE concurrent accessors -- the mesh RX task and the AP RX task both snoop into it,
+ * and the announce task ages and reads it -- and was unguarded. Two RX contexts could interleave on the
+ * same slot and publish a mismatched IP/MAC pair, and the announce loop read entries live ACROSS its TX
+ * calls, so a slot could be evicted and refilled mid-push and teach a host the wrong MAC. Both are the
+ * kind of fault that presents as "the bridge works, mostly".
+ *
+ * A MUTEX, not a portMUX critical section, and that choice is measured rather than stylistic. Every
+ * accessor is a task -- both RX callbacks are dispatched from the one UMAC event loop, forget_mac runs
+ * on the AP status task, the push on its own -- so no ISR is involved and interrupts need never be
+ * disabled. The critical-section version scanned up to GW_ARP_MAX slots with interrupts off on the
+ * PER-FRAME path, and T2 mesh-gate-b2 measured the cost: 28/30 twice, against 30/30 for the identical
+ * build with the locking removed under the same RF conditions (median RTT 43-46 ms across all three).
+ * A mutex costs a take/give and blocks nothing at the driver level. */
+static SemaphoreHandle_t g_gw_arp_lock;
+static inline void gw_arp_lock(void)   { if (g_gw_arp_lock) xSemaphoreTake(g_gw_arp_lock, portMAX_DELAY); }
+static inline void gw_arp_unlock(void) { if (g_gw_arp_lock) xSemaphoreGive(g_gw_arp_lock); }
+
 /* The announce task, woken the moment a NEW cross-bridge mapping is learned rather than only on its
  * period. This is what keeps the 15 s steady-state period from costing propagation latency: the periodic
  * sweep is UPKEEP, but the moment that actually matters is the first time the gate learns a host, and a
@@ -286,36 +304,50 @@ static void gw_arp_learn(uint32_t ip, const uint8_t *mac, uint8_t side)
 {
     if (ip == 0 || (mac[0] & 0x01)) return; /* skip 0.0.0.0 + broadcast/multicast MACs */
     uint32_t now = gw_now_ms();
-    int free_i = -1, lru_i = -1;
+    bool is_new = false;
+    gw_arp_lock();
+    int free_i = -1, lru_i = -1, slot = -1;
     for (int i = 0; i < GW_ARP_MAX; i++) {
         if (g_gw_arp[i].used) {
             if (g_gw_arp[i].ip == ip) {
-                memcpy(g_gw_arp[i].mac, mac, 6); g_gw_arp[i].side = side; g_gw_arp[i].last_ms = now; return;
+                memcpy(g_gw_arp[i].mac, mac, 6); g_gw_arp[i].side = side; g_gw_arp[i].last_ms = now;
+                slot = i; break; /* refresh of a mapping we already hold: no wake */
             }
             if (lru_i < 0 || (int32_t)(g_gw_arp[i].last_ms - g_gw_arp[lru_i].last_ms) < 0) lru_i = i;
         } else if (free_i < 0) { free_i = i; }
     }
-    int slot = (free_i >= 0) ? free_i : lru_i; /* a free slot, else evict the least-recently-used entry */
-    if (slot < 0) return;
-    g_gw_arp[slot].ip = ip; memcpy(g_gw_arp[slot].mac, mac, 6);
-    g_gw_arp[slot].side = side; g_gw_arp[slot].last_ms = now;
-    g_gw_arp[slot].used = true; /* publish last, after the fields are populated */
-    gw_arp_wake_announce();     /* a NEW mapping: push it now, do not wait for the period */
+    if (slot < 0) {
+        slot = (free_i >= 0) ? free_i : lru_i; /* a free slot, else evict the least-recently-used entry */
+        if (slot >= 0) {
+            g_gw_arp[slot].ip = ip; memcpy(g_gw_arp[slot].mac, mac, 6);
+            g_gw_arp[slot].side = side; g_gw_arp[slot].last_ms = now;
+            g_gw_arp[slot].used = true; /* publish last, after the fields are populated */
+            is_new = true;
+        }
+    }
+    gw_arp_unlock();
+    /* Outside the lock: the notify can leave a context switch pending. */
+    if (is_new) gw_arp_wake_announce(); /* a NEW mapping: push it now, do not wait for the period */
 }
 static void gw_arp_forget_mac(const uint8_t *mac)
 {
+    gw_arp_lock();
     for (int i = 0; i < GW_ARP_MAX; i++)
         if (g_gw_arp[i].used && memcmp(g_gw_arp[i].mac, mac, 6) == 0) g_gw_arp[i].used = false;
+    gw_arp_unlock();
 }
 static bool gw_arp_lookup(uint32_t ip, uint8_t *mac_out, uint8_t *side_out)
 {
     uint32_t now = gw_now_ms();
+    bool found = false;
+    gw_arp_lock();
     for (int i = 0; i < GW_ARP_MAX; i++)
         if (g_gw_arp[i].used && g_gw_arp[i].ip == ip) {
-            if ((uint32_t)(now - g_gw_arp[i].last_ms) > GW_ARP_TTL_MS) { g_gw_arp[i].used = false; return false; }
-            memcpy(mac_out, g_gw_arp[i].mac, 6); *side_out = g_gw_arp[i].side; return true;
+            if ((uint32_t)(now - g_gw_arp[i].last_ms) > GW_ARP_TTL_MS) { g_gw_arp[i].used = false; break; }
+            memcpy(mac_out, g_gw_arp[i].mac, 6); *side_out = g_gw_arp[i].side; found = true; break;
         }
-    return false;
+    gw_arp_unlock();
+    return found;
 }
 /* Learn the sender's IP->MAC from a frame (ARP or IPv4), so the gate can proxy/announce it. `side` = the
  * vif it arrived on. Snooping IPv4 (not just ARP) lets the gate learn a host from ANY of its traffic
@@ -344,7 +376,14 @@ static void gw_arp_build_reply(uint8_t *out, const uint8_t *req_mac, uint32_t re
     out[20] = 0x00; out[21] = 0x02; /* oper = REPLY */
     memcpy(out + 22, tpa_mac, 6);   /* sha = answered host MAC */
     memcpy(out + 28, &tpa, 4);      /* spa = answered host IP */
-    memcpy(out + 34, req_mac, 6);   /* tha = requester MAC */
+    /* tha at ARP-payload offset 18 == absolute 32, NOT 34. At 34 the field landed two bytes late:
+     * out[32..33] were never written (uninitialised stack went on air) and out[38..39] were written
+     * twice, so every proxy-ARP reply the gate sent to an AP client carried a malformed target
+     * hardware address. It resolved anyway because lwIP's etharp_input decides "for us" from the
+     * target PROTOCOL address and updates its cache from sha/spa -- it never reads tha -- which is
+     * why the bridge tests passed throughout. The mesh SNAP builder below always had this right
+     * (a + 18), and that disagreement is what gave the bug away. */
+    memcpy(out + 32, req_mac, 6);   /* tha = requester MAC */
     memcpy(out + 38, &req_ip, 4);   /* tpa = requester IP */
 }
 static void gw_tx_ap_frame(const uint8_t *frame, uint32_t len)
@@ -411,23 +450,32 @@ static void gw_arp_push_to_mesh(uint32_t spa, const uint8_t *smac, const uint8_t
 static void gw_arp_announce_once(void)
 {
     uint32_t now = gw_now_ms();
-    for (int i = 0; i < GW_ARP_MAX; i++) /* age out departed/stale hosts before pushing */
-        if (g_gw_arp[i].used && (uint32_t)(now - g_gw_arp[i].last_ms) > GW_ARP_TTL_MS)
-            g_gw_arp[i].used = false;
+    /* Age out and SNAPSHOT in one critical section, then transmit from the snapshot. Reading the live
+     * table across the TX calls below let a slot be evicted and refilled mid-push, which teaches a host
+     * an IP->MAC pair that never coexisted. ~12 B per entry on this task's 4 KB stack. This is also why
+     * the lock is never held across a TX: that would block the datapath for the whole O(n^2) sweep. */
+    struct { uint32_t ip; uint8_t mac[6]; uint8_t side; } view[GW_ARP_MAX];
+    int n = 0;
+    gw_arp_lock();
+    for (int i = 0; i < GW_ARP_MAX; i++) {
+        if (!g_gw_arp[i].used) continue;
+        if ((uint32_t)(now - g_gw_arp[i].last_ms) > GW_ARP_TTL_MS) { g_gw_arp[i].used = false; continue; }
+        view[n].ip = g_gw_arp[i].ip; memcpy(view[n].mac, g_gw_arp[i].mac, 6);
+        view[n].side = g_gw_arp[i].side; n++;
+    }
+    gw_arp_unlock();
     int pushed = 0;
-    for (int a = 0; a < GW_ARP_MAX; a++) {
-        if (!g_gw_arp[a].used) continue;
-        for (int b = 0; b < GW_ARP_MAX; b++) {
-            if (!g_gw_arp[b].used || g_gw_arp[a].side == g_gw_arp[b].side) continue; /* other side only */
+    for (int a = 0; a < n; a++) {
+        for (int b = 0; b < n; b++) {
+            if (view[a].side == view[b].side) continue; /* other side only */
             /* teach host `a` that host `b` is-at b.mac, over a's reliable link */
-            if (g_gw_arp[a].side == GW_SIDE_AP) {
+            if (view[a].side == GW_SIDE_AP) {
                 uint8_t reply[42]; /* per-call buffer (was a shared static) */
-                gw_arp_build_reply(reply, g_gw_arp[a].mac, g_gw_arp[a].ip,
-                                   g_gw_arp[b].ip, g_gw_arp[b].mac);
+                gw_arp_build_reply(reply, view[a].mac, view[a].ip, view[b].ip, view[b].mac);
                 gw_tx_ap_frame(reply, sizeof(reply));                   /* AP downlink (acked) */
             } else {
-                gw_arp_push_to_mesh(g_gw_arp[b].ip, g_gw_arp[b].mac,
-                                    g_gw_arp[a].mac, g_gw_arp[a].ip);   /* proxied mesh unicast */
+                gw_arp_push_to_mesh(view[b].ip, view[b].mac,
+                                    view[a].mac, view[a].ip);           /* proxied mesh unicast */
             }
             pushed++;
         }
@@ -777,6 +825,7 @@ void app_main(void)
      * STRICTLY BEFORE the RX callbacks below, and that ordering is load-bearing. gw_arp_learn() runs from
      * RX context and wakes this task by handle; a mapping learned while the handle is still NULL drops its
      * wake and waits out the full period instead. Registering RX first leaves exactly that window open. */
+    g_gw_arp_lock = xSemaphoreCreateMutex();   /* before the RX callbacks below can learn */
     xTaskCreate(gw_arp_announce_task, "gw_arp", 4096, NULL, 4, &g_gw_arp_task);
 
     /* Override mmhalow's single plain RX cb with per-vif ext cbs (gateway RX demux delivers mesh
