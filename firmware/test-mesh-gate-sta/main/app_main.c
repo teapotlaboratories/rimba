@@ -126,9 +126,13 @@ static bool associate(void)
     mmhalow_wifi_config_t conf = { .sta = MMWLAN_STA_ARGS_INIT };
     memcpy(conf.sta.ssid, LINK_SSID, strlen(LINK_SSID));
     conf.sta.ssid_len = strlen(LINK_SSID);
+#ifdef TEST_AP_OPEN
+    conf.sta.security_type = MMWLAN_OPEN;   /* capture build -- pairs with the gate's TEST_AP_OPEN */
+#else
     memcpy(conf.sta.passphrase, LINK_PSK, strlen(LINK_PSK));
     conf.sta.passphrase_len = strlen(LINK_PSK);
     conf.sta.security_type = MMWLAN_SAE;
+#endif
     ESP_ERROR_CHECK(mmhalow_set_config(WIFI_IF_STA, &conf));
     mmwlan_override_max_tx_power(1);
     mmhalow_connect(sta_status_cb);
