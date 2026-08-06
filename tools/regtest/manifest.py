@@ -405,6 +405,17 @@ APPS: tuple[App, ...] = (
               "support; origin drives a long ping burst). Relay forwards, then asserts its "
               "hw_restart_counter did NOT climb across the window (the interrupt-WDT crash). "
               "RELAY=board2 (require_wired). Needs CONFIG_HALOW_AP_MODE=y."),
+    App("test-mesh-hwrestart",
+        notes="Mesh hw_restart S1 reproducer (NOT a regression test -- deliberately unregistered from "
+              "T2). Forces a chip restart with mmwlan_force_hw_restart() on a peered mesh node. Its "
+              "ONE TEST| gate is restart-ran (umac_stats hw_restart_counter climbed), which asserts "
+              "the TRIGGER worked, not that the mesh recovered -- so a PASS here is NOT a recovery "
+              "verdict. Scoring recovery on-device is impossible for this defect: "
+              "mmwlan_mesh_peer_count() reads the host-side mesh_peers[], which mmdrv_deinit/init "
+              "never touches, and an earlier version of this fixture PASSed a node that was "
+              "transmitting nothing. THE RECOVERY VERDICT IS OFF-AIR -- run tools/mesh_hwrestart_cap.py "
+              "on chronium's morse0 (same shape as test-raw-rps). Rig: 2 boards, this one + any mesh "
+              "node on rimba-mesh ch27 (test-mesh-gate-node NO_PING=1). Needs CONFIG_HALOW_AP_MODE=y."),
     App("test-mesh-ap-gate",
         notes="T2 mesh-ap: the GATE support role (mesh+AP+ip_forward on one radio). board2. "
               "Needs CONFIG_HALOW_AP_MODE=y + CONFIG_LWIP_IP_FORWARD=y."),
