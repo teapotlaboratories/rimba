@@ -13,6 +13,8 @@ if(DEFINED TEST_NO_PING)
 endif()
 
 # AP_OPEN=1 joins an unsecured AP. Pairs with the gate fixture's TEST_AP_OPEN capture build.
-if(DEFINED TEST_AP_OPEN)
+# Tests the VALUE, not merely DEFINED, so `AP_OPEN=0` does not silently drop link security -- see the
+# matching note in test-mesh-gate-ap/main/CMakeLists.txt.
+if(TEST_AP_OPEN)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE "TEST_AP_OPEN=1")
 endif()
