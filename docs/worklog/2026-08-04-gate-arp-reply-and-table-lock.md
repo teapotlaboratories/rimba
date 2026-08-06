@@ -166,3 +166,116 @@ wrong-passphrase failure. The open branch now clears both.
 Capture archived at `docs/worklog/artifacts/gate-arp/2026-08-04-proxy-arp-postfix.pcap`.
 Bench left radio-silent: all three boards on `rimba-hello`, chronium's `wlan1`/`morse0` down, PPK2
 hold released and board2 dark.
+
+---
+
+## Review follow-ups (2026-08-05, `/review 53`)
+
+The review confirmed both headline fixes independently — the ARP offsets re-derived from scratch
+(Ethernet header 14 + `tha` at ARP-payload offset 18 = absolute 32, `tpa` at 38, and the function now
+writes all 42 bytes with no gap), both apps carrying byte-identical changes, and the locking reasoning
+holding up: no accessor is an ISR, nothing nests so there is no deadlock, and `gw_arp_forget_mac()` is
+called *after* `taskEXIT_CRITICAL` — taking a mutex inside a `portMUX` critical section would have been
+fatal rather than merely slow. It also re-decoded both archived pcaps and reproduced the byte-diff above.
+
+Three fixes came out of it. None is a correctness defect in the shipped datapath; all three are cases
+where a failure would have been silent.
+
+### 1. An allocation failure silently restored the unguarded table
+
+`g_gw_arp_lock = xSemaphoreCreateMutex()` was unchecked, and the accessors were written
+`if (g_gw_arp_lock) xSemaphoreTake(...)`. So if the handle ever failed to allocate, every access would
+quietly proceed **unlocked** — reverting to precisely the race this work exists to remove, with no
+diagnostic and no crash. The NULL guard was doing the opposite of its apparent job: it converted a loud
+failure into an invisible one. Now `configASSERT`ed at creation and the guards are gone.
+
+### 2. The lock was created after an accessor that could already run
+
+It was created next to the announce task, justified by a comment about the RX callbacks — which was
+true as far as it went. But `mmwlan_ap_enable()` arms `ap_sta_status_cb` several statements earlier,
+and that path reaches `gw_arp_forget_mac()`. A client leaving in that window would have walked the
+table with no lock held.
+
+Harmless in practice today, because the RX callbacks are not yet registered so the table is still
+empty — but the placement was only *accidentally* safe, and the comment justified it against two of
+the three accessors. Creation moved to the top of `app_main()`, before any radio is up, which makes it
+unconditionally true and is what lets fix 1 drop the NULL guard.
+
+### 3. `AP_OPEN=0` built an **open** AP
+
+The Makefile forwards `-D TEST_AP_OPEN=$(AP_OPEN)`, and make treats `"0"` as a non-empty string, so
+`AP_OPEN=0` still arrived defined; the fixture's CMake tested `if(DEFINED TEST_AP_OPEN)` and forced it
+to 1. **The off switch turned security off.** Confirmed by A/B rather than argued from CMake semantics:
+
+| build | result |
+|---|---|
+| `AP_OPEN=0`, `if(DEFINED TEST_AP_OPEN)` (before) | **OPEN — no security** |
+| `AP_OPEN=0`, `if(TEST_AP_OPEN)` (after) | SAE/PMF |
+| `AP_OPEN=1`, `if(TEST_AP_OPEN)` (after) | OPEN — no security |
+
+This matches the existing `NO_PING` spelling, but the consequence differs in kind: the other `TEST_*`
+flags skip a ping when misspelled, this one drops link encryption. Both fixture `CMakeLists.txt` now
+test the value. The shipped gate was never exposed — `rimba-halow-mesh-ap/main/CMakeLists.txt` has no
+`TEST_AP_OPEN` block at all, so the flag cannot reach it however it is spelled.
+
+### 4. The branch was shipping a RED T0 test, and reading the diff never showed it
+
+`make test-unit` **failed on the branch head** — `clone-mirror: test-mesh-gate-ap/main/app_main.c has
+DRIFTED from its source`. The `#ifdef TEST_AP_OPEN` block had been added to the fixture only, and
+`CLONE_MIRRORS` (`manifest.py:497`) requires `test-mesh-gate-ap/main/app_main.c` to stay byte-identical
+to `rimba-halow-mesh-ap/main/app_main.c` below the banner.
+
+**I missed this reading the diff and only found it by running the tier** — which is the lesson, not a
+footnote. Three review passes over the same hunks did not surface it, because a per-file diff cannot
+show a *cross-file* invariant. It cost one command. (Confirmed pre-existing by stashing this session's
+edits and re-running: the failure reproduces on the untouched branch head, and the reported drift is
+exactly the `TEST_AP_OPEN` hunk.)
+
+The invariant is not incidental — it is the guard that stops the shipped gate and its fixture from
+drifting apart, which is *precisely* how one malformed proxy-ARP reply came to live in three copies at
+once. Silencing it by dropping the row is explicitly anticipated and tested against
+(`test_allowlist_covers_mesh_gate`, "guards against someone silencing the check by deleting the row").
+
+**Fix: the block now exists identically in both files**, which is what the mirror demands, and only
+`main/app_main.c` is mirrored — so `CMakeLists.txt` remains free to differ, and that is where the real
+containment lives. In the shipped gate the branch is **unreachable**: nothing defines `TEST_AP_OPEN` for
+that target, so the compiler takes the SAE/PMF `#else` unconditionally.
+
+That absence is now the single thing keeping the shipped gate secure, so it is documented as a tripwire
+in `rimba-halow-mesh-ap/main/CMakeLists.txt` rather than left as a silent gap someone later "completes".
+Verified directly rather than assumed:
+
+| build | result |
+|---|---|
+| `rimba-halow-mesh-ap` with `AP_OPEN=1` | **SAE/PMF — the flag cannot reach it** |
+
+### Verification
+
+`make test-unit` **53/53 OK** (was 52/53 with the clone-mirror failure).
+`rimba-halow-mesh-ap`, `test-mesh-gate-ap` and `test-mesh-gate-sta` all build clean from a removed
+build directory (the CMakeCache stickiness footgun makes an incremental build untrustworthy for a
+`CMakeLists.txt` change). The two `AP_OPEN` A/Bs above are the direct tests of fixes 3 and 4.
+
+⚠ **Fixes 1 and 2 are not bench-verified.** They are init-ordering and assertion changes on the shipped
+gate's startup path, and re-running T2 `mesh-gate-b2` needs the full three-board rig with board2 on the
+PPK2 hold, which was not set up for this session. The behaviour they change is unreachable on a healthy
+boot by construction — an allocation that does not fail, and a window in which the table is empty — so
+neither is expected to move the tier. **That expectation is an argument, not a measurement**; run
+`mesh-gate-b2` before merging if the gate's startup path is considered load-bearing enough to warrant it.
+
+### Two things left as-is, deliberately
+
+- **A side change on refresh does not wake the announce task.** `gw_arp_learn()` returns early when it
+  finds an existing entry for the IP, so a host that moves between the AP and mesh sides has its mapping
+  updated but no push until the next period. Pre-existing — the code before this work also returned
+  early — but the 3 s → 15 s period change made the wait 5× longer. Out of scope here; worth a tracked
+  TODO rather than a silent fix inside an unrelated PR.
+- **The snapshot can go stale mid-sweep.** A client that leaves after the snapshot is taken still gets
+  pushed for the remainder of that sweep. That is the deliberate cost of never holding the lock across a
+  TX, and it is bounded by one period.
+
+### One more convention gap, closed
+
+This worklog had no HTML render and no index entry. Both now exist
+(`docs/worklog/html/2026-08-04-gate-arp-reply-and-table-lock.html`), which is the standing requirement
+for any added worklog.

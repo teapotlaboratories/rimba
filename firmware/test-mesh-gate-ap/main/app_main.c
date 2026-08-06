@@ -280,10 +280,15 @@ static uint32_t gw_now_ms(void) { return (uint32_t)xTaskGetTickCount() * portTIC
  * disabled. The critical-section version scanned up to GW_ARP_MAX slots with interrupts off on the
  * PER-FRAME path, and T2 mesh-gate-b2 measured the cost: 28/30 twice, against 30/30 for the identical
  * build with the locking removed under the same RF conditions (median RTT 43-46 ms across all three).
- * A mutex costs a take/give and blocks nothing at the driver level. */
+ * A mutex costs a take/give and blocks nothing at the driver level.
+ *
+ * Deliberately NOT NULL-guarded here. The handle is created at the top of app_main(), before any radio
+ * is started, so it precedes every accessor unconditionally. A `if (g_gw_arp_lock)` guard would instead
+ * let an allocation failure silently restore the unguarded table this lock exists to remove -- the one
+ * failure mode worth crashing on, since it is invisible from the outside. */
 static SemaphoreHandle_t g_gw_arp_lock;
-static inline void gw_arp_lock(void)   { if (g_gw_arp_lock) xSemaphoreTake(g_gw_arp_lock, portMAX_DELAY); }
-static inline void gw_arp_unlock(void) { if (g_gw_arp_lock) xSemaphoreGive(g_gw_arp_lock); }
+static inline void gw_arp_lock(void)   { xSemaphoreTake(g_gw_arp_lock, portMAX_DELAY); }
+static inline void gw_arp_unlock(void) { xSemaphoreGive(g_gw_arp_lock); }
 
 /* The announce task, woken the moment a NEW cross-bridge mapping is learned rather than only on its
  * period. This is what keeps the 15 s steady-state period from costing propagation latency: the periodic
@@ -768,6 +773,13 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(esp_netif_init());
 
+    /* Proxy-ARP table lock, created before ANY radio is up so it precedes all three accessors. The
+     * subtle one is ap_sta_status_cb -> gw_arp_forget_mac: mmwlan_ap_enable() arms that callback well
+     * before the RX callbacks are registered, so creating the lock next to the announce task (as it was)
+     * left a window where a client could leave and walk the table unguarded. */
+    g_gw_arp_lock = xSemaphoreCreateMutex();
+    configASSERT(g_gw_arp_lock != NULL);
+
     esp_read_mac(g_mesh_mac, ESP_MAC_WIFI_STA);
     g_mesh_mac[0] = (g_mesh_mac[0] | 0x02) & 0xFE;
 
@@ -837,7 +849,6 @@ void app_main(void)
      * STRICTLY BEFORE the RX callbacks below, and that ordering is load-bearing. gw_arp_learn() runs from
      * RX context and wakes this task by handle; a mapping learned while the handle is still NULL drops its
      * wake and waits out the full period instead. Registering RX first leaves exactly that window open. */
-    g_gw_arp_lock = xSemaphoreCreateMutex();   /* before the RX callbacks below can learn */
     xTaskCreate(gw_arp_announce_task, "gw_arp", 4096, NULL, 4, &g_gw_arp_task);
 
     /* Override mmhalow's single plain RX cb with per-vif ext cbs (gateway RX demux delivers mesh
