@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh hw_restart S1 — the fixture that passed a deaf node — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-08-05</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-08-05</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">&#10003; S1 done &mdash; red on air</span>
+    <span class="badge bug">mesh &middot; hw_restart</span>
+    <span class="badge err">bad PASS retired</span>
+  </div>
+
+  <h1>The fixture that passed a deaf node</h1>
+  <p class="lead">S1 of the mesh <code>hw_restart</code> work was blocked by its own success: the
+  reproducer returned <strong>PASS</strong> on a node that had stopped transmitting entirely. The trigger
+  turned out to be fine. The metric was reading the wrong radio &mdash; in fact, it was reading no radio
+  at all.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num acc">0&#8202;&rarr;&#8202;1</div><div class="lbl">hw_restart_counter &mdash; the handler <em>did</em> run</div></div>
+    <div class="stat"><div class="num err">0</div><div class="lbl">NUT beacons in the 112&#8202;s after the trigger</div></div>
+    <div class="stat"><div class="num ok">9.1/s</div><div class="lbl">control beacons throughout &mdash; the channel was live</div></div>
+    <div class="stat"><div class="num">1</div><div class="lbl">what the host peer count reported, the whole time</div></div>
+  </div>
+
+  <hr>
+
+  <h2 id="hypotheses">1 &middot; Two hypotheses, one cheap probe</h2>
+  <p>The previous session left the fixture reporting <code>estab_peers=1</code> both before and after a
+  forced chip restart, with two readings the output could not separate:</p>
+  <ol>
+    <li>the restart ran and the host peer table is merely stale &mdash; the <strong>metric</strong> is wrong; or</li>
+    <li><code>mmwlan_force_hw_restart()</code> returned <code>SUCCESS</code> but the queued event never
+    executed &mdash; the <strong>hook</strong> is wrong.</li>
+  </ol>
+
+  <p>The decisive probe was already sitting inside the handler: <code>umac_stats</code>' hw-restart
+  counter, which <code>hw_restart_evt_handler()</code> bumps <em>after</em> <code>mmdrv_deinit()</code>
+  and <code>mmdrv_init()</code> have both run. It is reachable from an app through the public
+  <code>mmwlan_get_umac_stats()</code>, so nothing new had to be added to morselib to read it.</p>
+
+<pre><code><span class="cm">TEST|INFO|</span>hw_restart_counter=<span class="nm">0</span> before the trigger
+<span class="cm">TEST|STEP|</span>restart-ran|<span class="st">PASS</span>|hw_restart_counter <span class="nm">0</span> -&gt; <span class="nm">1</span></code></pre>
+
+  <div class="callout ok"><p class="ct">Hypothesis 2 is dead</p>
+  <p>The hook added last session is correct &mdash; the handler really does execute through the teardown
+  and re-init. Everything that was wrong lived in the metric.</p></div>
+
+  <p>Running this <em>first</em> was worth the ordering. Going straight to the on-air probe would have
+  produced a red result that was ambiguous between &ldquo;the mesh cannot recover&rdquo; and &ldquo;my
+  trigger never fired&rdquo; &mdash; and the same counter read would have been needed anyway, with a far
+  more expensive experiment already built on top of it.</p>
+
+  <h2 id="structural">2 &middot; Why no on-device probe can score this</h2>
+
+  <p><code>mmwlan_mesh_peer_count()</code> walks <code>mesh_peers[]</code>, a <strong>host-side
+  array</strong>. <code>mmdrv_deinit()</code>/<code>mmdrv_init()</code> tears down the chip and never
+  touches it, so it reads <code>1</code> whether the node is meshing or transmitting nothing at all. It
+  held at 1 for the full 45&#8202;s window while the monitor saw the board emit zero frames.</p>
+
+  <div class="callout bug"><p class="ct">The trap is structural, not an oversight</p>
+  <p><strong>&ldquo;Silently deaf&rdquo; is by definition the state in which every host-side view still
+  looks healthy.</strong> So <em>any</em> replacement metric that reads RAM on the node under test walks
+  into it again.</p></div>
+
+  <p>The first version picked the peer table specifically to dodge the documented ping/empty-mpath trap,
+  and landed somewhere strictly worse. A fixture that certifies a broken node as healthy is worse than no
+  fixture &mdash; it spends credibility instead of building it.</p>
+
+  <h2 id="split">3 &middot; The split: firmware asserts the trigger, the air asserts the recovery</h2>
+
+  <div class="diagram">
+  <svg viewBox="0 0 760 300" role="img" aria-label="The node under test cannot observe its own failure; a second radio can.">
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+      </marker>
+    </defs>
+    <g fill="none" stroke-width="1.5" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
+
+      <!-- NUT box -->
+      <rect x="20" y="40" width="250" height="150" rx="10" fill="var(--err-bg)" stroke="var(--err)"/>
+      <text x="145" y="66" text-anchor="middle" font-size="14" font-weight="650" fill="var(--err)" stroke="none">board1 — node under test</text>
+      <text x="145" y="88" text-anchor="middle" font-size="12" fill="var(--muted)" stroke="none">chip restarted · mesh vif never reinstalled</text>
+
+      <rect x="42" y="104" width="206" height="30" rx="6" fill="var(--card)" stroke="var(--line)"/>
+      <text x="145" y="123" text-anchor="middle" font-size="12" fill="var(--fg)" stroke="none">mesh_peers[] → reads 1 ✓</text>
+
+      <rect x="42" y="142" width="206" height="30" rx="6" fill="var(--card)" stroke="var(--line)"/>
+      <text x="145" y="161" text-anchor="middle" font-size="12" fill="var(--fg)" stroke="none">frames on air → none ✗</text>
+
+      <!-- the lie -->
+      <path d="M270 119 L360 119" stroke="var(--err)" marker-end="url(#ar)" color="var(--err)"/>
+      <text x="315" y="111" text-anchor="middle" font-size="11" fill="var(--err)" stroke="none">&ldquo;healthy&rdquo;</text>
+
+      <rect x="362" y="98" width="150" height="42" rx="8" fill="var(--err-bg)" stroke="var(--err)" stroke-dasharray="4 3"/>
+      <text x="437" y="117" text-anchor="middle" font-size="12" font-weight="650" fill="var(--err)" stroke="none">old verdict: PASS</text>
+      <text x="437" y="132" text-anchor="middle" font-size="11" fill="var(--muted)" stroke="none">on a deaf node</text>
+
+      <!-- monitor -->
+      <rect x="530" y="40" width="210" height="150" rx="10" fill="var(--ok-bg)" stroke="var(--ok)"/>
+      <text x="635" y="66" text-anchor="middle" font-size="14" font-weight="650" fill="var(--ok)" stroke="none">chronium — morse0</text>
+      <text x="635" y="88" text-anchor="middle" font-size="12" fill="var(--muted)" stroke="none">a second, independent radio</text>
+
+      <rect x="552" y="104" width="166" height="30" rx="6" fill="var(--card)" stroke="var(--line)"/>
+      <text x="635" y="123" text-anchor="middle" font-size="12" fill="var(--fg)" stroke="none">NUT beacons → 0</text>
+
+      <rect x="552" y="142" width="166" height="30" rx="6" fill="var(--card)" stroke="var(--line)"/>
+      <text x="635" y="161" text-anchor="middle" font-size="12" fill="var(--fg)" stroke="none">peer beacons → 9.1/s</text>
+
+      <path d="M270 157 C 380 210, 430 210, 545 180" stroke="var(--ok)" marker-end="url(#ar)" color="var(--ok)"/>
+      <text x="400" y="205" text-anchor="middle" font-size="11" fill="var(--ok)" stroke="none">silence, observed from outside</text>
+
+      <rect x="248" y="238" width="290" height="42" rx="8" fill="var(--ok-bg)" stroke="var(--ok)"/>
+      <text x="393" y="257" text-anchor="middle" font-size="12" font-weight="650" fill="var(--ok)" stroke="none">new verdict: FAIL</text>
+      <text x="393" y="272" text-anchor="middle" font-size="11" fill="var(--muted)" stroke="none">the red test S2 has to turn green</text>
+    </g>
+  </svg>
+  <figcaption>The node cannot witness its own deafness &mdash; every view it has of itself still says
+  &ldquo;peered&rdquo;. The control node&rsquo;s steady beacon rate is what turns the NUT&rsquo;s silence
+  from missing data into a measurement.</figcaption>
+  </div>
+
+  <table>
+    <thead><tr><th>probe</th><th>scores</th><th>verdict</th></tr></thead>
+    <tbody>
+      <tr><td><code>test-mesh-hwrestart</code><br><span style="color:var(--muted)">firmware</span></td>
+          <td>did the trigger really restart the chip (<code>hw_restart_counter</code>)</td>
+          <td><span class="badge ok">PASS</span> the fixture works</td></tr>
+      <tr><td><code>tools/mesh_hwrestart_cap.py</code><br><span style="color:var(--muted)">chronium</span></td>
+          <td>do the node&rsquo;s own beacons ever return</td>
+          <td><span class="badge err">FAIL</span> the S2 defect</td></tr>
+    </tbody>
+  </table>
+
+  <p>This is not a new pattern here &mdash; it is the <code>test-raw-rps</code> shape, whose
+  <code>TEST|</code> gates are also preconditions with the real verdict decoded from a capture. The
+  firmware still prints <code>mmwlan_mesh_peer_count()</code>, demoted to INFO and explicitly labelled
+  unscored, so the stale number stays visible next to the on-air truth. That contrast <em>is</em> the
+  finding; deleting it would hide the lesson.</p>
+
+  <h2 id="measurement">4 &middot; The measurement</h2>
+
+  <p>The scorer reads <code>morse0</code> over <code>AF_PACKET</code>, filters S1G beacons by source
+  address, and scores the shape <em>beacons &rarr; gap &rarr; beacons?</em> &mdash; so it needs no clock
+  sync with the device under test.</p>
+
+<pre><code>captured 150s: nut=<span class="nm">317</span> beacons, peer(control)=<span class="nm">1367</span> beacons
+nut beacon window: first=+0.0s last=+37.9s  (trailing silence <span class="nm">112.1s</span>)
+control rate: <span class="nm">9.1/s</span> before the node went quiet, <span class="nm">9.1/s</span> during its silence
+<span class="cm">RESULT|</span><span class="kw">FAIL</span>|the node's beacons stopped at +37.9s and NEVER returned ...</code></pre>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">NUT, before</span><span class="bar-track"><span class="bar-fill fast" style="width:96%"></span></span><span class="val">~9/s</span></div>
+    <div class="bar-row"><span class="lbl">NUT, after</span><span class="bar-track"><span class="bar-fill" style="width:0.4%"></span></span><span class="val">0/s</span></div>
+    <div class="bar-row"><span class="lbl">control, before</span><span class="bar-track"><span class="bar-fill fast" style="width:96%"></span></span><span class="val">9.1/s</span></div>
+    <div class="bar-row"><span class="lbl">control, after</span><span class="bar-track"><span class="bar-fill fast" style="width:96%"></span></span><span class="val">9.1/s</span></div>
+  </div>
+
+  <div class="callout"><p class="ct">The liveness control is what makes this a measurement</p>
+  <p>The peer board is unaffected by the restart and beacons throughout. Its rate holding steady
+  <em>across the node&rsquo;s silence</em> is what proves the monitor still had the channel &mdash; so
+  zero NUT beacons is <em>silence</em> and not a capture that quietly died. Without it, &ldquo;no
+  beacons&rdquo; would be unfalsifiable: the same absence-of-evidence mistake that produced the original
+  bad PASS, wearing a different costume. The tool reports INCONCLUSIVE rather than FAIL when the control
+  drops, for exactly that reason.</p></div>
+
+  <h3>The PASS branch is not dead code</h3>
+  <p>A scorer that has only ever emitted FAIL is not yet a scorer. Validated by rebooting a plain mesh
+  node mid-capture and pointing the tool at it:</p>
+
+<pre><code>nut beacon window: first=+0.0s last=+75.0s  (trailing silence 0.0s)
+  gap <span class="nm">4.9s</span>  (+20.0s -&gt; +24.9s)
+<span class="cm">RESULT|</span><span class="st">PASS</span>|the node's beacons stopped for 4.9s and RESUMED at +24.9s (469 beacons since)</code></pre>
+
+  <p>Both branches now fire on real air, so the FAIL above is a finding rather than a tool stuck on one
+  answer.</p>
+
+  <h2 id="deadends">5 &middot; Dead ends and bench notes</h2>
+  <ul>
+    <li><strong>The first run of the day was lost.</strong> I piped the serial capture through
+    <code>grep</code>, and the capture script died on <code>ModuleNotFoundError: No module named
+    'serial'</code> &mdash; the traceback went into the same grep and vanished. pyserial lives in the IDF
+    venv, not system <code>python3</code>. The app parks forever after <code>TEST|END</code>, so the
+    verdict was unrecoverable. Same family as the documented &ldquo;never pipe a tier through
+    <code>tail</code>&rdquo; footgun.</li>
+    <li><strong><code>morse0</code> will not come up until <code>wlan1</code> is up and tuned.</strong>
+    <code>tcpdump</code> failed with <em>&ldquo;That device is not up&rdquo;</em>: the driver forwards to
+    <code>morse0</code> only while <code>monitor_mode</code> is true, which needs a live monitor-type vif.
+    Order is <code>wlan1 up</code> &rarr; <code>set freq 5560</code> &rarr; <code>morse0 up</code>, and it
+    must be re-verified with <code>ip -br link</code> rather than assumed from the absence of an error.</li>
+    <li><strong><code>tcpdump</code> cannot decode S1G beacons</strong> &mdash; they print as
+    <em>&ldquo;unknown 802.11 frame type (3)&rdquo;</em>, an S1G beacon being a type-3 (extension) frame.
+    Parse the bytes: SA at frame offset <code>[4:10]</code>, <code>fc == 0x1c</code>.</li>
+  </ul>
+
+  <h2 id="state">6 &middot; State</h2>
+  <p>S1 is <strong>done and red</strong>, which is the deliverable &mdash; it converts the 2026-07-15
+  crash observation into a repeatable test that S2 has to turn green.</p>
+  <ul>
+    <li><strong>S2</strong> &mdash; <code>umac_mesh_handle_hw_restarted()</code>, derived from
+    <code>ieee80211_reconfig</code>&rsquo;s mesh path, shipping the code-map the porting rule requires.</li>
+    <li><strong>S3</strong> &mdash; the AP-side <code>MMOSAL_ASSERT(false)</code>, still
+    <strong>unreproduced</strong>. This fixture is mesh-only, so it never instantiates an AP vif and never
+    reaches the assert. S3 needs its own reproducer, or this one extended onto
+    <code>rimba-halow-mesh-ap</code>.</li>
+  </ul>
+
+  <div class="callout warn"><p class="ct">Uncommitted</p>
+  <p>Everything from this session is held in the working tree under the weekday work-hours rule: the
+  design doc, <code>firmware/test-mesh-hwrestart/</code>, <code>tools/mesh_hwrestart_cap.py</code>, this
+  worklog, and <code>components/halow</code> on submodule branch <code>feat/mesh-hw-restart</code>.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#hypotheses">1 &middot; Two hypotheses, one probe</a></li>
+    <li><a href="#structural">2 &middot; Why no on-device probe works</a></li>
+    <li><a href="#split">3 &middot; The split</a></li>
+    <li><a href="#measurement">4 &middot; The measurement</a></li>
+    <li><a href="#deadends">5 &middot; Dead ends</a></li>
+    <li><a href="#state">6 &middot; State</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-08-05-mesh-hwrestart-s1-metric-reads-the-air</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
