@@ -423,7 +423,7 @@ before the vif loop. morselib had one of them inside the STA-gated body of
 | frag threshold, `umac_mmdrv_shim.c` `hw_restart_evt_handler()` — moved out of `umac_connection.c:1771` | `drv_set_frag_threshold()` — `util.c:1836` | hw-global: value from umacd config, `mmdrv_set_frag_threshold()` takes no vif |
 | — *not restored, any vif type* | `drv_set_rts_threshold()` — `util.c:1839` | **pre-existing morselib gap**, affects STA too; tracked in `docs/rimba-todo.md`, not fixed in passing |
 | — *no counterpart* | `drv_set_coverage_class()` — `util.c:1842` | morselib has no coverage-class surface |
-| PS mode: via `reinstall_vif` → `umac_interface_init_vif()` → `umac_ps_update_mode()` | Linux restores PS generically | see D10 |
+| `umac_ps_handle_hw_restarted()`, moved out of `umac_connection.c` into `hw_restart_evt_handler()` | Linux restores PS generically | hw-global; the `init_vif` path alone is a no-op — see D10 |
 
 **This was the fix the analysis called for and the first implementation did not deliver.** The stated
 conclusion was "S2 is a hoist, not a mirror", yet the first cut added a parallel mesh function and left
@@ -510,14 +510,29 @@ it the dispatcher, back into the link and broke `rimba-halow-sta`. Guarded with 
 already uses (`umac.c:487`, `s1g_capabilities.c:13`, `config.c:295`). No Linux counterpart — mac80211
 has no compile-time AP-removal — so this is a build-configuration fix, not a port decision.
 
-**D10 — PS state is not re-pushed by the mesh arm, because it is already restored.**
-`umac_ps_handle_hw_restarted()` remains STA-gated, which looks like the same stranding as the frag
-threshold but is not: `umac_interface_reinstall_vif()` ends in `umac_interface_init_vif()`, whose first
-action is `umac_ps_update_mode(umacd)` — so a recovering mesh vif re-applies its PS mode already. What
-the STA-only helper adds beyond that is preserving the module's `suspended` flag across an internal
-reset. Calling it from the mesh path was considered and rejected: it carries a `MMOSAL_DEV_ASSERT` on
-mode equality and was written for the STA lifecycle, and blind-hoisting it would repeat the mistake of
-assuming rather than checking. **If mesh ever uses PS suspend, this needs revisiting.**
+**D10 — power save is restored in the shim, hoisted out of the STA path.** ⚠ **An earlier revision of
+this row said the opposite and was wrong.** It argued the mesh arm needed no PS work because
+`umac_interface_reinstall_vif()` → `umac_interface_init_vif()` already calls `umac_ps_update_mode()`.
+It does — and that call is a **no-op**. `umac_ps_update_mode()` early-returns on
+`data->pwr_mode == new_mode`, and `pwr_mode` is HOST state that survives the restart. The chip comes
+back with PS off while the host still believes it is on, so no `mmdrv_set_chip_power_save_enabled()` is
+ever issued, and every later `update_mode()` short-circuits identically — nothing can fix it
+afterwards. `umac_ps_handle_hw_restarted()` exists precisely to break that: it calls `umac_ps_reset()`,
+clearing `pwr_mode`, *before* `update_mode()`. It now runs in `hw_restart_evt_handler()` beside the
+fragmentation threshold, so every interface type gets it.
+
+> **This is the third instance of one pattern, and it is the real lesson of S2.** morselib's restart
+> path is full of HOST-side caches that survive `mmdrv_init()`, so "re-apply the same value" silently
+> does nothing:
+> | cache | the no-op | fix |
+> |---|---|---|
+> | `current_s1g_operation` | `set_channel_from_regdb()` returns success, programs nothing (D12) | `umac_interface_reconfigure_channel()` clears it first |
+> | key `tx_seq`/`rx_seq` | a rebuilt key rewinds the CCMP PN (D5) | `umac_keys_reinstall_keys()` re-pushes the surviving chain |
+> | `pwr_mode` | `umac_ps_update_mode()` early-returns (this row) | `umac_ps_handle_hw_restarted()` resets first |
+>
+> All three fail **silently and successfully**. Anything else restored on this path should be checked
+> against the same question: *does re-applying the value actually reach the chip, or does a host cache
+> swallow it?*
 
 **D11 — handler exclusivity is ENFORCED in the shim, not inferred.** `hw_restart_evt_handler()` now
 dispatches `if (umac_mesh_is_active()) mesh else connection`, mirroring `ieee80211_reconfig()`'s
