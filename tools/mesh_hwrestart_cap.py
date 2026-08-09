@@ -19,6 +19,10 @@
 #   3. recovery  — do they come back?  PASS iff yes, FAIL iff the silence runs to the end of the window.
 # No clock sync with the DUT is needed: the shape (beacons, gap, beacons) carries the verdict by itself.
 #
+# The gap is REQUIRED for a verdict, and that is deliberate. Without one there is no evidence a restart
+# occurred at all, and the fixture has several early-exits that park before triggering one -- so a
+# gapless capture is INCONCLUSIVE, never PASS. Cross-check the fixture's own restart-ran step.
+#
 # THE LIVENESS CONTROL IS WHAT MAKES "NO BEACONS" MEAN ANYTHING. The peer board beacons throughout and
 # is unaffected by the restart, so its beacons prove the monitor still had the channel. If the peer goes
 # quiet too, the capture — not the node — is what broke, and the run is INCONCLUSIVE rather than a FAIL.
@@ -150,10 +154,11 @@ if tail_silence >= GAP_S:
 
     print("RESULT|FAIL|the node's beacons stopped at +%.1fs and NEVER returned (%.1fs of silence to the "
           "end of the capture) while the control kept beaconing at %.1f/s. The chip restarted and the "
-          "mesh vif was never reinstalled: umac_connection_handle_hw_restarted() skips its entire body "
-          "on a mesh node because it opens on the UMAC_INTERFACE_STA vif id, which is "
-          "MMDRV_VIF_ID_INVALID here -- mesh owns UMAC_INTERFACE_MESH. Nothing restores it. This is the "
-          "S2 defect." % (quiet_from - t0, tail_silence, ctrl_during))
+          "mesh was not brought back: nothing re-issued the mesh-specific chip configuration (BSS, "
+          "BSSID, MESH_CONFIG, beaconing), so the vif can be alive with nothing on air. If this fires "
+          "AFTER S2 landed, suspect the restore aborting (look for 'MESH: hw-restart restore ABORTED' "
+          "on the console) or the channel not being reprogrammed."
+          % (quiet_from - t0, tail_silence, ctrl_during))
     sys.exit(1)
 
 # Beacons are still flowing at the end of the capture, and the baseline was real -- that is the
@@ -167,17 +172,36 @@ if tail_silence >= GAP_S:
 # diagnostic detail and the verdict rests on the thing that actually distinguishes the defect:
 # beacons before, and beacons still flowing at the end.
 if gaps:
-    outage = gaps[-1][1] - gaps[-1][0]
-    n_after = sum(1 for t in nut_t if t >= gaps[-1][1])
+    # The LARGEST gap, not the last one. The restart's teardown (~3 s measured) dominates anything RF
+    # loss produces, whereas the last gap may be a late blip: with GAP_S at 2.0 s a 2.1 s dropout near
+    # the end of the window would leave only a handful of beacons after it and score a fully recovered
+    # node as FAIL. Picking the largest keys the verdict to the event under test.
+    biggest = max(gaps, key=lambda g: g[1] - g[0])
+    outage = biggest[1] - biggest[0]
+    n_after = sum(1 for t in nut_t if t >= biggest[1])
     if n_after < MIN_RECOVERY:
-        print("RESULT|FAIL|the node emitted only %d beacon(s) after its %.1fs gap (need >=%d). It is "
-              "not back on air in any usable sense." % (n_after, outage, MIN_RECOVERY))
+        print("RESULT|FAIL|the node emitted only %d beacon(s) after its longest interruption (%.1fs; "
+              "need >=%d). It is not back on air in any usable sense." % (n_after, outage, MIN_RECOVERY))
         sys.exit(1)
     detail = ("its longest interruption was %.1fs, after which it emitted %d more beacons"
               % (outage, n_after))
 else:
-    detail = ("it never went quiet for as long as %.1fs -- either the restart's outage was shorter "
-              "than that, or the capture does not contain one" % GAP_S)
+    # No gap at all: there is NO evidence a restart happened, so this cannot be a recovery PASS.
+    #
+    # An earlier revision did award PASS here, reasoning that a recovery too fast to drop GAP_S worth
+    # of beacons should not be penalised. That was wrong, and reachable by design rather than only by
+    # operator error: every INCONCLUSIVE early-exit in the fixture park_forever()s BEFORE
+    # mmwlan_force_hw_restart() -- so a run that bailed because the rig was wrong produces a capture
+    # of a node that was simply never restarted, and it would have scored PASS. The measured teardown
+    # is ~3 s against a 2.0 s threshold, so a real restart always leaves a gap; its absence means the
+    # capture does not contain the trigger.
+    print("RESULT|INCONCLUSIVE|the node beaconed for the whole capture with no interruption of %.1fs "
+          "or more (%d beacons over %.0fs). A real teardown measures ~3s, so this capture almost "
+          "certainly does not contain the restart -- either it started too late, or the fixture bailed "
+          "before triggering one (check its data-before/peer-before steps). NOT a recovery PASS: "
+          "there is no evidence here that anything was restarted."
+          % (GAP_S, len(nut_t), span))
+    sys.exit(2)
 
 print("RESULT|PASS|the node is beaconing under its own mesh SA at the end of the capture (%d beacons "
       "over %.0fs, last one %.1fs before the end) and %s. Cross-check the fixture's own data-before/"
