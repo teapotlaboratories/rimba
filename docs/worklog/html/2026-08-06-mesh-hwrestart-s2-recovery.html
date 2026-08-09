@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh hw_restart S2 — a node that beacons and cannot pass a packet — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-08-06</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-08-06</span>
+    <span class="badge">8 min read</span>
+    <span class="badge ok">&#10003; S2 done &mdash; both probes green</span>
+    <span class="badge bug">mesh &middot; hw_restart</span>
+    <span class="badge err">&ldquo;it works&rdquo; was wrong twice</span>
+  </div>
+
+  <h1>A node that beacons perfectly and cannot pass a packet</h1>
+  <p class="lead">S2 turns S1&rsquo;s red test green. It also produced two defects <em>after</em> the
+  first &ldquo;it works&rdquo; &mdash; each invisible to the metric in hand at the time. The lesson
+  isn&rsquo;t the fix; it&rsquo;s that a second probe is not redundancy, it&rsquo;s what makes the first
+  one honest.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">5/5</div><div class="lbl">pings after the restart (was 0/5)</div></div>
+    <div class="stat"><div class="num acc">1568</div><div class="lbl">beacons over 190&#8202;s (was 112&#8202;s of silence)</div></div>
+    <div class="stat"><div class="num err">2</div><div class="lbl">defects found after declaring success</div></div>
+    <div class="stat"><div class="num warn">0</div><div class="lbl">errors logged while it was broken</div></div>
+  </div>
+
+  <hr>
+
+  <h2 id="design">1 &middot; The design changed before a line was written</h2>
+  <p>The backlog framing was &ldquo;add <code>umac_mesh_handle_hw_restarted()</code>, mirroring the
+  connection one, looping over N peers instead of one BSSID&rdquo;. Reading
+  <code>ieee80211_reconfig()</code> (<code>util.c:1753</code>) first said otherwise.</p>
+
+  <p>Linux&rsquo;s mesh case is <strong>three lines</strong> &mdash; re-enable the beacon &mdash; because
+  everything a mesh vif needs restored happens <strong>generically, before the type switch</strong>:
+  <code>drv_add_interface()</code>, <code>ieee80211_reconfig_stations()</code>,
+  <code>ieee80211_reenable_keys()</code>.</p>
+
+  <div class="callout bug"><p class="ct">The root cause, stated properly</p>
+  <p>morselib put that same generic work <em>inside</em>
+  <code>umac_connection_handle_hw_restarted()</code>, a STA-only function keyed on
+  <code>UMAC_INTERFACE_STA</code>. A mesh node gets nothing not because a mesh handler is missing, but
+  because <strong>the generic restore was written into a STA-specific function.</strong></p></div>
+
+  <div class="callout warn"><p class="ct">A reading trap I fell into for several minutes</p>
+  <p><code>ieee80211_reconfig</code> has <strong>two</strong> switches on <code>vif.type</code>. The
+  first (station re-add) has no <code>MESH_POINT</code> label, so mesh takes its <code>default:</code>
+  arm and <em>is</em> re-added; the <code>MESH_POINT</code> case at <code>util.c:2043</code> belongs to
+  the second switch and only touches beaconing. Conflating them yields &ldquo;Linux never restores mesh
+  peers&rdquo; &mdash; the opposite of the truth.</p></div>
+
+  <h2 id="built">2 &middot; What got built</h2>
+  <p>A <strong>hoist plus a real mesh arm</strong>, not a mirror.</p>
+
+  <div class="flow">
+    <div class="node acc"><div class="t">reinstall vif</div><div class="s">already mesh-aware</div></div>
+    <div class="node"><div class="t">re-tag stads</div><div class="s">new vif id</div></div>
+    <div class="node"><div class="t">chip BSS config</div><div class="s">channel · bss · bssid</div></div>
+    <div class="node ok"><div class="t">common keys</div><div class="s">defect 1</div></div>
+    <div class="node ok"><div class="t">per-peer restore</div><div class="s">ladder + keychain</div></div>
+    <div class="node"><div class="t">arm beaconing</div><div class="s">last, by necessity</div></div>
+  </div>
+
+  <ul>
+    <li><code>mesh_chip_configure_bss()</code> / <code>mesh_chip_start_beaconing()</code> &mdash; the
+    chip sequence factored out of <code>mmwlan_mesh_start()</code>, extracted so start&rsquo;s statement
+    order is <strong>unchanged</strong>. Two phases, not one, because start must populate
+    <code>mesh_ctx</code> and arm the host beacon engine between them: the firmware must not be told to
+    beacon before the host can serve one.</li>
+    <li><code>umac_interface_reinstall_vif()</code> needed <em>no change</em> &mdash; it already maps
+    <code>UMAC_INTERFACE_MESH</code> to <code>MMDRV_INTERFACE_TYPE_MESH</code>. It had simply never been
+    reachable for mesh, its only caller being the STA-gated handler.</li>
+  </ul>
+
+  <h2 id="wrong">3 &middot; The part worth reading: &ldquo;it works&rdquo; was wrong twice</h2>
+
+  <h3>First &ldquo;it works&rdquo; &mdash; beacons only</h3>
+  <p>The S1 scorer went green: beacons stopped 2.94&#8202;s at the trigger, then ran for 140&#8202;s.
+  Against a pre-S2 baseline of <em>112&#8202;s of silence and never returning</em>, that looked
+  conclusive, and I said so. It wasn&rsquo;t.</p>
+
+  <div class="callout err"><p class="ct">190 s of continuous beaconing, and 0/5 pings</p>
+  <p>Beaconing proves the vif is on air. It proves nothing about the datapath. The fixture gained a ping
+  &mdash; before <em>and</em> after, the before-ping being what makes the after-ping readable, since a
+  bare post-restart failure is ambiguous with &ldquo;this rig never carried traffic&rdquo;. The node had
+  answered 5/5 a minute earlier: perfect on air, dead as a network node.</p></div>
+
+  <h3>Defect 1 &mdash; the common stad&rsquo;s keys were never replayed</h3>
+  <p><code>umac_mesh_install_common_keys()</code> runs at start, and its own comment says it plainly:
+  <em>&ldquo;The common_stad drives ALL mesh TX (every mesh frame dequeues from it).&rdquo;</em> Recovery
+  never re-pushed them. Beacons are host-generated and unencrypted, so they sailed through while every
+  data frame died &mdash; <strong>invisible in a beacon capture by construction</strong>, which is
+  exactly why the on-air metric S1 was built around could not see it.</p>
+
+  <h3>Defect 2 &mdash; I was resetting our CCMP packet number to zero</h3>
+  <p>Fixing defect 1 changed nothing: still 0/5. Every command returned success. Nothing logged an
+  error.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 700 190" role="img" aria-label="Rebuilding a key resets the PN into the peer's surviving replay window">
+    <g font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="12.5">
+      <rect x="20" y="26" width="300" height="60" rx="9" fill="var(--err-bg)" stroke="var(--err)"/>
+      <text x="170" y="48" text-anchor="middle" font-weight="650" fill="var(--err)">rebuild key (stack struct)</text>
+      <text x="170" y="68" text-anchor="middle" fill="var(--muted)">tx_seq = 0 &nbsp;→&nbsp; our PN restarts at 0</text>
+
+      <rect x="380" y="26" width="300" height="60" rx="9" fill="var(--card)" stroke="var(--line)"/>
+      <text x="530" y="48" text-anchor="middle" font-weight="650" fill="var(--fg)">peer never restarted</text>
+      <text x="530" y="68" text-anchor="middle" fill="var(--muted)">replay window still at N</text>
+
+      <path d="M320 56 L374 56" stroke="var(--err)" fill="none" stroke-width="1.5"/>
+      <text x="347" y="48" text-anchor="middle" font-size="11" fill="var(--err)">frames</text>
+
+      <rect x="200" y="112" width="300" height="52" rx="9" fill="var(--err-bg)" stroke="var(--err)" stroke-dasharray="4 3"/>
+      <text x="350" y="133" text-anchor="middle" font-weight="650" fill="var(--err)">every frame discarded as a replay</text>
+      <text x="350" y="152" text-anchor="middle" font-size="11.5" fill="var(--muted)">all installs return success · nothing logged</text>
+      <path d="M530 90 L400 108" stroke="var(--err)" fill="none" stroke-width="1.5"/>
+    </g>
+  </svg>
+  <figcaption><code>connection_keys_install_key()</code> copies <code>tx_seq</code>/<code>rx_seq</code>
+  out of the struct it is handed (<code>connection_keys.c:118-121</code>) &mdash; so a freshly built key
+  silently rewinds the packet number.</figcaption>
+  </div>
+
+  <p>The fix is to stop rebuilding keys at all. Only the <em>chip</em> lost its copy; the host keychain
+  survived intact, PN and all. <code>umac_keys_reinstall_keys()</code> re-pushes that existing chain
+  without touching the counters &mdash; the same primitive the STA path already uses
+  (<code>umac_connection.c:1721</code>) and the same intent as <code>ieee80211_reenable_keys()</code>.</p>
+
+  <div class="callout ok"><p class="ct">The bug was a divergence from the reference; the fix was to stop diverging</p>
+  <p>Linux re-enables existing key objects. I had invented a rebuild. The porting rule earns its keep
+  here not as paperwork, but because the reference&rsquo;s <em>shape</em> encoded a constraint I
+  didn&rsquo;t know existed.</p></div>
+
+  <h3>Defect 3 &mdash; my own scorer&rsquo;s PASS was structurally unsound</h3>
+  <p>It <em>required</em> a gap to award PASS. So a recovery <strong>too fast</strong> to drop
+  <code>GAP_S</code> worth of beacons was reported INCONCLUSIVE &mdash; better behaviour, worse verdict
+  &mdash; and when an unrelated gap (the board&rsquo;s own reboot) shared the capture, PASS was awarded
+  keyed on <em>that</em>. Right answer, wrong evidence: the exact failure the tool exists to prevent,
+  reproduced inside the tool. The verdict now rests on a solid baseline plus beacons still flowing at the
+  end, with the gap as diagnostic detail. <code>GAP_S</code> also dropped 3.0&#8202;&rarr;&#8202;2.0&#8202;s,
+  since the measured teardown outage is 2.94&#8202;s &mdash; the old threshold sat just <em>above</em>
+  the thing it was meant to catch.</p>
+
+  <h2 id="result">4 &middot; Result</h2>
+  <table>
+    <thead><tr><th>probe</th><th>before S2</th><th>after S2</th></tr></thead>
+    <tbody>
+      <tr><td><code>hw_restart_counter</code></td><td>0 &rarr; 1</td><td>0 &rarr; 1</td></tr>
+      <tr><td>datapath &mdash; ping the peer</td><td><em>not measured</em></td><td><strong>5/5 before, 5/5 after</strong></td></tr>
+      <tr><td>beacons &mdash; chronium <code>morse0</code></td><td>stopped, <strong>112&#8202;s silence to end of capture</strong></td><td><strong>PASS</strong> &mdash; 1568 over 190&#8202;s, 3.1&#8202;s outage, 1262 after</td></tr>
+    </tbody>
+  </table>
+  <p>Two probes, because neither is sufficient alone: beaconing does not prove the datapath, and a ping
+  does not prove the node is beaconing. <strong>Defect 1 was invisible to one; defect 2 was invisible to
+  the other.</strong></p>
+
+  <h2 id="adversarial">5 &middot; The adversarial review &mdash; which refuted three of my own claims</h2>
+  <p>Having declared the port Linux-faithful, I ran a pass whose goal was to <em>refute</em> that. It did,
+  three times, and the most important finding is that I had violated my own stated design.</p>
+
+  <div class="callout err"><p class="ct">R1 &mdash; I wrote &ldquo;a hoist, not a mirror&rdquo;, then shipped a mirror</p>
+  <p><code>umac_connection_handle_hw_restarted()</code>&rsquo;s STA guard spans
+  <code>umac_connection.c:1697-1797</code>, and inside it sat the <strong>fragmentation threshold</strong>
+  restore &mdash; value from umacd config, pushed via <code>mmdrv_set_frag_threshold()</code>, which takes
+  <strong>no vif</strong>. It is hw-global, Linux restores it unconditionally at <code>util.c:1836</code>,
+  and a mesh node never entered the body that restored it. I diagnosed exactly this bug class as the root
+  cause, prescribed a hoist, then added a parallel mesh function that left it stranded. Now hoisted into
+  <code>hw_restart_evt_handler()</code>. Latent rather than active &mdash; no app sets a frag threshold
+  &mdash; but a future one would have lost it silently.</p></div>
+
+  <ul>
+    <li><strong>R2 &mdash; D7 was factually wrong.</strong> I wrote that morselib has &ldquo;no
+    <code>conf_tx</code>/EDCA surface at all&rdquo;. It does:
+    <code>umac_connection.c:911-951</code> builds <code>aifs</code>/<code>cw_min</code>/<code>cw_max</code>.
+    My grep was too narrow. The conclusion survives &mdash; that plumbing is fed by an AP&rsquo;s EDCA
+    element a mesh node never receives &mdash; but a code map that misstates the reference is worse than
+    one that omits the row.</li>
+    <li><strong>R3 &mdash; D3 cited a constraint that doesn&rsquo;t apply.</strong> I justified
+    keys-before-beaconing with the host-beacon-engine ordering; that is a <em>start-path</em> constraint,
+    and in recovery <code>mesh_ctx</code> is already populated. Both references do beacon-then-keys. The
+    ordering is a deliberate choice &mdash; live peers resume the instant we are back on air, so
+    keys-first closes a window where we advertise presence with no crypto &mdash; now recorded as a
+    choice, not a constraint.</li>
+    <li><strong>R4 &mdash; D8 survived.</strong> The plink tick is a <code>umac_core</code> timeout,
+    cancelled only in <code>mmwlan_mesh_stop()</code>; <code>mmdrv_deinit/init</code> does not touch it.</li>
+  </ul>
+
+  <h3>And the hoist broke a build I had never been building</h3>
+  <p>Adding the hoist, I built <code>rimba-halow-sta</code> for the first time and it <strong>failed to
+  link</strong>: <code>undefined reference to umac_ap_get_beacon</code>. Bisected, not guessed.</p>
+
+  <div class="callout bug"><p class="ct">An undefined symbol surviving on an accident of dead-code elimination</p>
+  <p><code>mmdrv_host_get_beacon()</code> calls <code>umac_ap_get_beacon()</code> <strong>unguarded</strong>,
+  while <code>umac_ap.c</code> is not compiled when <code>CONFIG_HALOW_AP_MODE=n</code>. That build only
+  ever linked because <code>--gc-sections</code> dropped the whole dispatcher when nothing referenced it.
+  My mesh recovery call pulled <code>umac_mesh.o</code>, and with it the dispatcher, back into the link.
+  Fixed with the <code>MMWLAN_AP_DISABLED</code> guard the tree already uses.</p>
+  <p>The lesson is narrower than &ldquo;build everything&rdquo;: <strong>a change to a shared shim can
+  retain code that was previously collected, so its blast radius is every build configuration, not the
+  one you are testing.</strong></p></div>
+
+  <p>Re-verified on hardware after all of it: datapath <strong>5/5 before, 5/5 after</strong>; beacons
+  <strong>1705 over 190&#8202;s</strong>, longest interruption 3.0&#8202;s. Four configurations
+  clean-build.</p>
+
+  <h2 id="review">6 &middot; The code review &mdash; two bugs concealing each other</h2>
+  <p>A <code>/code-review</code> pass returned eight findings. All eight were real. The first invalidated
+  a claim I had repeated since the original investigation, and fixing it uncovered a worse defect of my
+  own.</p>
+
+  <div class="callout err"><p class="ct">The premise was wrong, and had been all along</p>
+  <p>I had written &mdash; in the design doc, the worklog, the commit message and the shim comment &mdash;
+  that <code>umac_connection_handle_hw_restarted()</code> <em>&ldquo;skips its whole body on a mesh
+  node&rdquo;</em>. It does not: <code>UMAC_INTERFACE_STA</code> is inside
+  <code>VIF_STA_INTERFACE_TYPES_MASK</code>, so the lookup returns the STA-slot id
+  <strong>without consulting <code>active_interface_types</code></strong> &mdash; and mesh shares that
+  slot. Settled on hardware, not by re-reading:</p>
+  <pre><code>E 31250 ev umac_connection_handle_hw_restarted[1699] <span class="kw">PROBE: BODY RUNNING vif_id=0</span></code></pre>
+  <p>So both handlers had been running, the connection one re-running
+  <code>umac_interface_reinstall_vif()</code> right after the mesh restore finished.</p></div>
+
+  <h3>That fix broke recovery &mdash; and the reason is the real find</h3>
+  <p>With exclusivity enforced: <strong>0/5 pings.</strong> I bisected rather than guessed. It was the
+  channel.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 720 170" role="img" aria-label="Host channel cache hides that the chip lost its channel">
+    <g font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="12.5">
+      <rect x="20" y="24" width="200" height="54" rx="9" fill="var(--card)" stroke="var(--line)"/>
+      <text x="120" y="45" text-anchor="middle" font-weight="650" fill="var(--fg)">mmdrv_init()</text>
+      <text x="120" y="65" text-anchor="middle" fill="var(--muted)">chip channel: WIPED</text>
+
+      <rect x="260" y="24" width="220" height="54" rx="9" fill="var(--warn-bg)" stroke="var(--warn)"/>
+      <text x="370" y="45" text-anchor="middle" font-weight="650" fill="var(--warn)">host cache: still &ldquo;ch27&rdquo;</text>
+      <text x="370" y="65" text-anchor="middle" fill="var(--muted)">current_s1g_operation untouched</text>
+
+      <rect x="520" y="24" width="180" height="54" rx="9" fill="var(--err-bg)" stroke="var(--err)"/>
+      <text x="610" y="45" text-anchor="middle" font-weight="650" fill="var(--err)">set_channel &rarr; equal</text>
+      <text x="610" y="65" text-anchor="middle" fill="var(--muted)">returns SUCCESS, no-op</text>
+
+      <path d="M220 51 L256 51" stroke="var(--muted)" fill="none"/>
+      <path d="M480 51 L516 51" stroke="var(--err)" fill="none" stroke-width="1.5"/>
+
+      <rect x="200" y="106" width="330" height="46" rx="9" fill="var(--err-bg)" stroke="var(--err)" stroke-dasharray="4 3"/>
+      <text x="365" y="126" text-anchor="middle" font-weight="650" fill="var(--err)">node returns on NO channel</text>
+      <text x="365" y="144" text-anchor="middle" font-size="11.5" fill="var(--muted)">beaconing &middot; 0/5 datapath</text>
+    </g>
+  </svg>
+  <figcaption><code>umac_interface_reconfigure_channel()</code> exists for exactly this &mdash; it clears
+  the cached operation first &mdash; which is why the STA restart path uses it.</figcaption>
+  </div>
+
+  <div class="callout bug"><p class="ct">Two bugs concealing each other</p>
+  <p><strong>The mesh restore had never restored the channel.</strong> It passed every earlier bench run
+  only because the un-enforced double dispatch meant the connection handler re-did the channel
+  afterwards. A redundant call I thought was harmless was in fact load-bearing, for a step I thought I
+  had implemented. Removing one exposed the other. <code>mesh_chip_configure_bss()</code> now does not
+  touch the channel at all, so the choice cannot be made by accident.</p></div>
+
+  <h3>The other six</h3>
+  <table>
+    <thead><tr><th>finding</th><th>outcome</th></tr></thead>
+    <tbody>
+      <tr><td>abort paths left <code>mesh_ctx.active</code> true over a dead chip</td><td>now torn down + logged &mdash; the error path had <em>recreated</em> the silently-deaf state</td></tr>
+      <tr><td>start passed a vif id where an <code>enum mmwlan_vif</code> was expected &rarr; <strong>zero BSSID</strong></td><td>fixed in start too; peering verified unaffected</td></tr>
+      <tr><td>ladder replayed unconditionally, but only installed under <code>MMWLAN_MESH_SEC_PHASE1</code></td><td>gated identically</td></tr>
+      <tr><td><code>peer-&gt;stad</code> NULL-checked at the call site, not where dereferenced</td><td>handled where used</td></tr>
+      <tr><td>per-peer failures swallowed; <code>restored++</code> regardless</td><td>failures counted and reported</td></tr>
+      <tr><td>chip sequence-number spaces not restored for mesh stads</td><td>added, <em>after</em> the station exists</td></tr>
+    </tbody>
+  </table>
+  <p>The reviewer independently reached the same all-zero-BSSID defect and made a sharper point than I
+  had: since recovery used the real MAC, start and restart programmed <em>different</em> BSSIDs, so the
+  bench was validating a configuration the node never normally runs. That moved it from &ldquo;file
+  it&rdquo; to &ldquo;fix it now&rdquo;.</p>
+
+  <h2 id="notfixed">7 &middot; Found and deliberately NOT fixed</h2>
+  <div class="callout warn"><p class="ct"><code>mmwlan_mesh_start()</code> pushes an all-zero BSSID to the firmware</p>
+  <p>It calls <code>umac_interface_get_vif_mac_addr(umacd, vif_id, mesh_mac)</code> &mdash; passing a
+  <code>uint16_t</code> driver vif id into an <code>enum mmwlan_vif</code> parameter. The mesh vif id is
+  0; <code>MMWLAN_VIF_STA</code> is 1 and <code>MMWLAN_VIF_UNSPECIFIED</code> is 0, so it resolves to
+  UNSPECIFIED, <code>umac_data_get_interface_vif()</code> returns NULL, the function returns
+  <code>MMWLAN_UNAVAILABLE</code> without writing, the return is discarded with <code>(void)</code>, and
+  <code>mmdrv_set_bssid()</code> receives six zero bytes.</p>
+  <p>Same shape as the proxy-ARP defect: a malformed field nobody reads. <strong>Left alone on
+  purpose</strong> &mdash; an unrelated change to shipped mesh start behaviour that could plausibly alter
+  firmware RX filtering and needs its own A/B. Bundling it would have confounded this session&rsquo;s
+  result: if peering had regressed I could not have told which change did it. Needs filing.</p></div>
+
+  <h2 id="bench">8 &middot; Bench notes</h2>
+  <ul>
+    <li><strong>The scratchpad was cleared mid-session</strong>, so the serial runner vanished; I piped
+    its <code>No such file</code> error into a <code>grep</code> and got a silent empty run. Second time
+    this session for that family of mistake. The rule is not so much &ldquo;don&rsquo;t pipe through
+    grep&rdquo; as <strong>never let a run&rsquo;s stderr go somewhere you aren&rsquo;t reading</strong>.</li>
+    <li><code>MMLOG_DBG</code>/<code>MMLOG_INF</code> do not reach the UART; only <code>MMLOG_ERR</code>
+    does. Diagnosing the recovery meant temporarily elevating the per-peer logs, then reverting. Worth
+    knowing before assuming a code path didn&rsquo;t run.</li>
+  </ul>
+
+  <div class="callout"><p class="ct">Still open</p>
+  <p><strong>S3</strong>, the AP-side <code>MMOSAL_ASSERT(false)</code>, remains unreproduced &mdash;
+  this fixture is mesh-only and never instantiates an AP vif. S2 makes it look smaller than it did:
+  Linux recovers an AP through the same generic path plus <code>drv_start_ap()</code>, so the assert
+  reads as a morselib scoping decision rather than a hardware limit. Unconfirmed on the chip.</p></div>
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#design">1 &middot; The design changed first</a></li>
+    <li><a href="#built">2 &middot; What got built</a></li>
+    <li><a href="#wrong">3 &middot; &ldquo;It works&rdquo; was wrong twice</a></li>
+    <li><a href="#result">4 &middot; Result</a></li>
+    <li><a href="#adversarial">5 &middot; Adversarial review</a></li>
+    <li><a href="#review">6 &middot; The code review</a></li>
+    <li><a href="#notfixed">7 &middot; Not fixed, on purpose</a></li>
+    <li><a href="#bench">8 &middot; Bench notes</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-08-06-mesh-hwrestart-s2-recovery</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>
