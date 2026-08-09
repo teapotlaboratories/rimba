@@ -1,8 +1,9 @@
 # Mesh `hw_restart` recovery — what actually happens, and what has to be built
 
-**Status:** **S1 done (2026-08-05)** — the reproducer exists and is red on air; S2 (mesh recovery) and
-S3 (the AP assert) are open. Blocks the relay Interrupt-WDT fix (FIX-1). Read the S1 sections bottom-up:
-the last one supersedes the two above it, which are kept for the dead ends.
+**Status:** **S1 + S2 done (2026-08-05/06)** — the reproducer exists, and mesh now survives a chip
+restart on both probes (datapath 5/5, beacons 1568/190 s), post-code-review. **S3 (the AP assert) is open and still
+unreproduced.** Blocks the relay Interrupt-WDT fix (FIX-1). Read the S1 sections bottom-up: the last one
+supersedes the two above it, which are kept for the dead ends. The S2 code map is at the end.
 
 ## The failure, traced in source
 
@@ -38,13 +39,26 @@ slot at this layer.
 > concluding the mesh vif is a STA vif here is wrong, and it inverts the conclusion below.
 
 So for a mesh node the sequence is: `mmdrv_deinit()`/`mmdrv_init()` wipes every vif, then
-`umac_connection_handle_hw_restarted()` opens with
-`umac_interface_get_vif_id(umacd, UMAC_INTERFACE_STA)`, which is **`MMDRV_VIF_ID_INVALID`** — so its
-entire body is skipped. **Nothing is restored.** The chip is re-initialised, the mesh vif is never
-reinstalled, no peer is re-registered, no key is reinstalled. The host stack still believes it is
-meshing. Nothing is on air.
+`umac_connection_handle_hw_restarted()` runs — and restores **none of the mesh-specific state**. No
+mesh BSS config, no `set_bssid`, no `MESH_CONFIG`, no beaconing, no peer re-registered, no mesh key
+reinstalled. The host stack still believes it is meshing. Nothing is on air.
 
 That is precisely the bench-observed "silently deaf", now with a mechanism rather than a symptom.
+
+> ⚠ **CORRECTION (2026-08-06, adversarial review).** Every earlier revision of this section said the
+> connection handler's *"entire body is skipped"* because
+> `umac_interface_get_vif_id(umacd, UMAC_INTERFACE_STA)` returns `MMDRV_VIF_ID_INVALID` on a mesh node.
+> **That is false, and it was repeated for the whole investigation.** `UMAC_INTERFACE_STA` is inside
+> `VIF_STA_INTERFACE_TYPES_MASK` (`umac_interface.c:118-120`), so `umac_interface_get_vif_id()` returns
+> `vif_data_sta->vif_id` **without ever consulting `active_interface_types`**
+> (`umac_interface.c:492`) — and mesh *shares the STA slot*. The guard is therefore **true** on a
+> mesh node and the body **does** run. Confirmed on hardware with a temporary probe: `BODY RUNNING
+> vif_id=0` on a meshing node.
+>
+> The *conclusion* survives — a mesh node comes back deaf and needs its own restore — but the mechanism
+> is "the handler restores STA things, none of which are the mesh's" rather than "the handler does
+> nothing". The difference is not cosmetic: it means the two handlers were both running, which is what
+> made the ordering hazard in D11 possible.
 
 ### (b) The shipped gate asserts outright
 
@@ -60,7 +74,7 @@ the more urgent of the two**, because the gate is the node with clients dependin
 |---|---|---|---|
 | 1 | `umac_interface_reinstall_vif()` | the STA vif | the MESH vif |
 | 2 | `mmdrv_update_sta_state(…, MORSE_STA_NONE)` | one BSSID | **loop over every established peer** |
-| 3 | `umac_interface_reconfigure_channel()` | once | once |
+| 3 | `umac_interface_reconfigure_channel()` | once | once — **and it must be this function, not `set_channel_from_regdb()`; see D12** |
 | 4 | `umac_keys_reinstall_keys(stad, vif_id)` | one peer's keys | **per-peer AMPE keys** |
 | 5 | `mmdrv_update_sta_state(…, MORSE_STA_AUTHORIZED)` | if FSM connected | per peer, if the plink is ESTAB |
 
@@ -83,9 +97,126 @@ twice now — check `git merge-base --is-ancestor` before merging the superproje
 
 ## Not yet checked
 
-- What `ieee80211_reconfig` does for a mesh vif in the Linux reference — the port must derive from it.
-- Whether `umac_interface_reinstall_vif()` is safe to call for `UMAC_INTERFACE_MESH` as-is.
+- ~~What `ieee80211_reconfig` does for a mesh vif in the Linux reference~~ — **answered 2026-08-06, and
+  it reframes S2. See below.**
+- ~~Whether `umac_interface_reinstall_vif()` is safe to call for `UMAC_INTERFACE_MESH` as-is.~~ —
+  **answered 2026-08-06: yes, and it is already mesh-aware. But it is nowhere near sufficient. See below.**
 - Whether a *concurrent* mesh+AP node can be recovered at all, or whether S3 is a vendor/firmware ask.
+
+### What Linux actually does — the restore is GENERIC, not per-vif-type
+
+Read on chronium at `~/halow/rpi-linux/net/mac80211/util.c`, `ieee80211_reconfig()` (`util.c:1753`).
+Offsets below are lines within the function body.
+
+The **mesh case is almost empty** — it only re-enables the beacon:
+
+```c
+case NL80211_IFTYPE_MESH_POINT:                     /* body line 291 */
+        if (sdata->vif.bss_conf.enable_beacon) {
+                changed |= BSS_CHANGED_BEACON | BSS_CHANGED_BEACON_ENABLED;
+                ieee80211_bss_info_change_notify(sdata, changed);
+        }
+        break;
+```
+
+It is small because everything the mesh actually needs restored is done **generically, for every vif
+type, before the switch**:
+
+| what | where (body line) | scope |
+|---|---|---|
+| reinstall the vif | `drv_add_interface()` — 101/113 | all types |
+| re-add every station | `ieee80211_reconfig_stations()` — 213, 347 | all types |
+| reinstall keys | `ieee80211_reenable_keys()` — 356 | all types |
+| per-type extras | the `switch` — 291 for mesh | type-specific |
+
+**This is the structural divergence, and it is the root cause.** morselib put the generic work — vif
+reinstall → `mmdrv_update_sta_state` → channel → keys → `AUTHORIZED` — *inside*
+`umac_connection_handle_hw_restarted()`, a **STA-shaped** function keyed on
+`get_vif_id(umacd, UMAC_INTERFACE_STA)`. Linux keeps that work outside the type switch. So the generic
+restore was written into a connection-specific function, and the mesh-specific half of it
+(`cfg_bss` / `set_bssid` / `MESH_CONFIG` / beaconing / peers / mesh keys) has no home at all.
+
+⚠ Note the nuance established by the correction in §(a): that key does **not** evaluate to
+`MMDRV_VIF_ID_INVALID` on a mesh node, so the handler does run and does restore the vif and the
+channel. What a mesh node gets is *STA* restoration — which is why it comes back with a live vif and
+still cannot beacon. "A mesh node gets nothing" was the earlier, wrong shorthand.
+
+### Consequences for staging
+
+- **S2 is a hoist, not a mirror.** The faithful port is to lift the vif/station/key restore out of
+  `umac_connection_handle_hw_restarted()` into a type-agnostic step that runs for whatever interface is
+  active, then add a *small* mesh arm (re-enable beaconing). Writing a parallel
+  `umac_mesh_handle_hw_restarted()` that duplicates the five steps would diverge from the reference and
+  create a second copy of the same logic — the failure mode the T0 clone-mirror guard exists to prevent
+  elsewhere in this repo.
+- **The "N peers instead of one BSSID" framing in the table above is superseded.** Linux does not loop
+  per-peer in the mesh path; `ieee80211_reconfig_stations()` already walks every station on the vif,
+  which for a mesh vif *is* the peer set. The loop is generic, not mesh-specific.
+- **S3 may fall out of the same hoist.** Linux handles AP in that same generic path plus a
+  `drv_start_ap()` in the type switch — it does not refuse to recover an AP. That makes the
+  `MMOSAL_ASSERT(false)` look like a morselib scoping decision rather than a hardware limitation, so S3
+  should be re-examined *after* the hoist rather than planned as an independent stage. Not yet
+  confirmed on the chip.
+
+⚠ Line numbers above are **body-relative** (from `awk '/^int ieee80211_reconfig/,/^}/'`), not file
+absolute — re-derive them against the tree before quoting them in the S2 code-map, which the porting
+rule requires to cite verified `file:line` pairs on both sides.
+
+### `umac_interface_reinstall_vif()` is mesh-safe — and not nearly enough
+
+**Safe, and already mesh-aware.** `umac_interface.c:560` branches on the active type and maps
+`UMAC_INTERFACE_MESH` → `MMDRV_INTERFACE_TYPE_MESH` before calling `mmdrv_add_if()`. Nothing about it is
+STA-specific. It is simply never reached for mesh today, because its **only** call site is inside the
+STA-gated `umac_connection_handle_hw_restarted()` (`umac_connection.c:1703`). The primitive needs no
+change — only a caller.
+
+**But it restores almost none of what a mesh vif needs**, because `umac_interface_init_vif()` — the
+helper it finishes with — has arms for `SCAN`, `STA` and `AP` and **no `MESH` arm**. So a reinstall
+brings back the vif plus the generic bits (PS mode, TX-status watermark, health check, dynamic-PS
+timeout) and stops there. Everything `mmwlan_mesh_start()` pushed to the chip is skipped:
+
+| chip-side step at mesh start | restored by `reinstall_vif`? |
+|---|---|
+| `mmdrv_add_if(…, MMDRV_INTERFACE_TYPE_MESH)` | ✅ |
+| `umac_interface_set_channel_from_regdb()` | ❌ — but `umac_interface_reconfigure_channel()` (`umac_interface.c:925`) is generic; reuse it, as the STA handler does |
+| `mmdrv_cfg_bss(vif_id, beacon_interval_tu, 1, 0)` | ❌ |
+| `mmdrv_set_bssid(vif_id, mesh_mac)` | ❌ |
+| `mmdrv_config_beacon_timer(vif_id, true)` | ❌ (non-fatal on 1.17.8) |
+| `mmdrv_start_beaconing(vif_id)` | ❌ |
+| `mmdrv_cfg_mesh(vif_id, true, true)` | ❌ |
+
+That table *is* the observed symptom: the chip re-inits, the vif could be re-added, and **nothing
+beacons**.
+
+**So the mesh arm is legitimately larger than Linux's**, and the earlier "small mesh arm" reading above
+is corrected here. mac80211 collapses all of this into one
+`bss_info_change_notify(BSS_CHANGED_BEACON | BSS_CHANGED_BEACON_ENABLED)` because the driver reacts to
+those flags; morselib has no such notify layer and issues the `mmdrv_*` commands explicitly. Record it
+as a **deliberate divergence** in the S2 code-map — same intent, different plumbing — not a porting gap.
+The hoist conclusion still holds for the vif/station/key portion; it is only the "mesh arm is nearly
+empty" part that does not survive contact with morselib.
+
+### ⚠ The trap: S2 must NOT re-run `mmwlan_mesh_start()`
+
+The start path wipes host state as its first act — "fresh MBSS" (`umac_mesh.c` ~3812-3816):
+
+```c
+memset(&mesh_ctx, 0, sizeof(mesh_ctx));
+memset(mesh_peers, 0, sizeof(mesh_peers)); /* fresh peer table for this MBSS */
+mesh_path_tbl_reset();                     /* fresh HWMP path table */
+memset(mpp_paths, 0, sizeof(mpp_paths));   /* fresh MPP table */
+memset(mesh_rmc, 0, sizeof(mesh_rmc));     /* fresh duplicate cache */
+```
+
+Re-running start as a recovery shortcut would **destroy the peer, path and MPP state the recovery
+exists to preserve**, turning a deaf node into a deaf *and* amnesiac one — and it would do so silently,
+since the host tables would then agree with the chip that there are no peers. (Note the irony: that is
+the one thing which would make `mmwlan_mesh_peer_count()` finally tell the truth.)
+
+**S2 is therefore a factoring job with a clear seam**: split the chip-configuration sequence out of
+`mmwlan_mesh_start()` into a helper callable from both start and recovery, leaving the host-table
+resets behind in start only. Then the recovery path is: reinstall vif → reconfigure channel → that
+helper → per-ESTAB-peer `mmdrv_update_sta_state` + `umac_keys_reinstall_keys`.
 
 ---
 
@@ -232,3 +363,267 @@ FAIL above is a finding rather than a scorer stuck on one answer.
 Remaining caveat: the AP-side assert (defect (b)) is still unreproduced — this fixture is mesh-only, so
 it never instantiates an AP vif and never reaches `MMOSAL_ASSERT(false)`. S3 needs its own reproducer,
 or an extension of this one onto `rimba-halow-mesh-ap`.
+
+---
+
+# S2 — code map
+
+**Reference revisions (pinned).** `rpi-linux` `372414fd42cdd4d8bfcf888cac62db9da947fdb6` (Linux 6.12.21,
+`net/mac80211`) · `morse_driver` `7a636e45833a5855bab20da72eb037562578c866`, both as checked out on
+chronium under `~/halow/`. New code: `components/halow` branch `feat/mesh-hw-restart-s2`.
+
+**Every `file:line` below was grepped in both trees on the date stamped here — none is cited from
+memory.** Rows marked *(call site)* or *(case label)* are exactly that, not definitions; lines drift,
+so re-verify before quoting these elsewhere.
+
+**Verified 2026-08-06.**
+
+## Recovery entry point
+
+| new code | Linux |
+|---|---|
+| `umac_mesh_handle_hw_restarted()` — `umac_mesh.c:4133` | `ieee80211_reconfig()` — `net/mac80211/util.c:1753` (the mesh-relevant subset) |
+| declared `umac_mesh.h:114`; invoked from `umac_mmdrv_shim.c:101` *(call site)* | invoked from the driver's restart-completion path |
+| STA counterpart it sits beside: `umac_connection_handle_hw_restarted()` — `umac_connection.c:1689` | same function, other vif types |
+
+## Per-step mapping
+
+| # | new code | Linux |
+|---|---|---|
+| 1 | `umac_interface_reinstall_vif()` — `umac_interface.c:560`, called at `umac_mesh.c:4145` *(call site)* | `drv_add_interface()` — `driver-ops.c:57`, called at `util.c:1853` and `:1865` *(call sites)* |
+| 2 | channel via `umac_interface_reconfigure_channel()` (D12), then `mesh_chip_configure_bss()` (cfg_bss + set_bssid) | `drv_add_chanctx()` — `util.c:1888`; BSS/beacon folded into `ieee80211_bss_info_change_notify()` — see D1 |
+| 3 | `umac_keys_reinstall_keys(common_stad)` — `umac_keys.c:124`, called at `umac_mesh.c:4196` *(call site)* | `ieee80211_reenable_keys()` — `net/mac80211/key.c:965`, called at `util.c:2108` *(call site)* |
+| 4 | `umac_mesh_peer_reinstall_on_chip()` — `umac_mesh.c:3759`, called at `umac_mesh.c:4232` *(call site)* | `ieee80211_reconfig_stations()` — `util.c:1662`, called at `util.c:1965` *(call site, the `default:` arm)* |
+| 4a | state ladder `mmdrv_update_sta_state()` — `umac_mesh.c:3783` | `drv_sta_state()` — `driver-ops.c:127`, stepped in `util.c:1662`'s loop |
+| 4b | `umac_keys_reinstall_keys(peer->stad)` — called at `umac_mesh.c:3810` *(call site)* | `ieee80211_reenable_keys()` — `key.c:965` |
+| 5 | `mesh_chip_start_beaconing()` — `umac_mesh.c:3876`, called at `umac_mesh.c:4247` *(call site)* | `case NL80211_IFTYPE_MESH_POINT:` — `util.c:2043` *(case label)*, setting `BSS_CHANGED_BEACON \| BSS_CHANGED_BEACON_ENABLED` |
+
+⚠ **`util.c` contains TWO switches on `sdata->vif.type` inside `ieee80211_reconfig`, and conflating them
+inverts the reading.** The first (station re-add) has **no** `MESH_POINT` label, so a mesh vif takes its
+`default:` arm at `util.c:1965` — mesh stations *are* re-added. The `MESH_POINT` case at `util.c:2043`
+belongs to the **second** switch and only re-enables beaconing. The second `ieee80211_reconfig_stations()`
+at `util.c:2099` is guarded to `AP`/`AP_VLAN` ("APs are now beaconing, add back stations") and does not
+apply to mesh.
+
+## Refactor for reuse (not ported code)
+
+| new code | why |
+|---|---|
+| `mesh_chip_configure_bss()` — `umac_mesh.c:3849` | extracted from `mmwlan_mesh_start()` (`umac_mesh.c:3916`) so start and recovery share one description of the chip sequence |
+| `mesh_chip_start_beaconing()` — `umac_mesh.c:3876` | same; kept a *separate* phase because start must populate `mesh_ctx` and arm the host beacon engine between the two |
+
+## HW-global restores (hoisted out of the STA path)
+
+Linux restores hw-global settings in `ieee80211_reconfig()` **unconditionally**, after `drv_start()` and
+before the vif loop. morselib had one of them inside the STA-gated body of
+`umac_connection_handle_hw_restarted()`, so a mesh node never got it.
+
+| new code | Linux | note |
+|---|---|---|
+| frag threshold, `umac_mmdrv_shim.c` `hw_restart_evt_handler()` — moved out of `umac_connection.c:1771` | `drv_set_frag_threshold()` — `util.c:1836` | hw-global: value from umacd config, `mmdrv_set_frag_threshold()` takes no vif |
+| — *not restored, any vif type* | `drv_set_rts_threshold()` — `util.c:1839` | **pre-existing morselib gap**, affects STA too; tracked in `docs/rimba-todo.md`, not fixed in passing |
+| — *no counterpart* | `drv_set_coverage_class()` — `util.c:1842` | morselib has no coverage-class surface |
+| PS mode: via `reinstall_vif` → `umac_interface_init_vif()` → `umac_ps_update_mode()` | Linux restores PS generically | see D10 |
+
+**This was the fix the analysis called for and the first implementation did not deliver.** The stated
+conclusion was "S2 is a hoist, not a mirror", yet the first cut added a parallel mesh function and left
+genuinely generic state stranded in the STA path — reproducing, in miniature, the exact defect being
+fixed. Found by an adversarial review of the faithfulness claim, 2026-08-06.
+
+## Deliberate divergences
+
+**D1 — the mesh arm is an explicit `mmdrv_*` sequence, not three lines.** Linux's mesh case is tiny
+because mac80211 pushes channel/BSS/beacon through one `bss_info_change_notify()` and the driver reacts
+to the changed-flags. morselib has no notify layer, so the same intent is spelled out as
+`umac_interface_set_channel_from_regdb` → `mmdrv_cfg_bss` → `mmdrv_set_bssid` →
+`mmdrv_config_beacon_timer` → `mmdrv_start_beaconing` → `mmdrv_cfg_mesh`. Same effect, different
+plumbing.
+
+**D2 — the station ladder starts at `AUTHENTICATED`, not `NOTEXIST`.** Linux replays every transition
+from `NOTEXIST` upward (`util.c:1662`). `morse_driver` discards exactly the low ones —
+*"Ignore both NOTEXIST to NONE and NONE to NOTEXIST"*, `morse_driver/mac.c:4812-4814` — so those
+commands would be dropped anyway. The ladder here is the same three states the normal ESTAB path sends.
+
+**D3 — keys go on before beaconing; both references do the reverse.** Linux re-enables keys at
+`util.c:2108`, *after* the mesh beacon re-enable at `util.c:2043`, and morselib's own
+`mmwlan_mesh_start()` likewise arms beaconing before calling `umac_mesh_install_common_keys()`. This
+recovery path installs the common-stad keychain and the per-peer keychains **first**, then arms
+beaconing last.
+
+The reason is deliberate: at this point the node still holds live peers that never restarted and will
+resume sending to it the moment it is back on air, so beaconing first would open a window in which it
+advertises presence with no keys on the chip. Ordering keys first closes that window. Peer keys also
+ride with the state ladder in `umac_mesh_peer_reinstall_on_chip()` rather than a later global pass,
+because the normal ESTAB path already pairs them and one description of "a peer is installed" beats two.
+
+⚠ An earlier revision justified this as "beaconing is armed last, which the host-beacon-engine ordering
+requires". **That was wrong** — the host-beacon-engine constraint is a *start-path* one (`mesh_ctx` must
+be populated before `MESH_CONFIG(START)`), and in recovery `mesh_ctx` is already populated and
+`active` is already true. The ordering is a choice, not a constraint, and is recorded as such.
+
+**D4 — the common stad has no Linux counterpart.** morselib routes *all* mesh TX through a synthetic
+`common_stad`; mac80211 has no such object. Its keychain therefore needs its own re-push (step 3), with
+nothing to map to. **Omitting it is invisible in a beacon capture and fatal to everything else** —
+beacons are host-generated and unencrypted, so the node beacons perfectly while every data frame dies.
+Measured 2026-08-06: 190 s of beaconing, 0/5 pings.
+
+**D5 — keys are RE-PUSHED, never rebuilt, and this is load-bearing.** `umac_keys_reinstall_keys()`
+walks the surviving host keychain and re-issues each key to the driver. Constructing fresh
+`struct umac_key` values instead resets the CCMP PN, because `connection_keys_install_key()` copies
+`tx_seq`/`rx_seq` out of the struct it is handed (`connection_keys.c:118-121`) — and the peer, which
+never restarted, still holds its replay window. Every frame we send is then dropped as a replay, with
+every install returning success and nothing logged. This matches Linux, where `ieee80211_reenable_keys()`
+re-enables existing key objects rather than reinstalling them. Cost one bench cycle to find.
+
+**D6 — recovery must never call `mmwlan_mesh_start()`.** That path opens by memset-ing `mesh_ctx`,
+`mesh_peers[]`, the HWMP path table, `mpp_paths` and `mesh_rmc` for a fresh MBSS. Reusing it as a
+shortcut would destroy the peer/path state recovery exists to preserve — silently, since the host tables
+would then agree with the chip that there are no peers.
+
+**D7 — `drv_conf_tx()` is not replayed; morselib's queue-param surface is STA-only.** A mesh vif takes
+switch #1's `default:` arm and then **falls through into `case NL80211_IFTYPE_AP:`**, which restores
+per-AC TX (EDCA) parameters: `for (i = 0; i < IEEE80211_NUM_ACS; i++) drv_conf_tx(...)`
+(`util.c:1968-1970`, under the `case NL80211_IFTYPE_AP:` label at `util.c:1967`). That fallthrough is
+easy to miss and it means Linux *does* restore EDCA for a mesh vif.
+
+morselib **does** have queue-parameter plumbing — `umac_connection.c:911-951` builds `aifs` / `cw_min` /
+`cw_max`, with defaults in `umac_config.c:27,34`. (An earlier revision of this row claimed no such
+surface existed; that was an under-scoped grep and is corrected here.) But it is **STA-path only**: the
+values are parsed from an AP's EDCA Parameter Set element, which a mesh node never receives, and
+`mmwlan_mesh_start()` never sets per-AC parameters. So there is no mesh queue configuration to lose and
+nothing for recovery to replay. **If mesh ever gains per-AC TX configuration, this becomes a real gap.**
+
+**D8 — only ESTAB peers are re-pushed; Linux re-adds every station.**
+`ieee80211_reconfig_stations()` walks all stations on the vif and steps each back to whatever
+`sta_state` it held, including partial ones. This restores only peers at `MESH_PLINK_ESTAB`
+(`umac_mesh.c:4228`). A peer mid-handshake has no chip state worth recreating — its `aid`/keys are not
+final — and the plink retry tick (`umac_mesh_plink_tick`, registered at start and unaffected by the
+restart) is still running and will drive it to ESTAB exactly as it would have. Re-pushing a half-formed
+peer would instead install a station the handshake then contradicts.
+
+**D9 — the AP beacon dispatcher is now `MMWLAN_AP_DISABLED`-guarded.** `mmdrv_host_get_beacon()`
+(`umac_mmdrv_shim.c`) called `umac_ap_get_beacon()` unguarded, even though `umac_ap.c` is not compiled
+when `CONFIG_HALOW_AP_MODE=n`. That build only ever linked because `--gc-sections` dropped the whole
+dispatcher when nothing referenced it — an undefined symbol surviving on an accident of dead-code
+elimination. Adding the mesh recovery call to `hw_restart_evt_handler()` pulled `umac_mesh.o`, and with
+it the dispatcher, back into the link and broke `rimba-halow-sta`. Guarded with the idiom the tree
+already uses (`umac.c:487`, `s1g_capabilities.c:13`, `config.c:295`). No Linux counterpart — mac80211
+has no compile-time AP-removal — so this is a build-configuration fix, not a port decision.
+
+**D10 — PS state is not re-pushed by the mesh arm, because it is already restored.**
+`umac_ps_handle_hw_restarted()` remains STA-gated, which looks like the same stranding as the frag
+threshold but is not: `umac_interface_reinstall_vif()` ends in `umac_interface_init_vif()`, whose first
+action is `umac_ps_update_mode(umacd)` — so a recovering mesh vif re-applies its PS mode already. What
+the STA-only helper adds beyond that is preserving the module's `suspended` flag across an internal
+reset. Calling it from the mesh path was considered and rejected: it carries a `MMOSAL_DEV_ASSERT` on
+mode equality and was written for the STA lifecycle, and blind-hoisting it would repeat the mistake of
+assuming rather than checking. **If mesh ever uses PS suspend, this needs revisiting.**
+
+**D11 — handler exclusivity is ENFORCED in the shim, not inferred.** `hw_restart_evt_handler()` now
+dispatches `if (umac_mesh_is_active()) mesh else connection`, mirroring `ieee80211_reconfig()`'s
+per-type switch where no vif takes two arms. It must be enforced: as the correction at the top of this
+doc records, the connection handler does **not** no-op on a mesh node. Left unguarded it re-ran
+`umac_interface_reinstall_vif()` immediately after the mesh restore had reinstalled the vif,
+reprogrammed the BSS, re-pushed every peer and armed beaconing — re-adding the FW interface underneath
+all of it, and driving `mmdrv_update_sta_state()` with the connection stad's aid 0 and all-zero BSSID.
+It happened to survive on the bench; that is not a property to depend on.
+
+**D12 — the restart path uses `umac_interface_reconfigure_channel()`, NOT
+`umac_interface_set_channel_from_regdb()`.** This is the one that bites hardest and silently.
+`umac_interface_set_channel_internal()` short-circuits on
+`ie_s1g_operation_is_equal(&data->current_s1g_operation, s1g_operation)` and returns **success without
+touching the chip**. `mmdrv_init()` wipes the chip's channel but leaves that HOST cache intact, so
+re-requesting the same channel after a restart programs nothing and reports success.
+`umac_interface_reconfigure_channel()` exists for exactly this — it clears the cached operation, then
+re-applies it — which is why the STA restart path calls it (`umac_connection.c:1713`) and Linux's
+equivalent re-adds the chanctx (`drv_add_chanctx()`, `util.c:1888`) rather than re-requesting the same
+one. `mesh_chip_configure_bss()` therefore does **not** set the channel at all; each caller picks its
+own primitive, so the choice cannot be made by accident.
+
+> This was a live defect in the mesh restore from the moment it was written, and it passed anyway —
+> because the un-enforced double dispatch in D11 meant the connection handler re-did the channel
+> afterwards. Fixing D11 removed the cover and the node came back **on no channel at all**: beaconing,
+> and 0/5 on the datapath. Two bugs that concealed each other.
+
+**D13 — every abort path tears the mesh down rather than leaving it "active".**
+`umac_mesh_abort_restore()` clears `mesh_ctx.active` and calls `umac_interface_remove()`, mirroring
+`mmwlan_mesh_start()`'s `fail:` label. Without it a failed restore left `umac_mesh_is_active()` true
+over a dead chip — beacon builder still routed to, plink/RANN ticks still running, datapath still
+queueing at an unconfigured vif — i.e. it would have reintroduced the exact silently-deaf state this
+work exists to remove, on the error path.
+
+**D14 — chip sequence-number spaces are re-pushed for the mesh stads.**
+`umac_datapath_handle_hw_restarted()` (`umac_datapath.c:3512`) re-issues `mmdrv_set_seq_num_spaces()`;
+the STA path calls it at `umac_connection.c:1796`, and it is now called for `mesh_ctx.common_stad` and
+each restored peer, **after** the station exists on the chip. Same hazard class as the CCMP PN reset in
+D5 — the chip restarts its counters at 0 while peers keep their duplicate-detection state — but for the
+numbers the chip stamps rather than the host.
+
+**D15 — S3 scope boundary: this path is unreachable on a mesh+AP gate.**
+`hw_restart_evt_handler()` still opens with `MMOSAL_ASSERT(false)` when an AP vif is active, so on the
+shipped `rimba-halow-mesh-ap` a restart panics *before* `umac_mesh_handle_hw_restarted()` is reached.
+S2 therefore fixes mesh-only nodes; the gate remains defect (b) and is S3's problem.
+
+## Verification
+
+Rig: board1 = NUT, board0 = `test-mesh-gate-node NO_PING=1`, chronium `morse0` on ch27. Two independent
+probes, because neither alone is sufficient — beaconing does not prove the datapath, and a ping does not
+prove the node is beaconing:
+
+| probe | before S2 | after S2 |
+|---|---|---|
+| `hw_restart_counter` | 0 → 1 | 0 → 1 |
+| datapath (ping the peer) | *not measured* | **5/5 before, 5/5 after** |
+| beacons (`tools/mesh_hwrestart_cap.py`) | stopped, **112 s silence to end of capture** | **PASS** — 1568 beacons/190 s, 3.1 s outage, 1262 after |
+
+Re-run in full after the code review's eight fixes (2026-08-06), not carried over from the pre-review build — the review changed handler dispatch, the channel primitive and the start-path BSSID, any of which could have moved the result. It did: the intermediate build regressed to **0/5** and that is how D12 was found.
+
+Reference SHAs re-checked and every `file:line` in this map re-derived after the review edits; 13 citations had drifted and were corrected. **Verified 2026-08-06.**
+
+### On-air byte check, re-run after the code review (2026-08-07)
+
+The review changed something that reaches the chip — the start-path BSSID — so the earlier byte check
+(taken on a pre-review build) could not be carried over. Both questions were re-answered from fresh
+captures, archived under `docs/worklog/artifacts/mesh-hwrestart/`.
+
+**Q1 — does the node still come back byte-identical to its former self?** Last pre-restart beacon vs a
+mid-window post-recovery beacon, same capture: length 97 → 97, differing offsets **only 11-12 and
+93-96** (S1G timestamp and FCS), IE chain `[213, 217, 232, 48, 114, 113]` unchanged, **6/6 IEs
+byte-identical** including Mesh Configuration, Mesh ID and RSN.
+
+**Q2 — did programming a real BSSID change any transmitted byte?** The archived pre-fix capture had
+been lost with the scratchpad, so rather than diff against something stale the pre-fix behaviour was
+rebuilt and A/B'd on the bench in the same session. Real-BSSID vs zero-BSSID steady-state beacons:
+length 97 vs 97, **no differing offsets at all once the timestamp and FCS are excluded**, 6/6 IEs
+byte-identical.
+
+**So the BSSID fix changes what the chip is PROGRAMMED with and nothing that is transmitted.** That is
+what makes it safe to have landed alongside S2: it cannot have invalidated the earlier on-air work, and
+the recovery bench now validates the same configuration the node normally runs.
+
+⚠ Archive captures under `docs/worklog/artifacts/`, not the scratchpad — the scratchpad is cleared
+without warning and the first S2 capture was lost that way.
+
+
+### On-air byte check — the recovered node is byte-identical to its former self
+
+S2 changes *when* the chip is configured, not what goes on the wire: the recovered node emits frames
+from the same builders as before. So the on-air rule's meaningful form here is **identity across the
+restart**, not a fresh byte-diff against Linux — the mesh beacon's Linux conformance was established by
+the 802.11s port and is unchanged by this work. A restart that silently altered the node's advertised
+identity (BSSID, Mesh ID, mesh capability, RSN) is exactly what this catches.
+
+Last pre-trigger beacon vs a mid-window post-recovery beacon, same capture (`s2.pcap`, 220 before /
+1325 after):
+
+| | result |
+|---|---|
+| frame length | 97 → 97 |
+| differing byte offsets | **only 11-13 and 93-96** — the S1G timestamp and the FCS |
+| IE chain | `[213, 217, 232, 48, 114, 113]` → identical |
+| IEs byte-identical | **6/6**, including 113 Mesh Configuration, 114 Mesh ID and 48 RSN |
+
+Every non-volatile byte survives the restart. Nothing about the node's on-air identity is rebuilt
+differently by the recovery path than by the start path.
+
+---

@@ -26,9 +26,19 @@
  * into it again.
  *
  * So the split is:
- *   - THIS APP asserts only what the device can genuinely know: that the trigger really did cause a
- *     chip restart (umac_stats' hw_restart_counter, bumped by hw_restart_evt_handler() itself only
- *     AFTER mmdrv was torn down and re-inited). That validates the FIXTURE, not the fix.
+ *   - THIS APP asserts what the device can genuinely know: that the trigger really did cause a chip
+ *     restart (umac_stats' hw_restart_counter, bumped by hw_restart_evt_handler() itself only AFTER
+ *     mmdrv was torn down and re-inited), and that the DATAPATH to the peer works after it.
+ *
+ *     A ping IS a legitimate recovery probe, where the peer count is not, and the difference is worth
+ *     being precise about: a reply cannot be manufactured by stale host memory. It requires this node
+ *     to transmit, the peer to receive, decrypt, reply, and this node to receive and decrypt -- so it
+ *     exercises the vif id, the per-peer chip state and the keys that the restart destroyed. What it
+ *     does NOT prove is that the node is BEACONING again, which is why the on-air capture stays.
+ *
+ *     The reason ping was avoided in the first version was the documented "a source with no IP fails
+ *     ping with an empty mpath" trap. That is handled by pinging BEFORE the restart too: a failing
+ *     before-ping makes the run INCONCLUSIVE (the rig never carried traffic), never a FAIL.
  *   - THE RECOVERY VERDICT IS OFF-AIR: run tools/mesh_hwrestart_cap.py on chronium's morse0 across the
  *     run. It scores this board's own S1G beacons -- beacons before the restart, then whether they
  *     ever come back -- and uses the peer board's beacons as a liveness control so "no beacons" means
@@ -54,6 +64,7 @@
 #include "esp_mac.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
+#include "ping/ping_sock.h"
 
 #include "mmhalow.h"
 #include "mmwlan.h"
@@ -84,6 +95,7 @@
  * healthy path also re-runs the firmware load. Scoring a recovery too early would report a defect that
  * is really just impatience. */
 #define RECOVER_WAIT_S   45
+#define PING_COUNT       5
 
 static const char *TAG = "hwrestart";
 static uint8_t g_mesh_mac[6];
@@ -107,6 +119,89 @@ static int peer_count(void)
     uint8_t macs[UMAC_MESH_MAX_PEERS][6] = { { 0 } };
     int n = mmwlan_mesh_peer_count(macs);
     return (n < 0) ? 0 : n;
+}
+
+/* First established peer's MAC, for the data-flow check. Uses the same (stale-prone) table as
+ * peer_count -- fine here, because it is only used to ADDRESS a ping, and the ping itself is what
+ * proves anything. A stale MAC yields a failed ping, never a false success. */
+static bool first_peer_mac(uint8_t out[6])
+{
+    uint8_t macs[UMAC_MESH_MAX_PEERS][6] = { { 0 } };
+    int n = mmwlan_mesh_peer_count(macs);
+    if (n <= 0) return false;
+    memcpy(out, macs[0], 6);
+    return true;
+}
+
+/* ---- data-flow check ------------------------------------------------------------------------
+ *
+ * Beacons returning proves the vif is back on air. It does NOT prove the DATAPATH came back: the peer
+ * could be re-installed on the chip at the wrong vif id, or its keys could be missing, and the node
+ * would beacon happily while every unicast to it failed. So the fixture also pings the peer.
+ *
+ * BEFORE and AFTER, and the BEFORE one is what makes the AFTER one readable. A bare post-restart ping
+ * failure is ambiguous between "recovery is broken" and "this rig never carried traffic in the first
+ * place" -- and the documented "a source with no IP fails ping with an empty mpath" trap makes the
+ * second reading entirely plausible. So a failing before-ping is INCONCLUSIVE (fix the rig), never a
+ * recovery verdict. Only a before-PASS/after-FAIL pair is evidence against the recovery.
+ *
+ * The peer's IP is derived from its MAC using the bench's flat-subnet convention (10.9.9.<100 + low
+ * 6 bits>, as test-mesh-gate-node pins for itself), so nothing here hardcodes a bench address. */
+static volatile int s_ping_ok;
+static volatile bool s_ping_done;
+
+static void on_ping_success(esp_ping_handle_t hdl, void *args) { (void)hdl; (void)args; s_ping_ok++; }
+static void on_ping_end(esp_ping_handle_t hdl, void *args) { (void)hdl; (void)args; s_ping_done = true; }
+
+/* Returns replies received (0 on any failure). */
+static int ping_peer(const uint8_t *peer_mac, int count)
+{
+    char ip[16];
+    snprintf(ip, sizeof(ip), "10.9.9.%u", 100u + (peer_mac[5] & 0x3fu));
+
+    ip_addr_t target = { 0 };
+    ipaddr_aton(ip, &target);
+
+    esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
+    cfg.target_addr = target;
+    cfg.count = count;
+    cfg.timeout_ms = 2000;
+    cfg.interval_ms = 1000;
+
+    esp_ping_callbacks_t cbs = { .on_ping_success = on_ping_success, .on_ping_end = on_ping_end };
+    esp_ping_handle_t hdl = NULL;
+    if (esp_ping_new_session(&cfg, &cbs, &hdl) != ESP_OK) return 0;
+
+    s_ping_ok = 0;
+    s_ping_done = false;
+    esp_ping_start(hdl);
+    for (int i = 0; i < (count * 3) + 10 && !s_ping_done; i++) vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_ping_stop(hdl);
+    esp_ping_delete_session(hdl);
+    TEST_INFO("ping %s: %d/%d replies", ip, s_ping_ok, count);
+    return s_ping_ok;
+}
+
+/* Pin a static flat-subnet IP on the mesh netif, same convention as test-mesh-gate-node. Without an
+ * address of our own the ping has no source and fails for a reason that has nothing to do with the
+ * restart -- the exact trap this fixture's header warns about. */
+static bool pin_static_ip(void)
+{
+    esp_netif_t *n = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (n == NULL) return false;
+    for (int i = 0; i < 60 && !esp_netif_is_netif_up(n); i++) vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_netif_dhcpc_stop(n);
+    esp_netif_set_mac(n, g_mesh_mac);
+
+    char ip[16];
+    snprintf(ip, sizeof(ip), "10.9.9.%u", 100u + (g_mesh_mac[5] & 0x3fu));
+    esp_netif_ip_info_t info = { 0 };
+    info.ip.addr = esp_ip4addr_aton(ip);
+    info.netmask.addr = esp_ip4addr_aton("255.255.255.0");
+    if (esp_netif_set_ip_info(n, &info) != ESP_OK) return false;
+    TEST_INFO("mesh IP %s", ip);
+    return true;
 }
 
 static int wait_for_peers(int timeout_s)
@@ -171,6 +266,22 @@ void app_main(void)
         park_forever();
     }
 
+    /* --- data-flow control: does traffic reach the peer BEFORE the restart? ------------------- */
+    uint8_t peer_mac[6] = { 0 };
+    bool have_peer = first_peer_mac(peer_mac);
+    bool have_ip = pin_static_ip();
+    int ping_before = (have_peer && have_ip) ? ping_peer(peer_mac, PING_COUNT) : 0;
+    TEST_STEP("data-before", ping_before > 0, "%d/%d replies from the peer", ping_before, PING_COUNT);
+    if (ping_before == 0)
+    {
+        TEST_INCONCLUSIVE("no traffic reached the peer BEFORE the restart (peer_mac=%d ip=%d) -- this "
+                          "rig never carried data, so a post-restart failure would say nothing about "
+                          "recovery. Fix the rig and re-run; the beacon capture is still valid",
+                          (int)have_peer, (int)have_ip);
+        TEST_END(NAME);
+        park_forever();
+    }
+
     /* Give the scorer a real pre-restart beacon baseline before we pull the rug out. */
     TEST_INFO("peered; beaconing for %ds to build the off-air baseline", SETTLE_S);
     vTaskDelay(pdMS_TO_TICKS(SETTLE_S * 1000));
@@ -214,6 +325,12 @@ void app_main(void)
               "mmdrv_deinit/init untouched, so this number is meaningless as a recovery signal",
               after, before);
 
+    /* --- did the DATAPATH come back? --------------------------------------------------------- */
+    int ping_after = ping_peer(peer_mac, PING_COUNT);
+    bool data_ok = (ping_after > 0);
+    TEST_STEP("data-after", data_ok, "%d/%d replies (was %d/%d before the restart)",
+              ping_after, PING_COUNT, ping_before, PING_COUNT);
+
     if (!restarted)
     {
         TEST_INCONCLUSIVE("hw_restart_counter did not advance (%d -> %d): mmwlan_force_hw_restart() "
@@ -221,12 +338,21 @@ void app_main(void)
                           "TRIGGER is broken, so the run says nothing about recovery -- fix the hook "
                           "before reading any capture from this run", rst_before, rst_after);
     }
+    else if (!data_ok)
+    {
+        TEST_FAIL("the chip restarted (hw_restart_counter %d -> %d) but the DATAPATH did not come "
+                  "back: %d/%d replies before, %d/%d after. Beaconing may still have resumed -- check "
+                  "the capture -- but the peer is not reachable, so the vif/keys/peer state were not "
+                  "fully restored", rst_before, rst_after, ping_before, PING_COUNT,
+                  ping_after, PING_COUNT);
+    }
     else
     {
-        TEST_PASS("trigger verified: the chip really was restarted (hw_restart_counter %d -> %d) with "
-                  "%d peer(s) established. THIS IS NOT A RECOVERY VERDICT -- score recovery off-air "
-                  "with tools/mesh_hwrestart_cap.py on chronium's morse0; it reports whether this "
-                  "board's beacons ever return", rst_before, rst_after, before);
+        TEST_PASS("restarted (hw_restart_counter %d -> %d) with %d peer(s) and the datapath came "
+                  "back: %d/%d replies after vs %d/%d before. NOTE this is the DATAPATH half of the "
+                  "verdict -- whether the node is beaconing again is scored off-air by "
+                  "tools/mesh_hwrestart_cap.py on chronium's morse0", rst_before, rst_after, before,
+                  ping_after, PING_COUNT, ping_before, PING_COUNT);
     }
 
     TEST_END(NAME);
