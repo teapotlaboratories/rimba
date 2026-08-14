@@ -1,0 +1,7 @@
+# The mesh stack plus the S3 arm's AP vif (AP_VIF=1 compiles the AP-mode morselib sources in) no
+# longer fit the SINGLE_APP_LARGE default (0x177000) — it overflowed by 0x1ab0. 2 MB on a 16 MB
+# flash, same as test-raw-rps and rimba-halow-ap-perf.
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x200000,

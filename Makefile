@@ -57,6 +57,7 @@ IDF_EXTRA_D := $(if $(LINUX_MAC),-D TEST_LINUX_MAC="$(LINUX_MAC)") \
                $(if $(EADDR1),-D TEST_EADDR1="$(EADDR1)") \
                $(if $(STA_IP),-D TEST_STATIC_IP="$(STA_IP)") \
                $(if $(AP_OPEN),-D TEST_AP_OPEN=$(AP_OPEN)) \
+               $(if $(AP_VIF),-D TEST_AP_VIF=$(AP_VIF)) \
                $(if $(PEER_MAC),-D TEST_PEER_MAC="$(PEER_MAC)") \
                $(if $(PING_IP),-D TEST_PING_IP="$(PING_IP)") \
                $(if $(IBSS_CREATE),-D TEST_IBSS_CREATE=1) \

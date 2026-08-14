@@ -97,6 +97,16 @@
 #define RECOVER_WAIT_S   45
 #define PING_COUNT       5
 
+#ifdef TEST_AP_VIF
+/* S3 arm: bring an AP vif up alongside the mesh before triggering, reproducing the SHIPPED gate's
+ * configuration (rimba-halow-mesh-ap = mesh primary + AP secondary on one MM6108). Same SSID/PSK/chan
+ * as the gate so the reproduction is of the real thing, not an approximation. */
+#define AP_SSID          "rimba-ping"
+#define AP_PSK           "rimbahalow"
+#define AP_OP_CLASS      68
+#define AP_MAX_STAS      16
+#endif
+
 static const char *TAG = "hwrestart";
 static uint8_t g_mesh_mac[6];
 
@@ -254,6 +264,29 @@ void app_main(void)
     TEST_INFO("mesh-mac|" MACSTR "|mesh_id=%s|chan=%d", MAC2STR(g_mesh_mac), MESH_ID, MESH_S1G_CHAN);
     ESP_LOGI(TAG, "mesh up on \"%s\" ch%d as " MACSTR, MESH_ID, MESH_S1G_CHAN, MAC2STR(g_mesh_mac));
 
+#ifdef TEST_AP_VIF
+    /* --- S3: an AP vif alongside the mesh, which is what the shipped gate runs ---------------- */
+    struct mmwlan_ap_args ap_args = MMWLAN_AP_ARGS_INIT;
+    memcpy((char *)ap_args.ssid, AP_SSID, strlen(AP_SSID));
+    ap_args.ssid_len = strlen(AP_SSID);
+    memcpy(ap_args.passphrase, AP_PSK, strlen(AP_PSK));
+    ap_args.passphrase_len = strlen(AP_PSK);
+    ap_args.security_type = MMWLAN_SAE;
+    ap_args.pmf_mode = MMWLAN_PMF_REQUIRED;
+    ap_args.s1g_chan_num = MESH_S1G_CHAN;
+    ap_args.op_class = AP_OP_CLASS;
+    ap_args.max_stas = AP_MAX_STAS;
+    if (mmwlan_ap_enable(&ap_args) != MMWLAN_SUCCESS)
+    {
+        TEST_INCONCLUSIVE("mmwlan_ap_enable failed -- no AP vif, so this run does NOT exercise the S3 "
+                          "assert. Needs CONFIG_HALOW_AP_MODE=y");
+        TEST_END(NAME);
+        park_forever();
+    }
+    TEST_INFO("ap-vif|up alongside the mesh (ssid=\"%s\" chan=%d) -- this is the gate's shape",
+              AP_SSID, MESH_S1G_CHAN);
+#endif
+
     /* --- baseline: we must be peered BEFORE the restart, or the after-measurement means nothing --- */
     int before = wait_for_peers(PEER_TIMEOUT_S);
     TEST_STEP("peer-before", before > 0, "estab_peers=%d (host-side; a precondition, NOT the metric)",
@@ -272,8 +305,23 @@ void app_main(void)
     bool have_ip = pin_static_ip();
     int ping_before = (have_peer && have_ip) ? ping_peer(peer_mac, PING_COUNT) : 0;
     TEST_STEP("data-before", ping_before > 0, "%d/%d replies from the peer", ping_before, PING_COUNT);
+#ifdef TEST_AP_VIF
+    /* The S3 arm does NOT gate on the datapath. Bringing up an AP vif alongside the mesh gives this
+     * fixture two vifs but none of the per-vif RX demux the real gate installs
+     * (rimba-halow-mesh-ap's gw_mesh_rx_cb / gw_ap_rx_cb), so mesh RX is not wired here and the ping
+     * cannot succeed. That is a property of this reproducer, not of the code under test.
+     *
+     * It does not matter: S3 is about hw_restart_evt_handler() asserting the moment it sees an AP vif,
+     * which happens before any datapath is consulted. What the arm needs is mesh + AP up and a
+     * trigger, and both are satisfied. The ping result is reported for the record and ignored. */
+    TEST_INFO("s3-arm|ignoring the datapath gate (%d/%d): this arm has no per-vif RX demux, and the "
+              "assert under test fires before the datapath is reached", ping_before, PING_COUNT);
+    if (0)
+    {
+#else
     if (ping_before == 0)
     {
+#endif
         TEST_INCONCLUSIVE("no traffic reached the peer BEFORE the restart (peer_mac=%d ip=%d) -- this "
                           "rig never carried data, so a post-restart failure would say nothing about "
                           "recovery. Fix the rig and re-run; the beacon capture is still valid",
@@ -289,6 +337,17 @@ void app_main(void)
     /* --- force the restart ------------------------------------------------------------------- */
     int rst_before = hw_restart_count();
     TEST_INFO("hw_restart_counter=%d before the trigger", rst_before);
+#ifdef TEST_AP_VIF
+    /* EXPECTED TO PANIC, and that is the deliverable. hw_restart_evt_handler() opens with
+     *     if (umac_interface_get_vif_id(umacd, UMAC_INTERFACE_AP) != MMDRV_VIF_ID_INVALID)
+     *         { MMLOG_ERR(...); MMOSAL_ASSERT(false); }
+     * so with an AP vif up it dies before any recovery runs. The board asserts and reboots, which means
+     * NO TEST| verdict can follow -- the panic itself is the result. Read the console for
+     * "Unable to recover from hardware restart with AP interface active" plus the assert backtrace.
+     * If the board instead survives and prints a verdict below, S3 is fixed. */
+    TEST_INFO("s3-expect-panic|an AP vif is active, so the handler should assert before recovering. "
+              "A reboot with no verdict after this line IS the S3 defect");
+#endif
     TEST_INFO("restart-trigger|forcing a chip restart via mmwlan_force_hw_restart() with %d peer(s) "
               "established", before);
     if (mmwlan_force_hw_restart() != MMWLAN_SUCCESS)
