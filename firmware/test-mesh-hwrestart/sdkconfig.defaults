@@ -1,1 +1,8 @@
 CONFIG_HALOW_AP_MODE=y
+
+# Own partition table: the default SINGLE_APP_LARGE app partition (0x177000) overflows once the S3 arm
+# (AP_VIF=1) pulls the AP-mode morselib sources in. Kept for the DEFAULT build too so both arms share
+# one flash layout — otherwise switching arms silently reflashes a different partition table.
+# ⚠ sdkconfig is cached per build dir: adding this does nothing until `rm -rf build/<app>/<board>`.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

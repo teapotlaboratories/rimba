@@ -66,6 +66,42 @@ That is precisely the bench-observed "silently deaf", now with a mechanism rathe
 `MMOSAL_ASSERT(false)` before doing anything. The gate does not go deaf — it panics. **This is arguably
 the more urgent of the two**, because the gate is the node with clients depending on it.
 
+#### REPRODUCED 2026-08-09 — and it is worse than "it panics"
+
+`test-mesh-hwrestart AP_VIF=1` brings an AP vif up alongside the mesh (same SSID/PSK/channel as the
+shipped gate) and then triggers. The console shows the assert's own log line and then the board dies:
+
+```
+TEST|INFO|s3-expect-panic|an AP vif is active, so the handler should assert before recovering
+TEST|INFO|restart-trigger|forcing a chip restart ... with 1 peer(s) established
+E 36390 ev hw_restart_evt_handler[77] Unable to recover from hardware restart with AP interface active
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Guru Meditation Error: Core  0 panic'ed (Interrupt wdt timeout on CPU0).
+rst:0xc (RTC_SW_CPU_RST) ...        <-- and again, ~1.5 s apart, indefinitely
+```
+
+Two findings beyond "the assert fires":
+
+1. **It is a REBOOT LOOP, not a single panic.** Each reboot brings mesh+AP back up and something
+   re-triggers a restart, which re-hits the assert. A gate that meets this condition is **permanently
+   bricked until power-cycled**, not merely down for one reboot. Every earlier description of defect
+   (b) — including this document's — understated it.
+2. **The panic reason is `Interrupt wdt timeout on CPU0`, not a clean assert abort.** That is the same
+   signature as the separately root-caused relay Interrupt-WDT fault (hw_restart's SPI-host teardown
+   being fatal under `bus_lock`; see `docs/worklog/2026-07-12-mesh-relay-intwdt-rootcause.md`). The
+   assert and that WDT are plausibly the same teardown path, which would mean S3 and FIX-1 are one
+   problem rather than two. **Not yet confirmed** — worth establishing before designing the fix, since
+   it changes the scope.
+
+Rig note: the S3 arm deliberately does **not** gate on the datapath. Two vifs with none of the gate's
+per-vif RX demux means mesh RX is unwired and the ping cannot succeed — a property of the reproducer,
+not of the code under test. The assert fires long before any datapath is consulted.
+
+Build note: the AP arm pulls the AP-mode morselib sources in and overflowed the default
+`SINGLE_APP_LARGE` app partition by `0x1ab0`. The fixture now carries its own 2 MB `partitions.csv`
+(precedent: `test-raw-rps`, `rimba-halow-ap-perf`), applied to both arms so switching arms does not
+silently reflash a different layout.
+
 ## The template already exists
 
 `umac_connection_handle_hw_restarted()` (`umac_connection.c:1689`) is the model, and it is five steps:
