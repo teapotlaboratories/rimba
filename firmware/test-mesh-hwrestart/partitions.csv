@@ -1,6 +1,10 @@
-# The mesh stack plus the S3 arm's AP vif (AP_VIF=1 compiles the AP-mode morselib sources in) no
-# longer fit the SINGLE_APP_LARGE default (0x177000) — it overflowed by 0x1ab0. 2 MB on a 16 MB
-# flash, same as test-raw-rps and rimba-halow-ap-perf.
+# The mesh stack plus the S3 arm (AP_VIF=1) no longer fits the SINGLE_APP_LARGE default (0x177000)
+# — it overflowed by 0x1ab0. 2 MB on a 16 MB flash, same as test-raw-rps and rimba-halow-ap-perf.
+#
+# NOT because the arm 'compiles the AP-mode sources in': CONFIG_HALOW_AP_MODE=y was already set here
+# before the arm existed, so they were always built. It is --gc-sections — referencing
+# mmwlan_ap_enable() makes the linker RETAIN the AP/hostap subgraph it used to discard. Toggling
+# HALOW_AP_MODE would not recover the flash.
 # Name,   Type, SubType, Offset,   Size
 nvs,      data, nvs,     0x9000,   0x6000,
 phy_init, data, phy,     0xf000,   0x1000,
