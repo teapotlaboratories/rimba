@@ -415,7 +415,13 @@ APPS: tuple[App, ...] = (
               "never touches, and an earlier version of this fixture PASSed a node that was "
               "transmitting nothing. THE RECOVERY VERDICT IS OFF-AIR -- run tools/mesh_hwrestart_cap.py "
               "on chronium's morse0 (same shape as test-raw-rps). Rig: 2 boards, this one + any mesh "
-              "node on rimba-mesh ch27 (test-mesh-gate-node NO_PING=1). Needs CONFIG_HALOW_AP_MODE=y."),
+              "node on rimba-mesh ch27 (test-mesh-gate-node NO_PING=1). Needs CONFIG_HALOW_AP_MODE=y "
+              "and carries its own 2 MB partitions.csv. TWO ARMS: the default one is the S1/S2 mesh "
+              "reproducer; AP_VIF=1 is the S3 arm, which brings an AP vif up beside the mesh and is "
+              "EXPECTED TO PANIC on hw_restart_evt_handler()'s MMOSAL_ASSERT(false) until S3 lands -- "
+              "do not read that panic as a broken fixture. ⚠ TEST_AP_VIF is a CMake cache var, so the "
+              "arm is sticky: pass AP_VIF=0 (not just omit it) or wipe build/<app>/<board>/ to get the "
+              "default arm back."),
     App("test-mesh-ap-gate",
         notes="T2 mesh-ap: the GATE support role (mesh+AP+ip_forward on one radio). board2. "
               "Needs CONFIG_HALOW_AP_MODE=y + CONFIG_LWIP_IP_FORWARD=y."),

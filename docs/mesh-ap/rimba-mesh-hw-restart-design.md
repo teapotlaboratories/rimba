@@ -1,8 +1,8 @@
 # Mesh `hw_restart` recovery — what actually happens, and what has to be built
 
-**Status:** **S1 + S2 done (2026-08-05/06)** — the reproducer exists, and mesh now survives a chip
-restart on both probes (datapath 5/5, beacons 1568/190 s), post-code-review. **S3 (the AP assert) is open and still
-unreproduced.** Blocks the relay Interrupt-WDT fix (FIX-1). Read the S1 sections bottom-up: the last one
+**Status:** **S1 + S2 done and merged (2026-08-05/06)** — mesh now survives a chip restart on both
+probes (datapath 5/5, beacons 1568/190 s), post-code-review. **S3 REPRODUCED 2026-08-09 and is TWO
+defects** (the assert, plus a boot-time ISR watchdog no ESP reset clears); the fix is not written. Blocks the relay Interrupt-WDT fix (FIX-1). Read the S1 sections bottom-up: the last one
 supersedes the two above it, which are kept for the dead ends. The S2 code map is at the end.
 
 ## The failure, traced in source
@@ -80,27 +80,69 @@ Guru Meditation Error: Core  0 panic'ed (Interrupt wdt timeout on CPU0).
 rst:0xc (RTC_SW_CPU_RST) ...        <-- and again, ~1.5 s apart, indefinitely
 ```
 
-Two findings beyond "the assert fires":
+Three findings beyond "the assert fires":
 
-1. **It is a REBOOT LOOP, not a single panic.** Each reboot brings mesh+AP back up and something
-   re-triggers a restart, which re-hits the assert. A gate that meets this condition is **permanently
-   bricked until power-cycled**, not merely down for one reboot. Every earlier description of defect
-   (b) — including this document's — understated it.
-2. **The panic reason is `Interrupt wdt timeout on CPU0`, not a clean assert abort.** That is the same
-   signature as the separately root-caused relay Interrupt-WDT fault (hw_restart's SPI-host teardown
-   being fatal under `bus_lock`; see `docs/worklog/2026-07-12-mesh-relay-intwdt-rootcause.md`). The
-   assert and that WDT are plausibly the same teardown path, which would mean S3 and FIX-1 are one
-   problem rather than two. **Not yet confirmed** — worth establishing before designing the fix, since
-   it changes the scope.
+1. **The assert itself fails CLEANLY.** `MMOSAL Assert` banner, backtrace, `rst:0xc` software reset. No
+   watchdog is involved at this point.
+2. **The reset can leave the node in a boot-time ISR watchdog loop.** When it happens, every boot dies
+   ~0.4 s into radio bring-up, in ISR context, immediately after the first chip GPIO is configured —
+   before mesh, before AP, before any trigger — and does not clear (30+ and 26 consecutive cycles
+   observed in two separate runs).
 
-Rig note: the S3 arm deliberately does **not** gate on the datapath. Two vifs with none of the gate's
-per-vif RX demux means mesh RX is unwired and the ping cannot succeed — a property of the reproducer,
-not of the code under test. The assert fires long before any datapath is consulted.
+   ⚠ **It is INTERMITTENT.** A third run, on the same binary and rig, recovered cleanly through
+   repeated assert cycles: after each assert the board rebooted, brought mesh and AP back up, re-peered
+   and passed `data-before` 4/5, then asserted again on the next trigger. So "every boot after the
+   reset dies" is **wrong** — an earlier revision said that and is corrected here. What is established
+   is that the loop is reachable and self-sustaining once entered, not that it always follows.
 
-Build note: the AP arm pulls the AP-mode morselib sources in and overflowed the default
-`SINGLE_APP_LARGE` app partition by `0x1ab0`. The fixture now carries its own 2 MB `partitions.csv`
-(precedent: `test-raw-rps`, `rimba-halow-ap-perf`), applied to both arms so switching arms does not
-silently reflash a different layout.
+   **The control that makes this readable:** the same binary boots fine normally, and the loop
+   reproduces with the fixture's TX-vif configuration *fixed* — so it is neither a property of the
+   build nor an artifact of the earlier mis-configured arm.
+3. **⛔ This Interrupt WDT is NOT the FIX-1 relay teardown**, and the two must not be merged on the
+   strength of both saying "Interrupt wdt". The AP check is the **first statement** in
+   `hw_restart_evt_handler()`, so `mmdrv_deinit()` — the SPI-host teardown behind FIX-1 — **never runs
+   on this path**. Combined with (1), the assert path contains no watchdog at all. What the WDT belongs
+   to is the boot that *follows* the reset.
+
+   > An earlier revision of this section speculated the opposite ("plausibly the same teardown path…
+   > S3 and FIX-1 may be one problem"). That was written before the question was chased and is
+   > **withdrawn** — it would have scoped S3 wrongly.
+
+### So S3 is TWO defects
+
+| stage | what | consequence |
+|---|---|---|
+| 1 | AP vif active → assert → clean reset | the documented defect; fix = recover the AP arm, as Linux does |
+| 2 | the reset **can** leave something wedged; later boots then fault in ISR during chip bring-up, indefinitely | intermittent, but once entered the node cannot reboot its way out |
+
+Stage 1's fix **avoids** stage 2 by never rebooting, but does not fix it: stage 2 stays reachable by any
+reset landing mid-restart, and is tracked separately.
+
+**NOT established, and not claimed:** whether stage 2 is chip state or host state, and whether a power
+cycle clears it. Only that an ESP **software** reset does not — 30+ cycles is the evidence. Answering the
+power-cycle question needs board2 on the PPK2 rail; board1 is directly USB-powered. (An earlier revision
+called this "permanently bricked until power-cycled" — withdrawn as untested.)
+
+Rig note: the S3 arm keeps the full datapath gate, but only after one extra line.
+`mmhalow_set_tx_vif(MMWLAN_VIF_STA)` is **required** once both a mesh (STA host-slot) and an AP vif are
+valid — otherwise morselib cannot infer which vif an egress packet belongs to, logs
+`Unable to infer VIF ID` and drops it, and the ping fails with the datapath dead.
+`test-mesh-ap-gate:291` does the same for the same shape.
+
+> An earlier revision of this arm mis-diagnosed that as "no per-vif RX demux" and *disabled* the
+> datapath gate to work around it. RX was never the problem — `mmhalow` registers a plain rx cb and
+> `umac_datapath` falls back to it for any vif. Worse, the workaround left the *after* ping still
+> scoring, so once S3 is fixed and the board survives, the fixture would have reported **FAIL for the
+> very fix it exists to certify**.
+
+Build note: the AP arm overflowed the default `SINGLE_APP_LARGE` app partition by `0x1ab0`. The fixture
+now carries its own 2 MB `partitions.csv` (precedent: `test-raw-rps`, `rimba-halow-ap-perf`), applied to
+both arms so switching arms does not silently reflash a different layout.
+
+⚠ The growth is **not** "the AP arm compiles the AP-mode sources in" — `CONFIG_HALOW_AP_MODE=y` was
+already in this fixture's `sdkconfig.defaults` before the arm existed, so those sources were always
+built. It is `--gc-sections`: referencing `mmwlan_ap_enable()` makes the linker **retain** the AP and
+hostap subgraph it had previously discarded. Toggling `HALOW_AP_MODE` would not recover the flash.
 
 ## The template already exists
 

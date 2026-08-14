@@ -283,8 +283,19 @@ void app_main(void)
         TEST_END(NAME);
         park_forever();
     }
-    TEST_INFO("ap-vif|up alongside the mesh (ssid=\"%s\" chan=%d) -- this is the gate's shape",
-              AP_SSID, MESH_S1G_CHAN);
+    /* With BOTH a mesh (STA host-slot) and an AP vif valid, morselib cannot infer which one an egress
+     * packet belongs to -- umac.c logs "Unable to infer VIF ID" and DROPS it -- so the mesh netif must
+     * be pinned. test-mesh-ap-gate:291 does exactly this for the same mesh+AP shape.
+     *
+     * Without it the datapath is dead and the ping cannot succeed. An earlier revision of this arm
+     * mis-diagnosed that as "no per-vif RX demux" and disabled the datapath gate to work around it;
+     * RX is in fact fine (mmhalow registers a plain rx cb, and umac_datapath falls back to it for any
+     * vif when no ext cb is registered). The gate is real again because the cause was one missing line,
+     * not a structural limitation of the fixture. */
+    mmhalow_set_tx_vif(MMWLAN_VIF_STA);
+
+    TEST_INFO("ap-vif|up alongside the mesh (ssid=\"%s\" chan=%d), tx vif pinned to STA -- this is "
+              "the gate's shape", AP_SSID, MESH_S1G_CHAN);
 #endif
 
     /* --- baseline: we must be peered BEFORE the restart, or the after-measurement means nothing --- */
@@ -305,23 +316,8 @@ void app_main(void)
     bool have_ip = pin_static_ip();
     int ping_before = (have_peer && have_ip) ? ping_peer(peer_mac, PING_COUNT) : 0;
     TEST_STEP("data-before", ping_before > 0, "%d/%d replies from the peer", ping_before, PING_COUNT);
-#ifdef TEST_AP_VIF
-    /* The S3 arm does NOT gate on the datapath. Bringing up an AP vif alongside the mesh gives this
-     * fixture two vifs but none of the per-vif RX demux the real gate installs
-     * (rimba-halow-mesh-ap's gw_mesh_rx_cb / gw_ap_rx_cb), so mesh RX is not wired here and the ping
-     * cannot succeed. That is a property of this reproducer, not of the code under test.
-     *
-     * It does not matter: S3 is about hw_restart_evt_handler() asserting the moment it sees an AP vif,
-     * which happens before any datapath is consulted. What the arm needs is mesh + AP up and a
-     * trigger, and both are satisfied. The ping result is reported for the record and ignored. */
-    TEST_INFO("s3-arm|ignoring the datapath gate (%d/%d): this arm has no per-vif RX demux, and the "
-              "assert under test fires before the datapath is reached", ping_before, PING_COUNT);
-    if (0)
-    {
-#else
     if (ping_before == 0)
     {
-#endif
         TEST_INCONCLUSIVE("no traffic reached the peer BEFORE the restart (peer_mac=%d ip=%d) -- this "
                           "rig never carried data, so a post-restart failure would say nothing about "
                           "recovery. Fix the rig and re-run; the beacon capture is still valid",
