@@ -57,13 +57,23 @@ IDF_EXTRA_D := $(if $(LINUX_MAC),-D TEST_LINUX_MAC="$(LINUX_MAC)") \
                $(if $(EADDR1),-D TEST_EADDR1="$(EADDR1)") \
                $(if $(STA_IP),-D TEST_STATIC_IP="$(STA_IP)") \
                $(if $(AP_OPEN),-D TEST_AP_OPEN=$(AP_OPEN)) \
-               $(if $(AP_VIF),-D TEST_AP_VIF=$(AP_VIF)) \
-               $(if $(HW_RESTART),-D TEST_HW_RESTART=$(HW_RESTART)) \
+               -D TEST_AP_VIF=$(or $(AP_VIF),0) \
+               -D TEST_HW_RESTART=$(or $(HW_RESTART),0) \
                $(if $(PEER_MAC),-D TEST_PEER_MAC="$(PEER_MAC)") \
                $(if $(PING_IP),-D TEST_PING_IP="$(PING_IP)") \
                $(if $(IBSS_CREATE),-D TEST_IBSS_CREATE=1) \
                $(if $(NO_PING),-D TEST_NO_PING=1)
 
+# TEST_AP_VIF / TEST_HW_RESTART are passed UNCONDITIONALLY, unlike every other option above, because
+# they arm a fixture to do something destructive (deliberately assert; restart the chip mid-run) and
+# they are CMake CACHE variables. With `$(if ...)` an omitted variable passes no -D at all, so the value
+# from a previous armed build survives in build/<app>/<board>/CMakeCache.txt and a later plain
+# `make build`/`make flash` silently inherits the arm. That is not theoretical for HW_RESTART:
+# test-mesh-ap-gate IS a T2 fixture, and tools/regtest/t2_onair.py:_flash only drops the cache when the
+# REGTEST-supplied make_vars differ from its stamp -- a manual armed flash writes no stamp, so a later
+# `make test-t2 TEST=mesh-ap` would compare nothing to nothing, keep the cache, and run a gate that
+# restarts its own chip mid-tier. Always emitting a value makes the default arm the default again.
+#
 # Source the IDF environment, enter the app dir, then run idf.py with our
 # out-of-source build directory and the selected board + app config defaults
 # (-B / -D apply to build/flash/monitor/size/clean).

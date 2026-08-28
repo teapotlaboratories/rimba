@@ -318,7 +318,11 @@ static void mesh_net_task(void *arg)
  * re-associates ~22 s later, so an after-ping that succeeds may be talking to a FRESH association and
  * would prove nothing about the restore. s_auth_events is the discriminator, and the verdict below
  * returns INCONCLUSIVE rather than PASS whenever it advanced. Reporting that honestly is the point:
- * it converts stage 1's inference into a recorded measurement of why this rig cannot score it. */
+ * it converts stage 1's inference into a recorded measurement of why this rig cannot score it.
+ *
+ * ⚠ s_auth_events counts AUTHORIZED transitions and is NEVER decremented, so on its own "unchanged" is
+ * ambiguous between "held its association" and "left and never came back". s_sta_n is what separates
+ * those -- it IS decremented on the deauth path -- and the verdict consults both. */
 
 static volatile int  s_ping_ok;
 static volatile bool s_ping_done;
@@ -490,13 +494,27 @@ static void hw_restart_arm_task(void *arg)
                           "restore -- a working AP would pass this either way. Probe A (the group-key "
                           "PN train, scored off air) is unaffected and is the verdict for this run",
                           ping_after, PING_COUNT, auth_before, auth_after);
+    } else if (s_sta_n == 0) {
+        /* No re-association AND no client left. s_auth_events only counts AUTHORIZED transitions and is
+         * never decremented, so "unchanged" cannot by itself distinguish "held its association" from
+         * "deauthed and never came back" -- and the client is MEASURED to deauth ~1.1 s into every
+         * outage. Without this branch that second case would print the FAIL below and accuse the
+         * firmware of a defect on a run where the station record was torn down by the client and there
+         * was nothing left to restore. s_sta_n IS decremented on the deauth path, so it is the honest
+         * discriminator. */
+        TEST_INCONCLUSIVE("the chip restarted (%d -> %d) but the client is GONE: it deauthed during "
+                          "the outage and had not come back by the end of the run (%d client(s) "
+                          "tracked, %d association event(s), %d/%d replies). Nothing was left for the "
+                          "per-STA restore to act on, so this says nothing about it either way -- it "
+                          "is not a firmware failure. Probe A (the group-key PN train) is unaffected",
+                          rst_before, rst_after, s_sta_n, auth_after, ping_after, PING_COUNT);
     } else if (ping_after == 0) {
-        TEST_FAIL("the chip restarted (%d -> %d) and the client did NOT re-associate, so its chip "
-                  "station entry and pairwise key are exactly what umac_ap_handle_hw_restarted() "
-                  "re-pushed -- and no traffic crosses it: %d/%d replies before, %d/%d after. The "
-                  "per-STA restore is broken. Check the console for 'AP: restore sta_state ... FAILED' "
-                  "or 'AP: reinstall keychain FAILED'",
-                  rst_before, rst_after, ping_before, PING_COUNT, ping_after, PING_COUNT);
+        TEST_FAIL("the chip restarted (%d -> %d), the client is still associated (%d tracked) and did "
+                  "NOT re-associate, so its chip station entry and pairwise key are exactly what "
+                  "umac_ap_handle_hw_restarted() re-pushed -- and no traffic crosses it: %d/%d replies "
+                  "before, %d/%d after. The per-STA restore is broken. Check the console for "
+                  "'AP: restore sta_state ... FAILED' or 'AP: reinstall keychain FAILED'",
+                  rst_before, rst_after, s_sta_n, ping_before, PING_COUNT, ping_after, PING_COUNT);
     } else {
         TEST_PASS("the chip restarted (%d -> %d), the client held its association THROUGH the outage "
                   "(%d association events, unchanged), and traffic crosses it: %d/%d replies after vs "
