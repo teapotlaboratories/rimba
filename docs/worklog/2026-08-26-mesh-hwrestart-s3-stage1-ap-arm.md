@@ -480,3 +480,83 @@ Builds clean for the mesh+AP fixture, both gateway arms, a STA-only app and an A
 - **mm-esp32-halow PR 35** merged (rebase) — `ece942cd` + `22e84d75` on submodule `main`. ⚠ The rebase
   rewrote both SHAs; the superproject gitlink points at **`22e84d75`**, the post-rebase tip, verified
   with `git merge-base --is-ancestor` before committing.
+
+
+---
+
+# Second review round — eight findings on the superproject PR, plus three on the follow-up
+
+`/code-review` at `high` against rimba PR 57. Eight findings, all real. One of them was a bug I had
+introduced *in the previous round's fix*, which is the part worth recording.
+
+### The one that would have blamed the firmware for the bench's behaviour
+
+The `TEST_FAIL` branch asserted "the client did NOT re-associate, so its chip station entry is exactly
+what the restore re-pushed". But `s_auth_events` only counts AUTHORIZED transitions and is **never
+decremented**, so "unchanged" cannot distinguish *held its association* from *left and never came back*
+— and the client is measured to deauth ~1.1 s into every outage. A client that failed to return within
+the window would have printed **"the per-STA restore is broken"** on a run where the station record was
+torn down by the client and there was nothing to restore. `s_sta_n` **is** decremented on the deauth
+path, so the verdict now consults both, and that case reads INCONCLUSIVE.
+
+### The fix I got wrong last round
+
+Finding 7 was **my own** finding-3b fix. Making `umac_interface_reconfigure_channel()` restore its cache
+on failure means the host claims a channel the chip never got — and the next `set_channel()` for the
+same operation then short-circuits on `ie_s1g_operation_is_equal()` and returns SUCCESS having
+programmed nothing. The same trap, entered from the other side. And the retry it protected does not
+exist: restoring `UMAC_FATAL_ERROR` severity in that same round had already closed the hole. Reverted.
+
+**Then the review of the revert caught that my justification for it was false.** I wrote that
+`mmwlan_get_vif_channel_info()` — "which the AP uses to inherit the STA's channel" — reads that cache.
+It does not: the STA arm reads `bss_cfg.channel_cfg`, the AP arm reads its own args, and `umac_ap.c`
+does not reference the cache at all. The real readers are `umac_rc.c:166`/`:410` and the ECSA handler.
+Since a comment in that file is the durable record for the path, a wrong mechanism in it sends the next
+reader to the wrong struct — so it is corrected to the route that does cause damage: `umac_data_init()`
+zeroes the cache only at app boot, **not** on the fatal shutdown, so a stale value survives and a later
+`mmwlan_mesh_start()` / `mmwlan_ap_enable()` beacons on an unprogrammed channel.
+
+That review also caught that the empty-cache branch returns `MMWLAN_SUCCESS` while nothing is
+programmed, which is reachable after a first failure because `umac_fatal_error()` early-returns once
+`fatal_error` is latched. It returns `MMWLAN_UNAVAILABLE` now, and the shim distinguishes "nothing was
+configured to restore" (benign — skip the arms, warn) from "the chip rejected a channel it was
+operating on" (fatal).
+
+### The rest
+
+| # | finding | fix |
+|---|---|---|
+| 2 | the capture marker is flipped **before** the trigger, racing the 5 Hz train — a post-length frame can reach air before the chip stops, giving a ~0.2 s "outage" and an INCONCLUSIVE on a good restart | the marker now **narrows** the search and a real gap **confirms** the event |
+| 3 | `mesh_hwrestart_cap.py` would score a **panic-and-reboot regression as PASS** — exactly what the repurposed `AP_VIF=1` arm exists to catch, since a rebooted node returns under the same MACs | no cheap marker exists for that fixture, so the PASS text states the limitation and names the two required cross-checks instead of overclaiming |
+| 4 | for the AP address "largest gap" is **not** the event — the AP recovers inside `GAP_S`, so an unrelated late dropout could FAIL a recovered AP | verdict rests on a tail window, not on a chosen gap |
+| 5 | `HW_RESTART` is the first sticky cache arm on a fixture that **is in T2**, and the harness's stale-cache guard only fires on regtest-supplied vars — a manual armed flash poisons a later tier run | the Makefile always emits a value for both arms |
+| 6 | `<=` counted CCMP **retransmissions** (same PN) as resets, which would have permanently silenced the no-positive-control warning | strict `<` |
+| 8 | a genuine FAIL was masked whenever another address was unmeasurable — a mistyped `--ap` could hide a real mesh failure | only the global "no restart anywhere" outranks a FAIL |
+
+**Deferred, tracked not fixed:** an ECSA bandwidth comparison at `umac_connection.c:1491` that is always
+false, because `old_s1g_info` aliases the struct `set_channel()` overwrites — so a bandwidth change
+never restarts rate control. Pre-existing, unrelated to this path beyond sharing the struct, and it
+needs an ECSA generator the bench does not have. Recorded in the mesh-ap milestones.
+
+## Verified after each round
+
+Two more bench cycles, because the fixes changed real behaviour both times:
+
+| | round 1 fixes | round 2 fixes |
+|---|---|---|
+| group-key PN across the outage | 131 → 132 (1.11 s) | **132 → 133 (1.14 s)** |
+| positive controls | 2 | **2** |
+| mesh datapath | 5/5 | **5/5** |
+| restore errors / "no channel" warnings | 0 | **0** |
+
+The scorer changes I could not reach on the bench were exercised by **replaying the archived pcap
+through the tool's own code** (a stubbed `AF_PACKET` socket and clock): it reproduces the original PASS,
+and the previously-masked FAIL now surfaces as exit 1. The sticky-cache fix was demonstrated directly —
+an armed build followed by a bare build now yields the *unarmed* binary, with `TEST_HW_RESTART=0` in the
+cache.
+
+## Landed
+
+- **mm-esp32-halow PR 35** — the AP arm — `ece942cd` + `22e84d75`.
+- **mm-esp32-halow PR 36** — the cache revert and its own review round — `978fb8b4` + `b9907a94`.
+- Superproject gitlink → **`b9907a94`**, verified on the submodule's `main`.

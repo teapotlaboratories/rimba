@@ -871,6 +871,20 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   next-hop (Linux `fail_avg`→`LINK_FAIL_THRESH(95)`→`mesh_plink_broken`; the hook exists at
   `umac_datapath.c:2938` beside `umac_rc_feedback`; needs the EWMA ported exactly + a convergence bench;
   would NOT cure the flapping). Memory [[mesh-p6c-airtime-and-hwmp-flapping]].
+- ☐ **ECSA bandwidth change never restarts rate control** (`umac_connection.c:1491`, PRE-EXISTING —
+  surfaced by the review of teapotlaboratories/mm-esp32-halow#36, deliberately NOT fixed there).
+  `old_s1g_info` is a live pointer *into* `data->current_s1g_operation`, and the very next statement,
+  `umac_interface_set_channel(umacd, new_s1g_info)`, overwrites that struct on success
+  (`umac_interface.c:833`). So by the time the code compares
+  `new_s1g_info->operation_channel_width_mhz != old_s1g_info->operation_channel_width_mhz`, the "old"
+  value is already a copy of the new one and the test is **always false**. An ECSA that changes
+  operating bandwidth (2 MHz → 8 MHz, say) therefore never restarts rate control, leaving `mmrc` with a
+  capability mask built for the old bandwidth. *Fix:* snapshot by value —
+  `struct ie_s1g_operation old = *umac_interface_get_current_s1g_operation_info(umacd);` — before the
+  `set_channel` call. *Verification:* needs an AP that can emit an ECSA with a bandwidth change; the
+  bench has no such generator today, so this needs a Linux AP driving the change, or a unit test around
+  the comparison. Kept separate from the hw-restart work because it is an ECSA-path bug that predates
+  it and shares only the struct.
 - ☐ **Mesh hw-restart recovery (prerequisite) + FIX-1 (bus-preserving restart, REMOVED from the tree)** —
   **one item, in this order.**
   ⚠ **Part (1) is now DONE** — S1 (reproducer, PR #54), S2 (mesh recovery, PR #55), the S3 reproducer

@@ -23,7 +23,12 @@
 # 2026-08-26), so its pairwise key is renegotiated before anything can be observed crossing the
 # restored one. The group key has no such problem — the AP owns it alone.
 #
-# HOW THE RESTART IS IDENTIFIED — by a marker, never by the shape of the trace. The fixture switches
+# HOW THE RESTART IS IDENTIFIED — by a marker AND a gap: the marker narrows the search, the gap
+# confirms the event. Anchoring on the first post-length frame alone would race the fixture, which
+# flips its payload just before triggering while the train runs at 5 Hz — a post-length frame can
+# reach the air before the chip stops, giving a ~0.2 s "outage" and an INCONCLUSIVE on a good restart.
+#
+# The marker is what makes the event locatable at all, never the shape of the trace. The fixture switches
 # its broadcast payload to a LONGER one immediately before triggering, so the frames split into two
 # on-air lengths with the event at the boundary. Length, because the frames are GTK-encrypted: the
 # sniffer can see how big they are and nothing else.
@@ -167,8 +172,12 @@ if len(pts) < 2 * MIN_EACH_SIDE:
     sys.exit(2)
 
 # --- every PN reset in the window, labelled ---------------------------------------------------------
+# STRICTLY less-than. A CCMP retransmission carries the SAME PN and the monitor captures both copies,
+# so `<=` scored every retry as a "reset" -- which would have quietly guaranteed that the
+# no-positive-control warning below never fires, defeating the one check that says whether this
+# measurement could have seen a rewind at all.
 resets = [(pts[i + 1][0] - t0, pts[i][1], pts[i + 1][1])
-          for i in range(len(pts) - 1) if pts[i + 1][1] <= pts[i][1]]
+          for i in range(len(pts) - 1) if pts[i + 1][1] < pts[i][1]]
 print("PN ran %d -> %d over the window; %d reset(s) seen:" % (pts[0][1], pts[-1][1], len(resets)))
 for at, a, b in resets:
     print("  +%6.2fs  PN %d -> %d" % (at, a, b))
@@ -199,27 +208,43 @@ if before[-1][0] >= after[0][0]:
           % (ln_a, before[-1][0] - t0, ln_b, after[0][0] - t0))
     sys.exit(2)
 
-outage = after[0][0] - before[-1][0]
-pn_before, key_before = before[-1][1], before[-1][2]
-pn_after, key_after = after[0][1], after[0][2]
+# The marker NARROWS the search; the gap CONFIRMS the event. Anchoring on the first post-length frame
+# outright would race the fixture: it flips the payload just before triggering, and the train runs at
+# 5 Hz, so a post-length frame can reach the air before the chip stops. That yields a ~0.2 s "outage"
+# and an INCONCLUSIVE on a perfectly good restart. So walk forward to the first post-length frame whose
+# own preceding gap is a real teardown, and pair it with the last frame of ANY length before it.
+post_idx = None
+for j, (t, _pn, _k) in enumerate(after):
+    prev = [p for p in pts if p[0] < t]
+    if prev and (t - prev[-1][0]) >= GAP_S:
+        post_idx = j
+        break
 
-print("marker boundary: last %dB frame at +%.2fs, first %dB frame at +%.2fs  ->  outage %.2fs"
-      % (ln_a, before[-1][0] - t0, ln_b, after[0][0] - t0, outage))
+if post_idx is None:
+    print("RESULT|INCONCLUSIVE|the train switched to its post-restart payload length at +%.2fs but "
+          "never paused for %.1fs or more around it, so the capture does not contain the teardown — "
+          "the trigger may have been refused, or the capture ended too early. Cross-check the "
+          "fixture's restart-ran step. NOT a pass: there is no outage here to have survived."
+          % (after[0][0] - t0, GAP_S))
+    sys.exit(2)
+
+first_post = after[post_idx]
+last_pre = [p for p in pts if p[0] < first_post[0]][-1]
+outage = first_post[0] - last_pre[0]
+pn_before, key_before = last_pre[1], last_pre[2]
+pn_after, key_after = first_post[1], first_post[2]
+
+print("marker boundary: post-length train starts at +%.2fs; first post frame after a >=%.1fs pause is "
+      "at +%.2fs, preceded by a frame at +%.2fs  ->  outage %.2fs"
+      % (after[0][0] - t0, GAP_S, first_post[0] - t0, last_pre[0] - t0, outage))
 print("PN across it: %d -> %d  (delta %+d)   key id %d -> %d"
       % (pn_before, pn_after, pn_after - pn_before, key_before, key_after))
 
-if outage < GAP_S:
-    print("RESULT|INCONCLUSIVE|the train barely paused at the marker (%.2fs, need >=%.1fs), so the "
-          "capture does not appear to contain the teardown at all — the trigger may have been refused. "
-          "Cross-check the fixture's restart-ran step. NOT a pass: there is no outage here to have "
-          "survived." % (outage, GAP_S))
-    sys.exit(2)
-
 if CONTROL is not None:
-    dur_before = max(before[-1][0] - t0, 1e-6)
-    dur_after = max(time.time() - after[0][0], 1e-6)
-    r_before = sum(1 for t in ctrl_t if t <= before[-1][0]) / dur_before
-    r_after = sum(1 for t in ctrl_t if t >= after[0][0]) / dur_after
+    dur_before = max(last_pre[0] - t0, 1e-6)
+    dur_after = max(time.time() - first_post[0], 1e-6)
+    r_before = sum(1 for t in ctrl_t if t <= last_pre[0]) / dur_before
+    r_after = sum(1 for t in ctrl_t if t >= first_post[0]) / dur_after
     print("control beacon rate: %.1f/s before the outage, %.1f/s after" % (r_before, r_after))
     if r_before > 0 and r_after < 0.25 * r_before:
         print("RESULT|INCONCLUSIVE|the control's beacons fell off across the outage (%.1f/s -> %.1f/s), "

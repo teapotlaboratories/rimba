@@ -591,6 +591,78 @@ RESULT|FAIL|the AP's group key was REBUILT across the restart ...</code></pre>
   <code>22e84d75</code>, the post-rebase tip, verified with
   <code>git merge-base --is-ancestor</code> before committing.</p></div>
 
+  <h2 id="review2">10 &middot; Second review round &mdash; and the fix I got wrong</h2>
+
+  <p>Eight findings on the superproject PR, all real. Two are worth reading in full.</p>
+
+  <div class="callout bug"><p class="ct">A FAIL that would have blamed the firmware for the bench&rsquo;s behaviour</p>
+  <p>The <code>TEST_FAIL</code> branch asserted &ldquo;the client did NOT re-associate, so its chip
+  station entry is exactly what the restore re-pushed&rdquo;. But <code>s_auth_events</code> only counts
+  AUTHORIZED transitions and is <strong>never decremented</strong>, so &ldquo;unchanged&rdquo; cannot
+  distinguish <em>held its association</em> from <em>left and never came back</em> &mdash; and the client
+  is measured to deauth ~1.1&#8202;s into every outage. A client that failed to return would have printed
+  <em>&ldquo;the per-STA restore is broken&rdquo;</em> on a run where there was nothing left to restore.
+  <code>s_sta_n</code> <em>is</em> decremented on the deauth path, so the verdict consults both now.</p></div>
+
+  <div class="callout trap"><p class="ct">Finding 7 was my own fix from the previous round</p>
+  <p>Making <code>reconfigure_channel()</code> restore its cache on failure means the host claims a
+  channel the chip never got &mdash; and the next <code>set_channel()</code> for the same operation then
+  short-circuits on the equality check and returns SUCCESS having programmed nothing. The same trap,
+  entered from the other side. The retry it protected did not exist: restoring
+  <code>UMAC_FATAL_ERROR</code> severity in that same round had already closed the hole.</p>
+  <p><strong>Then the review of the revert caught that my justification for it was false.</strong> I
+  wrote that <code>mmwlan_get_vif_channel_info()</code> reads that cache. It does not &mdash; the STA arm
+  reads <code>bss_cfg.channel_cfg</code>, the AP arm reads its own args, and <code>umac_ap.c</code> never
+  references the cache. A wrong mechanism in a durable comment sends the next reader to the wrong
+  struct, so it now cites the route that does cause damage: <code>umac_data_init()</code> zeroes the
+  cache only at app boot, <em>not</em> on the fatal shutdown, so a stale value survives into a later
+  start.</p></div>
+
+  <h3>The rest</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th style="width:2.2em">#</th><th>finding</th><th>fix</th></tr></thead>
+    <tbody>
+      <tr><td class="step">2</td><td>the marker is flipped <em>before</em> the trigger, racing the 5&#8202;Hz train &mdash; a post-length frame can reach air before the chip stops, giving a ~0.2&#8202;s &ldquo;outage&rdquo;</td><td>the marker <em>narrows</em>, a real gap <em>confirms</em></td></tr>
+      <tr><td class="step">3</td><td><code>mesh_hwrestart_cap.py</code> would score a <strong>panic-and-reboot regression as PASS</strong> &mdash; exactly what the repurposed arm exists to catch</td><td>no cheap marker exists there, so the PASS states the limitation and names its cross-checks</td></tr>
+      <tr><td class="step">4</td><td>for the AP address &ldquo;largest gap&rdquo; is not the event &mdash; it recovers inside the threshold, so a late dropout could FAIL a recovered AP</td><td>verdict rests on a tail window</td></tr>
+      <tr><td class="step">5</td><td>first sticky cache arm on a fixture that <strong>is in T2</strong>; the harness guard only fires on regtest-supplied vars</td><td>the Makefile always emits a value</td></tr>
+      <tr><td class="step">6</td><td><code>&lt;=</code> counted CCMP retransmissions as PN resets, silencing the no-positive-control warning for good</td><td>strict <code>&lt;</code></td></tr>
+      <tr><td class="step">8</td><td>a real FAIL was masked whenever another address was unmeasurable &mdash; a mistyped <code>--ap</code> could hide it</td><td>only the global &ldquo;no restart anywhere&rdquo; outranks a FAIL</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>Deferred, tracked not fixed:</strong> an ECSA bandwidth comparison at
+  <code>umac_connection.c:1491</code> that is always false, because <code>old_s1g_info</code> aliases the
+  struct <code>set_channel()</code> overwrites &mdash; so a bandwidth change never restarts rate control.
+  Pre-existing, and it needs an ECSA generator the bench does not have. Recorded in the milestones.</p>
+
+  <h3>Verified after each round</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th></th><th>round 1 fixes</th><th>round 2 fixes</th></tr></thead>
+    <tbody>
+      <tr><td>group-key PN across the outage</td><td>131 &rarr; 132 (1.11 s)</td><td><b>132 &rarr; 133 (1.14 s)</b></td></tr>
+      <tr><td>positive controls</td><td>2</td><td><b>2</b></td></tr>
+      <tr><td>mesh datapath</td><td>5/5</td><td><b>5/5</b></td></tr>
+      <tr><td>restore errors / &ldquo;no channel&rdquo; warnings</td><td>0</td><td><b>0</b></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The scorer changes I could not reach on the bench were exercised by <strong>replaying the archived
+  pcap through the tool&rsquo;s own code</strong> &mdash; a stubbed <code>AF_PACKET</code> socket and
+  clock. It reproduces the original PASS, and the previously-masked FAIL now surfaces as exit 1. The
+  sticky-cache fix was demonstrated directly: an armed build followed by a bare build now yields the
+  <em>unarmed</em> binary.</p>
+
+  <div class="callout ok"><p class="ct">Landed</p>
+  <p>mm-esp32-halow PR 35 (the AP arm) &mdash; <code>ece942cd</code> + <code>22e84d75</code>.
+  PR 36 (the cache revert and its own review round) &mdash; <code>978fb8b4</code> +
+  <code>b9907a94</code>. Superproject gitlink &rarr; <code>b9907a94</code>, verified on the
+  submodule&rsquo;s <code>main</code>.</p></div>
+
 </main>
 
 <aside class="toc"><div class="toc-inner">
@@ -605,6 +677,7 @@ RESULT|FAIL|the AP's group key was REBUILT across the restart ...</code></pre>
     <li><a href="#state">7 &middot; State</a></li>
     <li><a href="#stage1b">8 &middot; Stage 1b &mdash; the gap closed</a></li>
     <li><a href="#review">9 &middot; Review round</a></li>
+    <li><a href="#review2">10 &middot; Second review round</a></li>
   </ul>
 </div></aside>
 </div>

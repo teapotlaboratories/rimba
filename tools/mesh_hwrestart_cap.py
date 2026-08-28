@@ -30,6 +30,14 @@
 # occurred at all, and the fixture has several early-exits that park before triggering one -- so a
 # gapless capture is INCONCLUSIVE, never PASS. Cross-check the fixture's own restart-ran step.
 #
+# ⚠ WHAT THIS TOOL CANNOT DO, and it matters more since the AP_VIF=1 arm stopped expecting a panic:
+# it cannot distinguish an in-place recovery from a REBOOT-and-recover. A node that asserts comes back
+# under the same mesh SA and the same AP BSSID and beacons for the rest of the capture, which is the
+# same shape as a clean recovery. The sibling tool ap_gtk_pn_cap.py solves this with an on-air marker
+# the fixture toggles at the trigger; this one has no such marker, so the fixture's restart-ran step
+# (hw_restart_counter, which a reboot resets) and a console with no boot banner are load-bearing
+# cross-checks, not optional extras. The PASS text says so.
+#
 # THE LIVENESS CONTROL IS WHAT MAKES "NO BEACONS" MEAN ANYTHING. The peer board beacons throughout and
 # is unaffected by the restart, so its beacons prove the monitor still had the channel. If the peer goes
 # quiet too, the capture — not the node — is what broke, and the run is INCONCLUSIVE rather than a FAIL.
@@ -71,8 +79,10 @@ if AP in (NUT, PEER):
 GAP_S = 2.0
 # Beacons needed before the gap for the baseline to count as real.
 MIN_BASELINE = 20
-# Consecutive beacons needed after a gap to call it recovered (one stray frame is not a working mesh).
+# Beacons needed in the tail window to call it recovered (one stray frame is not a working mesh).
 MIN_RECOVERY = 5
+# How much of the capture's end counts as "now". At ~9 beacons/s this is a generous margin.
+TAIL_WINDOW_S = 10.0
 # The control must stay above this fraction of its own baseline rate, else the monitor lost the channel.
 CONTROL_MIN_FRAC = 0.25
 
@@ -206,20 +216,26 @@ def score(label, ts, what):
     # the better the recovery, the shorter the outage, and once it drops below GAP_S a working node was
     # being reported as unmeasurable. What is required is evidence that a restart happened at all --
     # see restart_observed, which reads every scored SA rather than just this one.
+    # "Back on air" is measured at the END of the capture, not after some chosen gap.
+    #
+    # This used to FAIL when fewer than MIN_RECOVERY beacons followed the LARGEST gap, on the reasoning
+    # that the restart's teardown dominates anything RF loss produces. That reasoning does not hold for
+    # every scored address: the AP vif recovers INSIDE GAP_S -- which is why restart_observed had to
+    # become cross-address in the first place -- so on the AP any unrelated 2.1 s dropout late in the
+    # window becomes the anchor and FAILs a fully recovered AP. Picking "the largest gap" is the same
+    # mistake in a smaller costume. The tail window has no such dependence on which gap is the event.
+    n_tail = sum(1 for t in ts if t >= t_end - TAIL_WINDOW_S)
+    if n_tail < MIN_RECOVERY:
+        return (1, "FAIL|%s: only %d beacon(s) in the last %.0fs of the capture (need >=%d). Whatever "
+                   "happened earlier, it is not on air in any usable sense now."
+                   % (label, n_tail, TAIL_WINDOW_S, MIN_RECOVERY))
+
     if gaps:
-        # The LARGEST gap, not the last one. The restart's teardown (~3 s measured) dominates anything
-        # RF loss produces, whereas the last gap may be a late blip: with GAP_S at 2.0 s a 2.1 s
-        # dropout near the end of the window would leave only a handful of beacons after it and score a
-        # fully recovered node as FAIL. Picking the largest keys the verdict to the event under test.
         biggest = max(gaps, key=lambda g: g[1] - g[0])
         outage = biggest[1] - biggest[0]
         n_after = sum(1 for t in ts if t >= biggest[1])
-        if n_after < MIN_RECOVERY:
-            return (1, "FAIL|%s: only %d beacon(s) after its longest interruption (%.1fs; need >=%d). "
-                       "It is not back on air in any usable sense." % (label, n_after, outage,
-                                                                       MIN_RECOVERY))
-        detail = ("its longest interruption was %.1fs, after which it emitted %d more beacons"
-                  % (outage, n_after))
+        detail = ("its longest interruption was %.1fs, after which it emitted %d more beacons "
+                  "(%d in the last %.0fs)" % (outage, n_after, n_tail, TAIL_WINDOW_S))
     elif not restart_observed:
         # No gap on ANY scored SA: there is no evidence a restart happened, so this cannot be a
         # recovery PASS.
@@ -243,9 +259,10 @@ def score(label, ts, what):
         detail = ("it never dropped %.1fs of beacons, though the restart is evident on the other "
                   "scored address" % GAP_S)
 
+    detail_tail = "it never dropped %.1fs of beacons" % GAP_S if not gaps else detail
     return (0, "PASS|%s: beaconing under its %s at the end of the capture (%d beacons over %.0fs, last "
                "one %.1fs before the end) and %s." % (label, what, len(ts), span, t_end - ts[-1],
-                                                      detail))
+                                                      detail_tail))
 
 
 results = [score("mesh", nut_t, "mesh SA")]
@@ -255,16 +272,32 @@ if AP is not None:
 for code, msg in results:
     print("RESULT|" + msg)
 
-# INCONCLUSIVE dominates FAIL: the commonest way to get one is "no evidence a restart happened", and a
-# capture that does not contain the trigger cannot condemn anything in it. A FAIL is only meaningful
-# once every scored address agrees the run was measurable.
-if any(c == 2 for c, _ in results):
-    print("RESULT|INCONCLUSIVE|at least one scored address was unmeasurable (above); the run does not "
-          "support a verdict either way.")
+# Combining the per-address verdicts, and the ORDER matters.
+#
+# Only ONE kind of inconclusive invalidates the whole run: "no evidence a restart happened anywhere",
+# which is global by construction (restart_observed reads every address) and means the capture does not
+# contain the event, so nothing in it can condemn anything. Every other inconclusive is LOCAL to one
+# address -- too few frames, a mistyped --ap, a vif that never came up -- and must not bury a real FAIL
+# on a different address. An earlier version let any inconclusive win, so a mistyped --ap silently
+# converted a genuine mesh-side FAIL into "re-run": the one verdict an operator must not miss, hidden by
+# a typo.
+if not restart_observed:
+    print("RESULT|INCONCLUSIVE|no scored address paused for %.1fs or more, so this capture does not "
+          "contain the restart at all -- it started too late, or the fixture bailed before triggering "
+          "one. Nothing here is a verdict on recovery." % GAP_S)
     sys.exit(2)
 if any(c == 1 for c, _ in results):
     print("RESULT|FAIL|at least one vif did not come back after the restart (above).")
     sys.exit(1)
-print("RESULT|PASS|every scored vif came back after the restart. Cross-check the fixture's own "
-      "data-before/data-after steps: beaconing alone does not prove the datapath came back.")
+if any(c == 2 for c, _ in results):
+    print("RESULT|INCONCLUSIVE|the restart is in the capture and no scored address failed, but at "
+          "least one was unmeasurable (above) -- so this run does not clear the vifs it could not "
+          "read.")
+    sys.exit(2)
+print("RESULT|PASS|every scored vif is back on air after the restart. TWO cross-checks are required "
+      "before reading this as a recovery: the fixture's own data-before/data-after steps, because "
+      "beaconing alone does not prove the datapath came back; and its restart-ran step plus a console "
+      "free of a boot banner, because THIS TOOL CANNOT TELL AN IN-PLACE RECOVERY FROM A "
+      "REBOOT-AND-RECOVER -- a node that panics comes back under the same MACs and beacons for the rest "
+      "of the window, which looks identical from here.")
 sys.exit(0)
