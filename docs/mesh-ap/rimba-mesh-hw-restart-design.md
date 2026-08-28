@@ -720,3 +720,160 @@ Every non-volatile byte survives the restart. Nothing about the node's on-air id
 differently by the recovery path than by the start path.
 
 ---
+
+## S3 stage 1 — the AP arm (IMPLEMENTED 2026-08-26)
+
+The `MMOSAL_ASSERT(false)` is gone and the AP host-slot has a restore arm. Worklog:
+[`docs/worklog/2026-08-26-mesh-hwrestart-s3-stage1-ap-arm.md`](../worklog/2026-08-26-mesh-hwrestart-s3-stage1-ap-arm.md).
+
+### The dispatch blocker, resolved
+
+The open question at the end of the reproducer stage was that
+`if (umac_mesh_is_active()) mesh else connection` has no room for the gateway's mesh **+** AP. The
+answer is in the reference, and it is not a third branch:
+
+**`ieee80211_reconfig()` does not choose an interface type — it LOOPS over interfaces**
+(`net/mac80211/util.c:1902`), and each one independently takes its own arm of the type switch. A Linux
+mesh gateway is two `sdata` entries and both are walked. morselib had collapsed that loop into a single
+either/or.
+
+morselib has exactly two host slots (`VIF_STA_INTERFACE_TYPES_MASK`, `umac_interface.c:118-120`), so
+the restore is **per slot**:
+
+- **`MMWLAN_VIF_STA`** — STA / IBSS / mesh / scan / the boot vif. Exclusive *within* the slot (they
+  share one FW vif), so this arm stays an either/or. Unchanged from S2.
+- **`MMWLAN_VIF_AP`** — independent, and concurrent with the mesh on the gateway. New arm.
+
+⚠ The exclusivity S2 enforced is **within** the STA slot, not across the radio. Conflating those two is
+what made the gateway look unrepresentable.
+
+⚠ The AP call must sit inside `#if !(defined(MMWLAN_AP_DISABLED) && MMWLAN_AP_DISABLED)`: `umac_ap.c`
+is not compiled when `CONFIG_HALOW_AP_MODE=n`, so an unguarded reference is an undefined symbol at
+link — the trap already documented on `umac_mmdrv_get_beacon()`.
+
+### The channel moved out of the arms
+
+`umac_interface_reconfigure_channel()` is HW-global — `mmdrv_set_channel()` is issued with
+`MMDRV_VIF_ID_INVALID` (`driver/driver.c:864`), as are the txpower / duty-cycle / mpsw commands beside
+it — so it is now restored once in `hw_restart_evt_handler()`, before the arms, alongside the frag
+threshold and power save. Linux puts `ieee80211_hw_config()` in the same place. Left inside the arms,
+the gateway would program the channel a second time from the AP arm *after* the mesh arm had armed
+beaconing.
+
+⚠ **`umac_connection_handle_hw_restarted()` keeps its own copy and that is not dead code.**
+`wnm_sleep_fsm_active_exit()` (`umac_wnm_sleep.c:281-286`) re-inits the chip after a WNM chip-powerdown
+and calls the connection restore **directly**, never through the restart handler. Removing it there
+would silently drop the channel restore on the power-save wake path.
+
+### Code map — `umac_ap_handle_hw_restarted()` ↔ `ieee80211_reconfig()`
+
+Linux reference as checked out on chronium at `~/halow/rpi-linux` (same revision as the S2 map).
+
+| # | new code (`umac_ap.c`) | Linux |
+|---|---|---|
+| 1 | `umac_interface_reinstall_vif(MMWLAN_VIF_AP)` + re-tag every stad's vif id | `drv_add_interface()` — `util.c:1853/1865` |
+| 2 | `mmdrv_cfg_bss(vif, beacon_interval_tus, dtim_period, cssid)` | BSS-config half of `bss_info_change_notify()` |
+| 3 | `mmdrv_start_beaconing(vif)` | `drv_start_ap()` — `util.c:2036-2038` |
+| 4 | per-STA ladder `AUTHENTICATED …` up to the stored state, **after** beaconing | `ieee80211_reconfig_stations()` in the SECOND loop — `util.c:2093-2103` |
+| 5 | `umac_keys_reinstall_keys()` for `sta_common` + each STA, plus `umac_datapath_handle_hw_restarted()` | `ieee80211_reenable_keys()` — `util.c:2108` |
+
+**Deliberate divergences:** no notify layer, so steps 2-3 are the explicit `mmdrv_*` pair
+`umac_ap_start()` uses; the channel belongs to the caller (above); the ladder starts at
+`AUTHENTICATED` because morse_driver filters `NOTEXIST`/`NONE` (`mac.c:4813`), as the mesh arm already
+reasons.
+
+⚠ **AP stations are re-added AFTER the beacon, not with everyone else.** Linux's first switch has
+`case NL80211_IFTYPE_AP:` carrying the comment *"AP stations are handled later"* and deliberately does
+**not** fall into `ieee80211_reconfig_stations()`. Do not "fix" this to match the mesh arm's ordering.
+
+**Not restored, and stated rather than hidden:** AP-side TWT **responder agreements**. The responder
+itself is re-armed by `umac_interface_init_vif()`, but per-STA agreements the chip held are gone and
+there is no responder-side equivalent of `umac_twt_install_pending_agreements()`. Tracked separately.
+
+### Verification status
+
+- **Verified on air:** no panic; both vifs beacon again after the restart (AP 0.98 s outage, mesh
+  3.88 s, control never gapped); mesh datapath 5/5 after vs 4/5 before. Two scored captures, archived.
+- **NOT directly verified:** steps 4-5 (per-STA ladder, per-STA keys, group keys). Blocker: every
+  client on this bench deauths ~1 s into the outage, before the restore completes, so the restored
+  station entry cannot be exercised. Closing it needs the trigger wired into `test-mesh-ap-gate`, which
+  has a working AP-side datapath. See the worklog for the full frame timeline and the reasoning.
+
+### S3 stage 1b — closing the AP verification gap (DONE 2026-08-26)
+
+**The change:** a `HW_RESTART=1` arm on `test-mesh-ap-gate`, which is the one fixture with a working
+AP-side datapath (a second `esp_netif` on 192.168.12.1, per-vif RX demux and per-vif TX tagging). It
+triggers a restart on a live gateway and scores what stage 1 could only infer.
+
+**Why it is two probes, not one.** The obvious probe — ping the client across the AP link before and
+after — cannot stand alone, because the client tears its own association down ~1.1 s into the outage
+and re-associates ~22 s later (measured 2026-08-26). A ping that succeeds after a *re*-association
+proves the AP works, not that the restore worked, and there is no public morselib knob to lengthen a
+STA's beacon-loss tolerance. So:
+
+| probe | what it scores | needs a client to survive? |
+|---|---|---|
+| **A — group-key PN continuity, on air** | step 5's group half. The gate emits a continuous broadcast train on the AP subnet; the CCMP PN of those frames must keep **climbing** across the restart. A rewind to a low PN is exactly the S2 "rebuilt keys reset `tx_seq`" defect, and it is directly visible in a capture. | **no** |
+| **B — unicast ping across the AP link** | step 4 + step 5's pairwise half. | **yes** — so the arm counts AUTHORIZED transitions and returns INCONCLUSIVE-for-the-restore if the STA re-associated, rather than banking a PASS it did not earn. |
+
+**Acceptance:** probe A gives a real verdict on this bench and is the deliverable. Probe B is expected
+to read INCONCLUSIVE here; that is a *measurement* of why the pairwise path cannot be scored on this
+rig, replacing the stage-1 inference with a recorded result. New tool `tools/ap_gtk_pn_cap.py`
+(chronium `morse0`, the `test-raw-rps` shape).
+
+**Result — probe A PASS, probe B INCONCLUSIVE exactly as designed.**
+- **A:** across a **1.08 s** outage the group CCMP PN advanced **135 → 136** on an unchanged key id.
+  The group key was re-pushed, not rebuilt. The same capture holds **two legitimate PN resets** (AP boot,
+  first-client GTK install) as the positive control that the measurement can see a rewind. Archived:
+  `docs/worklog/artifacts/mesh-hwrestart/2026-08-26-s3-stage1b-ap-gtk-pn.pcap`.
+- **B:** the client re-associated (1 → 2 association events) and the after-ping read 5/5. Without the
+  association counter that would have printed a confident PASS on a link rebuilt from scratch during the
+  outage. It is INCONCLUSIVE, correctly.
+
+⛔ **THE RULE STAGE 1b PRODUCED — a scorer must LOCATE its event, not recognise it by size.** The tool's
+first version picked "the largest gap in the train" and scored a textbook PASS as a FAIL: the board's own
+**reboot** leaves a bigger hole (3.33 s) than the chip restart (~1 s), and a reboot legitimately installs
+a fresh GTK at PN 1. The fixture now switches its broadcast payload length at the trigger (18 B → 32 B,
+i.e. 100 B → 114 B on air) and the tool measures across that boundary. Length, not content, because the
+frames are GTK-encrypted. Third instance on this epic of a verdict keyed on the biggest/last thing in the
+window turning out to be keyed on whatever else was in the window.
+
+⚠ `test-mesh-ap-gate` is a **T2 fixture**: `make test-t2 TEST=mesh-ap` re-run **PASS (391 s)**. Its app
+partition grew to 2 MB (`partitions.csv`) because the arm pulls in `esp_ping` + lwIP sockets; that
+applies to both arms, since the partition table is Kconfig-time and cannot follow a `-D`.
+
+**Still not verified:** step 4 and the pairwise half of step 5. The blocker is now a scored, repeatable
+INCONCLUSIVE rather than an inference. Closing it needs a client that holds its association across a
+1–4 s AP outage — either exposing morselib's connection-monitor control publicly, or a Linux HaLow STA
+whose tolerance can be configured.
+
+### Review round — the rule it produced
+
+⛔ **Any `umac_interface_get_vif_id(umacd, UMAC_INTERFACE_STA)` inside a routine that can be handed an
+ARBITRARY stad is a latent bug.** `UMAC_INTERFACE_STA` is inside `VIF_STA_INTERFACE_TYPES_MASK`, so it
+returns the STA host-slot id whatever the stad belongs to. S2 documented this from one direction (the
+connection handler does not no-op on a mesh node); stage 1 walked into it from the other, by reusing
+`umac_datapath_handle_hw_restarted()` — which derived its vif that way — for AP stads. On the gateway it
+aimed an AP client's sequence-number spaces at the **mesh** vif and left the AP's counters at zero.
+`vif_id` is now a parameter.
+
+⚠ **Stage 1b PASSED with that bug present** — probe A measures the group key (no per-peer sequence
+spaces) and probe B was already INCONCLUSIVE for an unrelated reason. A green run is not coverage.
+
+Three more, all real: the AP's `sta_common` was pushed a sequence-number baseline for an all-zero
+address (unlike the mesh common stad, it never gets a peer address — only a BSSID); the channel hoist had
+quietly downgraded a fatal error to a log line **and** `umac_interface_reconfigure_channel()` leaves its
+cache zeroed on failure, so one failure silently disables every later retry including the WNM-wake
+caller; and a vif alone does not mean the AP started, because `umac_ap_start()`'s failure path memsets
+the config without removing the interface it added (that leaked interface is a **separate** defect, not
+fixed here).
+
+Re-verified on the bench after the fixes: group-key PN 133 → 134 across a 0.99 s outage, 2 positive
+controls, mesh datapath 5/5, zero restore error lines.
+
+**Landed:** mm-esp32-halow PR 35 (rebase) — `ece942cd` + `22e84d75` on submodule `main`.
+
+### Still open
+
+**Stage 2 — the intermittent boot-time ISR watchdog loop.** Untouched. Stage 1 *avoids* it by never
+rebooting, but it stays reachable by any reset landing mid-restart.
