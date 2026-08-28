@@ -417,14 +417,25 @@ APPS: tuple[App, ...] = (
               "on chronium's morse0 (same shape as test-raw-rps). Rig: 2 boards, this one + any mesh "
               "node on rimba-mesh ch27 (test-mesh-gate-node NO_PING=1). Needs CONFIG_HALOW_AP_MODE=y "
               "and carries its own 2 MB partitions.csv. TWO ARMS: the default one is the S1/S2 mesh "
-              "reproducer; AP_VIF=1 is the S3 arm, which brings an AP vif up beside the mesh and is "
-              "EXPECTED TO PANIC on hw_restart_evt_handler()'s MMOSAL_ASSERT(false) until S3 lands -- "
-              "do not read that panic as a broken fixture. ⚠ TEST_AP_VIF is a CMake cache var, so the "
+              "reproducer; AP_VIF=1 is the S3 arm, which brings an AP vif up beside the mesh. It used "
+              "to be EXPECTED TO PANIC on hw_restart_evt_handler()'s MMOSAL_ASSERT(false); since S3 "
+              "stage 1 that assert is gone and the arm expects BOTH vifs to come back -- a panic there "
+              "is now a regression. Score the AP side by passing the fixture's TEST|INFO|ap-mac| to "
+              "mesh_hwrestart_cap.py as --ap. ⚠ TEST_AP_VIF is a CMake cache var, so the "
               "arm is sticky: pass AP_VIF=0 (not just omit it) or wipe build/<app>/<board>/ to get the "
               "default arm back."),
     App("test-mesh-ap-gate",
         notes="T2 mesh-ap: the GATE support role (mesh+AP+ip_forward on one radio). board2. "
-              "Needs CONFIG_HALOW_AP_MODE=y + CONFIG_LWIP_IP_FORWARD=y."),
+              "Needs CONFIG_HALOW_AP_MODE=y + CONFIG_LWIP_IP_FORWARD=y. Carries its own 2 MB "
+              "partitions.csv (the HW_RESTART arm pulls in esp_ping + lwIP sockets and overflowed "
+              "SINGLE_APP_LARGE; the table is Kconfig-time so it applies to both arms). TWO ARMS: the "
+              "default one is the T2 support role; HW_RESTART=1 is the S3 stage-1b arm, which forces a "
+              "chip restart on the live gateway and scores the AP-side restore -- a 5 Hz group-addressed "
+              "train for tools/ap_gtk_pn_cap.py (the GROUP-key CCMP PN must climb across the outage, not "
+              "rewind) plus a unicast ping that returns INCONCLUSIVE if the client re-associated, because "
+              "a ping across a FRESH association proves nothing about the restore. NOT in T2 -- it "
+              "restarts the chip mid-run. \u26a0 TEST_HW_RESTART is a CMake cache var, so the arm is "
+              "sticky: pass HW_RESTART=0 or wipe build/<app>/<board>/."),
     App("test-mesh-ap-peer",
         notes="T2 mesh-ap: the far mesh node (board1, 10.9.9.100); return route via gate 10.9.9.108. "
               "Needs CONFIG_HALOW_AP_MODE=y."),

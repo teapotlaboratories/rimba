@@ -7,7 +7,7 @@
  *
  * WHY IT HAS TO EXIST FIRST. The defect was found in a crash on 2026-07-15, and there is no way to
  * trigger a chip restart deliberately. Recovery code you can only exercise by waiting for a fault is
- * code you cannot verify -- so the reproducer is S1 and the two fixes (mesh recovery, the AP assert)
+ * code you cannot verify -- so the reproducer is S1 and the two fixes (mesh recovery, the AP arm)
  * are S2/S3. Mechanism traced in docs/mesh-ap/rimba-mesh-hw-restart-design.md.
  *
  * ============================================================================================
@@ -279,7 +279,7 @@ void app_main(void)
     if (mmwlan_ap_enable(&ap_args) != MMWLAN_SUCCESS)
     {
         TEST_INCONCLUSIVE("mmwlan_ap_enable failed -- no AP vif, so this run does NOT exercise the S3 "
-                          "assert. Needs CONFIG_HALOW_AP_MODE=y");
+                          "mesh+AP restore path. Needs CONFIG_HALOW_AP_MODE=y");
         TEST_END(NAME);
         park_forever();
     }
@@ -296,6 +296,23 @@ void app_main(void)
 
     TEST_INFO("ap-vif|up alongside the mesh (ssid=\"%s\" chan=%d), tx vif pinned to STA -- this is "
               "the gate's shape", AP_SSID, MESH_S1G_CHAN);
+
+    /* The AP's own BSSID, for the off-air scorer. It is NOT the mesh MAC: with a mesh already active,
+     * umac_interface_add() derives a locally-administered address for the AP vif (device MAC with
+     * bit 1 of octet 0 flipped, umac_interface.c:303-311), because the two vifs cannot share one.
+     * Read it back rather than deriving it here, so the fixture reports what the stack actually
+     * programmed. Feed it to mesh_hwrestart_cap.py as --ap; that is what scores AP recovery, for the
+     * same reason the mesh side is scored off-board (see this file's header). */
+    uint8_t ap_bssid[6] = { 0 };
+    if (mmwlan_ap_get_bssid(ap_bssid) == MMWLAN_SUCCESS)
+    {
+        TEST_INFO("ap-mac|" MACSTR "|ssid=%s -- pass this to mesh_hwrestart_cap.py --ap",
+                  MAC2STR(ap_bssid), AP_SSID);
+    }
+    else
+    {
+        TEST_INFO("ap-mac|UNREADABLE -- the AP arm cannot be scored on air this run");
+    }
 #endif
 
     /* --- baseline: we must be peered BEFORE the restart, or the after-measurement means nothing --- */
@@ -334,15 +351,15 @@ void app_main(void)
     int rst_before = hw_restart_count();
     TEST_INFO("hw_restart_counter=%d before the trigger", rst_before);
 #ifdef TEST_AP_VIF
-    /* EXPECTED TO PANIC, and that is the deliverable. hw_restart_evt_handler() opens with
-     *     if (umac_interface_get_vif_id(umacd, UMAC_INTERFACE_AP) != MMDRV_VIF_ID_INVALID)
-     *         { MMLOG_ERR(...); MMOSAL_ASSERT(false); }
-     * so with an AP vif up it dies before any recovery runs. The board asserts and reboots, which means
-     * NO TEST| verdict can follow -- the panic itself is the result. Read the console for
-     * "Unable to recover from hardware restart with AP interface active" plus the assert backtrace.
-     * If the board instead survives and prints a verdict below, S3 is fixed. */
-    TEST_INFO("s3-expect-panic|an AP vif is active, so the handler should assert before recovering. "
-              "A reboot with no verdict after this line IS the S3 defect");
+    /* This arm used to expect a PANIC, and that WAS the deliverable: hw_restart_evt_handler() opened
+     * with an AP-vif check that logged "Unable to recover from hardware restart with AP interface
+     * active" and MMOSAL_ASSERT(false)'d, so the gateway was the one configuration a restart could not
+     * survive. S3 stage 1 removed that assert and gave the AP host-slot its own restore arm
+     * (umac_ap_handle_hw_restarted()), so the board is now expected to come back with BOTH vifs.
+     *
+     * A reboot with no verdict after this line is now a REGRESSION, not the expected result. */
+    TEST_INFO("s3-expect-recovery|an AP vif is active; the handler must restore BOTH host-slots and "
+              "return. A panic or a reboot with no verdict after this line is an S3 regression");
 #endif
     TEST_INFO("restart-trigger|forcing a chip restart via mmwlan_force_hw_restart() with %d peer(s) "
               "established", before);

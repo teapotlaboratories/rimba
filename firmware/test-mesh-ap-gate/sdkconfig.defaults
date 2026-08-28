@@ -7,3 +7,8 @@ CONFIG_HALOW_AP_MODE=y
 # subnet (10.9.9.0/24) via two esp_netifs — lwIP must forward between them.
 CONFIG_LWIP_IP_FORWARD=y
 CONFIG_LWIP_IPV4_NAPT=n
+
+# 2 MB app partition — the stage-1b arm (HW_RESTART=1) overflows SINGLE_APP_LARGE. See partitions.csv
+# for why it applies to both arms.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

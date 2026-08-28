@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh hw_restart S3 stage 1 — the AP arm — Rimba Worklog</title>
+<style>
+/* Rimba worklog — shared design system. Hand-authored (no generator). */
+:root{
+  --bg:#f6f8fb; --fg:#1b2230; --muted:#5a6577; --line:#e3e8f0; --card:#fff;
+  --accent:#2f6feb; --accent2:#7c3aed; --soft:#eaf1ff;
+  --ok:#1a8a4a; --ok-bg:#e6f6ec; --warn:#b7791f; --warn-bg:#fbf3e2;
+  --err:#c0392b; --err-bg:#fdecea; --bug:#8a3ffc; --bug-bg:#f2ecfe;
+  --code-bg:#0c1018; --code-fg:#dfe6f0;
+  --shadow:0 1px 2px rgba(24,39,75,.06),0 6px 18px rgba(24,39,75,.06);
+  --max:840px;
+}
+:root[data-theme=dark],
+:root[data-theme=auto] { color-scheme: light dark; }
+@media (prefers-color-scheme:dark){:root[data-theme=auto]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme=dark]{
+  --bg:#0b0e14; --fg:#d6dde8; --muted:#8894a6; --line:#1f2733; --card:#131922;
+  --accent:#5b93ff; --accent2:#a78bfa; --soft:#152241;
+  --ok:#4ade80; --ok-bg:#0f2a1c; --warn:#f2c14e; --warn-bg:#2c2410;
+  --err:#f87171; --err-bg:#2c1517; --bug:#c4b5fd; --bug-bg:#1e1636;
+  --code-bg:#080b11; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.66 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 20px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .home{font-weight:600;color:var(--fg)} .topbar .crumb{color:var(--muted);font-size:14px}
+.themetgl{margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px}
+.wrap{max-width:1200px;margin:0 auto;padding:30px 20px 60px}
+.foot{color:var(--muted);text-align:center;font-size:13px;padding:26px;border-top:1px solid var(--line)}
+
+/* doc layout */
+.doc{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:44px}
+.content{max-width:var(--max);min-width:0}
+.metaline{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.content h1{font-size:2.05rem;line-height:1.18;margin:.15em 0 .5em;letter-spacing:-.02em}
+.content h2{font-size:1.38rem;margin:2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+.content h3{font-size:1.12rem;margin:1.6em 0 .35em}
+.content h4{font-size:.82rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.content p,.content li{overflow-wrap:break-word} .content strong{font-weight:680}
+.content hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.content ul,.content ol{padding-left:1.35em} .content li{margin:.28em 0}
+.lead{font-size:1.08rem;color:var(--muted);line-height:1.6;margin:.2em 0 1.4em}
+
+/* code */
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{background:var(--line);padding:.12em .4em;border-radius:5px;color:var(--fg)}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;margin:1.1em 0;padding:14px 16px;
+  overflow-x:auto;font-size:13.5px;line-height:1.55;box-shadow:var(--shadow)}
+pre code{background:none;padding:0;color:inherit;white-space:pre}
+pre .cm{color:#7c8aa0} pre .kw{color:#c792ea} pre .st{color:#c3e88d} pre .nm{color:#f78c6c} pre .fn{color:#82aaff}
+
+/* tables */
+.content table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+.content th,.content td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.content thead th{background:var(--soft);font-weight:650;white-space:nowrap}
+.content tbody tr:nth-child(even){background:color-mix(in srgb,var(--line) 32%,transparent)}
+.content td.num,.content th.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;
+  border-radius:20px;background:var(--soft);color:var(--accent);letter-spacing:.01em;white-space:nowrap}
+.badge.date{background:var(--line);color:var(--muted)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.err{background:var(--err-bg);color:var(--err)} .badge.todo{background:var(--line);color:var(--muted)}
+.badge.bug{background:var(--bug-bg);color:var(--bug)}
+
+/* callouts */
+.callout{margin:1.2em 0;padding:.85em 1.1em .85em 1.15em;border-radius:10px;border:1px solid var(--line);
+  border-left:4px solid var(--accent);background:var(--soft)}
+.callout .ct{font-weight:680;margin:0 0 .25em;display:flex;align-items:center;gap:.5em}
+.callout p{margin:.3em 0} .callout>:last-child{margin-bottom:0}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-bg)} .callout.ok .ct{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)} .callout.warn .ct{color:var(--warn)}
+.callout.err{border-left-color:var(--err);background:var(--err-bg)} .callout.err .ct{color:var(--err)}
+.callout.bug{border-left-color:var(--bug);background:var(--bug-bg)} .callout.bug .ct{color:var(--bug)}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:1.3em 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+.stat .num{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num.ok{color:var(--ok)} .stat .num.acc{color:var(--accent)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* before/after bars */
+.bars{margin:1.3em 0;display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:12px;font-size:13.5px}
+.bar-row .lbl{color:var(--muted);text-align:right}
+.bar-track{background:var(--line);border-radius:6px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  min-width:2px;transition:width .5s}
+.bar-fill.slow{background:linear-gradient(90deg,#e0a03a,#d0632f)}
+.bar-fill.fast{background:linear-gradient(90deg,#2fae6b,#1a8a4a)}
+.bar-row .val{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* flow / pipeline diagram */
+figure{margin:1.4em 0;text-align:center} figcaption{color:var(--muted);font-size:13px;margin-top:.5em}
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;justify-content:center;margin:1.3em 0}
+.flow .node{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;min-width:88px;text-align:center;font-size:13.5px;box-shadow:var(--shadow);margin:6px 22px 6px 0}
+.flow .node:last-child{margin-right:6px}
+.flow .node::after{content:"→";position:absolute;right:-20px;top:50%;transform:translateY(-50%);
+  color:var(--muted);font-size:18px}
+.flow .node:last-child::after{content:""}
+.flow .node .t{font-weight:650} .flow .node .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.flow .node.acc{border-color:var(--accent);background:var(--soft)}
+.flow .node.ok{border-color:var(--ok)} .flow .node.err{border-color:var(--err)}
+.flow.vert{flex-direction:column;align-items:center}
+.flow.vert .node{margin:0 0 26px}
+.flow.vert .node::after{content:"↓";right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%)}
+
+/* generic diagram frame + svg */
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+  margin:1.3em 0;box-shadow:var(--shadow);overflow-x:auto}
+.diagram svg{max-width:100%;height:auto;display:block;margin:0 auto}
+
+/* TOC */
+.toc{position:sticky;top:68px;align-self:start;font-size:13.5px;max-height:calc(100vh-92px);overflow:auto}
+.toc-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5em}
+.toc ul{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+.toc a{display:block;padding:3px 0 3px 12px;color:var(--muted);border-left:2px solid transparent;margin-left:-2px}
+.toc a:hover{color:var(--accent);text-decoration:none;border-left-color:var(--accent)}
+@media (max-width:900px){.doc{grid-template-columns:1fr}.toc{display:none}.bar-row{grid-template-columns:92px 1fr auto}}
+
+/* index */
+.hero{padding:10px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px}
+.hero h1{font-size:2.4rem;margin:.1em 0;letter-spacing:-.02em}
+.hero .lede{color:var(--muted);font-size:1.05rem;margin:.2em 0 .8em;max-width:640px}
+.hero .stat{color:var(--muted);font-size:.95rem;margin:0} .hero .stat b{color:var(--accent)}
+.month{margin:34px 0} .month h2{font-size:1.12rem;display:flex;gap:10px;align-items:center;margin:0 0 15px}
+.mcount{font-size:12px;font-weight:600;background:var(--line);color:var(--muted);border-radius:20px;padding:2px 9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px 18px 14px;
+  box-shadow:var(--shadow);transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none;box-shadow:0 6px 22px rgba(24,39,75,.13)}
+.card-date{font-size:12px;font-weight:600;color:var(--accent)}
+.card-title{font-size:1.02rem;font-weight:650;margin:5px 0 7px;line-height:1.32}
+.card-ex{font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:11px}
+.card-meta{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="home" href="index.html">&larr; Worklogs</a>
+  <span class="crumb">2026-08-26</span>
+  <button class="themetgl" onclick="tt()" title="Toggle theme" aria-label="Toggle theme">&#9681;</button>
+</header>
+
+<div class="wrap doc">
+<main class="content">
+  <div class="metaline">
+    <span class="badge date">2026-08-26</span>
+    <span class="badge">7 min read</span>
+    <span class="badge ok">&#10003; both vifs recover</span>
+    <span class="badge">S3 stage 1</span>
+    <span class="badge ok">group key proven on air</span>
+    <span class="badge warn">pairwise half still unproven</span>
+  </div>
+
+  <h1>An AP arm &mdash; and the dispatch that had no room for the gateway</h1>
+  <p class="lead">The <code>MMOSAL_ASSERT(false)</code> that panicked a mesh&#8202;+&#8202;AP node on a
+  hardware restart is gone, and the AP host-slot has a real restore arm. The blocker was never a
+  missing branch: it was that morselib had collapsed Linux&rsquo;s <em>loop over interfaces</em> into a
+  single either/or.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num ok">0.98<span style="font-size:.5em">s</span></div><div class="lbl">AP outage, measured off air</div></div>
+    <div class="stat"><div class="num acc">3.88<span style="font-size:.5em">s</span></div><div class="lbl">mesh outage, same restart</div></div>
+    <div class="stat"><div class="num ok">5/5</div><div class="lbl">mesh pings after (4/5 before)</div></div>
+    <div class="stat"><div class="num ok">+1</div><div class="lbl">group-key PN across the outage (no rewind)</div></div>
+  </div>
+
+  <hr>
+
+  <h2 id="blocker">1 &middot; The blocker, and why a third branch was the wrong shape</h2>
+
+  <p>The handover said the dispatch had &ldquo;no room for the gate&rsquo;s mesh&#8202;+&#8202;AP
+  case&rdquo; and needed <em>revisiting, not extending</em>. That is right, and the reason is in the
+  reference.</p>
+
+  <div class="callout bug"><p class="ct">ieee80211_reconfig() does not choose an interface type</p>
+  <p>It <strong>loops over interfaces</strong> &mdash; <code>net/mac80211/util.c:1902</code>,
+  <code>list_for_each_entry(sdata, &amp;local-&gt;interfaces, list)</code> &mdash; and each one
+  independently takes its own arm of the type switch. A Linux mesh gateway is two <code>sdata</code>
+  entries and <em>both</em> are walked. morselib had collapsed that loop into one either/or, which is
+  precisely the construct that cannot express &ldquo;both&rdquo;.</p></div>
+
+  <p>morselib has exactly two host slots (<code>VIF_STA_INTERFACE_TYPES_MASK</code>,
+  <code>umac_interface.c:118-120</code>), so the restore goes <strong>per slot</strong>, not per type:</p>
+
+  <table>
+    <tr><th>host slot</th><th>holds</th><th>on the mesh gateway</th><th>arm</th></tr>
+    <tr><td><code>MMWLAN_VIF_STA</code></td><td>STA &middot; IBSS &middot; mesh &middot; scan &middot; the boot vif</td><td>the mesh</td><td>either/or &mdash; they share one FW vif</td></tr>
+    <tr><td><code>MMWLAN_VIF_AP</code></td><td>AP</td><td>the AP</td><td>independent, runs as well</td></tr>
+  </table>
+
+  <div class="flow vert">
+    <div class="node acc"><div class="t">mmdrv_deinit() &rarr; mmdrv_init()</div><div class="s">the chip comes back blank</div></div>
+    <div class="node"><div class="t">HW-global restores</div><div class="s">frag threshold &middot; power save &middot; <strong>channel</strong> &middot; scan</div></div>
+    <div class="node ok"><div class="t">VIF_STA slot</div><div class="s">mesh arm <em>or</em> connection arm</div></div>
+    <div class="node ok"><div class="t">VIF_AP slot</div><div class="s">umac_ap_handle_hw_restarted() &mdash; new</div></div>
+    <div class="node"><div class="t">mmdrv_hw_restart_completed()</div><div class="s">unpause TX</div></div>
+  </div>
+
+  <div class="callout warn"><p class="ct">Two arms, not three</p>
+  <p>The exclusivity S2 fought to enforce is real, but it lives <strong>within</strong> the STA slot,
+  not across the radio. Conflating those two is what made the gateway look unrepresentable.</p></div>
+
+  <div class="callout err"><p class="ct">The <code>#if</code> around the AP call is load-bearing</p>
+  <p><code>umac_ap.c</code> is not compiled when <code>CONFIG_HALOW_AP_MODE=n</code>
+  (<code>components/morselib/CMakeLists.txt:120</code> defines <code>MMWLAN_AP_DISABLED=1</code>), so an
+  unguarded reference is an undefined symbol at link. Same trap already documented on
+  <code>umac_mmdrv_get_beacon()</code>, which the S2 work tripped once by pulling
+  <code>umac_mesh.o</code> back into a build that had been getting away with <code>--gc-sections</code>.
+  Verified by building <code>test-idle</code>: links clean.</p></div>
+
+  <h2 id="channel">2 &middot; The channel moved &mdash; and a second caller nearly made that silent</h2>
+
+  <p>With two slots restoring, <code>umac_interface_reconfigure_channel()</code> could not stay inside
+  the arms: on the gateway the AP arm would have programmed the channel a <em>second</em> time, after
+  the mesh arm had already armed beaconing. One radio, one channel, one restore.</p>
+
+  <p>It is genuinely HW-global, which is what licenses the hoist: <code>mmdrv_set_channel()</code> is
+  issued with <code>MMDRV_VIF_ID_INVALID</code> (<code>driver/driver.c:864</code>), as are the txpower,
+  duty-cycle and mpsw commands beside it (<code>umac_interface.c:834-866</code>). Linux puts
+  <code>ieee80211_hw_config()</code> in the same place &mdash; once, before the per-vif loop.</p>
+
+  <div class="callout err"><p class="ct">The trap, caught before it shipped</p>
+  <p><code>umac_connection_handle_hw_restarted()</code> has a <strong>second caller that never passes
+  through the restart handler</strong>: <code>wnm_sleep_fsm_active_exit()</code>
+  (<code>umac_wnm_sleep.c:281-286</code>) re-inits the chip after a WNM chip-powerdown and drives the
+  connection restore directly. Removing the channel call from that function would have silently dropped
+  the channel restore on the <strong>power-save wake path</strong> &mdash; a path this bench cannot
+  easily exercise. So the connection arm keeps its own copy. The cost is one redundant
+  <code>SET_CHANNEL</code> with the same value on a STA restart, before any vif is beaconing, and both
+  files carry the reason inline so a later reader does not tidy the &ldquo;duplicate&rdquo; away.</p></div>
+
+  <div class="callout warn"><p class="ct">Fourth instance of the same host-cache trap</p>
+  <p>It must be <code>reconfigure_channel()</code>, never <code>set_channel_from_regdb()</code>:
+  <code>ie_s1g_operation_is_equal()</code> against <code>current_s1g_operation</code> short-circuits,
+  programs nothing, and returns SUCCESS. Joins the channel cache, the CCMP PN counters and
+  <code>pwr_mode</code> on that list.</p></div>
+
+  <h2 id="arm">3 &middot; What the AP arm does</h2>
+
+  <table>
+    <tr><th>#</th><th>new code &mdash; <code>umac_ap.c</code></th><th>Linux</th></tr>
+    <tr><td>1</td><td><code>umac_interface_reinstall_vif(MMWLAN_VIF_AP)</code>, then re-tag every stad with the new vif id</td><td><code>drv_add_interface()</code> &mdash; <code>util.c:1853/1865</code></td></tr>
+    <tr><td>2</td><td><code>mmdrv_cfg_bss(vif, beacon_interval, dtim, cssid)</code></td><td>the BSS-config half of the notify</td></tr>
+    <tr><td>3</td><td><code>mmdrv_start_beaconing(vif)</code></td><td><code>drv_start_ap()</code> &mdash; <code>util.c:2036-2038</code></td></tr>
+    <tr><td>4</td><td>per-STA ladder <code>AUTHENTICATED</code> &rarr; its current state, <strong>after</strong> beaconing</td><td><code>ieee80211_reconfig_stations()</code> in the <strong>second</strong> loop &mdash; <code>util.c:2093-2103</code></td></tr>
+    <tr><td>5</td><td><code>umac_keys_reinstall_keys()</code> for <code>sta_common</code> and each STA, plus the seq-number spaces</td><td><code>ieee80211_reenable_keys()</code> &mdash; <code>util.c:2108</code></td></tr>
+  </table>
+
+  <div class="callout warn"><p class="ct">AP stations are re-added AFTER the beacon, not with everyone else</p>
+  <p>Linux&rsquo;s first switch has <code>case NL80211_IFTYPE_AP:</code> carrying the comment
+  <em>&ldquo;AP stations are handled later&rdquo;</em> and deliberately does <strong>not</strong> fall
+  into <code>ieee80211_reconfig_stations()</code>. Copying the mesh arm&rsquo;s ordering here would have
+  diverged from the reference for no reason.</p></div>
+
+  <div class="callout bug"><p class="ct">Two S2 lessons that apply unchanged to the AP</p>
+  <ul>
+    <li><strong>Re-push keys, never rebuild them.</strong> <code>connection_keys_install_key()</code>
+      copies <code>tx_seq</code>/<code>rx_seq</code> out of the struct it is handed
+      (<code>connection_keys.c:118-121</code>), so a freshly built key rewinds this node&rsquo;s CCMP PN
+      to 0 while the associated STAs &mdash; which did not restart &mdash; keep their replay windows.
+      Every install returns success and nothing is logged.</li>
+    <li><strong><code>sta_common</code> is not optional.</strong> It carries the group keys. Skipping it
+      gives an AP that beacons and answers unicast while every group-addressed frame dies &mdash; the
+      AP-side twin of the mesh <code>common_stad</code> defect S2 found only <em>after</em> a
+      beacon-only capture had looked green.</li>
+  </ul></div>
+
+  <p><strong>Abort is deliberately not <code>umac_ap_disable_ap()</code>.</strong> That path is written
+  for an app-initiated shutdown and is unsafe from inside the restart event loop: it issues
+  <code>mmdrv_stop_beaconing()</code> at a chip that just failed a command, tears down the hostapd
+  interface, and sleeps 100&#8202;ms. <code>umac_ap_abort_restore()</code> instead reports
+  <code>MMWLAN_LINK_DOWN</code> through the vif-state callback and leaves the allocation intact so a
+  later <code>mmwlan_ap_disable()</code> still works. The asymmetry with
+  <code>umac_mesh_abort_restore()</code>, which <em>does</em> tear down, is justified: a half-restored
+  mesh leaves self-rescheduling plink/RANN timers armed and every peer stad leaked. The AP has neither.</p>
+
+  <p><strong>Not restored, stated rather than hidden:</strong> AP-side TWT <em>responder agreements</em>.
+  The responder itself is re-armed by <code>umac_interface_init_vif()</code>, but per-STA agreements the
+  chip held are gone and there is no responder-side equivalent of
+  <code>umac_twt_install_pending_agreements()</code>. Tracked separately.</p>
+
+  <h2 id="bench">4 &middot; Bench &mdash; both vifs come back</h2>
+
+  <p>Rig: <strong>board1</strong> = NUT (<code>test-mesh-hwrestart AP_VIF=1</code>),
+  <strong>board0</strong> = <code>test-mesh-gate-node NO_PING=1</code> (mesh peer <em>and</em> the
+  capture&rsquo;s liveness control), <strong>chronium</strong> <code>morse0</code> monitor on ch27. A
+  third run added <strong>board2</strong> as a SAE client on the NUT&rsquo;s AP.</p>
+
+  <p>On device, reproduced three times, no panic:</p>
+  <pre><code>TEST|INFO|s3-expect-recovery|an AP vif is active; the handler must restore BOTH host-slots and return
+TEST|STEP|restart-ran|PASS|hw_restart_counter 0 -&gt; 1
+TEST|STEP|data-after|PASS|5/5 replies (was 4/5 before the restart)
+TEST|RESULT|PASS</code></pre>
+
+  <p>Off air, both vifs scored against the same capture. Outages measured directly from the pcap:</p>
+
+  <div class="bars">
+    <div class="bar-row"><span class="lbl">AP BSSID</span><div class="bar-track"><div class="bar-fill fast" style="width:25%"></div></div><span class="val">0.98 s</span></div>
+    <div class="bar-row"><span class="lbl">mesh SA</span><div class="bar-track"><div class="bar-fill slow" style="width:100%"></div></div><span class="val">3.88 s</span></div>
+    <div class="bar-row"><span class="lbl">control</span><div class="bar-track"><div class="bar-fill" style="width:8%"></div></div><span class="val">0.31 s max</span></div>
+  </div>
+
+  <table>
+    <tr><th>SA</th><th>beacons in 170 s</th><th>outage at the restart</th></tr>
+    <tr><td>AP <code>be:2a:33:96:b2:92</code></td><td>1831</td><td><strong>0.98 s</strong></td></tr>
+    <tr><td>mesh <code>e2:72:a1:f8:f9:40</code></td><td>1271</td><td><strong>3.88 s</strong></td></tr>
+    <tr><td>control <code>e2:72:a1:f8:ef:a4</code></td><td>1878</td><td>none &mdash; largest gap anywhere in the window 0.31 s</td></tr>
+  </table>
+
+  <p>The control never gapped, so both silences are the node&rsquo;s and both recoveries are real.</p>
+
+  <div class="callout ok"><p class="ct">The AP recovering 2.9 s faster than the mesh had to be explained before the PASS was worth anything</p>
+  <p>The AP arm runs <em>after</em> the mesh arm, so it should be slower. It is not a paradox: the
+  mesh&rsquo;s first beacon lags its arming. The same ordering appears on a plain cold boot in the same
+  capture &mdash; AP back after 3.67&#8202;s, mesh after 5.00&#8202;s &mdash; where the mesh is started
+  <em>first</em>. So the lag belongs to the mesh beacon engine, not to the restore. Consistent with
+  <code>mesh_chip_start_beaconing</code> logging <code>config_beacon_timer fw_status=14</code> and
+  falling back to <code>MESH_CONFIG</code> to arm beaconing.</p></div>
+
+  <p>Measured incidentally: with an AP vif sharing the radio the node&rsquo;s <em>mesh</em> beacon rate
+  drops to 6.3/s (S2 measured 8.25/s mesh-only) while its AP beacons run at 9.1/s &mdash; ~15.4
+  beacons/s total off one radio. Airtime sharing, not a regression, but worth knowing before reading a
+  mesh beacon count off a gateway.</p>
+
+  <div class="callout warn"><p class="ct">The bench inventory&rsquo;s MACs are derived, and wrong</p>
+  <p><code>docs/reference/rimba-bench-devices.md</code> lists board2&rsquo;s mesh MAC as
+  <code>e2:72:a1:f8:f0:08</code>, derived from its efuse MAC. Its actual HaLow MAC is
+  <code>bc:2a:33:96:b2:33</code> &mdash; the MM6108 module has its own MAC and it is not the ESP efuse
+  MAC &plusmn; a bit. Deriving the AP BSSID that way would have pointed the scorer at an address nothing
+  transmits. The fixture now reads it back with <code>mmwlan_ap_get_bssid()</code> and prints it.</p></div>
+
+  <h2 id="client">5 &middot; The client run &mdash; what it proved, and what it did not</h2>
+
+  <p>board2 ran <code>test-apsta-sta</code> and associated to the NUT&rsquo;s AP over SAE. Its pings
+  fail by construction &mdash; the hwrestart fixture has no AP-side netif and pins all TX to the mesh
+  vif &mdash; so the client is an <em>association</em>, not a datapath. Timeline anchored on the AP
+  beacon gap at pcap <code>+38.0 &rarr; +39.1</code>:</p>
+
+  <table>
+    <tr><th>pcap t</th><th>event</th></tr>
+    <tr><td>+38.0</td><td>chip restart; AP beacons stop (mesh stops +38.1)</td></tr>
+    <tr><td><strong>+39.09</strong></td><td><strong>client &rarr; AP deauth</strong> &mdash; 1.1 s into the outage, while the AP is still off air</td></tr>
+    <tr><td>+39.1 / +41.2</td><td>AP / mesh beacons resume</td></tr>
+    <tr><td>+43.47</td><td>AP &rarr; client <strong>probe response</strong> &mdash; the AP&rsquo;s management path is alive</td></tr>
+    <tr><td>+44.92</td><td>client &rarr; AP auth &times;5, <strong>unanswered</strong></td></tr>
+    <tr><td>+49.91</td><td>client &rarr; AP deauth &times;5</td></tr>
+    <tr><td>+59.11 &rarr; +60.62</td><td>probe-resp, auth both ways, assoc-req/resp &mdash; <strong>client re-associated</strong></td></tr>
+  </table>
+
+  <p>The client&rsquo;s link did <strong>not</strong> survive, and it is worth being precise about why
+  that is not evidence against the restore:</p>
+  <ul>
+    <li>It gave up <strong>1.1 s</strong> into the outage, before the AP had finished coming back. No
+      AP-side restore can prevent that; a chip restart is 1&ndash;4 s of silence and this STA&rsquo;s
+      tolerance is shorter.</li>
+    <li>The AP was answering probe requests <strong>5 s</strong> after the restart, so its management
+      path recovered. The 15 s during which it ignored the client&rsquo;s auths is consistent with
+      802.11w SA-Query / association-comeback on a PMF-required BSS whose hostapd still believed that
+      STA associated &mdash; which is what a <em>successful</em> station restore looks like from
+      outside.</li>
+    <li>No <code>AP: &hellip; FAILED</code> or <code>AP: hw-restart restore ABORTED</code> appeared.
+      Every failure path in the new arm is <code>MMLOG_ERR</code>, and <code>MMLOG_ERR</code>
+      demonstrably reaches this UART.</li>
+  </ul>
+
+  <div class="callout err"><p class="ct">Stated plainly: steps 4 and 5 are NOT directly verified</p>
+  <p>The per-STA ladder, the per-STA keys and the group keys are <em>inferred</em> from the three points
+  above. The concrete blocker: no client on this bench tolerates a multi-second AP outage, so the
+  restored station entry is made moot by the client&rsquo;s own deauth before anything can be sent over
+  it. Closing it needs either a client with a longer beacon-loss tolerance, or the trigger wired into
+  <code>test-mesh-ap-gate</code> &mdash; which has a working AP-side datapath and IP forwarding &mdash;
+  so a ping across the AP link can be scored before and after. That is the right next step for the AP
+  side and is deliberately not being claimed here.</p></div>
+
+  <p>An attempt to get direct evidence by rebuilding at <code>MMLOG_LEVEL_INF</code>, to capture the
+  arm&rsquo;s own <code>AP: restored vif %u with %d associated STA(s)</code> summary,
+  <strong>failed to link</strong>: <code>undefined reference to 'mm_hexdump'</code> from
+  <code>umac_datapath.c</code>. A pre-existing morselib gap at INF level, unrelated to this change; the
+  temporary edit was reverted.</p>
+
+  <h2 id="scorer">6 &middot; The scorer now reads two addresses</h2>
+
+  <p><code>tools/mesh_hwrestart_cap.py</code> gained <code>--ap &lt;bssid&gt;</code>, and the per-phase
+  logic moved into a <code>score()</code> function run once per address. One design point matters.</p>
+
+  <div class="callout bug"><p class="ct">&ldquo;Did a restart happen at all?&rdquo; is evidence about the radio, not about one vif</p>
+  <p>The gapless-capture INCONCLUSIVE branch &mdash; which exists because every early-exit in the
+  fixture parks <em>before</em> triggering a restart, so a mis-rigged run would otherwise score PASS
+  &mdash; now consults <code>restart_observed</code>, computed across <strong>every</strong> scored
+  address. Keyed per-SA it would have called this very run&rsquo;s AP arm INCONCLUSIVE: the AP&rsquo;s
+  0.98&#8202;s outage is under the 2.0&#8202;s threshold while the mesh&rsquo;s 3.88&#8202;s is plainly a
+  restart. Single-address behaviour is unchanged, because with one SA the global test reduces to the
+  local one.</p></div>
+
+  <p>INCONCLUSIVE dominates FAIL in the combined verdict: a capture that does not contain the trigger
+  cannot condemn anything in it.</p>
+
+  <h2 id="state">7 &middot; State</h2>
+
+  <ul>
+    <li><strong>morselib</strong> (submodule): <code>umac_mmdrv_shim.c</code>, <code>umac_ap.c</code>,
+      <code>umac_ap.h</code>, <code>umac_mesh.c</code>, <code>umac_connection.c</code>.</li>
+    <li><strong>rimba:</strong> <code>firmware/test-mesh-hwrestart/main/app_main.c</code> (the arm now
+      expects recovery and prints <code>ap-mac</code>), <code>tools/mesh_hwrestart_cap.py</code>,
+      <code>tools/regtest/manifest.py</code>, this worklog, two archived pcaps.</li>
+    <li><code>make test-unit</code> <strong>53/53</strong>. Builds clean in the three configurations
+      that matter: the mesh+AP fixture, the shipped gate (<code>rimba-halow-mesh-ap</code>), and an
+      AP-disabled app (<code>test-idle</code>).</li>
+    <li>Bench radio-silent: <code>rimba-hello</code> on board0/1/2, <code>wlan1</code> and
+      <code>morse0</code> down, PPK2 hold released so board2 is dark.</li>
+  </ul>
+
+  <div class="callout warn"><p class="ct">Stage 2 is untouched</p>
+  <p>The intermittent boot-time ISR watchdog loop remains. Stage 1 <em>avoids</em> it by never
+  rebooting, but it stays reachable by any reset landing mid-restart.</p></div>
+
+  <h2 id="stage1b">8 &middot; Stage 1b &mdash; closing the gap, same day</h2>
+
+  <p>Section 5 ended with steps 4 and 5 inferred rather than measured. The restart trigger then went
+  into <code>test-mesh-ap-gate</code>, behind <code>HW_RESTART=1</code> &mdash; the one fixture with a
+  real AP-side datapath (a second <code>esp_netif</code> on 192.168.12.1, per-vif RX demux, per-vif TX
+  tagging). Two probes, because one of them cannot work on this bench.</p>
+
+  <table>
+    <tr><th>probe</th><th>scores</th><th>needs the client to survive?</th></tr>
+    <tr><td><b>A</b> &mdash; group-key PN continuity, off air</td><td>step 5&rsquo;s group half</td><td><b>no</b> &mdash; the AP owns the GTK alone</td></tr>
+    <tr><td><b>B</b> &mdash; unicast ping across the AP link</td><td>step 4 + step 5&rsquo;s pairwise half</td><td><b>yes</b></td></tr>
+  </table>
+
+  <div class="callout ok"><p class="ct">Probe A &mdash; PASS, and it is a direct measurement of the S2 defect</p>
+  <p>The gate emits a 5&#8202;Hz broadcast train on its AP subnet. Those frames are group-addressed, so
+  the AP encrypts them with the GTK on <code>sta_common</code> &mdash; exactly the keychain step 5
+  re-pushes &mdash; and the CCMP packet number sits in the clear in every header.</p>
+  <pre><code>marker boundary: last 100B frame at +43.93s, first 114B frame at +45.01s  -&gt;  outage 1.08s
+PN across it: 135 -&gt; 136  (delta +1)   key id 1 -&gt; 1
+control beacon rate: 8.5/s before the outage, 8.9/s after
+RESULT|PASS|the AP's group key SURVIVED the restart</code></pre>
+  <p>The PN advanced by exactly <strong>+1</strong> on an unchanged key id, across a 1.08&#8202;s outage
+  that matches the 0.98&#8202;s AP beacon outage from stage 1. <strong>The group key was re-pushed, not
+  rebuilt.</strong> Had it been rebuilt, every associated station would have discarded every group frame
+  as a replay &mdash; silently, with every install returning success.</p></div>
+
+  <div class="callout good"><p class="ct">The capture contains its own positive control</p>
+  <p>Two <em>legitimate</em> PN resets sit in the same window: at +7.09&#8202;s (the AP booting) and
+  +17.11&#8202;s (the first client&rsquo;s association triggering a GTK install), both
+  <code>PN&nbsp;&rarr;&nbsp;1</code>. They are what make the negative result mean anything &mdash; the
+  instrument demonstrably <em>can</em> see a rewind, so not seeing one is evidence rather than absence of
+  evidence. The tool reports them instead of filtering them, and warns when a run contains none.</p></div>
+
+  <div class="callout bug"><p class="ct">Probe B &mdash; INCONCLUSIVE, and that is the right answer</p>
+  <pre><code>TEST|STEP|data-before|PASS|5/5 replies from the client across the AP link
+TEST|STEP|restart-ran|PASS|hw_restart_counter 0 -&gt; 1
+TEST|STEP|data-after|PASS|5/5 replies (was 5/5 before)
+TEST|INFO|assoc-churn|1 association event(s) before the restart, 2 after -- the client RE-ASSOCIATED
+TEST|RESULT|INCONCLUSIVE|... that ping crossed a FRESH association ...</code></pre>
+  <p><strong>A 5/5 after-ping that means nothing.</strong> Without the association counter this run
+  would have printed a confident PASS on the strength of traffic crossing a link rebuilt from scratch
+  during the outage. The counter earned its place on the first run. What the run <em>does</em> establish
+  is that the AP is fully functional afterwards &mdash; it beacons, completes SAE, and carries traffic.</p></div>
+
+  <h3>The tool was wrong on its first run, and the bench caught it</h3>
+  <p>Version one located the restart as <em>the largest gap in the train</em>, reusing the idea from the
+  mesh scorer. It returned:</p>
+  <pre><code>outage: 3.33s at +3.88s -&gt; +7.21s   PN 1379 -&gt; 1
+RESULT|FAIL|the AP's group key was REBUILT across the restart ...</code></pre>
+  <p>That gap is the board&rsquo;s own <strong>reboot</strong>, not the chip restart &mdash; and a reboot
+  legitimately installs a fresh GTK at PN&nbsp;1. The reboot&rsquo;s hole is <em>larger</em> than the
+  restart&rsquo;s, so &ldquo;largest gap&rdquo; picks the wrong event every time. A textbook PASS scored
+  as a FAIL.</p>
+
+  <div class="callout warn"><p class="ct">The rule this produced: a scorer must LOCATE its event, not recognise it by size</p>
+  <p>The fixture now switches its broadcast payload to a longer one immediately before triggering
+  &mdash; 18&#8202;B&nbsp;&rarr;&nbsp;32&#8202;B, which is 100&#8202;B&nbsp;&rarr;&nbsp;114&#8202;B on air
+  &mdash; and the tool measures across that boundary. It has to be <em>length</em> because the frames are
+  GTK-encrypted: the sniffer can see how big they are and nothing else. This is the third time on this
+  epic that a verdict keyed on the biggest or last thing in the window turned out to be keyed on whatever
+  else happened to be in the window.</p></div>
+
+  <h3>Regression check and build notes</h3>
+  <ul>
+    <li><code>test-mesh-ap-gate</code> is a <strong>T2 fixture</strong>, so changing it means re-running
+      its scenario, not just building it: <code>make test-t2 TEST=mesh-ap</code> &rarr;
+      <strong>PASS in 391&#8202;s</strong>, plus the tier&rsquo;s own radio-silent sweep.</li>
+    <li>The gate overflowed its app partition by <code>0x2dd0</code> once the arm pulled in
+      <code>esp_ping</code> and the lwIP socket API. It now carries a 2&#8202;MB
+      <code>partitions.csv</code>, applied to <em>both</em> arms because the partition table is chosen at
+      Kconfig time and cannot follow a <code>-D</code>.</li>
+    <li><code>TEST_HW_RESTART</code> is a CMake cache variable, so the arm is sticky exactly as
+      <code>TEST_AP_VIF</code> is. <code>HW_RESTART=0</code> or a wiped build directory; omitting it
+      inherits the arm.</li>
+  </ul>
+
+  <div class="callout trap"><p class="ct">What is still unproven &mdash; now a measurement, not an inference</p>
+  <p>Step 4 and the pairwise half of step 5. The blocker is no longer &ldquo;no client tolerates the
+  outage&rdquo; read off one capture; it is a scored, repeatable INCONCLUSIVE with the association count
+  as its evidence. Closing it needs a client that holds its association across a 1&ndash;4&#8202;s AP
+  outage &mdash; either exposing morselib&rsquo;s connection-monitor control through the public API, or a
+  Linux HaLow STA whose tolerance can be configured. Both are larger than this stage, and neither is
+  being claimed.</p></div>
+
+  <h2 id="review">9 &middot; Review round &mdash; four findings, all real</h2>
+
+  <p><code>/code-review</code> at <code>high</code> against the submodule PR, before merging. Every
+  finding was verified against the source rather than taken on trust; all four stood up, and one was a
+  genuine correctness bug in code the bench had already passed.</p>
+
+  <div class="callout bug"><p class="ct">1 &middot; The AP&rsquo;s sequence-number restore went to the WRONG vif (high)</p>
+  <p><code>umac_datapath_handle_hw_restarted()</code> derived its vif from
+  <code>get_vif_id(umacd, UMAC_INTERFACE_STA)</code> &mdash; correct for the STA and mesh callers, since
+  mesh shares that host-slot, and <strong>silently wrong for an AP one</strong>. On the gateway it aimed
+  an AP client&rsquo;s counters at the <em>mesh</em> vif while leaving the AP vif&rsquo;s at the
+  post-<code>mmdrv_init()</code> zero &mdash; the exact duplicate-detection rewind the call exists to
+  prevent.</p>
+  <p><strong>This is the same trap S2 documented, walked into from the other side.</strong> S2 found that
+  this lookup returns the STA slot <em>without consulting <code>active_interface_types</code></em>. I
+  recorded that, then reused a helper built on it for an AP stad. The generalisation:
+  <em>any <code>get_vif_id(UMAC_INTERFACE_STA)</code> inside a routine that can be handed an arbitrary
+  stad is a latent bug.</em> <code>vif_id</code> is now a parameter; STA and mesh pass exactly what they
+  resolved before, so their behaviour is bit-identical.</p></div>
+
+  <div class="callout warn"><p class="ct">A green run is not proof of everything the code does</p>
+  <p>Stage 1b <strong>passed with that bug present</strong> &mdash; probe A measures the <em>group</em>
+  key, which has no per-peer sequence spaces, and probe B was already inconclusive for an unrelated
+  reason. Worth remembering before treating a PASS as coverage.</p></div>
+
+  <h3>2 &middot; <code>sta_common</code> got a baseline for an all-zero address (medium)</h3>
+  <p>The AP&rsquo;s <code>sta_common</code> never gets a peer address &mdash; only a BSSID, and it is
+  <code>calloc</code>&rsquo;d. The <em>mesh</em> common stad does carry this node&rsquo;s own MAC, which
+  is what makes the equivalent mesh call meaningful. I copied the call across without checking the
+  premise held. Dropped, with the asymmetry written where a reader will look for it.</p>
+
+  <h3>3 &middot; The channel hoist downgraded a fatal error to a log line (medium)</h3>
+  <p><strong>(a)</strong> Inside the arms the call had consequences &mdash; a mesh abort, or
+  <code>UMAC_FATAL_ERROR()</code> for STA. Hoisted, it only logged, and both arms then re-armed beaconing
+  on a chip whose channel was never programmed. The handler printed <em>&ldquo;the node will be unable to
+  transmit or receive&rdquo;</em> and carried on, manufacturing the silently-deaf state this feature
+  exists to eliminate.</p>
+  <p><strong>(b)</strong> Worse, and I had not seen it:
+  <code>umac_interface_reconfigure_channel()</code> memsets the cached S1G operation up front, and
+  <code>set_channel_internal()</code> only rewrites it on a <em>successful</em> set. A failure leaves the
+  cache zeroed &mdash; so every later call reads <code>operating_channel_index == 0</code>, takes the
+  empty branch and returns SUCCESS having programmed nothing. <strong>One failure permanently disables
+  the retry, silently</strong> &mdash; including the WNM-wake caller I had deliberately preserved, so the
+  &ldquo;keep the duplicate for safety&rdquo; reasoning was protecting a call a single earlier failure
+  would have neutered. Both halves fixed.</p>
+
+  <h3>4 &middot; A vif alone does not mean the AP started (low)</h3>
+  <p><code>umac_ap_start()</code>&rsquo;s failure path frees the config but does <strong>not</strong>
+  remove the interface it added, so a restart could pass a vif-only guard and push
+  <code>cfg_bss(beacon_interval=0, dtim_period=0)</code> plus beaconing on a dead config. The guard now
+  also requires <code>config.head</code>. The interface that path leaks is a separate defect, called out
+  rather than fixed in passing.</p>
+
+  <h3>Re-verified after the fixes</h3>
+  <p>The fixes changed real behaviour, so the bench ran again rather than trusting a clean build:</p>
+  <table>
+    <tr><th></th><th>before the fixes</th><th>after</th></tr>
+    <tr><td>group-key PN across the outage</td><td>135 &rarr; 136 (1.08 s)</td><td><b>133 &rarr; 134 (0.99 s)</b></td></tr>
+    <tr><td>positive controls in the capture</td><td>2</td><td><b>2</b></td></tr>
+    <tr><td>mesh datapath</td><td>5/5</td><td><b>5/5</b></td></tr>
+    <tr><td>AP/mesh restore error lines</td><td>0</td><td><b>0</b></td></tr>
+  </table>
+
+  <div class="callout ok"><p class="ct">Landed</p>
+  <p>mm-esp32-halow PR 35 merged (rebase) &mdash; <code>ece942cd</code> + <code>22e84d75</code> on
+  submodule <code>main</code>. ⚠ The rebase rewrote both SHAs; the superproject gitlink points at
+  <code>22e84d75</code>, the post-rebase tip, verified with
+  <code>git merge-base --is-ancestor</code> before committing.</p></div>
+
+</main>
+
+<aside class="toc"><div class="toc-inner">
+  <p class="toc-h">On this page</p>
+  <ul>
+    <li><a href="#blocker">1 &middot; The dispatch blocker</a></li>
+    <li><a href="#channel">2 &middot; The channel moved</a></li>
+    <li><a href="#arm">3 &middot; What the AP arm does</a></li>
+    <li><a href="#bench">4 &middot; Bench &mdash; both vifs</a></li>
+    <li><a href="#client">5 &middot; The client run</a></li>
+    <li><a href="#scorer">6 &middot; The scorer</a></li>
+    <li><a href="#state">7 &middot; State</a></li>
+    <li><a href="#stage1b">8 &middot; Stage 1b &mdash; the gap closed</a></li>
+    <li><a href="#review">9 &middot; Review round</a></li>
+  </ul>
+</div></aside>
+</div>
+
+<footer class="foot">Rimba engineering worklog &middot; 2026-08-26-mesh-hwrestart-s3-stage1-ap-arm</footer>
+<script>
+function tt(){var r=document.documentElement,n=r.getAttribute('data-theme')==='dark'?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('wl-theme',n)}catch(e){}}
+(function(){try{var t=localStorage.getItem('wl-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();
+</script>
+</body>
+</html>

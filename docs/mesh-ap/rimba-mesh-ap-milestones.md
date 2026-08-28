@@ -872,7 +872,22 @@ Open items only (resolved milestones are above). Each = marker + one line + poin
   `umac_datapath.c:2938` beside `umac_rc_feedback`; needs the EWMA ported exactly + a convergence bench;
   would NOT cure the flapping). Memory [[mesh-p6c-airtime-and-hwmp-flapping]].
 - ☐ **Mesh hw-restart recovery (prerequisite) + FIX-1 (bus-preserving restart, REMOVED from the tree)** —
-  **one item, in this order.** *(1) The blocker:* **a mesh node cannot survive ANY hw_restart.**
+  **one item, in this order.**
+  ⚠ **Part (1) is now DONE** — S1 (reproducer, PR #54), S2 (mesh recovery, PR #55), the S3 reproducer
+  (PR #56) and **S3 stage 1** (the AP arm; `hw_restart_evt_handler()`'s `MMOSAL_ASSERT(false)` deleted,
+  restore now runs **per host-slot** so the mesh gateway recovers BOTH vifs — bench-verified 2026-08-26,
+  AP back on air in 0.98 s, mesh in 3.88 s, mesh datapath 5/5) have all landed. Design doc
+  `docs/mesh-ap/rimba-mesh-hw-restart-design.md`; worklogs `2026-08-05` / `2026-08-06` / `2026-08-09` /
+  `2026-08-26-mesh-hwrestart-s3-stage1-ap-arm.md`. **Stage 1b (same day) closed most of the verification gap:** the trigger is
+  now also in `test-mesh-ap-gate` behind `HW_RESTART=1`, and the AP's **group key is proven on air** to
+  survive the restart — CCMP PN 135→136 across a 1.08 s outage, with two legitimate PN resets in the same
+  capture as the positive control. `make test-t2 TEST=mesh-ap` re-run PASS.
+  **What remains of part (1):** S3 **stage 2**, the
+  intermittent boot-time ISR watchdog loop a reset can leave the node in (stage 1 avoids it by never
+  rebooting, but does not fix it), and the **pairwise** half of the AP restore — blocked on a client that
+  holds its association across a 1–4 s AP outage (now a scored INCONCLUSIVE, not an inference). **This unblocks the FIX-1 revisit in (2)** — the
+  "silent permanent zombie" trap that gated it was exactly the unfixed part (1).
+  *The original statement of the blocker, kept for the record:* **a mesh node cannot survive ANY hw_restart.**
   `hw_restart_evt_handler` (`umac_mmdrv_shim.c:68`) restores scan + STA only, and
   `umac_interface_reinstall_vif` is called **exclusively** with `UMAC_INTERFACE_STA`
   (`umac_connection.c:1660`) — there is no `umac_mesh_handle_hw_restarted`, so once the chip reset wipes its

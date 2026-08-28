@@ -1,0 +1,13 @@
+# The gateway (mesh + AP + two netifs + lwIP forwarding) plus the S3 stage-1b arm (HW_RESTART=1) no
+# longer fits the SINGLE_APP_LARGE default (0x177000) — it overflowed by 0x2dd0. 2 MB on a 16 MB
+# flash, same as test-mesh-hwrestart, test-raw-rps and rimba-halow-ap-perf.
+#
+# The overflow is the ARM's doing, not the gateway's: the arm pulls in esp_ping and the lwIP socket
+# API, neither of which the support role used. Applied to BOTH arms rather than only the armed build,
+# because the partition table is chosen by Kconfig at configure time and cannot follow a -D. That
+# costs nothing — the default arm simply gets a bigger app partition on a flash with 14 MB spare —
+# and it keeps one layout for the fixture instead of two that differ by a build flag.
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x200000,
